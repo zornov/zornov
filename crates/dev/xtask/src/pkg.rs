@@ -215,7 +215,7 @@ pub fn wxs() -> String {
 }
 
 /// `cargo xtask package-msi`: builds the program, lays out the folder, then
-/// `wix build` (WiX v4+: `dotnet tool install --global wix`). With
+/// `wix build` (WiX 5: `dotnet tool install --global wix --version 5.0.2`). With
 /// `STUDIO_WIN_SIGN_THUMBPRINT` the MSI is signed with that certificate from
 /// the Windows store.
 pub fn package_msi() -> Result<String, String> {
@@ -237,7 +237,7 @@ pub fn package_msi() -> Result<String, String> {
         .arg(&out)
         .arg(&wxs_file)
         .status()
-        .map_err(|e| format!("cannot run wix ({e}); install it with `dotnet tool install --global wix`"))?;
+        .map_err(|e| format!("cannot run wix ({e}); install it with `dotnet tool install --global wix --version 5.0.2`"))?;
     if !st.success() {
         return Err("wix build failed".into());
     }

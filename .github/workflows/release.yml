@@ -96,7 +96,8 @@ jobs:
         with:
           toolchain: "1.99.0"
       - name: WiX
-        run: dotnet tool install --global wix
+        # WiX 5: version 6 and later ask every user to accept a maintenance-fee EULA.
+        run: dotnet tool install --global wix --version 5.0.2
       - name: Packages (Windows)
         env:
           STUDIO_UPDATE_KEY: ${{ secrets.STUDIO_UPDATE_KEY }}

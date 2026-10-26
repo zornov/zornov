@@ -775,6 +775,11 @@ mod tests {
         for panel in Panel::ALL {
             assert_eq!(panel.categories()[0], "All", "{panel:?}");
             let all = search(&doc, panel, 0, "");
+            // Assets and Audio list the content library, which a checkout
+            // without it (CI) does not have.
+            if all.is_empty() && matches!(panel, Panel::Assets | Panel::Audio) && crate::content::get().is_none() {
+                continue;
+            }
             assert!(!all.is_empty(), "{panel:?} is empty");
             let first = item(&doc, panel, all[0] as usize);
             assert!(!first.name.is_empty(), "{panel:?} item without a name");

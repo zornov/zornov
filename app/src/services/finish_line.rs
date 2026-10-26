@@ -52,15 +52,19 @@ fn finish_line() {
     library::apply(&mut doc, Panel::Looks, 0, &[clips[1]]).unwrap();
     assert_eq!(doc.project.clip(clips[1]).unwrap().look.as_deref(), Some(look.id));
 
-    // 6. A sticker from Assets, with a Motion.
+    // 6. A sticker from Assets, with a Motion. Stickers come with the
+    // content library, which a checkout without it (CI) does not have.
     let sticker_query = library::search(&doc, Panel::Assets, if Panel::Assets.uses_content() { 1 } else { 0 }, "");
-    let sticker = library::add(&mut doc, Panel::Assets, sticker_query[0] as usize, SEC / 2, None).unwrap().select[0];
-    let rise = catalogue::motions().iter().position(|m| m.id == "rise").unwrap();
-    library::apply(&mut doc, Panel::Motions, rise, &[sticker]).unwrap();
-    let s = doc.project.clip(sticker).unwrap();
-    assert_eq!(s.motion_in.as_deref(), Some("rise"));
-    assert_ne!(s.lane, spine);
-    assert_eq!(doc.project.lane(s.lane).unwrap().kind, LaneKind::Visual);
+    let stickers = !sticker_query.is_empty();
+    if stickers {
+        let sticker = library::add(&mut doc, Panel::Assets, sticker_query[0] as usize, SEC / 2, None).unwrap().select[0];
+        let rise = catalogue::motions().iter().position(|m| m.id == "rise").unwrap();
+        library::apply(&mut doc, Panel::Motions, rise, &[sticker]).unwrap();
+        let s = doc.project.clip(sticker).unwrap();
+        assert_eq!(s.motion_in.as_deref(), Some("rise"));
+        assert_ne!(s.lane, spine);
+        assert_eq!(doc.project.lane(s.lane).unwrap().kind, LaneKind::Visual);
+    }
 
     // 7. Export Social 1080p: the vertical project comes out 1080 × 1920.
     let dur = transport::duration(&doc);
@@ -93,6 +97,7 @@ fn finish_line() {
     while doc.undo().is_some() {
         n += 1;
     }
-    assert!(n >= 8, "{n} undo steps"); // import, 3 clips, title, cut, look, sticker, motion
+    let steps = if stickers { 8 } else { 6 }; // import, 3 clips, title, cut, look (sticker, motion)
+    assert!(n >= steps, "{n} undo steps");
     assert!(doc.project.clips.is_empty() && doc.project.media.is_empty());
 }

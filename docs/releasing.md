@@ -128,7 +128,7 @@ anything fails. **Restart now** (in the notice or Settings) does it right away.
 ## Windows
 
 `cargo xtask package-msi` needs the WiX toolset v4 or later
-(`dotnet tool install --global wix`). To sign, install your code-signing
+(`dotnet tool install --global wix --version 5.0.2`; later versions ask you to accept a maintenance-fee EULA). To sign, install your code-signing
 certificate in the Windows certificate store and set
 `STUDIO_WIN_SIGN_THUMBPRINT` to its SHA-1 thumbprint; `signtool` then signs the
 MSI. (The `UpgradeCode` in the MSI is fixed, so a newer MSI upgrades the old
