@@ -1225,6 +1225,7 @@ mod tests {
 
     fn app_with(doc: crate::doc::Doc, ctx: &egui::Context) -> StudioApp {
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         app.doc = doc;
         app.editor.playhead = 0;

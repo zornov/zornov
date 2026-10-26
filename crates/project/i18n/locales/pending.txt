@@ -660,3 +660,8 @@ tone-map
 bloom-and-lens
 simulate-physics-from-the-playhead-moving-bo
 verify
+later
+check-automatically
+check-for-updates-automatically
+update-now
+restart-now

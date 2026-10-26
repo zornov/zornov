@@ -374,6 +374,9 @@ pub fn release_mac(args: &[String]) -> Result<String, String> {
         notarize(n, &dmg)?;
         staple(&dmg)?;
     }
+    // A copy under a name that never changes, so zornov.com can link to
+    // releases/latest/download/Zornov-mac.dmg and start the download.
+    std::fs::copy(&dmg, release_dir().join("Zornov-mac.dmg")).map_err(|e| e.to_string())?;
     Ok(format!(
         "{} ({v}), {}; {signed}: {}{}",
         rel(&dmg),

@@ -528,6 +528,7 @@ mod tests {
     fn the_scissor_tool_draws_moves_and_removes_cuts() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let (doc, id) = card_doc();
         app.doc = doc;
@@ -595,6 +596,7 @@ mod tests {
     fn the_editor_draws_cuts_and_the_mesh() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let (doc, id) = card_doc();
         let mut s = crate::agent::Session::new(doc);

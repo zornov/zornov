@@ -103,12 +103,16 @@ pub fn take_provisional() -> bool {
 
 /// Fast seeking: while the person scrubs, a missing frame is replaced by
 /// the key frame before it (one cheap decode) instead of decoding up to
-/// the exact frame; the exact frame is drawn once scrubbing stops.
-static FAST_SEEK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// the exact frame; the exact frame is drawn once scrubbing stops. It is
+/// the preview thread's own setting: a render on any other thread (an
+/// export, the AI's frames) stays exact while the person scrubs.
+thread_local! {
+    static FAST_SEEK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
-/// Turns fast seeking on or off for the pictures decoded next.
+/// Turns fast seeking on or off for the pictures this thread decodes next.
 pub fn set_fast_seek(on: bool) {
-    FAST_SEEK.store(on, std::sync::atomic::Ordering::Relaxed);
+    FAST_SEEK.with(|f| f.set(on));
 }
 
 // ---------------------------------------------------------------- cache
@@ -626,7 +630,7 @@ impl Sources {
         if let Some(p) = self.cache.get(key, index) {
             return Some(p);
         }
-        if FAST_SEEK.load(std::sync::atomic::Ordering::Relaxed) {
+        if FAST_SEEK.with(|f| f.get()) {
             index = self.source(key)?.nearest_sync(index);
             if let Some(p) = self.cache.get(key, index) {
                 return Some(p);

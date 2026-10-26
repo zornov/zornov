@@ -104,6 +104,11 @@ jobs:
         run: |
           cargo xtask package-windows
           cargo xtask package-msi
+      # A copy under a name that never changes, so zornov.com can link to
+      # releases/latest/download/Zornov-windows.msi and start the download.
+      - name: Fixed download name (Windows)
+        shell: bash
+        run: cp dist/release/Zornov-*-windows-*.msi dist/release/Zornov-windows.msi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zornov-windows
@@ -138,6 +143,10 @@ jobs:
           cargo xtask package-linux
           cargo xtask package-deb
           cargo xtask package-appimage
+      - name: Fixed download names (Linux)
+        run: |
+          cp dist/release/Zornov-*.AppImage dist/release/Zornov-linux.AppImage
+          cp dist/release/zornov_*.deb dist/release/Zornov-linux.deb
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zornov-linux

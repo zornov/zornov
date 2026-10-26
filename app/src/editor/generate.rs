@@ -38,6 +38,8 @@ struct Run {
     done: Option<Result<Vec<PathBuf>, String>>,
     kind: Option<Kind>,
     at: Time,
+    /// The app that started it ([`crate::editor::owner_of`]).
+    owner: usize,
 }
 
 fn form_id() -> egui::Id {
@@ -76,7 +78,7 @@ fn land(app: &mut StudioApp, ctx: &egui::Context, files: Vec<PathBuf>, kind: Kin
 
 /// Lands a finished run (called every frame while the AI panel shows).
 pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
-    let Some(r) = run().lock().ok().and_then(|g| g.clone()) else { return };
+    let Some(r) = run().lock().ok().and_then(|g| g.clone()).filter(|r| r.lock().is_ok_and(|g| g.owner == crate::editor::owner_of(app))) else { return };
     let finished = r.lock().ok().and_then(|mut g| g.done.take().map(|d| (d, g.kind, g.at)));
     match finished {
         Some((Ok(files), Some(kind), at)) => {
@@ -145,7 +147,7 @@ pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
 }
 
 fn start(app: &StudioApp, prompt: &str) {
-    let state = Arc::new(Mutex::new(Run { status: crate::i18n::tf("Codex is painting it".to_owned()), kind: Some(Kind::Picture), at: app.editor.playhead, ..Default::default() }));
+    let state = Arc::new(Mutex::new(Run { status: crate::i18n::tf("Codex is painting it".to_owned()), kind: Some(Kind::Picture), at: app.editor.playhead, owner: crate::editor::owner_of(app), ..Default::default() }));
     if let Ok(mut g) = run().lock() {
         *g = Some(state.clone());
     }
@@ -186,6 +188,7 @@ mod tests {
     fn the_generate_card_draws_and_lands_a_run() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         for k in 0..4 {
             ctx.data_mut(|d| d.insert_temp(form_id(), Form { kind: k, prompt: "a fox in the snow".into() }));

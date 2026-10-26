@@ -1,13 +1,13 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `studio` in a terminal: a prompt like any other terminal tool.
+//! `zornov` in a terminal: a prompt like any other terminal tool.
 //!
 //! ```text
-//! studio                       the Studio prompt in this project folder
+//! zornov                       the Zornov prompt in this project folder
 //! zornov new my-video          a new project in ./my-video
 //! zornov see                   one command and out (any command below)
-//! studio card colour=red at=0 duration=2
+//! zornov card colour=red at=0 duration=2
 //! zornov make "a 10 second intro about the ocean"
 //! zornov app                   the editor window (zornov open DIR: on that project)
 //! zornov help [command]
@@ -292,7 +292,7 @@ fn help(topic: Option<&str>, st: &Style) {
             }
             let pos = positional(cmd);
             if !pos.is_empty() {
-                println!("\n  {} studio {cmd} {}", st.dim("short:"), pos.iter().map(|p| format!("<{p}>")).collect::<Vec<_>>().join(" "));
+                println!("\n  {} zornov {cmd} {}", st.dim("short:"), pos.iter().map(|p| format!("<{p}>")).collect::<Vec<_>>().join(" "));
             }
             return;
         }
@@ -300,7 +300,7 @@ fn help(topic: Option<&str>, st: &Style) {
             println!("{}  an edit\n\n  fields: {}", st.bold(cmd), fields.join(", "));
             let pos = positional(cmd);
             if let Some(p) = pos.first() {
-                println!("  {} studio {cmd} <{p}> field=value …", st.dim("short:"));
+                println!("  {} zornov {cmd} <{p}> field=value …", st.dim("short:"));
             }
             println!("\n  `zornov guide ops` explains every field.");
             return;
@@ -311,7 +311,7 @@ fn help(topic: Option<&str>, st: &Style) {
     println!(
         "{}
 
-  studio                 the Zornov prompt in this project
+  zornov                 the Zornov prompt in this project
   zornov new NAME        a new project in ./NAME  (--vertical, --square, --size 1080x1920, --fps 60)
   zornov make \"...\"      ask the AI editor to make or change something
   zornov app             the editor window   (zornov open DIR: on that project)
@@ -741,7 +741,7 @@ fn open_app(dir: Option<&Path>) {
     let _ = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }
 
-/// The terminal side of `studio`. `None`: open the window instead.
+/// The terminal side of `zornov`. `None`: open the window instead.
 pub fn main(argv: &[String]) -> Option<i32> {
     let tty = std::io::stdout().is_terminal();
     let st = Style { on: tty && std::env::var_os("NO_COLOR").is_none() };

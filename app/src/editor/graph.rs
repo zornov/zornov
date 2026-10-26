@@ -554,6 +554,7 @@ mod tests {
         use crate::app::StudioApp;
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Graph", 640, 360, 30.0));
         s.edit(&[serde_json::json!({"op": "card", "colour": "#ffcc00", "at": 0, "duration": 4, "width": 200, "height": 100}), serde_json::json!({"op": "animate", "clip": "$1", "property": "rotation", "keys": [[0, 0], [2, 90]], "ease": "linear"})], "anim", false).unwrap();

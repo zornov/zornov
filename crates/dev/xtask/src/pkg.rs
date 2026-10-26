@@ -241,7 +241,8 @@ pub fn package_msi() -> Result<String, String> {
     if !st.success() {
         return Err("wix build failed".into());
     }
-    if let Ok(thumb) = std::env::var("STUDIO_WIN_SIGN_THUMBPRINT") {
+    // A workflow passes an unset secret as an empty value: that is no certificate.
+    if let Some(thumb) = std::env::var("STUDIO_WIN_SIGN_THUMBPRINT").ok().filter(|t| !t.trim().is_empty()) {
         let st = Command::new("signtool").args(["sign", "/fd", "SHA256", "/tr", "http://timestamp.digicert.com", "/td", "SHA256", "/sha1"]).arg(thumb.trim()).arg(&out).status().map_err(|e| format!("cannot run signtool: {e}"))?;
         if !st.success() {
             return Err("signtool failed".into());

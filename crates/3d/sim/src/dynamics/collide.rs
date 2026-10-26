@@ -507,7 +507,9 @@ fn poly_poly(a: &Poly, b: &Poly, margin: f32) -> Option<Manifold> {
             let (s, t) = segment_segment(a0, a1, b0, b1);
             let pa = mad(a0, sub(a1, a0), s);
             let pb = mad(b0, sub(b1, b0), t);
-            return Some(Manifold { normal: eaxis, points: vec![Point { at: scale(add(pa, pb), 0.5), sep: esep }] });
+            // Apart along a face axis, so never nearer than that: an edge axis
+            // that cuts through the other shape is no measure of the gap.
+            return Some(Manifold { normal: eaxis, points: vec![Point { at: scale(add(pa, pb), 0.5), sep: esep.max(face_sep) }] });
         }
         return None;
     }
@@ -568,21 +570,40 @@ fn against_mesh(m: &TriMesh, pose: &Pose, world_bounds: &Aabb, margin: f32, out:
     let mut hits = Vec::new();
     m.query(&lb, &mut hits);
     let mut found: Vec<Manifold> = Vec::new();
+    // Points this close are one contact met twice (a shared edge). The
+    // range is the margin's, but a wide margin (a look for what is far
+    // below) must not fold a surface into the one behind it: a slab's top
+    // and bottom faces are a hand's breadth apart, and the near one counts.
+    let same = margin.min(0.05);
+    // What each triangle touches, and whether it is the triangle's own
+    // face (the contact runs along its normal) or only its edge or corner.
+    let mut touched: Vec<(bool, Manifold)> = Vec::new();
     for t in hits {
         let tri = m.bvh.tris[t as usize].map(|v| pose.apply(v));
         if let Some(mf) = each(&Poly::of_tri(tri)) {
-            match found.iter_mut().find(|f| dot(f.normal, mf.normal) > 0.95) {
-                Some(f) => {
-                    let wa = f.points.len() as f32;
-                    f.normal = normalise_or(add(scale(f.normal, wa), scale(mf.normal, mf.points.len() as f32)), f.normal);
-                    for p in mf.points {
-                        if !f.points.iter().any(|q| len2(sub(q.at, p.at)) < margin * margin * 0.01 + 1e-12) {
-                            f.points.push(p);
-                        }
+            let face = dot(mf.normal, pose.rotate(m.normals[t as usize])).abs() > 0.999;
+            touched.push((face, mf));
+        }
+    }
+    // An edge or corner touched while a face of the surface is as near is
+    // the seam to the next triangle of the same flat (a ball rolling over a
+    // floor's diagonal), not something to push against sideways.
+    let nearest_face = touched.iter().filter(|(face, _)| *face).flat_map(|(_, mf)| mf.points.iter().map(|p| p.sep)).fold(f32::INFINITY, f32::min);
+    for (face, mf) in touched {
+        if !face && mf.points.iter().all(|p| p.sep >= nearest_face - 1e-5) {
+            continue;
+        }
+        match found.iter_mut().find(|f| dot(f.normal, mf.normal) > 0.95) {
+            Some(f) => {
+                let wa = f.points.len() as f32;
+                f.normal = normalise_or(add(scale(f.normal, wa), scale(mf.normal, mf.points.len() as f32)), f.normal);
+                for p in mf.points {
+                    if !f.points.iter().any(|q| len2(sub(q.at, p.at)) < same * same * 0.01 + 1e-12) {
+                        f.points.push(p);
                     }
                 }
-                None => found.push(mf),
             }
+            None => found.push(mf),
         }
     }
     for mut f in found {

@@ -2,7 +2,7 @@
 name: titles-typography
 use: Use when words go on screen: titles, lower thirds, captions, kinetic type, charts.
 topics: typography, fonts, font, type, titles, title, mograph, motion-graphics, motion-design, templates, template, lower-thirds, lower-third, kinetic, kinetic-type, charts, chart, infographics-motion, text-animators, animators, 3d-text, text-3d, expressions, expression, time-remap, shapes, shape, shape-layers, captions, infographics, logo
-tools: text, text_3d, template, chart, shape, card, ai, animate, motion, stagger, expression, set, apply, transition, frame, contact_sheet, check, review, catalogue
+tools: text, text_3d, fonts, template, chart, shape, card, ai, animate, motion, stagger, expression, set, apply, transition, frame, contact_sheet, check, review, catalogue
 ---
 **Order**
 1. Say what the words are for and take them from the person: names, claims and numbers exactly as given, never invented. Captions come from speech: `ai {captions}` gives words with times.

@@ -1347,6 +1347,7 @@ mod tests {
         let _turn = crate::paint::test_lock();
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(Screen::Paint), fresh: true, ..Default::default() });
         crate::paint::apply(&[json!({"op": "new", "name": "UI test", "width": 400, "height": 200, "background": "white"})]).unwrap();
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));

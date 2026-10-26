@@ -183,6 +183,7 @@ mod tests {
         use eframe::egui::{Pos2, Rect, Vec2};
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Drivers", 640, 360, 30.0));
         s.edit(&[serde_json::json!({"op": "card", "colour": "#ffcc00", "at": 0, "duration": 2, "width": 100, "height": 100}), serde_json::json!({"op": "card", "colour": "#3366ff", "at": 0, "duration": 2, "width": 100, "height": 100})], "cards", false).unwrap();

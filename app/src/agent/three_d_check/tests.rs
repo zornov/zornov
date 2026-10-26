@@ -349,7 +349,8 @@ fn reconstruction(holes: bool, speck: bool, smear: bool) -> Mesh {
     if speck {
         let mut bit = prim::cube([2.0; 3]);
         ops::transform(&mut bit, &Region::All, [300.0, 0.0, 0.0], [0.0; 3], [1.0; 3], [0.0; 3]);
-        merge_with_materials(&mut m, &bit);
+        // `merge` appends the speck's material itself: a reconstruction has one or two.
+        ops::merge(&mut m, &bit);
     }
     m.tidy();
     m

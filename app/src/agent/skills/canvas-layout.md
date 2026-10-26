@@ -1,6 +1,6 @@
 ---
 name: canvas-layout
-use: Use when placing or checking things on the canvas: overlaps, what is in front, safe areas, free space.
+use: Use when placing things on the canvas: overlaps, what is in front, safe areas, free space.
 topics: canvas_layout, canvas-layout, layout-knowledge, where, positions, overlap, overlaps, free-space, placement-check, collisions
 tools: canvas_layout, inspect, see, check, review, restack, set
 ---

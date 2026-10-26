@@ -638,7 +638,8 @@ mod tests {
         let (_, mesh) = s.model_of(id).unwrap();
         assert!(mesh.rig.as_ref().is_some_and(|r| r.is_skinned() && r.shape("viseme_aa").is_some()));
         let r = s.edit(&[json!({"op": "act", "clip": id, "motion": "walk", "duration": 4})], "walk", false).unwrap();
-        assert!(r.to_string().contains("travels"), "{r}");
+        // A walk is a gait now: the feet stay planted while the body travels.
+        assert!(r.to_string().contains("planted feet"), "{r}");
         let mc = s.model_clip(id).unwrap();
         assert!(mc.keyframes.contains_key("transform.position_z"));
         s.edit(&[json!({"op": "pose", "clip": id, "keys": [{"t": 0, "shapes": {"smile": 0}}, {"t": 1, "shapes": {"smile": 1}, "bones": {"head": [0, 20, 0]}}]})], "smile", false).unwrap();
@@ -646,7 +647,7 @@ mod tests {
         assert!(mc.keyframes.contains_key("generator.shape.mouthSmileLeft") && mc.keyframes.contains_key("generator.bone.head.y"));
         // The renderer poses it from those settings.
         let p = mc.generator_params_at(micros(1.0));
-        assert!(matches!(p.get("action"), Some(m::Value::Text(a)) if a == "walk"));
+        assert!(matches!(p.get("action"), Some(m::Value::Text(a)) if a.starts_with("perf.walk.")));
         let bad = s.edit(&[json!({"op": "pose", "clip": id, "bones": {"tentacle": [1, 2, 3]}})], "x", false);
         assert!(bad.is_err());
         // A blend into a run, and a stop.

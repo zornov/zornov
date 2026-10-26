@@ -590,6 +590,7 @@ mod tests {
     fn app_with_movie() -> (egui::Context, StudioApp, u32) {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Track", W, H, FPS as f32));
         s.run("import", &json!({"paths": [test_movie::movie().to_string_lossy()], "to_timeline": true})).unwrap();
@@ -669,6 +670,7 @@ mod tests {
         let mut s = crate::agent::Session::new(app.doc);
         s.edit(&[json!({"op": "text", "text": "HI", "at": 0, "duration": 2}), json!({"op": "track", "clip": id, "at": 0.5, "point": [-90, -15], "radius": 26, "attach": "$1"}), json!({"op": "stabilize", "clip": id})], "t", false).unwrap();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         app.doc = s.doc;
         app.editor.selection = vec![id];

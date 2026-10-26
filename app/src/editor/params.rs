@@ -827,7 +827,8 @@ mod tests {
                 let p = e.path();
                 if p.is_dir() {
                     stack.push(p);
-                } else if p.extension().is_some_and(|x| x == "rs") {
+                } else if p.extension().is_some_and(|x| x == "rs") && !p.file_stem().and_then(|f| f.to_str()).is_some_and(|f| f == "tests" || f.ends_with("_tests")) {
+                    // Test files set meta up as fixtures; only the tools' own writes count.
                     let src = std::fs::read_to_string(&p).unwrap_or_default();
                     for pat in ["meta.insert(\"", "meta.entry(\"", "meta.insert(META.into()"] {
                         let mut rest = src.as_str();

@@ -108,7 +108,8 @@ pub fn rest_on_support(project: &m::Project, seq: m::SequenceId, clip: u64, t: m
     // Lift it out of anything it is sunk into first (up to its height).
     let lift = height * 1.05;
     scene.world.bodies[body].pose.p = mad(scene.world.bodies[body].pose.p, down, -lift);
-    let (gap, _) = gap_below(&mut scene, body, down, lift + height * 1.5);
+    // It looks as far below as the check does for a floating thing: up to three heights.
+    let (gap, _) = gap_below(&mut scene, body, down, lift + height * 3.0);
     let gap = gap?;
     let drop = gap - lift;
     // Already resting (within a hair): nothing to do.

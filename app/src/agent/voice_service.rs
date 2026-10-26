@@ -6,7 +6,7 @@
 //! Narration is made by one of: the Mac's own voices, Fish Audio,
 //! ElevenLabs or OpenAI; sounds described in words come from ElevenLabs.
 //! The choice lives in `~/Movies/Studio/voice-services.json`, shared by the
-//! window, the `studio` command line and every agent, and every line goes
+//! window, the `zornov` command line and every agent, and every line goes
 //! through [`speak`], so a choice made in Settings holds for all of them.
 //!
 //! Nothing falls back silently: when the chosen service fails, the line

@@ -21,6 +21,7 @@ fn space_app(ctx: &egui::Context) -> (StudioApp, u32, u32, u64) {
     s.edit(&[serde_json::json!({"op": "three_d", "clips": [a, b]})], "3d", false).unwrap();
     let cam = super::super::add_camera(&mut s.doc).unwrap();
     let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+    let _serial = crate::ui_tests::serial();
     let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
     app.doc = s.doc;
     app.editor.playhead = 0;
@@ -381,6 +382,7 @@ fn world_app(ctx: &egui::Context) -> StudioApp {
         "scatter": [{"kind": "rock", "count": 3, "size": 1.0}],
         "buildings": [{"kind": "house", "at": [0, 16], "floors": 1, "width": 8, "depth": 6, "yaw": 0}]})], "world", false).unwrap();
     let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+    let _serial = crate::ui_tests::serial();
     let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
     app.doc = s.doc;
     app.editor.playhead = 0;
@@ -490,6 +492,7 @@ fn walking_in_a_plain_scene_uses_its_models_as_ground_and_walls() {
     // A 3 m cube standing on the floor (y down: its centre 150 px above it), 6 m ahead.
     s.edit(&[serde_json::json!({"op": "model", "shape": "cube", "size": 300, "position": [0, 30, 600], "at": 0, "duration": 4})], "cube", false).unwrap();
     let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+    let _serial = crate::ui_tests::serial();
     let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
     app.doc = s.doc;
     app.editor.playhead = 0;

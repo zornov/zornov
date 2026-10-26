@@ -50,7 +50,7 @@ pub fn tools() -> Vec<Value> {
 /// (so it cannot go stale), the main fields of the ops used most.
 fn edit_description() -> String {
     let mut s = String::from(
-        "Change the project with ops applied as ONE undo step, all or nothing: {\"ops\": [{\"op\": name, ...fields}]}. The ops are listed in the guide's capability map. Clips by id, \"$1\" / \"$last\" (made earlier in this call), \"@4.2\" / \"music@4.2\", a name, or {lane, from, to}. An unknown field is refused with the right ones; the reply ends with read_back (the clips as they now are). dry_run checks only. Main fields (all ops: `edit_schema`, or guide topic ops): ",
+        "Change the project: ops applied as ONE undo step, all or nothing: {\"ops\": [{\"op\": name, ...fields}]}. Ops: see the capability map. Clips by id, \"$1\" / \"$last\" (made earlier in this call), \"@4.2\" / \"music@4.2\", a name, or {lane, from, to}. A wrong field is refused with the right ones; the reply ends with read_back (the clips as they now are). dry_run checks only. Main fields (all ops: `edit_schema`, or guide topic ops): ",
     );
     let common = ["place", "add", "text", "card", "sfx", "music", "scene", "narrate", "set", "animate", "split", "trim", "move", "transition", "apply", "effect"];
     let parts: Vec<String> = common
@@ -62,7 +62,7 @@ fn edit_description() -> String {
         })
         .collect();
     s.push_str(&parts.join("; "));
-    s.push_str(". text takes font (a family from the `fonts` tool), weight and italic; `style` names a text style from catalogue {panel: text}. add takes item (a name) or query (+ kind, mood: an unused sound each time).");
+    s.push_str(". text takes font (from `fonts`), weight, italic; style: a text style from catalogue {panel: text}. add: item (a name) or query (+ kind, mood; a new sound each call).");
     s
 }
 

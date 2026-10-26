@@ -192,10 +192,10 @@ mod tests {
 
     #[test]
     fn hidden_characters_are_removed_everywhere() {
-        let mut parts = vec![Content::Text("clip \"Intro\u{E0041}\u{E0042}\" at 0s 👩\u{200D}💻".into())];
+        let mut parts = vec![Content::Text("clip \"Intro\u{E0041}\u{E0042}\" at 0s \u{1F469}\u{200D}\u{1F4BB}".into())];
         assert!(!process("summary", &json!({}), &mut parts));
         let t = texts(&parts);
-        assert_eq!(t[0], "clip \"Intro\" at 0s 👩\u{200D}💻");
+        assert_eq!(t[0], "clip \"Intro\" at 0s \u{1F469}\u{200D}\u{1F4BB}");
         assert!(t[1].starts_with(WARNING) && t[1].contains("2 hidden characters"));
     }
 

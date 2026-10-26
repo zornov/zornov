@@ -659,6 +659,7 @@ mod tests {
     fn the_skeleton_section_and_bone_tool_draw_without_panicking() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let (doc, id) = crate::services::character::tests::figure_doc();
         app.doc = doc;

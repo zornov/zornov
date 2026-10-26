@@ -3,9 +3,12 @@
 
 //! A small binding to the SQLite that ships with macOS (`libsqlite3`, with
 //! FTS5 full-text search), just what the library index needs: open, run
-//! statements with bound values, read rows. No crate, nothing bundled.
+//! statements with bound values, read rows. Windows has no system SQLite, so
+//! there `libsqlite3-sys` builds one in.
 
 use std::ffi::{CStr, CString, c_char, c_double, c_int, c_void};
+#[cfg(windows)]
+use libsqlite3_sys as _;
 
 #[allow(non_camel_case_types)]
 type sqlite3 = c_void;
@@ -19,7 +22,7 @@ const OPEN_READWRITE: c_int = 0x2;
 const OPEN_CREATE: c_int = 0x4;
 const OPEN_FULLMUTEX: c_int = 0x10000;
 
-#[link(name = "sqlite3")]
+#[cfg_attr(not(windows), link(name = "sqlite3"))]
 unsafe extern "C" {
     fn sqlite3_open_v2(filename: *const c_char, db: *mut *mut sqlite3, flags: c_int, vfs: *const c_char) -> c_int;
     fn sqlite3_close_v2(db: *mut sqlite3) -> c_int;

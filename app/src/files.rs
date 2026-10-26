@@ -68,7 +68,7 @@ pub fn free_project_dir(name: &str) -> PathBuf {
         .expect("a free name")
 }
 
-/// Every project folder any Studio opened or made (this window, `studio`
+/// Every project folder any Zornov opened or made (this window, `zornov`
 /// in a terminal, agents), oldest first: the Start screen lists them all.
 fn shared_list() -> PathBuf {
     studio_paths::studio().join("recent-projects.txt")

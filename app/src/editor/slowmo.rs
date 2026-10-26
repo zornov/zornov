@@ -24,8 +24,8 @@ fn jobs() -> &'static Jobs {
     J.get_or_init(|| Jobs::new(1))
 }
 
-fn running() -> &'static Mutex<Option<(SlowJob, JobHandle<InterpEngine>)>> {
-    static R: Mutex<Option<(SlowJob, JobHandle<InterpEngine>)>> = Mutex::new(None);
+fn running() -> &'static Mutex<Option<(SlowJob, JobHandle<InterpEngine>, usize)>> {
+    static R: Mutex<Option<(SlowJob, JobHandle<InterpEngine>, usize)>> = Mutex::new(None);
     &R
 }
 
@@ -43,7 +43,7 @@ pub fn start(app: &StudioApp, ctx: &egui::Context, id: u32, method: Method) -> R
     let j = job.clone();
     let handle = jobs().spawn("Smooth slow motion", move |c| slowmo::run(&j, c).map_err(studio_ai::Error::Io));
     if let Ok(mut r) = running().lock() {
-        *r = Some((job.clone(), handle));
+        *r = Some((job.clone(), handle, crate::editor::owner_of(app)));
     }
     ctx.request_repaint();
     Ok(crate::i18n::tf(format!("Making {} in-between frames (about {})…", job.to_make(), if est < 90.0 { format!("{est:.0} s") } else { format!("{:.0} min", est / 60.0) })))
@@ -54,15 +54,15 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
     let done = {
         let Ok(mut r) = running().lock() else { return };
         match r.as_ref() {
-            Some((_, h)) if h.is_finished() => r.take(),
-            Some(_) => {
+            Some((_, h, owner)) if *owner == crate::editor::owner_of(app) && h.is_finished() => r.take(),
+            Some((_, _, owner)) if *owner == crate::editor::owner_of(app) => {
                 ctx.request_repaint_after(std::time::Duration::from_millis(200));
                 None
             }
-            None => None,
+            _ => None,
         }
     };
-    let Some((job, h)) = done else { return };
+    let Some((job, h, _)) = done else { return };
     match h.take_result() {
         Some(Ok(engine)) => match slowmo::apply(&mut app.doc, &job, engine) {
             Ok(_) => {
@@ -105,12 +105,12 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             }
             return;
         }
-        if let Some(p) = running().lock().ok().and_then(|r| r.as_ref().filter(|(j, _)| j.clip == id).map(|(_, h)| h.progress())) {
+        if let Some(p) = running().lock().ok().and_then(|r| r.as_ref().filter(|(j, _, _)| j.clip == id).map(|(_, h, _)| h.progress())) {
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(crate::i18n::tf(format!("Making in-between frames… {:.0}%", p * 100.0))).font(theme::body()).color(t.text_2));
                 if Button::ghost("Stop").show(ui).clicked()
                     && let Ok(r) = running().lock()
-                    && let Some((_, h)) = r.as_ref()
+                    && let Some((_, h, _)) = r.as_ref()
                 {
                     h.cancel();
                 }
@@ -148,6 +148,7 @@ mod tests {
         let _guard = test_movie::LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Slow", W, H, FPS as f32));
         s.run("import", &json!({"paths": [test_movie::movie().to_string_lossy()], "to_timeline": true})).unwrap();

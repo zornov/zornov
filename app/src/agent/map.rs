@@ -27,6 +27,7 @@ const DEPTS: &[Dept] = &[
         name: "Edit (cut and arrange)",
         lines: &[
             ("build a whole beat (voice, picture, title, sound)", "scene narrate"),
+            ("find real footage, pictures, sound and 3D in the library and on the web before making any", "tool:search_media"),
             ("put footage and library items on the timeline", "place add replace tool:import tool:download tool:read tool:job tool:media tool:make_playable"),
             ("cut and trim", "split trim delete move nudge reorder duplicate freeze speed_ramp"),
             ("trim neighbours", "roll slide slip ripple extend trim_sides"),

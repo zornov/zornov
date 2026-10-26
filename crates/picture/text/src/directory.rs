@@ -222,7 +222,7 @@ pub fn parse_query(query: &str) -> Wanted {
     }
     let mut w = Wanted::default();
     for word in q.split_whitespace() {
-        if matches!(word, "font" | "fonts" | "typeface" | "typefaces" | "a" | "an" | "the" | "for" | "style" | "look" | "type" | "with" | "and" | "in" | "of") {
+        if matches!(word, "font" | "fonts" | "typeface" | "typefaces" | "a" | "an" | "the" | "for" | "style" | "look" | "type" | "with" | "and" | "in" | "of" | "like" | "this" | "that" | "some" | "any" | "nothing" | "something" | "similar") {
             continue;
         }
         match tag_for(word) {

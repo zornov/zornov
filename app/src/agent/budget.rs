@@ -25,7 +25,9 @@ fn answer(s: &mut Session, tool: &str, args: Value) -> String {
 #[test]
 fn the_first_guide_read_stays_small() {
     let first = guide_answer(&json!({})).unwrap();
-    assert!(first.len() <= 12_000, "guide with no topic is {} characters (~{} tokens)", first.len(), first.len() / 4);
+    // 13_500: the map and the skill index each gained lines for physics, objects in
+    // footage, canvas layout, fonts and search_media (about 1 400 characters in all).
+    assert!(first.len() <= 13_500, "guide with no topic is {} characters (~{} tokens)", first.len(), first.len() / 4);
 }
 
 /// Reading a subject asks for its outline first, and no first read of any
@@ -112,8 +114,9 @@ fn the_tool_list_stays_within_its_budget() {
     let tools = mcp::tools();
     let json = serde_json::to_string(&tools).unwrap();
     eprintln!("tool list: {} tools, {} characters (~{} tokens)", tools.len(), json.len(), json.len() / 4);
-    // 94_500: the objects tool (about 1 000 characters) is one tool more.
-    assert!(json.len() <= 94_500, "the tool list is {} characters; keep property descriptions short and put the detail in tool_reference.md", json.len());
+    // 98_500: the objects tool (about 1 000 characters) is one tool more, the search_media
+    // tool (about 2 200) and the fonts tool (about 1 300) two more.
+    assert!(json.len() <= 98_500, "the tool list is {} characters; keep property descriptions short and put the detail in tool_reference.md", json.len());
     let index = guide_answer(&json!({"topic": "tools"})).unwrap();
     eprintln!("tool index: {} characters", index.len());
     assert!(index.len() <= 12_000, "the tool index is {} characters; it replaces dumping the {} raw definitions", index.len(), tools.len());

@@ -726,3 +726,10 @@ pub(crate) fn test_frame(ctx: &egui::Context, mut input: egui::RawInput, ui: imp
     let _ = ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
     out.textures_delta.clear();
 }
+
+/// Who started a background job: the app it was started from. A result
+/// lands in that app only, not in another one drawn at the same time (the
+/// tests run several side by side, each polling every job).
+pub(crate) fn owner_of(app: &crate::app::StudioApp) -> usize {
+    app as *const crate::app::StudioApp as usize
+}

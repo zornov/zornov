@@ -1169,40 +1169,32 @@ mod tests {
         assert!(span["findings"].as_array().unwrap().iter().all(|f| f["kind"] != "char_not_looking"), "{span}");
     }
 
-    /// A character whose hands have finger bones (as the body work gives them).
-    fn with_fingers(s: &mut Session, id: u32) {
+    /// A character whose digit bones are renamed past recognition: a hand
+    /// without finger bones.
+    fn without_fingers(s: &mut Session, id: u32) {
         let (mc, mut mesh) = s.model_of(id).unwrap();
         let mut rig = (**mesh.rig.as_ref().unwrap()).clone();
-        for side in ["L", "R"] {
-            let hand = rig.bone(&format!("hand.{side}")).unwrap();
-            let (h, t) = (rig.bones[hand].head, rig.bones[hand].tail);
-            let dir = studio_mesh::normalise(studio_mesh::sub(t, h));
-            let across = if side == "L" { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] };
-            for (fi, f) in ["thumb", "index", "middle", "ring", "pinky"].iter().enumerate() {
-                let base = studio_mesh::add(studio_mesh::add(h, studio_mesh::scale(dir, 0.3 * studio_mesh::length(studio_mesh::sub(t, h)))), studio_mesh::scale(across, (fi as f32 - 2.0) * 3.0 * 1.4));
-                let mut parent = hand;
-                for j in 0..3 {
-                    let a = studio_mesh::add(base, studio_mesh::scale(dir, j as f32 * 8.0));
-                    let b = studio_mesh::add(a, studio_mesh::scale(dir, 8.0));
-                    rig.bones.push(Bone::new(format!("{f}.{}.{side}", j + 1), Some(parent), a, b));
-                    parent = rig.bones.len() - 1;
-                }
+        for (i, b) in rig.bones.iter_mut().enumerate() {
+            if ["thumb", "index", "middle", "ring", "pinky"].iter().any(|d| b.name.starts_with(d)) {
+                b.name = format!("unnamed_{i}");
             }
         }
         mesh.rig = Some(Arc::new(rig));
-        s.save_rigged(mc, &mesh, "fingers").unwrap();
+        s.save_rigged(mc, &mesh, "no fingers").unwrap();
     }
 
     #[test]
     fn hand_poses_close_the_fingers_and_a_hand_without_fingers_says_so() {
         let (mut s, id) = with_character();
+        without_fingers(&mut s, id);
         let e = s.edit(&[json!({"op": "pose", "clip": id, "keys": [{"t": 1, "hand": "fist"}]})], "fist", false).unwrap_err();
         assert!(e.contains("no finger bones"), "{e}");
-        with_fingers(&mut s, id);
+        // The character body comes with five fingers on each hand.
+        let (mut s, id) = with_character();
         s.edit(&[json!({"op": "pose", "clip": id, "keys": [{"t": 1, "hand": {"L": "fist", "R": "cup"}}]})], "hands", false).unwrap();
         let spread = |s: &mut Session, t: f64, side: &str| -> f64 {
-            let v = query(s, id, json!({"bones": [format!("middle.3.{side}"), format!("hand.{side}")]}), t);
-            let tip = &v["bones"][format!("middle.3.{side}").as_str()]["tail"];
+            let v = query(s, id, json!({"bones": [format!("middle.{side}.2"), format!("hand.{side}")]}), t);
+            let tip = &v["bones"][format!("middle.{side}.2").as_str()]["tail"];
             let wrist = &v["bones"][format!("hand.{side}").as_str()]["head"];
             (0..3).map(|i| (tip[i].as_f64().unwrap() - wrist[i].as_f64().unwrap()).powi(2)).sum::<f64>().sqrt()
         };
@@ -1217,11 +1209,10 @@ mod tests {
     #[test]
     fn a_strike_is_built_from_hand_and_arm_primitives_and_beats_play_over_a_walk() {
         let (mut s, id) = with_character();
-        with_fingers(&mut s, id);
         let r = s.edit(&[json!({"op": "act", "clip": id, "motion": "walk", "route": [[0, -300]]}), json!({"op": "pose", "clip": id, "keys": [{"t": 6, "recipe": "strike", "look": true}, {"t": 9, "beat": "shrug"}, {"t": 11, "beat": "nod"}, {"t": 12, "beat": "sigh"}]})], "acts", false).unwrap();
         assert!(r.to_string().contains("strike"), "{r}");
         let mc = s.model_clip(id).unwrap();
-        assert!(mc.keyframes.keys().any(|k| k.starts_with("generator.bone.upper_arm.R.")) && mc.keyframes.keys().any(|k| k.starts_with("generator.bone.pinky.1.L.")));
+        assert!(mc.keyframes.keys().any(|k| k.starts_with("generator.bone.upper_arm.R.")) && mc.keyframes.keys().any(|k| k.starts_with("generator.bone.pinky.L.0.")));
         // At the end of the strike the hands are together in front of the chest and the arms are not stretched.
         let v = query(&mut s, id, json!({"bones": ["hand.L", "hand.R"]}), 7.5);
         let (l, r) = (&v["bones"]["hand.L"]["head"], &v["bones"]["hand.R"]["head"]);

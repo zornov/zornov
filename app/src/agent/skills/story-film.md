@@ -1,6 +1,6 @@
 ---
 name: story-film
-use: Use when turning a script or story into an animated film: cast, places, staging, dialogue.
+use: Use when a script or story becomes an animated film: cast, places, staging, dialogue.
 topics: story, script, screenplay, shots, shot-list, storyboard, bible, foley, staging, planning, coverage, cinematography, cinematographer, framing, shot-sizes, lenses, scene, scenes, place, places, backdrop, cast, ambience, blocking, in-the-backdrop, ground-shadows, integration, 180, anamorphic, animatic, bokeh, compositing, contact-shadow, continuity, crane, dolly, dp, drone, eyeline, eyelines, focus, footsteps, foreground, golden-ratio, guides, handheld, headroom, jib, lead-room, light-match, lighting-setups, line, moods, occlusion, overlays, pacing, pasted, plan, previs, rack-focus, rigs, rim-light, shot, steadicam, storytelling, tangents, thirds, three-point
 tools: search_media, story, plan, see, scene, narrate, voices, generate, character, puppet, scissor, skeleton, pose, parts, swap, living, particles, parallax, shadow, light_match, foreground, foley, sfx, music, transition, shot, compare_cameras, animatic, frame, contact_sheet, check, review, notes
 ---

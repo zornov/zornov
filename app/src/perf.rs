@@ -201,6 +201,7 @@ mod tests {
         use eframe::egui;
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = crate::app::StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         // PERF_PROJECT=DIR: a real project instead of the made-up one.
         app.doc = match std::env::var("PERF_PROJECT") {

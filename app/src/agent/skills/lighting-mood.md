@@ -1,6 +1,6 @@
 ---
 name: lighting-mood
-use: Use when a 3D scene needs mood: key light, lamps, flames, fog, rain, wet ground, exposure.
+use: Use when a 3D scene needs mood: lights, flames, fog, rain, wet ground, exposure.
 topics: atmosphere, atmospheric, mood, practicals, practical, lamps, lamp, candle, candlelight, neon, flame, flames, glow, bloom, rain, rainy, snow, snowy, fog, foggy, mist, haze, embers, sparks, wet, wetness, puddles, reflections, cinematic, night, dusk, dawn, noir, tonemap, look-3d
 tools: lighting, light, atmosphere, model, mesh, asset, camera, frame, check, review, notes, set, animate
 ---

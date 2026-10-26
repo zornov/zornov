@@ -130,6 +130,7 @@ impl Driver {
 fn app_with(ctx: &egui::Context) -> StudioApp {
     let s = crate::agent::Session::new(crate::services::project::new_custom("Model", 1280, 720, 30.0));
     let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+    let _serial = crate::ui_tests::serial();
     let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
     app.doc = s.doc;
     app.editor.playhead = 0;

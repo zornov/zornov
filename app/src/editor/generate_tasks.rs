@@ -76,6 +76,8 @@ struct Run {
     status: String,
     done: Option<Result<(g::Request, g::Outcome), String>>,
     args: Value,
+    /// The app that started it ([`crate::editor::owner_of`]).
+    owner: usize,
 }
 
 fn form_id() -> egui::Id {
@@ -225,7 +227,7 @@ fn start(app: &mut StudioApp, args: Value) -> Result<(), String> {
     let req = s.request_for(task, &args);
     app.doc = s.doc;
     let req = req?;
-    let state = Arc::new(Mutex::new(Run { status: "Starting".into(), done: None, args }));
+    let state = Arc::new(Mutex::new(Run { status: "Starting".into(), done: None, args, owner: crate::editor::owner_of(app) }));
     if let Ok(mut gl) = run().lock() {
         *gl = Some(state.clone());
     }
@@ -245,7 +247,7 @@ fn start(app: &mut StudioApp, args: Value) -> Result<(), String> {
 
 /// Lands a finished task (called every frame while the AI panel shows).
 pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
-    let Some(r) = run().lock().ok().and_then(|g| g.clone()) else { return };
+    let Some(r) = run().lock().ok().and_then(|g| g.clone()).filter(|r| r.lock().is_ok_and(|g| g.owner == crate::editor::owner_of(app))) else { return };
     let finished = r.lock().ok().and_then(|mut g| g.done.take().map(|d| (d, g.args.clone())));
     let Some((done, args)) = finished else {
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
@@ -427,6 +429,7 @@ mod tests {
     fn the_change_card_builds_tasks_and_lands_them() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let dir = std::env::temp_dir().join(format!("studio-gen-change-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

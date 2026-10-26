@@ -859,6 +859,7 @@ mod tests {
     fn app_with_cut() -> (StudioApp, egui::Context, eframe::Frame) {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Cut", 320, 180, 24.0));
         s.run("import", &json!({"paths": [test_movie::movie().to_string_lossy()]})).unwrap();

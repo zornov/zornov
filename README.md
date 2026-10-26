@@ -156,26 +156,26 @@ The container has a software graphics driver, so the GPU tests run without a gra
 
 </details>
 
-<details>
-<summary><b>Headless use</b></summary>
+## From the terminal
 
-<br>
-
-Zornov can be driven without a window, for scripts, tests and automation. Every film above was made this way:
+Everything the window does also works from a terminal, or with no window at all, for scripts, render machines and AI assistants. Every film above was made this way.
 
 ```bash
-zornov agent --headless --project path/to/project --out path/to/out -
+zornov new my-video && cd my-video
+zornov card colour=red at=0 duration=2
+zornov text "Hello" at=0.5
+zornov check
+zornov export out.mp4
 ```
 
-Send one JSON line per tool call on standard input, for example `{"tool": "frame", "args": {"t": 2.0}}`.
-
-</details>
+Run `zornov` on its own for a prompt: commands run, anything else goes to the AI editor. `zornov agent --headless` speaks JSON for scripts, and `zornov mcp` serves the tools to any AI assistant that speaks MCP. See [Terminal and headless use](docs/terminal.md).
 
 ## Documentation
 
 | Guide | What it covers |
 |---|---|
 | [AI crew](docs/ai-crew.md) | How the AI editor and its crew work |
+| [Terminal and headless use](docs/terminal.md) | The `zornov` prompt, one-off commands, JSON for scripts, MCP for AI assistants and render nodes |
 | [Plugins](docs/plugins.md) | Writing plugins: effects, generators, transitions, importers, exporters and panels |
 | [Accessibility](docs/accessibility.md) | Using Zornov without a mouse, with a screen reader, at large sizes and in any light |
 | [Localisation](docs/localisation.md) | The interface languages and how to add translations |

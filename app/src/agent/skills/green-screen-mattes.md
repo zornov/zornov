@@ -2,7 +2,7 @@
 name: green-screen-mattes
 use: Use when a subject must leave its background: green screen, cut-outs, roto, masks.
 topics: keying, key, cut-out, cutout, roto, rotoscope, background, matte, mattes, mask, masks, cut_out, chroma, stabilize, track, tracking
-tools: keying, cut_out, roto, mask, matte, mask_puppet, corner_pin, track, apply, effect, foreground, frame, check, place
+tools: keying, cut_out, roto, mask, matte, mask_puppet, corner_pin, track, apply, effect, foreground, frame, check, place, key_background
 ---
 **Order**
 1. Pick the method by the footage. Green or blue screen, white or black background (a black background for fire and flares can use the `screen` blend instead): a key (`keying`, or a key effect from `catalogue {panel: "effects"}`). No screen: `cut_out` (people need no subject; anything else gets a point on it, two or three for a long thing, `exclude` what keeps getting caught, or a `box`). A shape you must edit or feather by hand, or something too fast to matte cleanly: `roto`. A window, rectangle or circle: a plain `mask`.

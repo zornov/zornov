@@ -99,6 +99,7 @@ mod tests {
         let _guard = crate::services::tracking::test_movie::LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Match", 640, 360, 30.0));
         let movie = crate::services::tracking::test_movie::movie();

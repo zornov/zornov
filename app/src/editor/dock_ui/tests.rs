@@ -432,6 +432,8 @@ fn label_centre(d: &mut Drive, label: &str) -> Option<Pos2> {
     let frame = &mut d.frame;
     let mut out = d.h.ctx.run_ui(input, |ui| eframe::App::ui(app, ui, frame));
     let _ = d.h.ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
+    // As `step` does: dropping them unhandled would panic.
+    out.textures_delta.clear();
     let update = out.platform_output.accesskit_update?;
     update.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.bounds()).map(|b| Pos2::new(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32))
 }

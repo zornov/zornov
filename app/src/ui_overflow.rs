@@ -267,6 +267,7 @@ pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> 
                 continue;
             }
             let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
+            let _viewport = crate::editor::viewport::test_lock();
             let mut h = Harness::new(s.args).sized(w, hh);
             (s.setup)(&mut h);
             h.frames(8);
@@ -341,6 +342,7 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
         for s in surfaces().into_iter().filter(|s| CHECKED.contains(&s.name)) {
             visited += 1;
             let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
+            let _viewport = crate::editor::viewport::test_lock();
             let mut h = Harness::new(s.args).sized(w, hh);
             (s.setup)(&mut h);
             h.frames(8);
@@ -367,6 +369,7 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
 fn a_menu_taller_than_the_window_fits_it_and_scrolls_to_the_end() {
     let last = studio_fx::particles::PRESETS.last().expect("particle presets").name;
     for (w, hh) in [(960.0, 600.0), (1440.0, 900.0), (2000.0, 1300.0)] {
+        let _viewport = crate::editor::viewport::test_lock();
         let mut h = Harness::new(&["--screen", "editor"]).sized(w, hh);
         h.frames(6);
         assert!(h.click("3D camera and lights"), "the 3D menu opens");
@@ -414,6 +417,7 @@ fn popup_body_caps_to_the_window() {
 /// brings the last one into reach) instead of clipping them.
 #[test]
 fn a_narrow_timeline_toolbar_scrolls_instead_of_clipping() {
+    let _viewport = crate::editor::viewport::test_lock();
     let mut h = Harness::new(&["--screen", "editor"]).sized(520.0, 700.0);
     h.frames(8);
     let first = h.find(None, "Select (drag empty space to box-select)").expect("the first tool");

@@ -170,7 +170,21 @@ impl Ragdoll {
             let rf = rest[i];
             let len = b.length().max(size * 0.01);
             // The skin in the bone's own frame, in metres.
-            let local: Vec<V3> = skin[i].iter().map(|p| scale(rf.inverse().apply(*p), place.k)).collect();
+            let mut local: Vec<V3> = skin[i].iter().map(|p| scale(rf.inverse().apply(*p), place.k)).collect();
+            // Skinning hands a bone a few far points (an armpit on the upper
+            // arm, the seat on a thigh); in a hull they would make the limb
+            // several times its weight. Keep the skin near the bone itself.
+            if local.len() >= 8 {
+                let lm = len * place.k;
+                let radial = |p: &V3| (p[0] * p[0] + p[2] * p[2]).sqrt();
+                let mut r: Vec<f32> = local.iter().map(radial).collect();
+                r.sort_by(f32::total_cmp);
+                let cut = r[r.len() / 2] * 1.6;
+                let near: Vec<V3> = local.iter().copied().filter(|p| radial(p) <= cut && p[1] >= -0.1 * lm && p[1] <= 1.1 * lm).collect();
+                if near.len() >= 8 {
+                    local = near;
+                }
+            }
             let shape = if local.len() >= 8 {
                 Hull::from_points(&local, 24, len * place.k * 0.05).map(|h| Shape::Hull(Arc::new(h)))
             } else {
@@ -394,8 +408,9 @@ mod tests {
     use super::*;
     use studio_mesh::rig::PoseInput;
 
+    // Bare: the ragdoll weighs the body, and loose clothes are not flesh.
     fn figure() -> Mesh {
-        studio_mesh::character::character(180.0, &Default::default())
+        studio_mesh::character::character(180.0, &studio_mesh::character::Build { dressed: false, ..Default::default() })
     }
 
     #[test]

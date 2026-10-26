@@ -14,8 +14,29 @@ use std::collections::BTreeMap;
 /// change them run one at a time.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+thread_local! {
+    static HELD: std::cell::RefCell<Option<std::sync::MutexGuard<'static, ()>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Holds the process-wide settings still for the rest of this test: the
+/// turn lasts until the test's thread ends, so a helper that builds the app
+/// keeps it for the test that called it. Taking it again on the same thread
+/// does nothing.
+pub fn serial() -> Serial {
+    HELD.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.is_none() {
+            *h = Some(SERIAL.lock().unwrap_or_else(|e| e.into_inner()));
+        }
+    });
+    Serial
+}
+
+/// This thread's turn at the process-wide settings (see [`serial`]).
+pub struct Serial;
+
 pub struct Harness {
-    _serial: std::sync::MutexGuard<'static, ()>,
+    _serial: Serial,
     pub app: StudioApp,
     pub ctx: egui::Context,
     frame: eframe::Frame,
@@ -29,7 +50,7 @@ pub struct Harness {
 
 impl Harness {
     pub fn new(args: &[&str]) -> Self {
-        let serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let serial = serial();
         crate::i18n::set_lang(studio_i18n::Lang::En);
         crate::access::set(false, crate::prefs::ColourVision::Standard);
         let ctx = egui::Context::default();

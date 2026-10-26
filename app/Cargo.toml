@@ -85,6 +85,9 @@ studio-entitlements = { path = "../crates/business/entitlements", optional = tru
 studio-plugins = { path = "../crates/plugins/plugins" }
 
 [target.'cfg(windows)'.dependencies]
+# Windows ships no SQLite, so the library index builds its own there
+# (with FTS5); macOS and Linux use the system's.
+libsqlite3-sys = { version = "0.39", features = ["bundled"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

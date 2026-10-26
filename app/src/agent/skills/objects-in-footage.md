@@ -1,6 +1,6 @@
 ---
 name: objects-in-footage
-use: Use when you need what is in footage and where: title room, a moment by words, an object to cut out or follow.
+use: Use when you need what is in footage: title room, a moment by words, an object to cut out or follow.
 topics: objects, object, detect, detection, find, find-moment, search, free-space, space, ocr, text-in-picture, depth, distance, size, relations, in-front, behind, what-is-in
 tools: objects, see, cut_out, roto, track, text, place, frame, set, animate, check
 ---

@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Studio desktop application.
+//! Zornov desktop application.
 //!
 //! Command-line options (mostly for development and visual checks):
 //!
@@ -9,7 +9,7 @@
 //! zornov mcp [--project DIR]          agent server (MCP over stdio, headless)
 //! zornov agent [--project DIR] TOOL [JSON]   one agent call from a shell
 //! zornov eval --out DIR [--solo]       the AI editor on scored jobs, headless
-//! studio [--screen start|editor|export|settings|gallery] [--theme dark|light]
+//! zornov [--screen start|editor|export|settings|gallery] [--theme dark|light]
 //!        [--size 1440x900] [--project demo|empty|one|big] [--select N]
 //!        [--shot out.png] [--frames N] [--fresh]
 //! ```
@@ -111,7 +111,7 @@ fn main() -> eframe::Result {
         Some("queue") => std::process::exit(deliver_run::queue_main(&argv[1..])),
         _ => {}
     }
-    // `studio` in a terminal: the prompt, `zornov new`, `zornov see`…
+    // `zornov` in a terminal: the prompt, `zornov new`, `zornov see`…
     if let Some(code) = agent::shell::main(&argv) {
         std::process::exit(code);
     }

@@ -158,6 +158,10 @@ A release:
 3. Put the run's `entries/*.json` next to the Mac's in `dist/release/entries/`,
    run `cargo xtask feed` on the Mac, and attach `feed.json`, the DMG and every
    package to the GitHub release.
+4. Also attach the fixed-name copies (`Zornov-mac.dmg`, `Zornov-windows.msi`,
+   `Zornov-linux.AppImage`, `Zornov-linux.deb`). zornov.com's download
+   buttons link to `releases/latest/download/<that name>`, so they start the
+   download straight away and keep working for every new version.
 
 Secrets the release workflow reads:
 

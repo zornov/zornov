@@ -2,7 +2,7 @@
 name: vfx-compositing
 use: Use when a shot needs compositing, tracking, stabilising, clean-up or a new sky.
 topics: vfx, visual-effects, compositing, comp, nodes, matchmove, camera-tracking, cleanup, clean-plate, sky, light-wrap, grain, tracking, track, stabilize, stabilise, stabilizing, node-kinds, comp-nodes, keying-deluxe, compositor
-tools: comp, keying, remove_object, clean_plate, sky, wire, paint, depth_of_field, grain_match, lens, motion_blur, matchmove, place_on_ground, export_camera, import_camera, track, stabilize, smooth_motion, reframe, shadow, light_match, match_colour, frame, check
+tools: comp, keying, remove_object, clean_plate, sky, wire, paint, depth_of_field, grain_match, lens, motion_blur, matchmove, place_on_ground, export_camera, import_camera, track, stabilize, smooth_motion, reframe, shadow, light_match, match_colour, frame, check, polygon_mask, parts_check
 ---
 **Order**
 1. Decide layers or nodes. Titles, overlays and grades belong in the layer stack; a shot with a key, a clean-up, a sky, CG or several passes belongs in a node graph (`comp`), where every step can be viewed alone (`output`).

@@ -1,6 +1,6 @@
 ---
 name: physics-3d
-use: Use when 3D things must behave physically: fall, rest, stack, roll, tip, collide, swing on hinges, break, be thrown or pushed, ragdoll, jiggle, follow through.
+use: Use when 3D things must act physically: fall, stack, collide, swing, break, be thrown, ragdoll, jiggle.
 topics: physics, physics-3d, rigid-body, rigid-bodies, gravity, collision, collisions, colliders, fall, falling, drop, throw, push, knock, topple, tip, stack, stacking, dominoes, bowling, pendulum, hinge, joint, joints, rope, chain, spring, door, ragdoll, knocked-down, jiggle, secondary-motion, follow-through, tail, ears, antennae, feathers, coat-tails, settle, resting, floating, sinking, mass, weight, material, destruction, shatter, break, breaking, glass, vehicle, crash
 tools: body, joint, drop, throw, push, break, settle, ragdoll, jiggle, bake_physics, physics_world, simulate, model, mesh, asset, check, review, frame
 ---

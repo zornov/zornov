@@ -462,12 +462,34 @@ fn materials_said(m: &Mesh) -> Value {
     Value::Array(shown)
 }
 
+/// What a model is made of, by name: each name that carries triangles with
+/// their count (same-named parts add up), the first sixteen and how many
+/// more, so a model built of a hundred parts is not a hundred lines.
+fn parts_said(m: &Mesh) -> Value {
+    let mut per_material = vec![0usize; m.materials.len()];
+    for k in m.tri_materials() {
+        if let Some(n) = per_material.get_mut(k as usize) {
+            *n += 1;
+        }
+    }
+    let mut named: Vec<(&str, usize)> = Vec::new();
+    for (mt, n) in m.materials.iter().zip(per_material).filter(|(_, n)| *n > 0) {
+        match named.iter_mut().find(|(name, _)| *name == mt.name) {
+            Some(entry) => entry.1 += n,
+            None => named.push((&mt.name, n)),
+        }
+    }
+    let mut shown: Vec<Value> = named.iter().take(16).map(|(name, n)| json!({"name": name, "triangles": n})).collect();
+    if named.len() > 16 {
+        shown.push(json!({"more_parts": named.len() - 16}));
+    }
+    Value::Array(shown)
+}
+
 /// Words about a model for the agent: size, place of its box, triangles.
 pub(super) fn describe(m: &Mesh) -> Value {
     let (lo, hi) = m.bounds();
     let r = |v: f32| (v * 10.0).round() / 10.0;
-    let mats = m.tri_materials();
-    let parts: Vec<Value> = m.materials.iter().enumerate().map(|(i, mt)| json!({"name": mt.name, "triangles": mats.iter().filter(|&&k| k as usize == i).count()})).collect();
     let worn = if m.rig.is_some() { Some(studio_mesh::wear::worn(m)) } else { None };
     json!({
         "triangles": m.triangles(),
@@ -476,7 +498,7 @@ pub(super) fn describe(m: &Mesh) -> Value {
         "box_min": [r(lo[0]), r(lo[1]), r(lo[2])],
         "box_max": [r(hi[0]), r(hi[1]), r(hi[2])],
         "rig": m.rig.as_deref().map(super::anim3d::describe_rig),
-        "parts": parts,
+        "parts": parts_said(m),
         "worn": worn,
     })
 }

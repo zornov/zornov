@@ -872,6 +872,7 @@ mod tests {
     fn the_story_panel_shows_edits_and_builds() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         let mut s = crate::agent::Session::new(crate::services::project::new_custom("Panel", 640, 360, 30.0));
         let script = "EXT. MEADOW - DAY\n\nNARRATOR (V.O.)\nThe fox walked out into the sun.\n\nFOX\nHello?\n\nOWL\nUp here!\n";
@@ -924,6 +925,7 @@ mod tests {
     fn a_script_is_dropped_on_the_panel_then_edited() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
         let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
         app.doc = crate::agent::Session::new(crate::services::project::new_custom("Drop", 640, 360, 30.0)).doc;
         let area = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(420.0, 900.0));
