@@ -1,0 +1,9 @@
+# Text is checked out with LF on every system, Windows included: the guides,
+# skills and fixtures are compiled in and parsed line by line, and
+# assets.lock hashes the files as committed.
+* text=auto eol=lf
+
+# Upstream licence texts, kept byte for byte as they ship (CRLF).
+app/assets/icons/Phosphor-LICENSE.txt -text
+crates/dev/xtask/licenses/BSD-2-Clause.txt -text
+crates/dev/xtask/licenses/BSD-3-Clause.txt -text

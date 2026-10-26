@@ -51,13 +51,26 @@ pub fn sources_dir() -> PathBuf {
     studio_paths::studio().join("Plugin sources")
 }
 
+/// A toolchain program. Zornov is a window program on Windows, so without
+/// this each one would open a console window of its own.
+fn tool(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 /// Finds `cargo` and checks the wasm target is installed.
 pub fn toolchain() -> Result<PathBuf, String> {
     let home = studio_paths::home();
     let candidates = [PathBuf::from("cargo"), home.join(".cargo/bin/cargo")];
-    let cargo = candidates.into_iter().find(|c| Command::new(c).arg("--version").output().is_ok_and(|o| o.status.success())).ok_or("Rust is not installed on this Mac, so Zornov cannot build plugins (install it from rustup.rs)")?;
+    let cargo = candidates.into_iter().find(|c| tool(c).arg("--version").output().is_ok_and(|o| o.status.success())).ok_or("Rust is not installed on this Mac, so Zornov cannot build plugins (install it from rustup.rs)")?;
     let rustc = if cargo.parent().is_some_and(|p| !p.as_os_str().is_empty()) { cargo.with_file_name("rustc") } else { PathBuf::from("rustc") };
-    let sysroot = Command::new(rustc).args(["--print", "sysroot"]).output().map_err(|e| e.to_string())?;
+    let sysroot = tool(rustc).args(["--print", "sysroot"]).output().map_err(|e| e.to_string())?;
     let sysroot = PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim());
     if !sysroot.join("lib/rustlib/wasm32-unknown-unknown").is_dir() {
         return Err("the Rust WebAssembly target is missing; run `rustup target add wasm32-unknown-unknown` once".into());
@@ -194,7 +207,7 @@ pub fn build(spec: &Spec, root: &Path) -> Result<Built, String> {
         write(&dir.join("src/effect.wgsl"), w)?;
     }
     let target = root.join(".build");
-    let mut child = Command::new(&cargo)
+    let mut child = tool(&cargo)
         .args(["build", "--release", "--offline", "--quiet", "--target", "wasm32-unknown-unknown", "--manifest-path"])
         .arg(dir.join("Cargo.toml"))
         .env("CARGO_TARGET_DIR", &target)

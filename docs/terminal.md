@@ -18,6 +18,12 @@ cd my-video
 zornov                       # the prompt in this project
 ```
 
+On Windows, `zornov.exe` is the window program (a double click or the Start
+menu opens the editor), so use `zornov-cli` beside it in a terminal:
+`zornov-cli new my-video`, `zornov-cli` for the prompt, and the same for every
+command below. Programs that talk to Zornov over pipes, such as an MCP
+client running `zornov mcp`, can use either.
+
 `zornov new` takes `--vertical`, `--square`, `--size 1080x1920` and
 `--fps 60`. The project is the folder you are in, or the nearest one above it
 that holds a project.

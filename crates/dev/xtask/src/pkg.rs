@@ -162,10 +162,33 @@ pub fn portable_linux_from(exe: &Path, content: Option<&Path>, notices: &Notices
     Ok(format!("{}{}", rel(&out_dir.join(format!("{name}.tar.gz"))), if signed { " (+ signed update archive)" } else { "" }))
 }
 
+/// The console program beside `zornov.exe`, built with it: `zornov.exe` is a
+/// window program on Windows, so the terminal side goes through this one.
+const WINDOWS_CLI: &str = "zornov-cli.exe";
+
+/// DXC, the DirectX shader compiler, which `app/build.rs` puts beside the
+/// program: Zornov draws through DirectX 12 with it on Windows.
+const DXC: [&str; 2] = ["dxcompiler.dll", "dxil.dll"];
+
+/// Microsoft's notice for [`DXC`], shipped beside it.
+const DXC_NOTICE: &str = "DirectXShaderCompiler-NOTICE.md";
+
+/// [`portable_tree`] for Windows: `zornov.exe` with `zornov-cli.exe`, DXC
+/// and DXC's notice beside it.
+fn windows_tree(exe: &Path, content: Option<&Path>, notices: &Notices, dest: &Path) -> Result<(), String> {
+    portable_tree(exe, "zornov.exe", content, notices, dest)?;
+    for f in std::iter::once(WINDOWS_CLI).chain(DXC) {
+        std::fs::copy(exe.with_file_name(f), dest.join(f)).map_err(|e| format!("cannot copy {f} (DXC comes from the Windows SDK; see docs/windows.md): {e}"))?;
+    }
+    let notice = crate::root().join("packaging/windows").join(DXC_NOTICE);
+    std::fs::copy(&notice, dest.join(DXC_NOTICE)).map_err(|e| format!("{}: {e}", notice.display()))?;
+    Ok(())
+}
+
 pub fn portable_windows_from(exe: &Path, content: Option<&Path>, notices: &Notices, out_dir: &Path, sign: bool) -> Result<String, String> {
     let name = format!("zornov-windows-{}", crate::arch());
     let tree = out_dir.join(&name);
-    portable_tree(exe, "zornov.exe", content, notices, &tree)?;
+    windows_tree(exe, content, notices, &tree)?;
     let items = repro::collect(&tree)?;
     repro::zip(&out_dir.join(format!("{name}.zip")), &name, &items, &[])?;
     let upd = out_dir.join(format!("Zornov-{VERSION}-windows-{}.update.tar.gz", std::env::consts::ARCH));
@@ -221,7 +244,7 @@ pub fn wxs() -> String {
 pub fn package_msi() -> Result<String, String> {
     let exe = crate::build_app_repro()?;
     let src = crate::target_dir().join("msi/src");
-    portable_tree(&exe, "zornov.exe", crate::content_core().as_deref(), &crate::licenses::notices()?, &src)?;
+    windows_tree(&exe, crate::content_core().as_deref(), &crate::licenses::notices()?, &src)?;
     let wxs_file = crate::target_dir().join("msi/zornov.wxs");
     std::fs::write(&wxs_file, wxs()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(release_dir()).map_err(|e| e.to_string())?;
@@ -267,6 +290,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("core")).unwrap();
         std::fs::write(d.join("zornov-bin"), "binary").unwrap();
+        for f in std::iter::once(WINDOWS_CLI).chain(DXC) {
+            std::fs::write(d.join(f), f).unwrap();
+        }
         std::fs::write(d.join("core/index.json"), "{}").unwrap();
         d
     }
@@ -392,13 +418,17 @@ mod tests {
         let z = zip::ZipArchive::new(std::fs::File::open(o1.join(format!("{win}.zip"))).unwrap()).unwrap();
         let zipped: Vec<String> = z.file_names().map(str::to_owned).collect();
         has_all(&zipped, &win);
-        assert!(zipped.contains(&format!("{win}/zornov.exe")));
+        for f in ["zornov.exe", WINDOWS_CLI, DXC_NOTICE].into_iter().chain(DXC) {
+            assert!(zipped.contains(&format!("{win}/{f}")), "{f} missing from the zip");
+        }
 
         // The MSI is harvested from this folder: the notices sit next to zornov.exe.
-        portable_tree(&bin, "zornov.exe", None, &notices, &d.join("msi")).unwrap();
+        windows_tree(&bin, None, &notices, &d.join("msi")).unwrap();
         let msi: Vec<String> = repro::collect(&d.join("msi")).unwrap().into_iter().map(|i| i.rel).collect();
         has_all(&msi, "");
-        assert!(msi.contains(&"zornov.exe".to_owned()));
+        for f in ["zornov.exe", WINDOWS_CLI, DXC_NOTICE].into_iter().chain(DXC) {
+            assert!(msi.contains(&f.to_owned()), "{f} missing from the MSI folder");
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -125,20 +125,47 @@ Get Zornov for macOS, Windows or Linux from **[zornov.com/download](https://zorn
 
 ## Build and run
 
-Zornov is written in Rust (edition 2024).
+Zornov is written in Rust (edition 2024). Each system builds natively, and each one packages and starts a little differently.
+
+### macOS and Linux
 
 ```bash
 cargo build --release -p studio-app
 ./target/release/zornov
 ```
 
-To make a signed macOS app bundle:
+One `zornov` program does both: started from Finder, the Dock or a desktop entry it opens the editor, and in a terminal it gives the prompt.
 
-```bash
-cargo xtask bundle
+| Package | Command | Makes |
+|---|---|---|
+| macOS app | `cargo xtask bundle` | `dist/Zornov.app` |
+| macOS DMG, signed and notarised | `cargo xtask release-mac` | see [`docs/releasing.md`](docs/releasing.md) |
+| Linux portable | `cargo xtask package-linux` | `dist/zornov-linux-<arch>.tar.gz` |
+| Linux packages | `cargo xtask package-deb`, `package-appimage` | `dist/release/` |
+
+### Windows
+
+From Command Prompt:
+
+```cmd
+git clone https://github.com/zornov/zornov.git
+cd zornov
+cargo build --release -p studio-app
+target\release\zornov.exe
 ```
 
-See [`docs/releasing.md`](docs/releasing.md) for signing, notarisation and the update feed.
+You need Rust with the MSVC toolchain and the Windows SDK. The build copies DXC, Microsoft's DirectX shader compiler, from the SDK next to `zornov.exe`, and Zornov draws through DirectX 12 with it, because Vulkan crashes on some Intel graphics drivers.
+
+Windows ships **two programs** side by side: `zornov.exe` opens the editor (double click, Start menu), and `zornov-cli.exe` is for the terminal, so use `zornov-cli` wherever these docs say `zornov` in a terminal.
+
+| Package | Command | Makes |
+|---|---|---|
+| Portable zip | `cargo xtask package-windows` | `dist\zornov-windows-x64.zip` |
+| Installer | `cargo xtask package-msi` (needs WiX 5) | `dist\release\Zornov-<version>-windows-x64.msi` |
+
+The last crate (the app itself) takes a long time to optimise, so the build can sit at `628/629` for a while. The build needs files with LF line endings, as committed; `.gitattributes` makes Git for Windows keep them. See [Windows](docs/windows.md) for what you need, fixing an older CRLF checkout, the two programs, graphics, and signing.
+
+See [`docs/releasing.md`](docs/releasing.md) for signing, notarisation and the update feed on every system.
 
 <details>
 <summary><b>Linux in a container</b></summary>
@@ -168,7 +195,7 @@ zornov check
 zornov export out.mp4
 ```
 
-Run `zornov` on its own for a prompt: commands run, anything else goes to the AI editor. `zornov agent --headless` speaks JSON for scripts, and `zornov mcp` serves the tools to any AI assistant that speaks MCP. See [Terminal and headless use](docs/terminal.md).
+Run `zornov` on its own for a prompt: commands run, anything else goes to the AI editor. `zornov agent --headless` speaks JSON for scripts, and `zornov mcp` serves the tools to any AI assistant that speaks MCP. On Windows, type `zornov-cli` instead of `zornov`. See [Terminal and headless use](docs/terminal.md).
 
 ## Documentation
 
@@ -184,6 +211,7 @@ Run `zornov` on its own for a prompt: commands run, anything else goes to the AI
 | [Models](docs/models.md) | The AI models Zornov can download when you ask, and their licences |
 | [Automation security](docs/automation-security.md) | How issues, pull requests and automation are kept safe |
 | [Releasing](docs/releasing.md) | Signing, notarisation, release packages and updates |
+| [Windows](docs/windows.md) | Building, running and packaging on Windows: LF line endings, the window and terminal programs, the zip and the installer |
 
 <details>
 <summary><b>Repository layout</b></summary>

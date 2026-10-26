@@ -9,6 +9,12 @@ license.workspace = true
 name = "zornov"
 path = "src/main.rs"
 
+# Windows: the console program for the terminal side (`zornov.exe` is a
+# window program there). It starts the `zornov` beside it on its console.
+[[bin]]
+name = "zornov-cli"
+path = "src/bin/zornov-cli.rs"
+
 [features]
 default = ["render"]
 # Viewer frames and export through `studio-render` (+ `text`, `encode`).
