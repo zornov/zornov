@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="160">
+  <rect x="10.3" y="12.7" width="80.5" height="50.2" fill="#e8573f"/>
+  <circle cx="140" cy="50" r="38.4" fill="#2b6cb0"/>
+  <ellipse cx="60" cy="120" rx="45" ry="22" fill="#38a169" transform="rotate(-15 60 120)"/>
+  <path d="M120 100 C150 80 190 150 160 150 S110 160 120 100Z" fill="#805ad5"/>
+  <polygon points="100,20 108,40 130,42 112,55 118,77 100,64 82,77 88,55 70,42 92,40" fill="#d69e2e" opacity="0.8"/>
+</svg>

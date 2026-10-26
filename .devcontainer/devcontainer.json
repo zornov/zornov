@@ -1,0 +1,31 @@
+{
+  "name": "Studio (Linux)",
+  "build": {
+    "dockerfile": "../docker/Dockerfile",
+    "context": "../docker"
+  },
+  "remoteUser": "dev",
+  "mounts": [
+    "source=studio-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+    "source=studio-cargo-git,target=/usr/local/cargo/git,type=volume",
+    "source=studio-linux-target,target=/cache/target,type=volume"
+  ],
+  "postCreateCommand": "cargo fetch",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy"
+      }
+    }
+  },
+  "hostRequirements": {
+    "cpus": 8,
+    "memory": "16gb",
+    "storage": "64gb"
+  }
+}

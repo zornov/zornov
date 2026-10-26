@@ -1,0 +1,252 @@
+{
+  "id": "callout.number-badge",
+  "name": "Number Badge",
+  "category": "callout",
+  "tags": [
+    "number",
+    "step",
+    "badge"
+  ],
+  "duration": 4.5,
+  "intro": 0.9,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "number",
+      "label": "Number",
+      "default": "1"
+    },
+    {
+      "key": "label",
+      "label": "Label",
+      "default": "Mix the dry ingredients"
+    }
+  ],
+  "layers": [
+    {
+      "name": "badge",
+      "type": "ellipse",
+      "colour": "#8B6CFF",
+      "size": [
+        96.0,
+        96.0
+      ],
+      "position": [
+        0.3,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "number",
+      "type": "text",
+      "field": "number",
+      "style": {
+        "font": {
+          "family": "Unbounded",
+          "weight": 800,
+          "italic": false
+        },
+        "size": 48.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 96.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.3,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "label",
+      "type": "text",
+      "field": "label",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 600,
+          "italic": false
+        },
+        "size": 42.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#000000B3",
+          "radius": 12.0,
+          "padding_x": 24.0,
+          "padding_y": 12.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 900.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.335,
+        0.5
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.6
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.3,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

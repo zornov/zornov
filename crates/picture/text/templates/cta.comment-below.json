@@ -1,0 +1,184 @@
+{
+  "id": "cta.comment-below",
+  "name": "Comment Below",
+  "category": "call_to_action",
+  "tags": [
+    "comment",
+    "question",
+    "pulse"
+  ],
+  "duration": 4.0,
+  "intro": 0.8,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "question",
+      "label": "Question",
+      "default": "Which one would you pick?"
+    },
+    {
+      "key": "hint",
+      "label": "Hint",
+      "default": "comment below 👇"
+    }
+  ],
+  "layers": [
+    {
+      "name": "question",
+      "type": "text",
+      "field": "question",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 52.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#0F172AE0",
+          "radius": 14.0,
+          "padding_x": 28.0,
+          "padding_y": 14.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1100.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.46
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "pop",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "hint",
+      "type": "text",
+      "field": "hint",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 600,
+          "italic": false
+        },
+        "size": 34.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFD166"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1100.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.56
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.4,
+      "intro_duration": 0.4,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "pulse",
+        "unit": "line",
+        "speed": 0.7,
+        "amount": 0.3,
+        "colour": null
+      }
+    }
+  ]
+}

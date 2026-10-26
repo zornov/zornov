@@ -1,0 +1,14 @@
+[package]
+name = "studio-av1"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Clean-room AV1 decoder (AV1 Bitstream & Decoding Process Specification v1.0.0 with Errata 1). Vendored from FilmCraft (storytold/filmcraft crates/codecs/av1)."
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+thiserror = "2"
+rayon = { version = "1", optional = true }

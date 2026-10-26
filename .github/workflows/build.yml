@@ -1,0 +1,233 @@
+name: build
+
+# Pull requests into main and pushes to main; nothing on other branches, so a
+# Dependabot branch runs once (as its pull request), not twice. macOS is not
+# built here at all: it is built, tested and signed by hand on a Mac
+# (cargo xtask release-mac), and its disk image is attached to releases by hand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request replaces the run in progress.
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    # Decides inside the run whether code changed, so a change to documentation
+    # only skips the builds while ci-ok still reports (a path filter on the
+    # trigger would leave the required check waiting forever).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.files.outputs.code }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Changed files
+        id: files
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then range="$PR_BASE...$PR_HEAD"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE..$AFTER"
+          else echo "code=true" >> "$GITHUB_OUTPUT"; echo "no range: building everything"; exit 0; fi
+          files=$(git diff --name-only "$range")
+          echo "$files"
+          if [ -n "$files" ] && ! echo "$files" | grep -qvE '(\.md$|^docs/|^LICENSE|^NOTICE$|^\.github/ISSUE_TEMPLATE/)'; then
+            echo "code=false" >> "$GITHUB_OUTPUT"; echo "documentation only: the builds are skipped"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deny:
+    # Licences, advisories, bans and sources (deny.toml).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+
+  credit:
+    # No commit in a push or pull request may credit an AI assistant: no
+    # Co-Authored-By or "Generated with" lines, no session links, and no AI or
+    # bot as author or committer.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check commit messages and identities
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DEFAULT: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$BEFORE..$AFTER"
+          elif git rev-parse -q --verify "origin/$DEFAULT" >/dev/null && [ "$(git rev-parse "origin/$DEFAULT")" != "$AFTER" ]; then
+            range="origin/$DEFAULT..$AFTER"
+          else
+            range="$AFTER"
+          fi
+          echo "checking $range"
+          git log --format='%H%x00%an <%ae>%x00%cn <%ce>%x00%B%x1e' "$range" | python3 -c '
+          import re, sys
+          AI = r"(claude|anthropic|openai|chatgpt|codex|copilot|gemini|cursor|devin|aider)"
+          LINE = re.compile("|".join(f"(?:{p})" for p in [
+              rf"co-authored-by:.*{AI}",
+              rf"generated (with|by|using) .*{AI}",
+              r"(created|written|made|assisted|authored|drafted) (with|by|using) .*(claude|anthropic)",
+              r"noreply@anthropic\.com", r"noreply@openai\.com", r"codex@users\.noreply\.github\.com",
+              r"claude\.ai/(code|chat|share)", r"claude\.com/(claude-code|code|product)",
+              r"^\s*claude-session\s*:", r"\bclaude\[bot\]", r"chatgpt-codex-connector\[bot\]", "\U0001F916",
+          ]), re.I)
+          WHO = re.compile(r"noreply@anthropic\.com|noreply@openai\.com|codex@users\.noreply\.github\.com|claude\[bot\]|chatgpt-codex-connector\[bot\]|\bcopilot\b", re.I)
+          bad = 0
+          for rec in sys.stdin.read().split("\x1e"):
+              parts = rec.strip("\n").split("\x00")
+              if len(parts) < 4:
+                  continue
+              sha, author, committer, body = parts
+              for role, who in (("author", author), ("committer", committer)):
+                  if WHO.search(who):
+                      print(f"::error::{sha[:10]} {role} is an AI identity: {who}"); bad += 1
+              for line in body.splitlines():
+                  if LINE.search(line):
+                      print(f"::error::{sha[:10]} credits an AI: {line.strip()}"); bad += 1
+          print(f"{bad} problem(s)")
+          sys.exit(1 if bad else 0)
+          '
+
+  workflows:
+    # The workflow files and the Linux image: injection through untrusted text,
+    # risky triggers, over-broad tokens and credential leaks (zizmor), and
+    # mistakes in syntax and expressions (actionlint).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - name: zizmor
+        run: uvx zizmor==1.31.1 --min-severity medium --format github .github/workflows
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+      - name: hadolint
+        run: docker run --rm -i hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d < docker/Dockerfile
+
+  assets:
+    # Every committed picture, video, sound, font, plugin and fixture must
+    # match assets.lock (cargo xtask assets-lock updates it on purpose).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - run: cargo xtask assets-check
+
+  windows:
+    # Windows builds and tests natively; it is the one system the maintainers
+    # cannot run at their desks.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Test
+        run: cargo test --release --workspace
+      - name: Tests left the test data untouched
+        run: cargo xtask assets-check
+      - name: Package
+        run: cargo xtask package-windows
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-Windows
+          path: dist/*.zip
+
+  linux:
+    # Linux builds and tests in the image from docker/Dockerfile: the same
+    # environment the dev container gives contributors. (Windows builds natively
+    # above; containers only run Linux; macOS is built by hand.)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Build the image
+        run: docker build -t studio-linux docker
+      - name: Test, check the test data, package
+        run: |
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache/home -e CARGO_TARGET_DIR=/work/target \
+            -v "$PWD:/work" \
+            -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
+            -v "$HOME/.cargo/git:/usr/local/cargo/git" \
+            studio-linux sh -c 'cargo test --release --workspace && cargo xtask assets-check && cargo xtask package-linux'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-Linux
+          path: dist/*.tar.gz
+
+  ci-ok:
+    # The one required check: green when every job above passed or was skipped
+    # on purpose (documentation only). A cancelled run was replaced by a newer
+    # one, so it warns instead of failing.
+    needs: [changes, deny, credit, workflows, assets, windows, linux]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | python3 -I -B -c '
+          import json, sys
+          needs = json.load(sys.stdin)
+          bad = [n for n, j in needs.items() if j["result"] == "failure"]
+          gone = [n for n, j in needs.items() if j["result"] == "cancelled"]
+          for n, j in needs.items(): print(n + ": " + j["result"])
+          if gone: print("::warning::cancelled: " + ", ".join(gone))
+          if bad: print("::error::failed: " + ", ".join(bad)); sys.exit(1)
+          '

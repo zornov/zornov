@@ -1,0 +1,23 @@
+# Settings > Account (only built with the `commerce` feature)
+licence-file = ملف الترخيص
+install = تثبيت…
+server = الخادم
+https-or-http-localhost-8787 = https://… أو http://localhost:8787
+signed-in-as = تم تسجيل الدخول باسم
+refresh = تحديث
+sign-out = تسجيل الخروج
+email = البريد الإلكتروني
+password = كلمة المرور
+for-a-new-account = لحساب جديد
+sign-in = تسجيل الدخول
+create-account = إنشاء حساب
+upgrade = ترقية
+checkout = إتمام الشراء
+check-payment = التحقق من الدفع
+balance = الرصيد
+this-month = هذا الشهر
+monthly-budget = الميزانية الشهرية
+no-limit = بلا حد
+show-packs = عرض الحزم
+templates-luts-sounds = قوالب، LUTs، أصوات…
+search-2 = بحث

@@ -1,0 +1,51 @@
+[package]
+name = "studio-pixel-raw"
+description = "Clean-room, pure-Rust camera raw decoder and developer (DNG, CR2, TIFF/EP raws)"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[features]
+default = []
+# Synthetic raw-file generators (DNG / CR2 / TIFF-EP writers and a lossless-JPEG
+# encoder) for tests and fuzz seeds.
+testgen = ["dep:image"]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
+
+[dependencies]
+# Adobe DNG compression 8: zlib (RFC 1950) with the TIFF predictor (pure-Rust backend).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Adobe DNG compression 34892: baseline JPEG tiles (lossy), decoded by zune-jpeg.
+zune-jpeg = { version = "0.5" }
+# Encodes the lossy-JPEG tiles of the testgen fixtures (feature `testgen`).
+image = { version = "0.25", default-features = false, features = ["jpeg"], optional = true }
+zune-core = { version = "0.5" }
+
+# Parallel bands on native; wasm builds stay single-threaded.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1" }
+# JPEG XL-compressed DNG (DNG 1.7, e.g. Samsung Expert RAW). Pure Rust, MIT OR Apache-2.0. Pinned
+# exactly: it parses untrusted files; moving the pin is a reviewed change (re-run the raw fuzz target).
+# Native only: it added 0.88 MB to the browser build's wasm, which has a hard size cap
+# (packaging/web/package.sh); there JPEG XL DNG is reported as unsupported (src/jxl.rs).
+jxl-oxide = { version = "=0.12.6", default-features = false, features = ["rayon"] }
+
+[dev-dependencies]
+studio-pixel-raw = { path = ".", features = ["testgen"] }
+# Writes sRGB PNG previews in the `rawinfo` example.
+png = "0.18"
+# Lossless JPEG XL encoder for the JPEG XL DNG tests (tests only).
+zune-jpegxl = { version = "=0.5.2", default-features = false, features = ["std"] }
+zune-core = "0.5"
+

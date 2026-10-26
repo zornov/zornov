@@ -1,0 +1,15 @@
+[package]
+name = "studio-vp9"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Clean-room pure-Rust VP9 decoder (VP9 Bitstream & Decoding Process Specification). Vendored from FilmCraft (storytold/filmcraft crates/codecs/vp9)."
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+thiserror = "2"
+rayon = { version = "1", optional = true }
+studio-craft-media = { path = "../../media/craft-media" }

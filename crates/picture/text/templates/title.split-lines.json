@@ -1,0 +1,220 @@
+{
+  "id": "title.split-lines",
+  "name": "Split Lines",
+  "category": "title",
+  "tags": [
+    "two lines",
+    "slide",
+    "editorial"
+  ],
+  "duration": 5.0,
+  "intro": 1.3,
+  "outro": 0.8,
+  "fields": [
+    {
+      "key": "line1",
+      "label": "Line 1",
+      "default": "Stories from"
+    },
+    {
+      "key": "line2",
+      "label": "Line 2",
+      "default": "the North Coast"
+    }
+  ],
+  "layers": [
+    {
+      "name": "line1",
+      "type": "text",
+      "field": "line1",
+      "style": {
+        "font": {
+          "family": "Playfair Display",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 84.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "right",
+        "valign": "middle",
+        "wrap_width": 1400.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.455
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.8
+      },
+      "outro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.8
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.9,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "rule",
+      "type": "line",
+      "colour": "#FFFFFF",
+      "length": 1400.0,
+      "thickness": 2.0,
+      "position": [
+        0.5,
+        0.515
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.8,
+              "value": 1.0,
+              "ease": "in_out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.8,
+              "value": 0.0,
+              "ease": "in_out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "line2",
+      "type": "text",
+      "field": "line2",
+      "style": {
+        "font": {
+          "family": "Playfair Display",
+          "weight": 700,
+          "italic": true
+        },
+        "size": 84.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFD166"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 1400.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.58
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "slide_right",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.8
+      },
+      "outro": {
+        "kind": "slide_right",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.8
+      },
+      "intro_delay": 0.2,
+      "intro_duration": 0.9,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

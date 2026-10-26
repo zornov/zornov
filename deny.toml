@@ -1,0 +1,124 @@
+# Copyright 2026 Ashrox LLC and contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Supply-chain policy, checked by `cargo deny check` (https://github.com/EmbarkStudios/cargo-deny).
+# Every dependency must be under a permissive licence, so Studio can be
+# released under the AGPL and under its commercial licence, in binary form, come from crates.io, and have no open
+# security advisory. Add an exception here only with a comment saying why.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Unmaintained crates are reported for direct dependencies only; deeper ones
+# are followed up when their parents move.
+unmaintained = "workspace"
+ignore = [
+    # zip 2.x, used only by xtask to write release archives. These advisories
+    # are about extracting untrusted archives, which xtask never does. Remove
+    # once xtask moves to zip >= 9.
+    { id = "RUSTSEC-2026-0367", reason = "xtask only writes zip files" },
+    { id = "RUSTSEC-2026-0368", reason = "xtask only writes zip files" },
+    { id = "RUSTSEC-2026-0369", reason = "xtask only writes zip files" },
+    # rustybuzz (studio-text's shaper) is unmaintained with no release to move
+    # to; the HarfBuzz project's successor is harfrust. Not a vulnerability.
+    { id = "RUSTSEC-2026-0206", reason = "no replacement released yet; move studio-text to harfrust" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+# Permissive licences only. Copyleft (GPL, LGPL, AGPL, MPL, EUPL, CDDL) and
+# non-commercial licences are not listed, so a dependency under one of them
+# alone fails the check; one offered under a choice ("MIT OR Apache-2.0 OR
+# LGPL-2.1-or-later") passes on its permissive option.
+# Studio's own crates are AGPL-3.0-or-later; only they may carry it.
+exceptions = [
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-aac" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-ai" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-app" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-audio" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-canvas" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-cloud-server" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-colour" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-commerce" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-content" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-crash" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-deliver" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-dnxhr" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-encode" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-entitlements" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-fx" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-guard" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-h264" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-hevc" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-hw" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-i18n" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-imageio" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-live" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-lottie" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-media" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-mesh" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-model" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-modeling" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-mograph" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-morph" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-mov" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-mp4" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-net" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-nn" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-paths" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-plugin-api" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-plugins" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-production" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-quality" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-render" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-rig" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-sim" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-sound" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-speech" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-synth" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-testkit" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-text" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-update" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-vector-art" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-vector-raster" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-vector" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-webmedia" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-world" },
+    { allow = ["AGPL-3.0-or-later"], crate = "xtask" },
+]
+
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0", # webpki-roots: the Mozilla root certificate list
+    "IJG",                 # jpeg-encoder: the Independent JPEG Group licence (permissive; its acknowledgement is in NOTICE, which ships with every build)
+    "ISC",
+    "MIT",
+    "NCSA",                # libfuzzer-sys, only with all features on (fuzzing; not in the app): the University of Illinois/NCSA licence (BSD-style)
+    "OFL-1.1",             # epaint_default_fonts: fonts drawn by the interface
+    "Ubuntu-font-1.0",     # epaint_default_fonts: Ubuntu-Light
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+# Workspace crates depend on each other by path with no version; nothing is
+# published to crates.io and builds are `--locked`.
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,8 @@
+[package]
+name = "studio-morph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shape morphing for Studio: point correspondence between any two outlines (equal resampling, winding fix, best start point, subpath matching) and the in-between shapes."
+
+[dependencies]

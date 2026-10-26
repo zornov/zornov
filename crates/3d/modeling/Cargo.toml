@@ -1,0 +1,15 @@
+[package]
+name = "studio-modeling"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio's 3D content creation: polygon modeling, subdivision with creases, modifiers, curves and surfaces, procedural geometry, sculpting, retopology, UVs, baking, layered materials and hair."
+
+[dependencies]
+studio-mesh = { path = "../mesh" }
+studio-media = { path = "../../media/media" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+studio-quality = { path = "../quality" }

@@ -1,0 +1,11 @@
+[package]
+name = "studio-mesh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "3D models for Studio: meshes, primitives, glTF/OBJ/STL import and export, and modeling (subdivision, smoothing, sculpting, booleans, decimation, extrusion, UVs)."
+
+[dependencies]
+studio-media = { path = "../../media/media" }
+studio-rig = { path = "../rig" }
+gltf = { version = "1.4", default-features = false, features = ["utils", "names", "extras", "KHR_materials_transmission", "KHR_materials_ior"] }

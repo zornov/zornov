@@ -1,0 +1,267 @@
+{
+  "id": "lower.pill",
+  "name": "Pill",
+  "category": "lower_third",
+  "tags": [
+    "pill",
+    "rounded",
+    "friendly"
+  ],
+  "duration": 6.0,
+  "intro": 1.0,
+  "outro": 0.6,
+  "fields": [
+    {
+      "key": "name",
+      "label": "Name",
+      "default": "Sam Okafor"
+    },
+    {
+      "key": "role",
+      "label": "Role",
+      "default": "Host"
+    }
+  ],
+  "layers": [
+    {
+      "name": "name",
+      "type": "text",
+      "field": "name",
+      "style": {
+        "font": {
+          "family": "Poppins",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 40.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#0B0B0C"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#FFFFFF",
+          "radius": 999.0,
+          "padding_x": 26.0,
+          "padding_y": 10.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 800.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.08,
+        0.79
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.6,
+              "ease": "linear"
+            },
+            {
+              "t": 0.5,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.25,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 0.0,
+              "ease": "in"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "role",
+      "type": "text",
+      "field": "role",
+      "style": {
+        "font": {
+          "family": "Poppins",
+          "weight": 600,
+          "italic": false
+        },
+        "size": 26.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#8B6CFF",
+          "radius": 999.0,
+          "padding_x": 20.0,
+          "padding_y": 6.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 800.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.08,
+        0.865
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.6,
+              "ease": "linear"
+            },
+            {
+              "t": 0.3,
+              "value": 0.6,
+              "ease": "linear"
+            },
+            {
+              "t": 0.8,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.3,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.55,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.3,
+              "value": 0.0,
+              "ease": "in"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

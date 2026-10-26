@@ -1,0 +1,362 @@
+{
+  "id": "title.retro-sunset",
+  "name": "Retro Sunset",
+  "category": "title",
+  "tags": [
+    "80s",
+    "synth",
+    "gradient",
+    "stripes"
+  ],
+  "duration": 5.0,
+  "intro": 1.4,
+  "outro": 0.8,
+  "fields": [
+    {
+      "key": "title",
+      "label": "Title",
+      "default": "OUTRUN"
+    },
+    {
+      "key": "subtitle",
+      "label": "Subtitle",
+      "default": "1986"
+    }
+  ],
+  "layers": [
+    {
+      "name": "stripe1",
+      "type": "rect",
+      "colour": "#FF6B9D",
+      "size": [
+        1300.0,
+        10.0
+      ],
+      "radius": 0.0,
+      "position": [
+        0.5,
+        0.6
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.6,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.6,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "stripe2",
+      "type": "rect",
+      "colour": "#7B2CBF",
+      "size": [
+        1100.0,
+        8.0
+      ],
+      "radius": 0.0,
+      "position": [
+        0.5,
+        0.63
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.7,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.7,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "stripe3",
+      "type": "rect",
+      "colour": "#4CC9F0",
+      "size": [
+        900.0,
+        6.0
+      ],
+      "radius": 0.0,
+      "position": [
+        0.5,
+        0.655
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.8,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.8,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "title",
+      "type": "text",
+      "field": "title",
+      "style": {
+        "font": {
+          "family": "Syne",
+          "weight": 800,
+          "italic": false
+        },
+        "size": 150.0,
+        "letter_spacing": 6.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [
+          {
+            "colour": "#1A0033",
+            "width": 2.5,
+            "opacity": 1.0
+          }
+        ],
+        "shadow": null,
+        "glow": {
+          "colour": "#FF2E9A",
+          "intensity": 0.6,
+          "range": 14.0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        },
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "upper",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1600.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.45
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "zoom",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "bounce",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "zoom",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "in",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.9,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "subtitle",
+      "type": "text",
+      "field": "subtitle",
+      "style": {
+        "font": {
+          "family": "Monoton",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 44.0,
+        "letter_spacing": 14.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFE066"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": {
+          "colour": "#FFE066",
+          "intensity": 0.5,
+          "range": 8.0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        },
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 800.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.72
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.9,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

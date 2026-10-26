@@ -1,0 +1,23 @@
+# Settings > Account (only built with the `commerce` feature)
+licence-file = ライセンスファイル
+install = インストール…
+server = サーバー
+https-or-http-localhost-8787 = https://… または http://localhost:8787
+signed-in-as = ログイン中のアカウント
+refresh = 更新
+sign-out = ログアウト
+email = メールアドレス
+password = パスワード
+for-a-new-account = 新規アカウント用
+sign-in = ログイン
+create-account = アカウントを作成
+upgrade = アップグレード
+checkout = 購入手続き
+check-payment = 支払いを確認
+balance = 残高
+this-month = 今月
+monthly-budget = 月間予算
+no-limit = 上限なし
+show-packs = パックを表示
+templates-luts-sounds = テンプレート、LUT、サウンド…
+search-2 = 検索

@@ -1,0 +1,35 @@
+[package]
+name = "studio-pixel-psd"
+description = "Faithful, lossless reader and writer for Adobe Photoshop PSD (v1) and PSB (v2) files"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+name = "studio_pixel_psd"
+path = "src/lib.rs"
+
+[features]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
+default = []
+serde = ["dep:serde"]
+testgen = []
+
+[dependencies]
+thiserror = { version = "2" }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+serde = { version = "1", features = ["derive", "rc"], optional = true }
+
+[dev-dependencies]
+proptest = { version = "1" }
+studio-pixel-psd = { path = ".", features = ["testgen"] }
+

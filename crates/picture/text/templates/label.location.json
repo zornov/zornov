@@ -1,0 +1,103 @@
+{
+  "id": "label.location",
+  "name": "Location Pin",
+  "category": "label",
+  "tags": [
+    "location",
+    "pin",
+    "travel"
+  ],
+  "duration": 4.0,
+  "intro": 0.7,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "place",
+      "label": "Place",
+      "default": "📍 Lisbon, Portugal"
+    }
+  ],
+  "layers": [
+    {
+      "name": "place",
+      "type": "text",
+      "field": "place",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 600,
+          "italic": false
+        },
+        "size": 34.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#000000B3",
+          "radius": 999.0,
+          "padding_x": 22.0,
+          "padding_y": 10.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 700.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.06,
+        0.1
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 0.6
+      },
+      "outro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.6
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

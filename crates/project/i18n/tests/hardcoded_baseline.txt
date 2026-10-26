@@ -1,0 +1,3 @@
+# Interface literals that are not text a person reads, or that predate the rule.
+# This list only shrinks (see tests/sources.rs).
+editor/modifiers.rs	value + sin(t * tau) * 10

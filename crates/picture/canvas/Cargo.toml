@@ -1,0 +1,30 @@
+[package]
+name = "studio-canvas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio's raster painting and photo editing: pictures on the pixel engine, AI selections, strokes from paths, frame-by-frame animation, and the ops the AI editor drives"
+
+[features]
+default = ["ai", "gpu"]
+# Subject / sky / object selection with the local models (SAM 2.1, MODNet, depth).
+ai = ["dep:studio-ai"]
+# Compositing on the GPU (wgpu).
+gpu = ["dep:studio-pixel-gpu", "dep:wgpu"]
+
+[dependencies]
+studio-pixel-engine = { path = "../../paint/pixel-engine" }
+studio-pixel-doc = { path = "../../paint/pixel-doc" }
+studio-pixel-geom = { path = "../../paint/pixel-geom" }
+studio-pixel-color = { path = "../../paint/pixel-color" }
+studio-pixel-raster = { path = "../../paint/pixel-raster" }
+studio-pixel-compose = { path = "../../paint/pixel-compose" }
+studio-pixel-algo = { path = "../../paint/pixel-algo" }
+studio-pixel-io = { path = "../../paint/pixel-io" }
+studio-pixel-codecs = { path = "../../paint/pixel-codecs", features = ["heif"] }
+studio-pixel-format = { path = "../../paint/pixel-format" }
+studio-ai = { path = "../../ai/ai", optional = true }
+studio-pixel-gpu = { path = "../../paint/pixel-gpu", optional = true }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

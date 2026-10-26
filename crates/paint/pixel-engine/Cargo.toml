@@ -1,0 +1,68 @@
+[package]
+name = "studio-pixel-engine"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[features]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
+
+[dependencies]
+studio-pixel-geom = { path = "../pixel-geom" }
+studio-pixel-color = { path = "../pixel-color" }
+studio-pixel-cms = { path = "../pixel-cms" }
+studio-pixel-raster = { path = "../pixel-raster" }
+studio-pixel-doc = { path = "../pixel-doc" }
+studio-pixel-ops = { path = "../pixel-ops" }
+studio-pixel-compose = { path = "../pixel-compose" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1" }
+thiserror = { version = "2" }
+rayon = { version = "1" }
+studio-pixel-paint = { path = "../pixel-paint" }
+studio-pixel-algo = { path = "../pixel-algo" }
+studio-pixel-text = { path = "../pixel-text" }
+studio-pixel-vector = { path = "../pixel-vector" }
+studio-pixel-io = { path = "../pixel-io" }
+studio-pixel-psd = { path = "../pixel-psd" }
+studio-pixel-format = { path = "../pixel-format" }
+studio-pixel-plugins = { path = "../pixel-plugins" }
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+studio-pixel-codecs = { path = "../pixel-codecs" }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+# Photoshop `.kys` shortcut sets (`edit.keyboardShortcuts` `importKys`); already in the tree
+# through photocraft-ui-egui and usvg.
+roxmltree = "0.21"
+# Release tags use the same semantic versions as Cargo.
+semver = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tempfile = "3"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+
+# `file_cmds::same_file` on Windows: the volume serial number and file index, so a hard link to a
+# file is that file (std's `MetadataExt::file_index` is unstable).
+[target.'cfg(windows)'.dependencies]
+same-file = "1"
+
+[dev-dependencies]
+studio-pixel-affinity = { path = "../pixel-affinity", features = ["synth"] }
+# Synthetic camera raw files for the open tests.
+studio-pixel-raw = { path = "../pixel-raw", features = ["testgen"] }
+studio-pixel-testkit = { path = "../pixel-testkit" }
+# WebAssembly text -> binary for plug-in test modules (Apache-2.0 WITH LLVM-exception).
+wat = "1.228"
+# Synthetic multi-part EXR fixtures for the parts-commands tests.
+exr = { version = "1.73", default-features = false }

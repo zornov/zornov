@@ -1,0 +1,319 @@
+{
+  "id": "lower.classic-bar",
+  "name": "Classic Bar",
+  "category": "lower_third",
+  "tags": [
+    "name",
+    "role",
+    "bar",
+    "broadcast"
+  ],
+  "duration": 6.0,
+  "intro": 1.2,
+  "outro": 0.7,
+  "fields": [
+    {
+      "key": "name",
+      "label": "Name",
+      "default": "Maya Chen"
+    },
+    {
+      "key": "role",
+      "label": "Role",
+      "default": "Lead designer, Studio"
+    }
+  ],
+  "layers": [
+    {
+      "name": "accent",
+      "type": "rect",
+      "colour": "#8B6CFF",
+      "size": [
+        12.0,
+        120.0
+      ],
+      "radius": 0.0,
+      "position": [
+        0.08,
+        0.82
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "height",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "height",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "bar",
+      "type": "rect",
+      "colour": "#0F172AE0",
+      "size": [
+        620.0,
+        120.0
+      ],
+      "radius": 0.0,
+      "position": [
+        0.08,
+        0.82
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "x",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 12.0,
+              "ease": "linear"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.5,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.5,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "name",
+      "type": "text",
+      "field": "name",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 44.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 580.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.08,
+        0.795
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "x",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 34.0,
+              "ease": "linear"
+            }
+          ]
+        }
+      ],
+      "intro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.5
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.3,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "role",
+      "type": "text",
+      "field": "role",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 26.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#C7C9D3"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 580.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.08,
+        0.85
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "x",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 34.0,
+              "ease": "linear"
+            }
+          ]
+        }
+      ],
+      "intro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.5
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.45,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

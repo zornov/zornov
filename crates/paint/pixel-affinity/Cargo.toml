@@ -1,0 +1,28 @@
+[package]
+name = "studio-pixel-affinity"
+description = "Bounded reader for native Affinity documents: archive, object stream and document model"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[features]
+# Synthetic-container builders for tests and fuzz seeds; not an Affinity exporter.
+synth = []
+
+[dependencies]
+crc32fast = "1.5"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ruzstd = "0.9.1"
+
+[dev-dependencies]
+proptest = { version = "1" }

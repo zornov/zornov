@@ -1,0 +1,18 @@
+[package]
+name = "studio-crash"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Crash reports for Studio in Rust: panics and native crashes saved locally, sent only if the person agrees."
+
+[dependencies]
+studio-update = { path = "../update" }
+studio-net = { path = "../net" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel"] }

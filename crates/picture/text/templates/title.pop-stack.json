@@ -1,0 +1,124 @@
+{
+  "id": "title.pop-stack",
+  "name": "Pop Stack",
+  "category": "title",
+  "tags": [
+    "playful",
+    "pop",
+    "words",
+    "bubble"
+  ],
+  "duration": 4.5,
+  "intro": 1.2,
+  "outro": 0.6,
+  "fields": [
+    {
+      "key": "title",
+      "label": "Title",
+      "default": "Best Day Ever"
+    }
+  ],
+  "layers": [
+    {
+      "name": "title",
+      "type": "text",
+      "field": "title",
+      "style": {
+        "font": {
+          "family": "Luckiest Guy",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 120.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [
+          {
+            "colour": "#FF6FAE",
+            "width": 5.0,
+            "opacity": 1.0
+          },
+          {
+            "colour": "#FFFFFF",
+            "width": 2.5,
+            "opacity": 1.0
+          }
+        ],
+        "shadow": {
+          "colour": "#C2185B",
+          "blur": 0.0,
+          "distance": 8.0,
+          "angle": 90.0,
+          "opacity": 0.6
+        },
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": {
+          "colours": [
+            "#FFFFFF",
+            "#FFF3B0",
+            "#CDF5FD"
+          ],
+          "unit": "word",
+          "phase": 0
+        },
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1500.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "pop",
+        "unit": "word",
+        "overlap": 0.5,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "pop",
+        "unit": "word",
+        "overlap": 0.6,
+        "order": "forward",
+        "ease": "in",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "wobble",
+        "unit": "word",
+        "speed": 0.5,
+        "amount": 0.25,
+        "colour": null
+      }
+    }
+  ]
+}

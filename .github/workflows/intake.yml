@@ -1,0 +1,124 @@
+# Checks text from outside the project before anyone, or any automation,
+# acts on it: new and edited issues, comments and pull requests.
+#
+#  - text: hidden text, text that tries to steer an AI, smuggled data and
+#    canary values (crates/dev/guard). A hit adds the `needs-human` label;
+#    automation must skip anything with that label.
+#  - pull requests: changes to AI instruction files, workflows, build scripts,
+#    dependencies and binaries get `risk: …` labels for review.
+#  - kill switch: a canary hit, or too many hits in an hour, sets the
+#    repository variable AGENTS_ENABLED to false, which every automation
+#    workflow checks before it runs.
+#
+# Safety: this runs the checker from the base branch only. Pull request code
+# is fetched as data for the diff and never built or run, and the outside
+# text reaches the checker through a file, never through the shell.
+# docs/automation-security.md has the setup.
+name: intake
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+  issue_comment:
+    types: [created, edited]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] base-branch code only; the pull request is read as data
+    types: [opened, edited, reopened, synchronize]
+  pull_request_review_comment:
+    types: [created, edited]
+
+permissions: {}
+
+concurrency:
+  group: intake-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    outputs:
+      verdict: ${{ steps.text.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - name: Build the checker (base branch)
+        run: cargo build -q --locked --release -p studio-guard
+
+      - name: Check the text
+        id: text
+        env:
+          TITLE: ${{ github.event.issue.title || github.event.pull_request.title }}
+          BODY: ${{ github.event.comment.body || github.event.issue.body || github.event.pull_request.body }}
+          STUDIO_GUARD_CANARIES: ${{ secrets.STUDIO_GUARD_CANARIES }}
+        run: |
+          printf '%s\n\n%s\n' "$TITLE" "$BODY" > "$RUNNER_TEMP/text.txt"
+          set +e
+          target/release/studio-guard scan "$RUNNER_TEMP/text.txt"
+          code=$?
+          set -e
+          case $code in
+            0) echo "verdict=clean" >> "$GITHUB_OUTPUT" ;;
+            1) echo "verdict=look" >> "$GITHUB_OUTPUT" ;;
+            2) echo "verdict=canary" >> "$GITHUB_OUTPUT" ;;
+            *) echo "checker failed ($code)"; exit 1 ;;
+          esac
+
+      - name: Label for a person
+        if: steps.text.outputs.verdict != 'clean'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" -f "labels[]=needs-human" > /dev/null
+
+      - name: Pull request risk labels
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch -q --no-tags origin "pull/$NUMBER/head:refs/guard/pr"
+          target/release/studio-guard pr-risk "$BASE" refs/guard/pr > "$RUNNER_TEMP/risk.tsv"
+          { echo "### Pull request risk"; echo; if [ -s "$RUNNER_TEMP/risk.tsv" ]; then sed 's/^\([^\t]*\)\t/- **\1**: /' "$RUNNER_TEMP/risk.tsv"; else echo "Nothing risky."; fi; } >> "$GITHUB_STEP_SUMMARY"
+          cut -f1 "$RUNNER_TEMP/risk.tsv" | sort -u | while read -r label; do
+            gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null
+          done
+
+  kill-switch:
+    # Sees only the verdict, never the outside text, so it can hold the token
+    # that changes repository variables.
+    needs: check
+    if: needs.check.outputs.verdict == 'look' || needs.check.outputs.verdict == 'canary'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      issues: read
+    steps:
+      - name: Stop automation on a canary or a burst of hits
+        env:
+          GH_TOKEN: ${{ secrets.KILL_SWITCH_TOKEN }}
+          READ_TOKEN: ${{ github.token }}
+          VERDICT: ${{ needs.check.outputs.verdict }}
+          LIMIT: ${{ vars.KILL_SWITCH_LIMIT || '5' }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::KILL_SWITCH_TOKEN is not set, so automation cannot be stopped automatically"
+            exit 0
+          fi
+          since=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ)
+          hits=$(GH_TOKEN="$READ_TOKEN" gh api -X GET search/issues -f "q=repo:$GITHUB_REPOSITORY label:needs-human updated:>=$since" -q .total_count)
+          echo "verdict $VERDICT, $hits flagged in the last hour (limit $LIMIT)"
+          if [ "$VERDICT" = canary ] || [ "$hits" -ge "$LIMIT" ]; then
+            gh variable set AGENTS_ENABLED --body false -R "$GITHUB_REPOSITORY"
+            echo "::error::Automation stopped: AGENTS_ENABLED is now false. Look at the needs-human items, then set it back to true."
+          fi

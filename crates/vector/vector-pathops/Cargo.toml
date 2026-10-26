@@ -1,0 +1,15 @@
+[package]
+name = "studio-vector-pathops"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Curve-preserving vector booleans (pathfinder), shape builder and live paint regions, offset, outline stroke, simplify. Vendored from VectorCraft (storytold/vectorcraft crates/pathops)."
+
+[dependencies]
+studio-vector-geom = { path = "../vector-geom" }
+kurbo = { version = "0.13", features = ["serde"] }
+thiserror = "2"
+linesweeper = "0.5"
+
+[dev-dependencies]
+proptest = "1"

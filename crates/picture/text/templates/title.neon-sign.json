@@ -1,0 +1,188 @@
+{
+  "id": "title.neon-sign",
+  "name": "Neon Sign",
+  "category": "title",
+  "tags": [
+    "neon",
+    "glow",
+    "night",
+    "script"
+  ],
+  "duration": 5.0,
+  "intro": 1.6,
+  "outro": 0.8,
+  "fields": [
+    {
+      "key": "title",
+      "label": "Title",
+      "default": "open late"
+    },
+    {
+      "key": "subtitle",
+      "label": "Subtitle",
+      "default": "every night till 2am"
+    }
+  ],
+  "layers": [
+    {
+      "name": "title",
+      "type": "text",
+      "field": "title",
+      "style": {
+        "font": {
+          "family": "Pacifico",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 120.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFE6F4"
+        },
+        "strokes": [
+          {
+            "colour": "#FF5FB5",
+            "width": 1.0,
+            "opacity": 1.0
+          }
+        ],
+        "shadow": null,
+        "glow": {
+          "colour": "#FF2E9A",
+          "intensity": 0.9,
+          "range": 16.0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        },
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1600.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.46
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "character",
+        "overlap": 0.3,
+        "order": "random",
+        "ease": "hold",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "character",
+        "overlap": 0.4,
+        "order": "random",
+        "ease": "hold",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 1.1,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "subtitle",
+      "type": "text",
+      "field": "subtitle",
+      "style": {
+        "font": {
+          "family": "Space Grotesk",
+          "weight": 500,
+          "italic": false
+        },
+        "size": 34.0,
+        "letter_spacing": 8.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#9DF2FF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": {
+          "colour": "#00E5FF",
+          "intensity": 0.7,
+          "range": 8.0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        },
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1200.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.62
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 1.0,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "id": "social.hook",
+  "name": "Hook",
+  "category": "social",
+  "tags": [
+    "hook",
+    "reels",
+    "bold",
+    "box"
+  ],
+  "duration": 4.0,
+  "intro": 1.0,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "text",
+      "label": "Text",
+      "default": "I tried this for 30 days"
+    }
+  ],
+  "layers": [
+    {
+      "name": "text",
+      "type": "text",
+      "field": "text",
+      "style": {
+        "font": {
+          "family": "Montserrat",
+          "weight": 800,
+          "italic": false
+        },
+        "size": 68.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 8.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [
+          {
+            "colour": "#000000",
+            "width": 3.5,
+            "opacity": 1.0
+          }
+        ],
+        "shadow": {
+          "colour": "#000000",
+          "blur": 2.0,
+          "distance": 4.0,
+          "angle": 90.0,
+          "opacity": 0.6
+        },
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 900.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "pop",
+        "unit": "word",
+        "overlap": 0.45,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "word",
+        "overlap": 0.8,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

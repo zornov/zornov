@@ -1,0 +1,121 @@
+{
+  "id": "callout.highlight",
+  "name": "Highlight",
+  "category": "callout",
+  "tags": [
+    "highlighter",
+    "marker",
+    "wipe"
+  ],
+  "duration": 4.5,
+  "intro": 1.0,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "text",
+      "label": "Text",
+      "default": "this changes everything"
+    }
+  ],
+  "layers": [
+    {
+      "name": "text",
+      "type": "text",
+      "field": "text",
+      "style": {
+        "font": {
+          "family": "Poppins",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 64.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#1A1A1A"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#FFE234",
+          "radius": 6.0,
+          "padding_x": 16.0,
+          "padding_y": 2.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": true
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1200.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": -2.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "wipe_x",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.7,
+              "value": 1.0,
+              "ease": "in_out"
+            }
+          ]
+        },
+        {
+          "property": "wipe_x",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.7,
+              "value": 0.0,
+              "ease": "in_out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

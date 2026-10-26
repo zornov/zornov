@@ -1,0 +1,21 @@
+# Changes to these need a maintainer's review (with "Require review from Code
+# Owners" on in branch protection). They decide what runs in CI, what builds
+# run, and what instructs automation.
+
+/.github/                     @marshiyar
+/crates/dev/guard/            @marshiyar
+/crates/dev/xtask/            @marshiyar
+/.githooks/                   @marshiyar
+/deny.toml                    @marshiyar
+/assets.lock                  @marshiyar
+/Cargo.toml                   @marshiyar
+/Cargo.lock                   @marshiyar
+build.rs                      @marshiyar
+AGENTS.md                     @marshiyar
+CLAUDE.md                     @marshiyar
+GEMINI.md                     @marshiyar
+.cursorrules                  @marshiyar
+.claude/                      @marshiyar
+.cursor/                      @marshiyar
+/SECURITY.md                  @marshiyar
+/LICENSE                      @marshiyar

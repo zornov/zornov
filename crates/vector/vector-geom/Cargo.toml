@@ -1,0 +1,15 @@
+[package]
+name = "studio-vector-geom"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Anchor-based editable vector paths, shape generators, hit testing and snapping. Vendored from VectorCraft (storytold/vectorcraft crates/geom)."
+
+[dependencies]
+kurbo = { version = "0.13", features = ["serde"] }
+serde = { version = "1", features = ["derive", "rc"] }
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }

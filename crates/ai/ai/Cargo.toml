@@ -1,0 +1,19 @@
+[package]
+name = "studio-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Local AI features (transcription, matting, cut-out, voice cleanup, interpolation, depth, faces, reframe, scene cuts, silence/filler and beat helpers, open-vocabulary object detection, picture-text search and text reading, and the object map built from them) on the studio-nn engine"
+
+[dependencies]
+studio-paths = { path = "../../project/paths" }
+studio-nn = { path = "../nn" }
+studio-audio = { path = "../../sound/audio" }
+studio-media = { path = "../../media/media" }
+studio-net = { path = "../../project/net" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+studio-quality = { path = "../../3d/quality" }
+studio-mesh = { path = "../../3d/mesh" }

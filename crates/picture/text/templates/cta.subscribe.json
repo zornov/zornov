@@ -1,0 +1,244 @@
+{
+  "id": "cta.subscribe",
+  "name": "Subscribe Button",
+  "category": "call_to_action",
+  "tags": [
+    "subscribe",
+    "button",
+    "bell",
+    "youtube"
+  ],
+  "duration": 4.0,
+  "intro": 0.8,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "text",
+      "label": "Button",
+      "default": "SUBSCRIBE"
+    }
+  ],
+  "layers": [
+    {
+      "name": "button",
+      "type": "text",
+      "field": "text",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 800,
+          "italic": false
+        },
+        "size": 44.0,
+        "letter_spacing": 4.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#E62117",
+          "radius": 10.0,
+          "padding_x": 34.0,
+          "padding_y": 16.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "upper",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 500.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.47,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "pulse",
+        "unit": "line",
+        "speed": 0.8,
+        "amount": 0.15,
+        "colour": null
+      }
+    },
+    {
+      "name": "bell",
+      "type": "text",
+      "text": "🔔",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 60.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 120.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.63,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.45,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.3,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.75,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "wobble",
+        "unit": "line",
+        "speed": 1.2,
+        "amount": 0.8,
+        "colour": null
+      }
+    }
+  ]
+}

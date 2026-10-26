@@ -1,0 +1,181 @@
+# Builds the release packages for macOS, Windows and Linux. It runs on a
+# version tag or by hand, uploads the files to the run (nothing is published)
+# and reads its secrets from the repository settings; see docs/releasing.md.
+# Release builds start clean (no build cache), so nothing cached by an
+# ordinary build can end up in a release.
+name: release
+
+# A version tag builds Windows and Linux. macOS is built, signed and
+# notarized by hand on a Mac (cargo xtask release-mac) and attached to the
+# release by hand; the macos job below runs only when asked for on a manual run.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: Also build macOS on a hosted Mac (normally done by hand)
+        type: boolean
+        default: false
+
+# One release build per ref at a time; a running release is never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    if: github.event_name == 'workflow_dispatch' && inputs.macos
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - name: Import the Developer ID certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then echo "no certificate secret: the DMG will be signed ad hoc"; exit 0; fi
+          kc="$RUNNER_TEMP/release.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Notary key
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          if [ -n "$NOTARY_KEY_P8" ]; then
+            echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+            echo "STUDIO_NOTARY_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          fi
+      - name: Release (macOS)
+        env:
+          STUDIO_NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          STUDIO_NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          STUDIO_UPDATE_KEY: ${{ secrets.STUDIO_UPDATE_KEY }}
+          HAVE_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+        run: |
+          if [ "$HAVE_CERT" = "true" ]; then
+            cargo xtask release-mac
+          else
+            cargo xtask release-mac --identity - --no-notarize
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-macos
+          path: |
+            dist/release/*.dmg
+            dist/release/*.update.tar.gz
+            dist/release/entries/*.json
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - name: WiX
+        run: dotnet tool install --global wix
+      - name: Packages (Windows)
+        env:
+          STUDIO_UPDATE_KEY: ${{ secrets.STUDIO_UPDATE_KEY }}
+          STUDIO_WIN_SIGN_THUMBPRINT: ${{ secrets.WIN_SIGN_THUMBPRINT }}
+        run: |
+          cargo xtask package-windows
+          cargo xtask package-msi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-windows
+          path: |
+            dist/*.zip
+            dist/*.update.tar.gz
+            dist/release/*.msi
+            dist/release/*.update.tar.gz
+            dist/release/entries/*.json
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - name: Build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libfuse2
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+      - name: Packages (Linux)
+        env:
+          STUDIO_UPDATE_KEY: ${{ secrets.STUDIO_UPDATE_KEY }}
+        run: |
+          cargo xtask package-linux
+          cargo xtask package-deb
+          cargo xtask package-appimage
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-linux
+          path: |
+            dist/*.tar.gz
+            dist/release/*.deb
+            dist/release/*.AppImage
+            dist/release/*.update.tar.gz
+            dist/release/entries/*.json
+
+  # Put the per-platform entries together into one signed feed.
+  feed:
+    # The macOS entry joins when the macos job ran; otherwise it is added by
+    # hand with the macOS release (see docs/releasing.md).
+    needs: [macos, windows, linux]
+    if: ${{ !cancelled() && needs.windows.result == 'success' && needs.linux.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.0"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: collected
+      - name: Feed
+        env:
+          STUDIO_UPDATE_KEY: ${{ secrets.STUDIO_UPDATE_KEY }}
+          STUDIO_UPDATE_BASE_URL: ${{ vars.UPDATE_BASE_URL }}
+        run: |
+          mkdir -p dist/release/entries
+          find collected -path "*entries*" -name "*.json" -exec cp {} dist/release/entries/ \;
+          if [ -n "$STUDIO_UPDATE_KEY" ]; then cargo xtask feed; else echo "no STUDIO_UPDATE_KEY: no feed"; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: studio-feed
+          path: dist/release/feed.json
+          if-no-files-found: ignore

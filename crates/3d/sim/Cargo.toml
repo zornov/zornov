@@ -1,0 +1,9 @@
+[package]
+name = "studio-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Physics for Studio's 3D: rigid bodies, shattering, cloth, soft bodies, hair, particles, smoke and fire, water, baked to caches for scrubbing."
+
+[dependencies]
+studio-mesh = { path = "../mesh" }

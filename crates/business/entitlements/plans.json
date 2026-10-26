@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "plans": [
+    {
+      "id": "free",
+      "name": "Free",
+      "summary": "Everything in the editor, on this computer. Bring your own AI keys.",
+      "features": ["ai.byok", "market.buy", "cloud.review"],
+      "monthly_credits": 0,
+      "seats": 1,
+      "storage_gb": 1
+    },
+    {
+      "id": "pro",
+      "name": "Pro",
+      "summary": "Hosted AI credits every month, cloud renders and review links.",
+      "features": ["ai.byok", "ai.hosted", "market.buy", "market.sell", "cloud.review", "cloud.render", "cloud.storage"],
+      "monthly_credits": 1000,
+      "seats": 1,
+      "storage_gb": 100
+    },
+    {
+      "id": "studio",
+      "name": "Studio",
+      "summary": "For teams: shared projects synced through the cloud, roles and seats.",
+      "features": ["ai.byok", "ai.hosted", "market.buy", "market.sell", "cloud.review", "cloud.render", "cloud.storage", "cloud.sync", "team.admin"],
+      "monthly_credits": 3000,
+      "seats": 5,
+      "storage_gb": 1000
+    },
+    {
+      "id": "education",
+      "name": "Education",
+      "summary": "Pro for students and teachers.",
+      "features": ["ai.byok", "ai.hosted", "market.buy", "cloud.review", "cloud.render", "cloud.storage", "cloud.sync"],
+      "monthly_credits": 500,
+      "seats": 1,
+      "storage_gb": 100
+    },
+    {
+      "id": "enterprise",
+      "name": "Enterprise",
+      "summary": "Studio with single sign-on, a private server and support.",
+      "features": ["ai.byok", "ai.hosted", "ai.priority", "market.buy", "market.sell", "cloud.review", "cloud.render", "cloud.storage", "cloud.sync", "team.admin", "team.sso", "support.priority"],
+      "monthly_credits": 10000,
+      "seats": 25,
+      "storage_gb": 10000
+    }
+  ]
+}

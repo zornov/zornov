@@ -1,0 +1,128 @@
+{
+  "id": "label.warning-tape",
+  "name": "Warning Tape",
+  "category": "label",
+  "tags": [
+    "warning",
+    "tape",
+    "yellow"
+  ],
+  "duration": 4.0,
+  "intro": 0.6,
+  "outro": 0.4,
+  "fields": [
+    {
+      "key": "text",
+      "label": "Text",
+      "default": "WARNING · LOUD AUDIO · WARNING · LOUD AUDIO"
+    }
+  ],
+  "layers": [
+    {
+      "name": "text",
+      "type": "text",
+      "field": "text",
+      "style": {
+        "font": {
+          "family": "Archivo Black",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 40.0,
+        "letter_spacing": 6.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#111111"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#FFD23F",
+          "radius": 0.0,
+          "padding_x": 2000.0,
+          "padding_y": 14.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "upper",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 2400.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": -6.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "wipe_x",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.5,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "wipe_x",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.5,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "jitter",
+        "unit": "line",
+        "speed": 1.0,
+        "amount": 0.3,
+        "colour": null
+      }
+    }
+  ]
+}

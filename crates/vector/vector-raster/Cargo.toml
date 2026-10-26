@@ -1,0 +1,28 @@
+[package]
+name = "studio-vector-raster"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio's vector rasterizer: exact-area anti-aliasing, non-zero and even-odd fills, strokes (joins, caps, miter limits, dashes, variable width), linear/radial/conic/freeform/mesh gradients, images and patterns, blend modes, clips, masks and effects, on the CPU and on the GPU (WGSL compute)."
+
+[features]
+default = ["gpu"]
+# The WGSL compute renderer. Without it only the CPU renderer is built.
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+
+[dependencies]
+kurbo = { version = "0.13", features = ["serde"] }
+serde = { version = "1", features = ["derive", "rc"] }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"], optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+png = "0.17"
+resvg = "0.48"
+serde_json = "1"
+usvg = "0.48"
+
+[[bench]]
+name = "raster"
+harness = false

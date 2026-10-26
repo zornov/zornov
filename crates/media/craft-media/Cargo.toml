@@ -1,0 +1,11 @@
+[package]
+name = "studio-craft-media"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Bit-level I/O and the clean-room Matroska (MKV, WebM) demuxer and muxer, vendored from craft-libs (storytold/craft-libs crates/media/media)."
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1"

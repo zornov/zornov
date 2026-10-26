@@ -1,0 +1,16 @@
+[package]
+name = "studio-webmedia"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Finds the media a web page openly exposes and downloads it natively in Rust: direct files, HLS and DASH into MP4 (no outside programs, no DRM)."
+
+[dependencies]
+studio-net = { path = "../../project/net" }
+studio-mp4 = { path = "../mp4" }
+studio-h264 = { path = "../../codecs/h264" }
+serde_json = "1"
+
+[dev-dependencies]
+studio-live = { path = "../live" }
+studio-encode = { path = "../encode" }

@@ -1,0 +1,23 @@
+# Settings > Account (only built with the `commerce` feature)
+licence-file = فایل مجوز
+install = نصب…
+server = سرور
+https-or-http-localhost-8787 = https://… یا http://localhost:8787
+signed-in-as = واردشده با حساب
+refresh = تازه‌سازی
+sign-out = خروج از حساب
+email = ایمیل
+password = گذرواژه
+for-a-new-account = برای حساب جدید
+sign-in = ورود
+create-account = ایجاد حساب
+upgrade = ارتقا
+checkout = پرداخت
+check-payment = بررسی پرداخت
+balance = موجودی
+this-month = این ماه
+monthly-budget = بودجهٔ ماهانه
+no-limit = بدون محدودیت
+show-packs = نمایش بسته‌ها
+templates-luts-sounds = قالب‌ها، LUTها، صداها…
+search-2 = جست‌وجو

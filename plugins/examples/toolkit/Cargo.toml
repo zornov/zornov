@@ -1,0 +1,25 @@
+[package]
+name = "studio-plugin-toolkit"
+description = "Example Studio plugin: a generator, a transition, two importers, an exporter and a panel"
+version = "1.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# Built on its own for wasm32-unknown-unknown, not as part of the Studio
+# workspace:
+#   cargo build --release --target wasm32-unknown-unknown --manifest-path plugins/examples/toolkit/Cargo.toml
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+studio-plugin-api = { path = "../../../crates/plugins/plugin-api" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

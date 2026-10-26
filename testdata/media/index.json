@@ -1,0 +1,127 @@
+[
+  {
+    "audio" : {
+      "channels" : 2,
+      "format" : "f32le interleaved",
+      "frames" : 72000,
+      "rate" : 48000
+    },
+    "file" : "h264_baseline_cavlc.mp4",
+    "name" : "h264_baseline_cavlc",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 30,
+      "frames" : 36,
+      "height" : 240,
+      "width" : 320
+    }
+  },
+  {
+    "audio" : {
+      "channels" : 1,
+      "format" : "f32le interleaved",
+      "frames" : 66150,
+      "rate" : 44100
+    },
+    "file" : "h264_main_cabac_bframes.mp4",
+    "name" : "h264_main_cabac_bframes",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 30,
+      "frames" : 36,
+      "height" : 240,
+      "width" : 320
+    }
+  },
+  {
+    "file" : "h264_main_cavlc_bframes.mp4",
+    "name" : "h264_main_cavlc_bframes",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 25,
+      "frames" : 30,
+      "height" : 288,
+      "width" : 352
+    }
+  },
+  {
+    "audio" : {
+      "channels" : 2,
+      "format" : "f32le interleaved",
+      "frames" : 72000,
+      "rate" : 48000
+    },
+    "file" : "h264_high_cabac.mp4",
+    "name" : "h264_high_cabac",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 30,
+      "frames" : 30,
+      "height" : 360,
+      "width" : 640
+    }
+  },
+  {
+    "file" : "h264_high_odd_size.mov",
+    "name" : "h264_high_odd_size",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 24,
+      "frames" : 24,
+      "height" : 182,
+      "width" : 318
+    }
+  },
+  {
+    "file" : "hevc_main.mp4",
+    "name" : "hevc_main",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 30,
+      "frames" : 30,
+      "height" : 240,
+      "width" : 320
+    }
+  },
+  {
+    "file" : "hevc_main10.mov",
+    "name" : "hevc_main10",
+    "video" : {
+      "format" : "i420-8bit (main10 is down-converted by Apple; compare the 8 MSBs)",
+      "fps" : 24,
+      "frames" : 24,
+      "height" : 240,
+      "width" : 320
+    }
+  },
+  {
+    "audio" : {
+      "channels" : 2,
+      "format" : "f32le interleaved",
+      "frames" : 66150,
+      "rate" : 44100
+    },
+    "file" : "aac_he_v1.mp4",
+    "name" : "aac_he_v1"
+  },
+  {
+    "audio" : {
+      "channels" : 2,
+      "format" : "f32le interleaved",
+      "frames" : 66150,
+      "rate" : 44100
+    },
+    "file" : "aac_he_v2.mp4",
+    "name" : "aac_he_v2"
+  },
+  {
+    "audio" : {
+      "channels" : 1,
+      "format" : "f32le interleaved",
+      "frames" : 33075,
+      "rate" : 22050
+    },
+    "file" : "aac_lc_mono_22k.m4a",
+    "name" : "aac_lc_mono_22k"
+  }
+]

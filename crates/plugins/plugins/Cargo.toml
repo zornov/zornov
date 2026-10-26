@@ -1,0 +1,20 @@
+[package]
+name = "studio-plugins"
+description = "Studio's plugin host: sandboxed WebAssembly plugins (effects, generators, transitions, importers, exporters, panels), the plugin store, and an OpenFX host on macOS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+studio-fx = { path = "../../picture/fx" }
+studio-paths = { path = "../../project/paths" }
+studio-net = { path = "../../project/net" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ring = "0.17"
+naga = { version = "30", features = ["wgsl-in"] }
+wasmtime = { version = "50", default-features = false, features = ["cranelift", "runtime", "std", "parallel-compilation", "wat", "anyhow"] }
+libloading = "0.8"
+
+[dev-dependencies]
+studio-plugin-api = { path = "../plugin-api" }

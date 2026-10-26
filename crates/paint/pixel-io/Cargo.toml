@@ -1,0 +1,64 @@
+[package]
+name = "studio-pixel-io"
+description = "Import/export between photocraft documents and PSD/PSB and flat raster formats"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[features]
+# Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
+corpus = []
+# HEIC/HEIF decode (forwarded to studio-pixel-codecs; see its `heif` feature).
+heif = ["studio-pixel-codecs/heif"]
+
+[dependencies]
+studio-pixel-geom = { path = "../pixel-geom" }
+studio-pixel-color = { path = "../pixel-color" }
+studio-pixel-cms = { path = "../pixel-cms" }
+studio-pixel-raster = { path = "../pixel-raster" }
+studio-pixel-doc = { path = "../pixel-doc" }
+studio-pixel-compose = { path = "../pixel-compose" }
+studio-pixel-algo = { path = "../pixel-algo" }
+studio-pixel-psd = { path = "../pixel-psd" }
+studio-pixel-codecs = { path = "../pixel-codecs" }
+studio-pixel-raw = { path = "../pixel-raw" }
+studio-pixel-affinity = { path = "../pixel-affinity" }
+studio-pixel-text = { path = "../pixel-text" }
+studio-pixel-paint = { path = "../pixel-paint" }
+studio-pixel-vector = { path = "../pixel-vector" }
+studio-pixel-format = { path = "../pixel-format" }
+studio-pixel-docpath = { path = "../pixel-docpath" }
+thiserror = { version = "2" }
+serde_json = { version = "1" }
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+# svg.rs inflates `.svgz` itself (with a size cap) so the XML can be checked before it is parsed;
+# pdn.rs inflates Paint.NET's gzip pixel chunks.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# ora.rs reads OpenRaster's stack.xml (already in the tree through usvg).
+roxmltree = "0.21"
+# SVG import (svg.rs): usvg parses, resvg rasterises what the shape model can't hold. Both are
+# already in the tree through the UI's icon loader; text shaping needs the fonts feature set.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "raster-images"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+resvg = { version = "0.45", default-features = false, features = ["text", "raster-images"] }
+
+[dev-dependencies]
+crc32fast = "1.5"
+studio-pixel-affinity = { path = "../pixel-affinity", features = ["synth"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+studio-pixel-psd = { path = "../pixel-psd", features = ["testgen"] }
+studio-pixel-raw = { path = "../pixel-raw", features = ["testgen"] }
+studio-pixel-testkit = { path = "../pixel-testkit" }
+proptest = { version = "1" }

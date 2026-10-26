@@ -1,0 +1,12 @@
+[package]
+name = "studio-encode"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+studio-h264 = { path = "../../codecs/h264" }
+studio-aac = { path = "../../codecs/aac" }
+studio-mp4 = { path = "../mp4" }

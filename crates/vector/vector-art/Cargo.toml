@@ -1,0 +1,29 @@
+[package]
+name = "studio-vector-art"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio's vector illustration documents: artboards, layers, paths and live shapes, appearance stacks, swatches and styles, symbols, repeats, blends, envelopes and perspective, type, image trace, pathfinder, SVG/PDF/EPS, animation, and the operations the AI and the app edit them with."
+
+[features]
+default = ["gpu"]
+gpu = ["studio-vector-raster/gpu"]
+
+[dependencies]
+studio-vector-raster = { path = "../vector-raster", default-features = false }
+studio-vector-geom = { path = "../vector-geom" }
+studio-vector-pathops = { path = "../vector-pathops" }
+studio-vector-trace = { path = "../vector-trace" }
+studio-morph = { path = "../../picture/morph" }
+studio-text = { path = "../../picture/text" }
+kurbo = { version = "0.13", features = ["serde"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+usvg = "0.48"
+rustybuzz = "0.20"
+miniz_oxide = "0.8"
+png = "0.17"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp", "tga"] }
+
+[dev-dependencies]
+resvg = "0.48"

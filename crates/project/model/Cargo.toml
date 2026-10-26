@@ -1,0 +1,15 @@
+[package]
+name = "studio-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio project data model, reversible edits, undo/redo, project file format and interchange"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+roxmltree = "0.20"
+studio-rig = { path = "../../3d/rig" }
+
+[dev-dependencies]
+proptest = "1"

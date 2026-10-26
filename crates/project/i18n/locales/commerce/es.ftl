@@ -1,0 +1,23 @@
+# Settings > Account (only built with the `commerce` feature)
+licence-file = Archivo de licencia
+install = Instalar…
+server = Servidor
+https-or-http-localhost-8787 = https://… o http://localhost:8787
+signed-in-as = Sesión iniciada como
+refresh = Actualizar
+sign-out = Cerrar sesión
+email = Correo electrónico
+password = Contraseña
+for-a-new-account = para una cuenta nueva
+sign-in = Iniciar sesión
+create-account = Crear cuenta
+upgrade = Mejorar plan
+checkout = Pagar
+check-payment = Comprobar pago
+balance = Saldo
+this-month = Este mes
+monthly-budget = Presupuesto mensual
+no-limit = sin límite
+show-packs = Mostrar paquetes
+templates-luts-sounds = plantillas, LUTs, sonidos…
+search-2 = Buscar

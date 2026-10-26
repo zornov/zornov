@@ -1,0 +1,9 @@
+[package]
+name = "studio-guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Checks text from outside (issues, pull requests, web pages, transcripts, shared projects) for prompt injection, and pull requests for risky changes, before people, automation or the AI editor act on them"
+
+[dependencies]

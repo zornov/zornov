@@ -1,0 +1,13 @@
+[package]
+name = "studio-content"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio library content: index, loaders, search, thumbnails, auto chroma key, quality gate and packaging"
+
+[dependencies]
+studio-media = { path = "../../media/media" }
+studio-mp4 = { path = "../../media/mp4" }
+studio-h264 = { path = "../../codecs/h264" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

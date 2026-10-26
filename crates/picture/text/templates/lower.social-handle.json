@@ -1,0 +1,229 @@
+{
+  "id": "lower.social-handle",
+  "name": "Social Handle",
+  "category": "lower_third",
+  "tags": [
+    "handle",
+    "social",
+    "dot"
+  ],
+  "duration": 5.0,
+  "intro": 1.0,
+  "outro": 0.6,
+  "fields": [
+    {
+      "key": "handle",
+      "label": "Handle",
+      "default": "@studio.app"
+    },
+    {
+      "key": "platform",
+      "label": "Platform",
+      "default": "follow for more"
+    }
+  ],
+  "layers": [
+    {
+      "name": "dot",
+      "type": "ellipse",
+      "colour": "#5CFF8A",
+      "size": [
+        22.0,
+        22.0
+      ],
+      "position": [
+        0.07,
+        0.838
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "pulse",
+        "unit": "line",
+        "speed": 1.0,
+        "amount": 0.5,
+        "colour": null
+      }
+    },
+    {
+      "name": "handle",
+      "type": "text",
+      "field": "handle",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 40.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 700.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.09,
+        0.838
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "slide_left",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.4
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.2,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "platform",
+      "type": "text",
+      "field": "platform",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 24.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#BDBDC7"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 700.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.09,
+        0.885
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.5,
+      "intro_duration": 0.4,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

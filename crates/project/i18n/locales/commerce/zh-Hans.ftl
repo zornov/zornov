@@ -1,0 +1,23 @@
+# Settings > Account (only built with the `commerce` feature)
+licence-file = 许可证文件
+install = 安装…
+server = 服务器
+https-or-http-localhost-8787 = https://… 或 http://localhost:8787
+signed-in-as = 当前登录账号
+refresh = 刷新
+sign-out = 退出登录
+email = 电子邮箱
+password = 密码
+for-a-new-account = 用于新账号
+sign-in = 登录
+create-account = 创建账号
+upgrade = 升级
+checkout = 结算
+check-payment = 检查付款状态
+balance = 余额
+this-month = 本月
+monthly-budget = 每月预算
+no-limit = 不限
+show-packs = 显示资源包
+templates-luts-sounds = 模板、LUT、音效…
+search-2 = 搜索

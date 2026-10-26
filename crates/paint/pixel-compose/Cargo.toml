@@ -1,0 +1,32 @@
+[package]
+name = "studio-pixel-compose"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+studio-pixel-geom = { path = "../pixel-geom" }
+studio-pixel-color = { path = "../pixel-color" }
+studio-pixel-raster = { path = "../pixel-raster" }
+studio-pixel-doc = { path = "../pixel-doc" }
+studio-pixel-vector = { path = "../pixel-vector" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1" }
+
+[dev-dependencies]
+proptest = { version = "1" }
+criterion = { version = "0.5", default-features = false }
+studio-pixel-paint = { path = "../pixel-paint" }
+studio-pixel-cms = { path = "../pixel-cms" }
+

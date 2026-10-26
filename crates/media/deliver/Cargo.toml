@@ -1,0 +1,16 @@
+[package]
+name = "studio-deliver"
+description = "Studio finishing and delivery: automated QC, delivery specs, render-queue and render-node protocol, DCP/IMF mastering (own JPEG 2000 encoder, MXF writer), deliverables bundle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+studio-sound = { path = "../../sound/sound" }
+studio-mp4 = { path = "../mp4" }
+studio-encode = { path = "../encode" }
+studio-h264 = { path = "../../codecs/h264" }
+studio-hevc = { path = "../../codecs/hevc" }
+studio-aac = { path = "../../codecs/aac" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

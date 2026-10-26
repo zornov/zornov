@@ -1,0 +1,16 @@
+base420 100 76
+base444 100 76
+base422 100 76
+base411 64 48
+prog420 100 76
+prog444 64 48
+restart 100 76
+progrestart 100 76
+gray 100 76
+proggray 64 48
+q16 100 76
+q16bit 100 76
+odd420 99 75
+oddprog422 99 75
+odd_h1v2 99 75
+orient6 75 99

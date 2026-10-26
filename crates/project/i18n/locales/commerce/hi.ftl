@@ -1,0 +1,23 @@
+# Settings > Account (only built with the `commerce` feature)
+licence-file = लाइसेंस फ़ाइल
+install = इंस्टॉल करें…
+server = सर्वर
+https-or-http-localhost-8787 = https://… or http://localhost:8787
+signed-in-as = इस खाते से साइन इन हैं
+refresh = रीफ़्रेश करें
+sign-out = साइन आउट करें
+email = ईमेल
+password = पासवर्ड
+for-a-new-account = नए खाते के लिए
+sign-in = साइन इन करें
+create-account = खाता बनाएँ
+upgrade = अपग्रेड करें
+checkout = चेकआउट
+check-payment = भुगतान जाँचें
+balance = शेष राशि
+this-month = इस महीने
+monthly-budget = मासिक बजट
+no-limit = कोई सीमा नहीं
+show-packs = पैक दिखाएँ
+templates-luts-sounds = टेम्पलेट, LUTs, साउंड…
+search-2 = खोजें

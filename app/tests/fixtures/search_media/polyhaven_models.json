@@ -1,0 +1,88 @@
+{
+ "ArmChair_01": {
+  "date_published": 1585605600,
+  "name": "Arm Chair 01",
+  "categories": [
+   "furniture",
+   "seating"
+  ],
+  "type": 2,
+  "tags": [
+   "gothic",
+   "vintage",
+   "chair",
+   "furniture",
+   "victorian",
+   "couch",
+   "wood",
+   "varnished",
+   "classic"
+  ],
+  "authors": {
+   "Kirill Sannikov": "All"
+  },
+  "max_resolution": [
+   4096,
+   4096
+  ],
+  "polycount": 5626,
+  "files_hash": "8a04a102d4a1e1a480bc4288384d4a2dfd649608",
+  "category_id": "11261ec6-df2b-5150-9904-684d2558070d",
+  "category": "Furniture/Seating/Chairs",
+  "attributes": {
+   "condition": [
+    "worn"
+   ],
+   "material": [
+    "wood",
+    "fabric"
+   ]
+  },
+  "img_version": "abbc4732",
+  "download_count": 32555,
+  "thumbnail_url": "https://cdn.polyhaven.com/asset_img/thumbs/ArmChair_01.png?width=256&height=256&format=webp&v=abbc4732"
+ },
+ "BarberShopChair_01": {
+  "date_published": 1585605600,
+  "name": "Barber Shop Chair 01",
+  "categories": [
+   "furniture",
+   "seating"
+  ],
+  "type": 2,
+  "tags": [
+   "chair",
+   "vintage",
+   "wood",
+   "leather",
+   "fancy",
+   "upholstery",
+   "barber",
+   "salon"
+  ],
+  "authors": {
+   "Fernando Quinn": "All"
+  },
+  "max_resolution": [
+   8192,
+   8192
+  ],
+  "polycount": 4280,
+  "files_hash": "f111fa76f5ccc8748e6f665ad8eca21b8e2a4001",
+  "category_id": "11261ec6-df2b-5150-9904-684d2558070d",
+  "category": "Furniture/Seating/Chairs",
+  "attributes": {
+   "condition": [
+    "worn"
+   ],
+   "material": [
+    "leather",
+    "wood",
+    "brass"
+   ]
+  },
+  "img_version": "5ed6c0ec",
+  "download_count": 20497,
+  "thumbnail_url": "https://cdn.polyhaven.com/asset_img/thumbs/BarberShopChair_01.png?width=256&height=256&format=webp&v=5ed6c0ec"
+ }
+}

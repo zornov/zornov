@@ -1,0 +1,9 @@
+[package]
+name = "studio-psd"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Photoshop PSD/PSB reader (layers, groups, masks, blend modes, text, adjustment layers; 8/16/32-bit, RGB/CMYK/Gray/Lab/Indexed, raw/RLE/ZIP) and a minimal writer. Vendored from EffectCraft (storytold/effectcraft crates/vector/psd)."
+
+[dependencies]
+miniz_oxide = "0.8"

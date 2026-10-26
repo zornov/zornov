@@ -1,0 +1,27 @@
+[package]
+name = "studio-pixel-raster"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+studio-pixel-geom = { path = "../pixel-geom" }
+studio-pixel-color = { path = "../pixel-color" }
+serde = { version = "1", features = ["derive", "rc"] }
+
+# Native only: converting a region's tiles is independent per tile, so it runs on all cores.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1" }
+
+[dev-dependencies]
+proptest = { version = "1" }

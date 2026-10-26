@@ -1,0 +1,98 @@
+{
+  "id": "social.shimmer-line",
+  "name": "Shimmer Line",
+  "category": "social",
+  "tags": [
+    "shimmer",
+    "sweep",
+    "highlight"
+  ],
+  "duration": 5.0,
+  "intro": 0.8,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "text",
+      "label": "Text",
+      "default": "new drop every friday"
+    }
+  ],
+  "layers": [
+    {
+      "name": "text",
+      "type": "text",
+      "field": "text",
+      "style": {
+        "font": {
+          "family": "Space Grotesk",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 64.0,
+        "letter_spacing": 4.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#9A9AA8"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1300.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "character",
+        "overlap": 0.9,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "character",
+        "overlap": 0.9,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "shimmer",
+        "unit": "character",
+        "speed": 0.4,
+        "amount": 0.6,
+        "colour": "#FFFFFF"
+      }
+    }
+  ]
+}

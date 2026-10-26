@@ -1,0 +1,99 @@
+{
+  "id": "label.date-stamp",
+  "name": "Date Stamp",
+  "category": "label",
+  "tags": [
+    "date",
+    "mono",
+    "camera"
+  ],
+  "duration": 4.0,
+  "intro": 1.0,
+  "outro": 0.4,
+  "fields": [
+    {
+      "key": "date",
+      "label": "Date",
+      "default": "2026.10.23  14:02"
+    }
+  ],
+  "layers": [
+    {
+      "name": "date",
+      "type": "text",
+      "field": "date",
+      "style": {
+        "font": {
+          "family": "VT323",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 44.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFB000"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": {
+          "colour": "#FFB000",
+          "intensity": 0.4,
+          "range": 3.0,
+          "offset": [
+            0.0,
+            0.0
+          ]
+        },
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "right",
+        "valign": "middle",
+        "wrap_width": 600.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.94,
+        0.9
+      ],
+      "anchor": [
+        1.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "type",
+        "unit": "character",
+        "overlap": 0.0,
+        "order": "forward",
+        "ease": "hold",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.8,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

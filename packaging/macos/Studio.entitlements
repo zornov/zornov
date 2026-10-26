@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Ashrox LLC and contributors -->
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Hardened-runtime entitlements for the Developer ID build (not sandboxed). -->
+<!-- The microphone (voice-overs, recording) and the camera (recording, live). Screen recording needs no entitlement; the system asks the person. Add others only when a new dependency needs them. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+</dict>
+</plist>

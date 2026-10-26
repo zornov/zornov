@@ -1,0 +1,195 @@
+{
+  "id": "callout.speech-bubble",
+  "name": "Speech Bubble",
+  "category": "callout",
+  "tags": [
+    "bubble",
+    "speech",
+    "comic"
+  ],
+  "duration": 4.0,
+  "intro": 0.8,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "text",
+      "label": "Text",
+      "default": "wait, what?"
+    }
+  ],
+  "layers": [
+    {
+      "name": "tail",
+      "type": "rect",
+      "colour": "#FFFFFF",
+      "size": [
+        40.0,
+        40.0
+      ],
+      "radius": 4.0,
+      "position": [
+        0.46,
+        0.585
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 45.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "text",
+      "type": "text",
+      "field": "text",
+      "style": {
+        "font": {
+          "family": "Nunito",
+          "weight": 900,
+          "italic": false
+        },
+        "size": 56.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#1F1F1F"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#FFFFFF",
+          "radius": 28.0,
+          "padding_x": 34.0,
+          "padding_y": 18.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 900.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "scale",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 1.0,
+              "ease": "overshoot"
+            }
+          ]
+        },
+        {
+          "property": "scale",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.4,
+              "value": 0.0,
+              "ease": "overshoot"
+            }
+          ]
+        }
+      ],
+      "intro": {
+        "kind": "pop",
+        "unit": "word",
+        "overlap": 0.6,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.2,
+      "intro_duration": 0.4,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

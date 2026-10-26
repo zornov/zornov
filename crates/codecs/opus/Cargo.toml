@@ -1,0 +1,10 @@
+[package]
+name = "studio-opus"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Clean-room pure-Rust Opus decoder (RFC 6716 / RFC 8251; OpusHead, multistream surround). Vendored from FilmCraft (storytold/filmcraft crates/codecs/opus)."
+
+
+[dependencies]
+

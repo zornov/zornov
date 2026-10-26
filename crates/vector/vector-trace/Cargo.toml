@@ -1,0 +1,16 @@
+[package]
+name = "studio-vector-trace"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Image trace: raster to vector (quantise, boundary follow, sub-pixel edges, Bezier fit, centre lines). Vendored from VectorCraft (storytold/vectorcraft crates/trace)."
+
+[dependencies]
+studio-vector-geom = { path = "../vector-geom" }
+kurbo = { version = "0.13", features = ["serde"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp", "tga"] }
+serde = { version = "1", features = ["derive", "rc"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }

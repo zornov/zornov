@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="120">
+  <defs>
+    <filter id="b" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+    <pattern id="p" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
+      <rect width="16" height="16" fill="#fefcbf"/><circle cx="8" cy="8" r="5" fill="#dd6b20"/>
+    </pattern>
+  </defs>
+  <g filter="url(#b)"><rect x="25" y="25" width="60" height="70" fill="#2b6cb0"/></g>
+  <rect x="120" y="10" width="90" height="100" fill="url(#p)"/>
+</svg>

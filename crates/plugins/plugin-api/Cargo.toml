@@ -1,0 +1,9 @@
+[package]
+name = "studio-plugin-api"
+description = "Write Studio plugins in Rust: effects, generators, transitions, importers, exporters and panels, compiled to WebAssembly"
+# The plugin API is versioned on its own: 1.x keeps ABI 1 (see ABI_VERSION).
+version = "1.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

@@ -1,0 +1,14 @@
+[package]
+name = "studio-dnxhr"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-or-later"
+description = "Clean-room DNxHR (SMPTE ST 2019-1 / VC-3) encoder, with a reference decoder for checking its own output"
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+thiserror = "2"
+rayon = { version = "1", optional = true }

@@ -1,0 +1,108 @@
+{
+  "id": "quote.pop-words",
+  "name": "Pop Words",
+  "category": "quote",
+  "tags": [
+    "words",
+    "pop",
+    "colour",
+    "bold"
+  ],
+  "duration": 5.0,
+  "intro": 1.6,
+  "outro": 0.7,
+  "fields": [
+    {
+      "key": "quote",
+      "label": "Quote",
+      "default": "Done is better than perfect"
+    }
+  ],
+  "layers": [
+    {
+      "name": "quote",
+      "type": "text",
+      "field": "quote",
+      "style": {
+        "font": {
+          "family": "Unbounded",
+          "weight": 800,
+          "italic": false
+        },
+        "size": 84.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 10.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [
+          {
+            "colour": "#000000",
+            "width": 2.5,
+            "opacity": 1.0
+          }
+        ],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": {
+          "colours": [
+            "#FFFFFF",
+            "#FFD166",
+            "#FFFFFF",
+            "#5CFF8A",
+            "#FFFFFF"
+          ],
+          "unit": "word",
+          "phase": 0
+        },
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1300.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "pop",
+        "unit": "word",
+        "overlap": 0.35,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "word",
+        "overlap": 0.8,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 1.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# Pull requests that move pinned versions forward: the action commits in the
+# workflows and the base image digest in docker/Dockerfile. Each one still
+# goes through review and every check.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly

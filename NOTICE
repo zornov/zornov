@@ -1,0 +1,102 @@
+Studio
+Copyright 2026 Ashrox LLC and contributors
+
+Licensed under the GNU Affero General Public License, version 3 or (at your
+option) any later version. You should have received a copy of the licence in
+the LICENSE file; if not, see https://www.gnu.org/licenses/agpl-3.0.html.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+Studio is also available under a commercial licence from Ashrox LLC for use
+that the AGPL does not suit. See LICENSING.md.
+
+Parts of Studio come from other projects under their own permissive licences
+(MIT, Apache-2.0 and others); their notices are kept in their files, in the
+list below and in ATTRIBUTIONS.md.
+
+Third-party code
+----------------
+
+Some crates are vendored or adapted from other projects and keep their own
+copyright and licence, stated at the top of their files:
+
+- crates/av1, crates/vp9, crates/opus, crates/prores: from FilmCraft
+  (https://github.com/storytold/filmcraft), Copyright (c) 2026 ArtCraft Team
+  and the FilmCraft contributors, MIT OR Apache-2.0.
+- crates/psd: from EffectCraft (https://github.com/storytold/effectcraft),
+  Copyright (c) 2026 ArtCraft Team and the EffectCraft contributors,
+  MIT OR Apache-2.0.
+- crates/craft-media: from craft-libs (https://github.com/storytold/craft-libs),
+  Copyright (c) 2026 ArtCraft Team and the craft-libs contributors,
+  MIT OR Apache-2.0.
+- crates/speech/data/cmudict.dict: the CMU Pronouncing Dictionary
+  (https://github.com/cmusphinx/cmudict), Copyright (C) 1993-2015 Carnegie
+  Mellon University, BSD-style licence (crates/speech/data/CMUDICT-LICENSE.txt).
+  It gives the pronunciations lip sync works from.
+- crates/lottie/tests/fixtures (bouncing-ball, legacy-masks, precomp-matte-text,
+  shapes-gradient) and the goldens drawn from them: from EffectCraft
+  (https://github.com/storytold/effectcraft), Copyright (c) 2026 ArtCraft Team and
+  the EffectCraft contributors, MIT OR Apache-2.0. The Lottie player itself is
+  written for Studio, with EffectCraft's Lottie importer as its reference.
+- crates/pixel-* (studio-pixel-geom, -color, -cms, -raster, -doc, -ops,
+  -psd, -codecs, -heif, -raw, -affinity, -compose, -paint, -algo, -io, -text,
+  -vector, -format, -plugins, -engine, -gpu, -tablet, -testkit): the pixel
+  engine of PhotoCraft (https://github.com/storytold/photocraft, rev 486afd8),
+  Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors,
+  MIT OR Apache-2.0; vendored with the crates renamed and the print spooler
+  left out. crates/pixel-docpath is craft-docpath from craft-libs
+  (https://github.com/storytold/craft-libs, rev 82a24b0), same copyright
+  holders and licence. Bundled with them: the Inter and JetBrains Mono fonts
+  (crates/pixel-text/assets/fonts, SIL Open Font License 1.1, licences beside
+  them), the SCOWL English word list (crates/pixel-text/assets/dict, SCOWL
+  licence beside it), and the libfacedetection weights
+  (crates/pixel-algo/data, BSD-3-Clause, Copyright (c) 2015-2019 Shiqi Yu,
+  licence beside them). crates/canvas/src/files.rs is adapted from
+  PhotoCraft's automation crate (same licence).
+- crates/app/assets/paint-icons: Lucide icons (ISC, Copyright (c) 2026
+  Lucide Icons and Contributors) and glyphs drawn by the PhotoCraft
+  contributors on Lucide's grid (MIT OR Apache-2.0), from PhotoCraft's icon
+  set; see the README and LICENSE-lucide.txt there.
+- crates/colour/src/aces.rs: the ACES 1.3 output transforms (RRT, ODT and
+  SSTS tone scales and their constants) are transcribed from the Academy's
+  reference CTL (https://github.com/ampas/aces-dev, v1.3), Copyright (c) 2015
+  Academy of Motion Picture Arts and Sciences (A.M.P.A.S.). Portions
+  contributed by others as indicated. All rights reserved. Used under the
+  ACES licence, reproduced with its Disclaimer of Warranty in
+  crates/colour/LICENSE-ACES.md.
+- crates/colour/src/camera.rs: camera log curve and gamut constants are the
+  manufacturers' published values as collected by colour-science
+  (https://github.com/colour-science/colour), Copyright 2013 Colour
+  Developers, BSD-3-Clause.
+- crates/vector-geom, crates/vector-pathops, crates/vector-trace: from
+  VectorCraft (https://github.com/storytold/vectorcraft, revision 8bf090b),
+  Copyright (c) 2026 ArtCraft Team and the VectorCraft contributors,
+  MIT OR Apache-2.0 (editable paths and shapes, curve-preserving booleans,
+  shape builder and live paint, image trace), with their test helpers from
+  its testkit crate.
+- crates/vector-art/src/adapted: adapted from VectorCraft (as above),
+  MIT OR Apache-2.0: warp envelopes, non-linear path mapping and Coons
+  boundaries (crates/doc/src/live.rs) and the distort, roughen, zig-zag,
+  twist and round-corner effects (crates/effects/src).
+
+Fonts and icons built into the program (crates/app/assets):
+
+- JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono), OFL-1.1; see JetBrainsMono-LICENSE.txt.
+- Manrope: Copyright 2018 The Manrope Project Authors
+  (https://github.com/googlefonts/manrope), OFL-1.1; see Manrope-LICENSE.txt.
+- Phosphor icons: Copyright (c) 2023 Phosphor Icons (https://phosphoricons.com),
+  MIT; see Phosphor-LICENSE.txt.
+
+The Rust crates compiled into Studio, with their licences and notices, are
+listed in THIRD-PARTY-LICENSES.txt (made by `cargo xtask licenses`).
+
+JPEG export uses the jpeg-encoder crate, which is under the Independent JPEG
+Group licence as well as MIT or Apache-2.0: this software is based in part on
+the work of the Independent JPEG Group.
+
+Library content (stickers, fonts, music, sounds and so on) and its licences
+are listed in ATTRIBUTIONS.md.

@@ -1,0 +1,12 @@
+[package]
+name = "studio-colour"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Colour science for Studio: transfer functions, grading tools, LUTs and scopes"
+
+[dependencies]
+
+[dev-dependencies]
+# Only used by tests to check that the shipped WGSL sources parse and validate.
+naga = { version = "26", features = ["wgsl-in"] }

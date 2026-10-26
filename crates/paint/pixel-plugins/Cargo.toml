@@ -1,0 +1,39 @@
+[package]
+name = "studio-pixel-plugins"
+description = "Sandboxed WebAssembly filter plug-ins: a resource-limited wasmi host for the PhotoCraft plug-in ABI"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+studio-pixel-geom = { path = "../pixel-geom" }
+studio-pixel-color = { path = "../pixel-color" }
+studio-pixel-raster = { path = "../pixel-raster" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1" }
+thiserror = { version = "2" }
+# Pure-Rust WebAssembly interpreter (MIT OR Apache-2.0). Without `wat` (text parsing is test-only)
+# and memory64; `validate` keeps full module validation on.
+wasmi = { version = "2.0.0", default-features = false, features = ["std", "validate", "stable", "portable-dispatch"] }
+
+# Bands run in parallel on native; wasm builds stay single-threaded.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1" }
+
+# Opening a plug-in file without blocking on a FIFO (the flag constant only).
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+
+[dev-dependencies]
+# WebAssembly text -> binary for the hostile-module fixtures (Apache-2.0 WITH LLVM-exception).
+wat = "1.228"

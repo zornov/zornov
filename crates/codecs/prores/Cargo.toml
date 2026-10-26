@@ -1,0 +1,15 @@
+[package]
+name = "studio-prores"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+description = "Clean-room Apple ProRes (SMPTE RDD 36) decoder and encoder Vendored from FilmCraft (storytold/filmcraft crates/codecs/prores)."
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+thiserror = "2"
+rayon = { version = "1", optional = true }
+studio-craft-media = { path = "../../media/craft-media" }

@@ -1,0 +1,23 @@
+[package]
+name = "studio-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared test kit for Studio: generated fixtures with ground truth, mocks, tolerant golden comparison and proptest strategies"
+publish = false
+
+[dependencies]
+studio-encode = { path = "../../media/encode" }
+studio-media = { path = "../../media/media" }
+studio-content = { path = "../../project/content" }
+studio-render = { path = "../../picture/render" }
+studio-model = { path = "../../project/model" }
+studio-fx = { path = "../../picture/fx" }
+studio-nn = { path = "../../ai/nn" }
+studio-mp4 = { path = "../../media/mp4" }
+studio-h264 = { path = "../../codecs/h264" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+proptest = "1"
+
+[dev-dependencies]

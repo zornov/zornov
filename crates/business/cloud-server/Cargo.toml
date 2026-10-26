@@ -1,0 +1,21 @@
+[package]
+name = "studio-cloud-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A small Studio cloud server anyone can run: accounts and licences, credits, renders, review links, project sync and the marketplace."
+
+[[bin]]
+name = "studio-cloud-server"
+path = "src/main.rs"
+
+[dependencies]
+studio-entitlements = { path = "../entitlements" }
+studio-commerce = { path = "../commerce" }
+studio-net = { path = "../../project/net" }
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"

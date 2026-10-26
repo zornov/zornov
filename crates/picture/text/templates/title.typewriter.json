@@ -1,0 +1,193 @@
+{
+  "id": "title.typewriter",
+  "name": "Typewriter",
+  "category": "title",
+  "tags": [
+    "mono",
+    "type",
+    "cursor",
+    "tech"
+  ],
+  "duration": 5.0,
+  "intro": 2.0,
+  "outro": 0.6,
+  "fields": [
+    {
+      "key": "title",
+      "label": "Text",
+      "default": "Recording log, day 14."
+    }
+  ],
+  "layers": [
+    {
+      "name": "title",
+      "type": "text",
+      "field": "title",
+      "style": {
+        "font": {
+          "family": "JetBrains Mono",
+          "weight": 500,
+          "italic": false
+        },
+        "size": 56.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#E8F5E9"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#0B1A12E6",
+          "radius": 6.0,
+          "padding_x": 26.0,
+          "padding_y": 14.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 1200.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "type",
+        "unit": "character",
+        "overlap": 0.0,
+        "order": "forward",
+        "ease": "hold",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.2,
+      "intro_duration": 1.6,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "cursor",
+      "type": "rect",
+      "colour": "#5CFF8A",
+      "size": [
+        6.0,
+        56.0
+      ],
+      "radius": 1.0,
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "x",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": -560.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.2,
+              "value": -560.0,
+              "ease": "linear"
+            },
+            {
+              "t": 1.8,
+              "value": 560.0,
+              "ease": "linear"
+            },
+            {
+              "t": 1.9,
+              "value": 560.0,
+              "ease": "linear"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.1,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 1.9,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 2.0,
+              "value": 0.0,
+              "ease": "linear"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

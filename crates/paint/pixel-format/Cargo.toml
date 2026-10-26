@@ -1,0 +1,55 @@
+[package]
+name = "studio-pixel-format"
+description = "Native .pcraft document bundle: manifest + content-addressed zstd tiles"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+studio-pixel-geom = { path = "../pixel-geom" }
+studio-pixel-color = { path = "../pixel-color" }
+studio-pixel-raster = { path = "../pixel-raster" }
+studio-pixel-doc = { path = "../pixel-doc" }
+studio-pixel-codecs = { path = "../pixel-codecs" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip", "unbounded_depth"] }
+thiserror = { version = "2" }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Same IEEE CRC-32 the ZIP container needs; already in Cargo.lock through flate2.
+crc32fast = "1.5"
+blake3 = { version = "1.8", default-features = false, features = ["pure"] }
+ruzstd = "0.9.1"
+
+# Unix directory cleanup uses no-follow descriptor-relative operations; the same
+# dependency provides the plain-fsync fallback on Apple file systems.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+
+# rustix does not expose Apple's directory-search open mode. Only the named
+# constant is used; all descriptor operations remain in safe rustix APIs.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+libc = "0.2"
+
+# Replacing a file keeps its ACL (#7073). `fcopyfile(COPYFILE_ACL)` is an `unsafe fn` and
+# `fclonefileat(CLONE_ACL)` is APFS-only; exacl is a safe wrapper over acl_get_file/acl_set_file.
+[target.'cfg(target_os = "macos")'.dependencies]
+exacl = "0.13"
+
+# `ReplaceFileW` is how Windows replaces a file without dropping its DACL, named streams
+# (Zone.Identifier, the Mark of the Web) and creation time (#7094, #7096). winsafe's `kernel`
+# feature is a dependency-free safe wrapper; the workspace forbids writing the FFI call here.
+[target.'cfg(windows)'.dependencies]
+winsafe = { version = "0.0.29", features = ["kernel"] }
+
+[dev-dependencies]
+proptest = { version = "1" }

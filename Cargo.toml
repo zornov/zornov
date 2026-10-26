@@ -1,0 +1,136 @@
+[workspace]
+resolver = "3"
+members = ["app", "crates/*/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# QA: codec and container crates run optimised in dev/test builds so the
+# generated fixtures and decode tests stay fast; everything else keeps the
+# dev profile for good backtraces.
+[profile.dev.package.studio-encode]
+opt-level = 3
+[profile.dev.package.studio-h264]
+opt-level = 3
+[profile.dev.package.studio-hevc]
+opt-level = 3
+[profile.dev.package.studio-aac]
+opt-level = 3
+[profile.dev.package.studio-dnxhr]
+opt-level = 3
+[profile.dev.package.studio-media]
+opt-level = 3
+[profile.dev.package.studio-mp4]
+opt-level = 3
+[profile.dev.package.studio-live]
+opt-level = 3
+# Sound synthesis renders seconds of audio per test.
+[profile.dev.package.studio-synth]
+opt-level = 3
+# 3D models, rigs and simulation: surface building, skin binding and
+# solvers are slow unoptimised and their tests run them at full size.
+[profile.dev.package.studio-mesh]
+opt-level = 3
+# Speech alignment runs a dynamic program over every frame of a voice.
+[profile.dev.package.studio-speech]
+opt-level = 3
+# Walkable worlds: culling, collision and walk physics run per frame.
+[profile.dev.package.studio-world]
+opt-level = 3
+
+[profile.dev.package.studio-sim]
+opt-level = 3
+
+
+# The pixel engine (crates/pixel-*) and the canvas run optimised in dev and
+# test builds too: painting, filters and compositing are pixel loops.
+[profile.dev.package.studio-pixel-geom]
+opt-level = 3
+[profile.dev.package.studio-pixel-color]
+opt-level = 3
+[profile.dev.package.studio-pixel-cms]
+opt-level = 3
+[profile.dev.package.studio-pixel-raster]
+opt-level = 3
+[profile.dev.package.studio-pixel-doc]
+opt-level = 3
+[profile.dev.package.studio-pixel-ops]
+opt-level = 3
+[profile.dev.package.studio-pixel-psd]
+opt-level = 3
+[profile.dev.package.studio-pixel-codecs]
+opt-level = 3
+[profile.dev.package.studio-pixel-heif]
+opt-level = 3
+[profile.dev.package.studio-pixel-raw]
+opt-level = 3
+[profile.dev.package.studio-pixel-affinity]
+opt-level = 3
+[profile.dev.package.studio-pixel-compose]
+opt-level = 3
+[profile.dev.package.studio-pixel-paint]
+opt-level = 3
+[profile.dev.package.studio-pixel-algo]
+opt-level = 3
+[profile.dev.package.studio-pixel-io]
+opt-level = 3
+[profile.dev.package.studio-pixel-text]
+opt-level = 3
+[profile.dev.package.studio-pixel-vector]
+opt-level = 3
+[profile.dev.package.studio-pixel-format]
+opt-level = 3
+[profile.dev.package.studio-pixel-plugins]
+opt-level = 3
+[profile.dev.package.studio-pixel-engine]
+opt-level = 3
+[profile.dev.package.studio-pixel-gpu]
+opt-level = 3
+[profile.dev.package.studio-pixel-docpath]
+opt-level = 3
+[profile.dev.package.studio-pixel-tablet]
+opt-level = 3
+[profile.dev.package.studio-canvas]
+opt-level = 3
+# Neural networks (SAM, matting, speech), the AI features around them and
+# the sound mixer: model loading, inference and a long mix take minutes
+# unoptimised, and the cut-out, caption and export tests run them on real
+# clips.
+[profile.dev.package.studio-nn]
+opt-level = 3
+[profile.dev.package.studio-ai]
+opt-level = 3
+[profile.dev.package.studio-sound]
+opt-level = 3
+# Modeling and sculpting work on millions of points; keep them fast in dev.
+[profile.dev.package.studio-modeling]
+opt-level = 3
+# Retopology, unwrapping and the quality critics rebuild and measure
+# whole models; the benchmark finishes one in seconds optimised.
+[profile.dev.package.studio-quality]
+opt-level = 3
+
+[profile.dev.package.studio-deliver]
+opt-level = 3
+
+# Vector geometry, booleans, image trace and the vector rasterizer run
+# optimised in dev/test builds: their sweeps and tracers are timing-tested and
+# the art they draw is interactive.
+[profile.dev.package.studio-vector-geom]
+opt-level = 3
+[profile.dev.package.studio-vector-pathops]
+opt-level = 3
+[profile.dev.package.studio-vector-trace]
+opt-level = 3
+[profile.dev.package.studio-vector-raster]
+opt-level = 3

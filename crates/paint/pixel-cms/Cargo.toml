@@ -1,0 +1,24 @@
+[package]
+name = "studio-pixel-cms"
+description = "Pure-Rust ICC v2/v4 colour management: profile parsing and writing, transforms, rendering intents, black point compensation"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+autotests = false
+autobenches = false
+autoexamples = false
+
+# Vendored: the upstream test suites stay in the tree (run them with
+# `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
+# of Studio's workspace test run.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { version = "1" }
+
+[dev-dependencies]
+moxcms = "0.8"

@@ -1,0 +1,247 @@
+{
+  "id": "title.clean-rise",
+  "name": "Clean Rise",
+  "category": "title",
+  "tags": [
+    "minimal",
+    "sans",
+    "rise"
+  ],
+  "duration": 5.0,
+  "intro": 1.4,
+  "outro": 0.8,
+  "fields": [
+    {
+      "key": "title",
+      "label": "Title",
+      "default": "Make something great"
+    },
+    {
+      "key": "subtitle",
+      "label": "Subtitle",
+      "default": "A short film by Studio"
+    }
+  ],
+  "layers": [
+    {
+      "name": "title",
+      "type": "text",
+      "field": "title",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 92.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": {
+          "colour": "#000000",
+          "blur": 8.0,
+          "distance": 0.0,
+          "angle": 0.0,
+          "opacity": 0.4
+        },
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1500.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.47
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "rise",
+        "unit": "word",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.6
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "word",
+        "overlap": 0.9,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 1.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "rule",
+      "type": "line",
+      "colour": "#8B6CFF",
+      "length": 120.0,
+      "thickness": 4.0,
+      "position": [
+        0.5,
+        0.565
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.6,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.6,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "opacity",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.3,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.6,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "subtitle",
+      "type": "text",
+      "field": "subtitle",
+      "style": {
+        "font": {
+          "family": "Inter",
+          "weight": 500,
+          "italic": false
+        },
+        "size": 30.0,
+        "letter_spacing": 22.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#D8D8E0"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "upper",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1500.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.62
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "fade",
+        "unit": "character",
+        "overlap": 0.9,
+        "order": "centre",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.6,
+      "intro_duration": 0.8,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+[package]
+name = "studio-speech"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Speech to mouth: phoneme timing, visemes, coarticulation and the sync check, for any kind of character"
+
+[dependencies]
+
+[dev-dependencies]
+studio-mesh = { path = "../../3d/mesh" }

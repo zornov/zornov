@@ -1,0 +1,19 @@
+[package]
+name = "studio-hevc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Bitstream synthesis (random valid streams) for cross-checking against other
+# decoders. Development only.
+synth = []
+
+[dependencies]
+
+[[example]]
+name = "synthgen"
+required-features = ["synth"]
+
+[dev-dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

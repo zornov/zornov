@@ -1,0 +1,160 @@
+{
+  "id": "callout.arrow-note",
+  "name": "Arrow Note",
+  "category": "callout",
+  "tags": [
+    "hand",
+    "note",
+    "arrow",
+    "point"
+  ],
+  "duration": 4.0,
+  "intro": 0.8,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "note",
+      "label": "Note",
+      "default": "look at this!"
+    }
+  ],
+  "layers": [
+    {
+      "name": "arrow",
+      "type": "line",
+      "colour": "#FFE234",
+      "length": 160.0,
+      "thickness": 6.0,
+      "position": [
+        0.5,
+        0.56
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 35.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.35,
+              "value": 1.0,
+              "ease": "out"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 0.35,
+              "value": 0.0,
+              "ease": "out"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "note",
+      "type": "text",
+      "field": "note",
+      "style": {
+        "font": {
+          "family": "Permanent Marker",
+          "weight": 400,
+          "italic": false
+        },
+        "size": 60.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFE234"
+        },
+        "strokes": [],
+        "shadow": {
+          "colour": "#000000",
+          "blur": 3.0,
+          "distance": 3.0,
+          "angle": 90.0,
+          "opacity": 0.6
+        },
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 700.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": -6.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "pop",
+        "unit": "word",
+        "overlap": 0.5,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.25,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0,
+      "motion": {
+        "kind": "sway",
+        "unit": "line",
+        "speed": 0.6,
+        "amount": 0.3,
+        "colour": null
+      }
+    }
+  ]
+}

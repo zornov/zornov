@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Studio's pre-commit checks. Turn them on once per clone:
+#     git config core.hooksPath .githooks
+# Skip them for one commit with `git commit --no-verify` (CI runs the same checks).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+fail() { echo "pre-commit: $*" >&2; exit 1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+# 1. Leftover merge conflict markers.
+if git diff --cached -U0 --diff-filter=ACMR -- $staged | grep -qE '^\+(<<<<<<< |>>>>>>> |=======$)'; then
+    fail "conflict markers in the staged changes; resolve them first."
+fi
+
+# 2. Secrets: private keys and live API keys must never be committed.
+if git diff --cached -U0 --diff-filter=ACMR | grep -E '^\+' | grep -qE 'BEGIN [A-Z ]*PRIVATE KEY|sk_live_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|xox[bp]-[0-9A-Za-z-]{20,}'; then
+    fail "something that looks like a private key or live API key is staged; remove it."
+fi
+
+# Cargo commands below share one build folder.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+# Runs a `cargo xtask` check; on failure prints its own message (compiler
+# warnings filtered out) and returns non-zero.
+check() {
+    local out
+    if out=$(cargo run -q --release -p xtask -- "$@" 2>&1); then return 0; fi
+    printf '%s\n' "$out" | grep -E '^(xtask:|  |If |crates/|app/)' >&2 || true
+    return 1
+}
+
+# 3. Copyright headers on new source files.
+if echo "$staged" | grep -qE '\.(rs|wgsl)$'; then
+    check headers --check || fail "add the header with \`cargo xtask headers\`."
+fi
+
+# 4. Assets (pictures, video, sound, fonts, plugins, fixtures) match assets.lock.
+SOURCE='rs|wgsl|toml|lock|md|yml|yaml|ftl|inc|gitignore|gitattributes|desktop|entitlements|conf|sh|py'
+changed=$(git diff --cached --name-only --diff-filter=ACMRD)
+if echo "$changed" | grep -vE "\.($SOURCE)$" | grep -q . ; then
+    check assets-check || fail "on purpose? run \`cargo xtask assets-lock\` and stage assets.lock."
+fi
+
+# 5. A local hook of your own still runs (.git/hooks/pre-commit).
+local_hook="$(git rev-parse --git-common-dir)/hooks/pre-commit"
+if [ -x "$local_hook" ]; then
+    "$local_hook"
+fi

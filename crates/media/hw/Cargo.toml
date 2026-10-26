@@ -1,0 +1,8 @@
+[package]
+name = "studio-hw"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "Hardware video encode and decode through the operating system's own codecs (VideoToolbox on macOS), with Studio's software codecs as the fallback."
+
+[dependencies]

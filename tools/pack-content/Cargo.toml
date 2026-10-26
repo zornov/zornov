@@ -1,0 +1,18 @@
+[package]
+name = "pack-content"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "Builds the Studio content folder: the core bundle and optional packs, with licences and review sheets"
+publish = false
+
+# Stand-alone package (not a workspace member) so the root manifest needs no
+# change; build with `cargo build --release --manifest-path tools/pack-content/Cargo.toml`.
+[workspace]
+
+[dependencies]
+studio-content = { path = "../../crates/project/content" }
+studio-media = { path = "../../crates/media/media" }
+
+[profile.release]
+opt-level = 3

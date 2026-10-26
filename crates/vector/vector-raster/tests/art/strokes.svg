@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160">
+  <polyline points="20,140 60,20 100,140" fill="none" stroke="#2d3748" stroke-width="14" stroke-linejoin="miter"/>
+  <polyline points="120,140 160,20 200,140" fill="none" stroke="#2d3748" stroke-width="14" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="20,30 50,60 80,30" fill="none" stroke="#c53030" stroke-width="8" stroke-linejoin="bevel" stroke-linecap="square"/>
+  <path d="M130 70 Q170 10 220 70" fill="none" stroke="#2b6cb0" stroke-width="5" stroke-dasharray="12 6" stroke-dashoffset="3"/>
+  <circle cx="200" cy="120" r="25" fill="none" stroke="#38a169" stroke-width="3" stroke-dasharray="5 3"/>
+</svg>

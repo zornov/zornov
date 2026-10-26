@@ -1,0 +1,146 @@
+{
+  "id": "quote.typed-line",
+  "name": "Typed Line",
+  "category": "quote",
+  "tags": [
+    "type",
+    "mono",
+    "underline"
+  ],
+  "duration": 6.0,
+  "intro": 2.4,
+  "outro": 0.7,
+  "fields": [
+    {
+      "key": "quote",
+      "label": "Quote",
+      "default": "write it down before it disappears"
+    }
+  ],
+  "layers": [
+    {
+      "name": "quote",
+      "type": "text",
+      "field": "quote",
+      "style": {
+        "font": {
+          "family": "Courier Prime",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 52.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#F3EBD3"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": null,
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "centre",
+        "valign": "middle",
+        "wrap_width": 1300.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.5,
+        0.5
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "type",
+        "unit": "character",
+        "overlap": 0.0,
+        "order": "forward",
+        "ease": "hold",
+        "distance": 1.0
+      },
+      "outro": {
+        "kind": "fade",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 1.0
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 2.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "rule",
+      "type": "line",
+      "colour": "#F3EBD3",
+      "length": 1300.0,
+      "thickness": 3.0,
+      "position": [
+        0.5,
+        0.56
+      ],
+      "anchor": [
+        0.5,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "tracks": [
+        {
+          "property": "width",
+          "phase": "intro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 0.0,
+              "ease": "linear"
+            },
+            {
+              "t": 2.0,
+              "value": 1.0,
+              "ease": "linear"
+            }
+          ]
+        },
+        {
+          "property": "width",
+          "phase": "outro",
+          "keys": [
+            {
+              "t": 0.0,
+              "value": 1.0,
+              "ease": "linear"
+            },
+            {
+              "t": 2.0,
+              "value": 0.0,
+              "ease": "linear"
+            }
+          ]
+        }
+      ],
+      "intro_delay": 0.0,
+      "intro_duration": 0.0,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

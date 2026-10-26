@@ -1,0 +1,51 @@
+[package]
+name = "studio-render"
+description = "Studio frame compositor: sequence resolver, decode cache, linear-light compositing on the GPU (wgpu) with a CPU reference path, export renderer and hit-testing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["model", "fx"]
+# Adapter from `studio-model` projects to the renderer's `Scene` trait.
+model = ["dep:studio-model"]
+# Effects, transitions and motion presets from `studio-fx`. Without it the
+# renderer still composites, with a plain dissolve as the only transition.
+fx = ["dep:studio-fx"]
+
+[dependencies]
+studio-hw = { path = "../../media/hw" }
+studio-colour = { path = "../colour" }
+studio-media = { path = "../../media/media" }
+studio-lottie = { path = "../lottie" }
+studio-vector = { path = "../../vector/vector" }
+studio-mp4 = { path = "../../media/mp4" }
+studio-mesh = { path = "../../3d/mesh" }
+studio-world = { path = "../../3d/world" }
+studio-h264 = { path = "../../codecs/h264" }
+studio-hevc = { path = "../../codecs/hevc" }
+studio-vector-art = { path = "../../vector/vector-art", default-features = false, features = ["gpu"] }
+serde_json = "1"
+studio-imageio = { path = "../../media/imageio" }
+studio-mov = { path = "../../media/mov" }
+studio-prores = { path = "../../codecs/prores" }
+studio-model = { path = "../../project/model", optional = true }
+studio-fx = { path = "../fx", optional = true }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"] }
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+studio-modeling = { path = "../../3d/modeling" }
+naga = { version = "30", features = ["wgsl-in"] }
+serde_json = "1"
+studio-text = { path = "../text" }
+
+[[bench]]
+name = "compose"
+harness = false
+
+[[bench]]
+name = "reuse"
+harness = false

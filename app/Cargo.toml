@@ -1,0 +1,94 @@
+[package]
+name = "studio-app"
+description = "Studio desktop application: editor user interface built on eframe/egui and wgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "studio"
+path = "src/main.rs"
+
+[features]
+default = ["render"]
+# Viewer frames and export through `studio-render` (+ `text`, `encode`).
+# Without it the app uses its simple built-in preview and cannot export.
+render = ["dep:studio-render", "dep:studio-encode"]
+# Accounts, licences, hosted AI credits, the cloud and the marketplace
+# (`studio-commerce`). Off by default: without it none of it exists in the
+# app (no Account page, no `account` tool, nothing in the guide), and the
+# editor is the same for everyone. See docs/accounts-and-cloud.md.
+commerce = ["dep:studio-commerce", "dep:studio-entitlements", "studio-i18n/commerce"]
+
+[dependencies]
+studio-paths = { path = "../crates/project/paths" }
+studio-guard = { path = "../crates/dev/guard" }
+studio-i18n = { path = "../crates/project/i18n" }
+eframe = { version = "0.37", features = ["persistence"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+resvg = "0.48"
+png = "0.18"
+studio-model = { path = "../crates/project/model" }
+# Script import: a .docx is a zip of XML.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"
+studio-rig = { path = "../crates/3d/rig" }
+studio-fx = { path = "../crates/picture/fx" }
+studio-colour = { path = "../crates/picture/colour" }
+studio-mp4 = { path = "../crates/media/mp4" }
+studio-h264 = { path = "../crates/codecs/h264" }
+studio-hevc = { path = "../crates/codecs/hevc" }
+studio-media = { path = "../crates/media/media" }
+studio-mesh = { path = "../crates/3d/mesh" }
+studio-speech = { path = "../crates/sound/speech" }
+studio-world = { path = "../crates/3d/world" }
+studio-modeling = { path = "../crates/3d/modeling" }
+studio-quality = { path = "../crates/3d/quality" }
+studio-sim = { path = "../crates/3d/sim" }
+studio-audio = { path = "../crates/sound/audio" }
+studio-sound = { path = "../crates/sound/sound" }
+studio-synth = { path = "../crates/sound/synth" }
+studio-live = { path = "../crates/media/live" }
+studio-aac = { path = "../crates/codecs/aac" }
+studio-content = { path = "../crates/project/content" }
+studio-ai = { path = "../crates/ai/ai" }
+studio-net = { path = "../crates/project/net" }
+studio-webmedia = { path = "../crates/media/webmedia" }
+studio-update = { path = "../crates/project/update" }
+studio-crash = { path = "../crates/project/crash" }
+studio-canvas = { path = "../crates/picture/canvas" }
+studio-pixel-tablet = { path = "../crates/paint/pixel-tablet" }
+studio-craft-media = { path = "../crates/media/craft-media" }
+studio-vp9 = { path = "../crates/codecs/vp9" }
+studio-av1 = { path = "../crates/codecs/av1" }
+studio-opus = { path = "../crates/codecs/opus" }
+studio-prores = { path = "../crates/codecs/prores" }
+studio-imageio = { path = "../crates/media/imageio" }
+studio-mov = { path = "../crates/media/mov" }
+studio-psd = { path = "../crates/vector/psd" }
+studio-lottie = { path = "../crates/picture/lottie" }
+studio-vector-art = { path = "../crates/vector/vector-art", default-features = false }
+studio-production = { path = "../crates/project/production" }
+rfd = "0.17"
+studio-render = { path = "../crates/picture/render", optional = true }
+studio-text = { path = "../crates/picture/text" }
+studio-vector = { path = "../crates/vector/vector" }
+studio-morph = { path = "../crates/picture/morph" }
+studio-mograph = { path = "../crates/picture/mograph" }
+studio-hw = { path = "../crates/media/hw" }
+studio-deliver = { path = "../crates/media/deliver" }
+studio-encode = { path = "../crates/media/encode", optional = true }
+studio-commerce = { path = "../crates/business/commerce", optional = true }
+studio-entitlements = { path = "../crates/business/entitlements", optional = true }
+studio-plugins = { path = "../crates/plugins/plugins" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[build-dependencies]
+winresource = "0.1"

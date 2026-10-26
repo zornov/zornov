@@ -1,0 +1,8 @@
+[package]
+name = "studio-nn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hand-written neural-network inference engine (ONNX / safetensors) with CPU (NEON) and Metal backends"
+
+[dependencies]

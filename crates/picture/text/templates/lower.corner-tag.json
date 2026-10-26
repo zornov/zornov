@@ -1,0 +1,189 @@
+{
+  "id": "lower.corner-tag",
+  "name": "Corner Tag",
+  "category": "lower_third",
+  "tags": [
+    "small",
+    "tag",
+    "vlog"
+  ],
+  "duration": 5.0,
+  "intro": 0.9,
+  "outro": 0.5,
+  "fields": [
+    {
+      "key": "name",
+      "label": "Name",
+      "default": "@maya.makes"
+    },
+    {
+      "key": "role",
+      "label": "Role",
+      "default": "Lisbon"
+    }
+  ],
+  "layers": [
+    {
+      "name": "name",
+      "type": "text",
+      "field": "name",
+      "style": {
+        "font": {
+          "family": "DM Sans",
+          "weight": 700,
+          "italic": false
+        },
+        "size": 34.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFFFFF"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#000000B3",
+          "radius": 10.0,
+          "padding_x": 18.0,
+          "padding_y": 8.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 600.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.06,
+        0.88
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "drop",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 0.8
+      },
+      "outro": {
+        "kind": "rise",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.5
+      },
+      "intro_delay": 0.0,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    },
+    {
+      "name": "role",
+      "type": "text",
+      "field": "role",
+      "style": {
+        "font": {
+          "family": "DM Sans",
+          "weight": 500,
+          "italic": false
+        },
+        "size": 24.0,
+        "letter_spacing": 0.0,
+        "line_spacing": 0.0,
+        "fill": {
+          "solid": "#FFD166"
+        },
+        "strokes": [],
+        "shadow": null,
+        "glow": null,
+        "background": {
+          "colour": "#000000B3",
+          "radius": 8.0,
+          "padding_x": 14.0,
+          "padding_y": 5.0,
+          "width": 0.0,
+          "height": 0.0,
+          "offset": [
+            0.0,
+            0.0
+          ],
+          "per_line": false
+        },
+        "extrusion": null,
+        "colour_cycle": null,
+        "underline": false,
+        "strikethrough": false,
+        "case": "as_typed",
+        "opacity": 1.0
+      },
+      "layout": {
+        "align": "left",
+        "valign": "middle",
+        "wrap_width": 600.0,
+        "box_height": null,
+        "fit_to_box": false,
+        "vertical": false,
+        "direction": "auto",
+        "bend": 0.0,
+        "max_lines": null
+      },
+      "position": [
+        0.06,
+        0.935
+      ],
+      "anchor": [
+        0.0,
+        0.5
+      ],
+      "rotation": 0.0,
+      "opacity": 1.0,
+      "intro": {
+        "kind": "drop",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "overshoot",
+        "distance": 0.8
+      },
+      "outro": {
+        "kind": "rise",
+        "unit": "line",
+        "overlap": 0.7,
+        "order": "forward",
+        "ease": "out",
+        "distance": 0.5
+      },
+      "intro_delay": 0.2,
+      "intro_duration": 0.5,
+      "outro_delay": 0.0,
+      "outro_duration": 0.0
+    }
+  ]
+}

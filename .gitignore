@@ -1,0 +1,141 @@
+target/
+target-*/
+.DS_Store
+content-build/
+dist/
+!/plugins/dist/
+review/
+# Secrets and signing material: never committed
+.env
+.env.*
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.keychain-db
+*.mobileprovision
+update-key.hex
+keychain-password
+# Local agent and editor state
+.claude/
+.idea/
+.vscode/
+/models/
+
+# AI assistant files (local, never committed)
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.codex/
+.cursor/
+.cursorrules
+.windsurfrules
+.aider*
+.continue/
+.copilot/
+GEMINI.md
+.gemini/
+
+# macOS clutter
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
+
+# Editor swap and backup files
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+
+# Logs and temp output
+*.log
+*.tmp
+/tmp/
+.land/
+
+# Rust extras
+**/*.rs.bk
+*.profraw
+*.profdata
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz/target/
+flamegraph.svg
+perf.data*
+
+# Studio project and output files made while testing
+*.mp4.part
+/out/
+/exports/
+
+# Model weights and big media downloaded locally
+*.safetensors
+*.onnx
+*.gguf
+
+# Other editors and IDEs
+*.code-workspace
+.fleet/
+.zed/
+.nova/
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# Build and test tooling output
+/coverage/
+*.lcov
+tarpaulin-report.*
+/criterion/
+**/target-*/
+nextest-results/
+junit.xml
+
+# Packaging and release artifacts
+*.dmg
+*.pkg
+*.app/
+*.zip
+*.tar.gz
+!/testdata/**
+/release/
+notarization-*.json
+
+# Local config and overrides
+.cargo/config.local.toml
+*.local.toml
+.envrc
+.direnv/
+.tool-versions
+
+# Studio user data that could land in the folder by accident
+*.studio/
+agent-notes.md
+/projects/
+/Made/
+
+# Crash and diagnostic dumps
+*.dSYM/
+*.crash
+*.ips
+*.sample.txt
+core
+
+# Python helper scripts (tools/vjepa)
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# Node, if a web doc site is ever added
+node_modules/
+
+# Secrets by name, belt and braces
+*secret*
+*credentials*
+*.token

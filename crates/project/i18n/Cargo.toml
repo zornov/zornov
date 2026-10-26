@@ -1,0 +1,14 @@
+[package]
+name = "studio-i18n"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Studio localisation: Fluent-style messages, plural rules, Arabic/Persian shaping and bidirectional text"
+
+[features]
+# The Settings > Account messages (see app feature `commerce`).
+commerce = []
+
+[dependencies]
+unicode-bidi = "0.3"
+sys-locale = "0.3"

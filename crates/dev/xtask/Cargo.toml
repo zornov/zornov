@@ -1,0 +1,21 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Studio's build and packaging tasks in Rust: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | update-key | feed | licenses | sbs"
+
+[dependencies]
+studio-media = { path = "../../media/media" }
+studio-update = { path = "../../project/update" }
+ring = "0.17"
+serde_json = "1"
+tar = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+rcgen = "0.13"
+p12 = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
