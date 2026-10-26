@@ -7,7 +7,8 @@
 //! when it is ready and show their own samples until then.
 //!
 //! The bundle lives in `content-build/` next to the repository while
-//! developing, or wherever `STUDIO_CONTENT` points.
+//! developing, in the data folder once downloaded (`library_download`), or
+//! wherever `STUDIO_CONTENT` points.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,6 +45,16 @@ static CONTENT: OnceLock<Option<Arc<Content>>> = OnceLock::new();
 static WITH_MODELS: Mutex<Option<Option<Arc<Content>>>> = Mutex::new(None);
 static HAS_MODELS: AtomicBool = AtomicBool::new(false);
 static LOADING: std::sync::Once = std::sync::Once::new();
+/// The library downloaded while Zornov runs (`CONTENT` was settled, empty,
+/// before it arrived).
+static LATE: OnceLock<Option<Arc<Content>>> = OnceLock::new();
+
+/// A downloaded library is in place: load it now, so the panels fill
+/// without a restart.
+pub fn installed() {
+    let _ = LATE.set(load());
+    models_changed();
+}
 
 /// A model was kept: the library is put together again with it.
 pub fn models_changed() {
@@ -117,7 +128,9 @@ fn look() -> Option<PathBuf> {
             }
         }
     }
-    None
+    // Downloaded from the Assets or Audio panel.
+    let d = crate::library_download::dir();
+    d.join("core/index.json").exists().then_some(d)
 }
 
 /// Start loading in the background (idempotent).
@@ -136,12 +149,12 @@ pub fn preload(ctx: &eframe::egui::Context) {
 
 /// Load synchronously (tests and the sample builders call this).
 pub fn get_blocking() -> Option<Arc<Content>> {
-    with_models(CONTENT.get_or_init(load))
+    with_models(LATE.get().filter(|c| c.is_some()).unwrap_or_else(|| CONTENT.get_or_init(load)))
 }
 
 /// The library if it has finished loading.
 pub fn get() -> Option<Arc<Content>> {
-    with_models(CONTENT.get()?)
+    with_models(LATE.get().filter(|c| c.is_some()).or(CONTENT.get())?)
 }
 
 fn load() -> Option<Arc<Content>> {

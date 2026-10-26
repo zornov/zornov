@@ -74,6 +74,48 @@ fn filtered(c: &content::Content, rail: RailItem, chip: usize, query: &str) -> A
     v
 }
 
+/// No library on this computer: offer the download, and show it going.
+fn offer_download(ui: &mut egui::Ui, body: Rect) {
+    use crate::library_download::{self as dl, State};
+    let t = theme::tokens(ui.ctx());
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body.shrink(theme::space::PANEL_PAD)));
+    match dl::state() {
+        State::Downloading { got, total } => {
+            let p = child.painter();
+            let c = body.center();
+            let done = if total > 0 { (got as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
+            let bar = Rect::from_center_size(c, Vec2::new((body.width() - 64.0).clamp(80.0, 240.0), 6.0));
+            p.rect_filled(bar, 3.0, theme::alpha(t.text_2, 0.2));
+            p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * done, bar.height())), 3.0, t.accent);
+            let words = crate::i18n::tf(format!("Downloading the library: {} of {} MB", got >> 20, total.div_ceil(1 << 20)));
+            p.text(c - Vec2::new(0.0, 20.0), Align2::CENTER_CENTER, words, theme::body(), t.text_2);
+            let r = Rect::from_center_size(c + Vec2::new(0.0, 22.0 + theme::space::CONTROL_H / 2.0), Vec2::new(96.0, theme::space::CONTROL_H));
+            let mut b = child.new_child(egui::UiBuilder::new().max_rect(r));
+            if kit::Button::secondary("Cancel").show(&mut b).clicked() {
+                dl::cancel();
+            }
+        }
+        State::Unpacking | State::Done => {
+            let p = child.painter();
+            kit::spinner(p, body.center() - Vec2::new(0.0, 12.0), 8.0, t.text_2);
+            p.text(body.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, crate::i18n::shown("Unpacking the library…"), theme::body(), t.text_2);
+        }
+        State::Failed(why) => {
+            let sentence = crate::i18n::tf(format!("The library did not download: {why}"));
+            if kit::empty_state(&mut child, Icon::DownloadSimple, &sentence, Some(("Try again", Icon::DownloadSimple))) {
+                dl::start(ui.ctx());
+            }
+        }
+        State::Idle => {
+            let mb = dl::size_mb().unwrap_or(0);
+            let sentence = crate::i18n::tf(format!("Stickers, music and sound effects come in a free download of {mb} MB."));
+            if kit::empty_state(&mut child, Icon::DownloadSimple, &sentence, Some(("Download the library", Icon::DownloadSimple))) {
+                dl::start(ui.ctx());
+            }
+        }
+    }
+}
+
 /// Draw the panel body. Returns false when the library is not installed,
 /// so the caller shows its built-in samples instead.
 pub fn panel(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, chip: usize, query: &str, body: Rect) -> bool {
@@ -84,6 +126,10 @@ pub fn panel(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, chip: usize
             let p = ui.painter();
             kit::spinner(p, body.center() - Vec2::new(0.0, 12.0), 8.0, t.text_2);
             p.text(body.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, crate::i18n::shown("Loading the library…"), theme::body(), t.text_2);
+            return true;
+        }
+        if matches!(rail, RailItem::Assets | RailItem::Audio) {
+            offer_download(ui, body);
             return true;
         }
         return false;
@@ -248,3 +294,46 @@ pub fn drag_dur(index: usize) -> Time {
     }
 }
 
+#[cfg(test)]
+mod offer_tests {
+    use super::*;
+    use crate::library_download::{self as dl, State};
+
+    /// Each state of the download offer draws without a panic, and a
+    /// picture of each lands in `target/ui-shots` to look at.
+    #[test]
+    fn the_library_offer_draws_in_every_state() {
+        let _serial = crate::ui_tests::serial();
+        let ctx = egui::Context::default();
+        theme::install_fonts(&ctx);
+        let mut textures = crate::ui_shot::Textures::default();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/ui-shots");
+        let _ = std::fs::create_dir_all(&dir);
+        let size = [380usize, 420usize];
+        let states = [
+            ("idle", State::Idle),
+            ("downloading", State::Downloading { got: 120 << 20, total: 278 << 20 }),
+            ("unpacking", State::Unpacking),
+            ("failed", State::Failed("the server answered 503".into())),
+        ];
+        for (name, st) in states {
+            dl::set(st);
+            let mut out = None;
+            for frame in 0..3 {
+                let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::pos2(0.0, 0.0), Vec2::new(size[0] as f32, size[1] as f32))), time: Some(frame as f64 / 60.0), ..Default::default() };
+                let mut o = ctx.run_ui(raw, |ui| {
+                    let body = ui.max_rect();
+                    offer_download(ui, body);
+                });
+                textures.apply(&o.textures_delta);
+                o.textures_delta.clear();
+                out = Some(o);
+            }
+            let out = out.unwrap();
+            let prims = ctx.tessellate(out.shapes, 1.0);
+            let rgba = crate::ui_shot::render(&prims, &textures, size, 1.0, theme::tokens(&ctx).ground);
+            crate::ui_shot::save_png(&dir.join(format!("library-offer-{name}.png")), size, &rgba).unwrap();
+        }
+        dl::set(State::Idle);
+    }
+}

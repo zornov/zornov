@@ -82,6 +82,7 @@ mod workspaces;
 mod dock;
 mod sound_bridge;
 mod sound_desk;
+mod library_download;
 mod sqlite;
 mod text_look;
 mod theme;

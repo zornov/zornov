@@ -107,9 +107,19 @@ fn writable(dir: &Path) -> bool {
     ok
 }
 
+/// Unpacks the update archive at `archive` into `dest` (emptied first) and
+/// checks it carries its manifest.
+pub fn stage(archive: &Path, dest: &Path) -> Result<(), String> {
+    unpack(archive, dest).map_err(|e| format!("the update: {e}"))?;
+    if !dest.join(MANIFEST).is_file() {
+        return Err("the update archive has no manifest".into());
+    }
+    Ok(())
+}
+
 /// Unpacks the `.tar.gz` at `archive` into `dest` (emptied first). Entries
 /// that would land outside `dest` are refused.
-pub fn stage(archive: &Path, dest: &Path) -> Result<(), String> {
+pub fn unpack(archive: &Path, dest: &Path) -> Result<(), String> {
     if dest.exists() {
         std::fs::remove_dir_all(dest).map_err(|e| format!("cannot clear {}: {e}", dest.display()))?;
     }
@@ -117,15 +127,12 @@ pub fn stage(archive: &Path, dest: &Path) -> Result<(), String> {
     let gz = flate2::read::GzDecoder::new(std::fs::File::open(archive).map_err(|e| format!("{}: {e}", archive.display()))?);
     let mut tar = tar::Archive::new(gz);
     tar.set_preserve_permissions(true);
-    for e in tar.entries().map_err(|e| format!("the update archive is damaged: {e}"))? {
-        let mut e = e.map_err(|e| format!("the update archive is damaged: {e}"))?;
-        let ok = e.unpack_in(dest).map_err(|e| format!("cannot unpack the update: {e}"))?;
+    for e in tar.entries().map_err(|e| format!("the archive is damaged: {e}"))? {
+        let mut e = e.map_err(|e| format!("the archive is damaged: {e}"))?;
+        let ok = e.unpack_in(dest).map_err(|e| format!("cannot unpack: {e}"))?;
         if !ok {
-            return Err("the update archive has a file outside its folder".into());
+            return Err("the archive has a file outside its folder".into());
         }
-    }
-    if !dest.join(MANIFEST).is_file() {
-        return Err("the update archive has no manifest".into());
     }
     Ok(())
 }

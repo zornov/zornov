@@ -18,6 +18,8 @@
 //! cargo xtask feed              dist/release/feed.json, signed
 //! cargo xtask headers [--check] the copyright header on every Studio file
 //! cargo xtask licenses          dist/THIRD-PARTY-LICENSES.txt
+//! cargo xtask library-pack      the content library download, and
+//!                               packaging/library.conf naming it
 //! cargo xtask assets-lock       assets.lock from every committed asset
 //! cargo xtask assets-check      fails on an asset added, changed or gone
 //!                               without updating assets.lock
@@ -25,7 +27,8 @@
 //!
 //! `CARGO_TARGET_DIR` picks the build folder (default `target`);
 //! `STUDIO_CONTENT_CORE` the core content library (default
-//! `content-build/core` in the repository).
+//! `content-build/core` in the repository); packages carry it only with
+//! `STUDIO_BUNDLE_LIBRARY=1`.
 
 mod assets;
 mod licenses;
@@ -49,6 +52,7 @@ fn main() -> ExitCode {
         Some("package-msi") => pkg::package_msi(),
         Some("update-key") => release::update_key_cmd(),
         Some("feed") => release::feed_cmd(&args[1..]),
+        Some("library-pack") => release::library_pack_cmd(),
         Some("licenses") => licenses::licenses_cmd(),
         Some("assets-lock") => assets::lock_cmd(&root()),
         Some("assets-check") => assets::check_cmd(&root()),
@@ -115,9 +119,18 @@ fn build(repro: bool) -> Result<PathBuf, String> {
     exe.is_file().then_some(exe).ok_or_else(|| "the build made no zornov binary".into())
 }
 
-/// The core content library, if it is there (the Assets and Audio panels
-/// are empty without it).
+/// The core content library to put inside a package. None by default: the
+/// app offers it as a download (`cargo xtask library-pack`), so installers
+/// stay small. `STUDIO_BUNDLE_LIBRARY=1` bundles it (an offline installer).
 fn content_core() -> Option<PathBuf> {
+    if std::env::var_os("STUDIO_BUNDLE_LIBRARY").is_none_or(|v| v != "1") {
+        return None;
+    }
+    library_core()
+}
+
+/// The core content library on this machine, if it is there.
+fn library_core() -> Option<PathBuf> {
     let core = std::env::var_os("STUDIO_CONTENT_CORE").map(PathBuf::from).unwrap_or_else(|| root().join("content-build/core"));
     if core.join("index.json").is_file() {
         Some(core)

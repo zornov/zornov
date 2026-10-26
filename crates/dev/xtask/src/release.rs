@@ -93,6 +93,36 @@ pub fn sign_update(archive: &Path, platform: &str) -> Result<PathBuf, String> {
 /// Releases `feed_url`, they point at this version's tagged release (so a
 /// newer release published mid-download cannot mix files); else they are
 /// left beside the feed.
+/// The content library download's version: raise it when the library changes.
+const LIBRARY_VERSION: u32 = 1;
+
+/// `cargo xtask library-pack`: the core content library as one archive
+/// (`dist/release/Zornov-library-N.tar.gz`, files under `core/`) for a
+/// release tagged `library-N`, and `packaging/library.conf`, which the app
+/// is built with, naming its address, size and SHA-256.
+pub fn library_pack_cmd() -> Result<String, String> {
+    let core = crate::library_core().ok_or("no content library to pack (content-build/core, or STUDIO_CONTENT_CORE)")?;
+    let items: Vec<repro::Item> = repro::collect(&core)?.into_iter().map(|i| repro::Item { rel: format!("core/{}", i.rel), ..i }).collect();
+    std::fs::create_dir_all(release_dir()).map_err(|e| e.to_string())?;
+    let name = format!("Zornov-library-{LIBRARY_VERSION}.tar.gz");
+    let out = release_dir().join(&name);
+    repro::tar_gz(&out, None, &items, &[])?;
+    let sha256 = feed::sha256_file(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let size = std::fs::metadata(&out).map_err(|e| e.to_string())?.len();
+    let conf = format!(
+        "# The content library the app offers to download when it has none\n\
+         # (`cargo xtask library-pack` writes this; upload the archive to a\n\
+         # release tagged library-{LIBRARY_VERSION} on zornov/zornov, not marked latest).\n\
+         version = {LIBRARY_VERSION}\n\
+         url = https://github.com/zornov/zornov/releases/download/library-{LIBRARY_VERSION}/{name}\n\
+         size = {size}\n\
+         sha256 = {sha256}\n"
+    );
+    let conf_path = crate::root().join("packaging/library.conf");
+    std::fs::write(&conf_path, conf).map_err(|e| format!("{}: {e}", conf_path.display()))?;
+    Ok(format!("{} ({} files, {} MB); packaging/library.conf updated", rel(&out), items.len(), size >> 20))
+}
+
 pub fn feed_cmd(args: &[String]) -> Result<String, String> {
     let mut base = std::env::var("STUDIO_UPDATE_BASE_URL").ok().filter(|v| !v.is_empty()).or_else(|| github_base(&studio_update::config::load().feed_url, VERSION));
     let mut notes = std::env::var("STUDIO_RELEASE_NOTES").unwrap_or_default();
