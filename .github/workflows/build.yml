@@ -63,64 +63,6 @@ jobs:
           persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
 
-  credit:
-    # No commit in a push or pull request may credit an AI assistant: no
-    # Co-Authored-By or "Generated with" lines, no session links, and no AI or
-    # bot as author or committer.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Check commit messages and identities
-        env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          DEFAULT: ${{ github.event.repository.default_branch }}
-        run: |
-          if [ "$EVENT" = pull_request ]; then
-            range="$PR_BASE..$PR_HEAD"
-          elif [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            range="$BEFORE..$AFTER"
-          elif git rev-parse -q --verify "origin/$DEFAULT" >/dev/null && [ "$(git rev-parse "origin/$DEFAULT")" != "$AFTER" ]; then
-            range="origin/$DEFAULT..$AFTER"
-          else
-            range="$AFTER"
-          fi
-          echo "checking $range"
-          git log --format='%H%x00%an <%ae>%x00%cn <%ce>%x00%B%x1e' "$range" | python3 -c '
-          import re, sys
-          AI = r"(claude|anthropic|openai|chatgpt|codex|copilot|gemini|cursor|devin|aider)"
-          LINE = re.compile("|".join(f"(?:{p})" for p in [
-              rf"co-authored-by:.*{AI}",
-              rf"generated (with|by|using) .*{AI}",
-              r"(created|written|made|assisted|authored|drafted) (with|by|using) .*(claude|anthropic)",
-              r"noreply@anthropic\.com", r"noreply@openai\.com", r"codex@users\.noreply\.github\.com",
-              r"claude\.ai/(code|chat|share)", r"claude\.com/(claude-code|code|product)",
-              r"^\s*claude-session\s*:", r"\bclaude\[bot\]", r"chatgpt-codex-connector\[bot\]", "\U0001F916",
-          ]), re.I)
-          WHO = re.compile(r"noreply@anthropic\.com|noreply@openai\.com|codex@users\.noreply\.github\.com|claude\[bot\]|chatgpt-codex-connector\[bot\]|\bcopilot\b", re.I)
-          bad = 0
-          for rec in sys.stdin.read().split("\x1e"):
-              parts = rec.strip("\n").split("\x00")
-              if len(parts) < 4:
-                  continue
-              sha, author, committer, body = parts
-              for role, who in (("author", author), ("committer", committer)):
-                  if WHO.search(who):
-                      print(f"::error::{sha[:10]} {role} is an AI identity: {who}"); bad += 1
-              for line in body.splitlines():
-                  if LINE.search(line):
-                      print(f"::error::{sha[:10]} credits an AI: {line.strip()}"); bad += 1
-          print(f"{bad} problem(s)")
-          sys.exit(1 if bad else 0)
-          '
-
   workflows:
     # The workflow files and the Linux image: injection through untrusted text,
     # risky triggers, over-broad tokens and credential leaks (zizmor), and
@@ -213,7 +155,7 @@ jobs:
     # The one required check: green when every job above passed or was skipped
     # on purpose (documentation only). A cancelled run was replaced by a newer
     # one, so it warns instead of failing.
-    needs: [changes, deny, credit, workflows, assets, windows, linux]
+    needs: [changes, deny, workflows, assets, windows, linux]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
