@@ -3,7 +3,7 @@
 
 //! The render queue: jobs with priorities, pause and resume, presets and
 //! notices, kept in a small JSON file so the Studio window, a headless
-//! agent and `studio queue` all see the same queue.
+//! agent and `zornov queue` all see the same queue.
 //!
 //! The file is the truth. Every change goes through [`Store::update`],
 //! which takes a lock file, reads, changes and writes atomically; a runner
@@ -392,7 +392,7 @@ impl RunnerLock {
             if let Ok(pid) = s.trim().parse::<u32>() {
                 let age_ok = std::fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a < Duration::from_secs(5));
                 if pid != std::process::id() && age_ok {
-                    return Err(format!("another Studio process (pid {pid}) is drawing the queue"));
+                    return Err(format!("another Zornov process (pid {pid}) is drawing the queue"));
                 }
             }
         }

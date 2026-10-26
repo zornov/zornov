@@ -317,7 +317,7 @@ pub fn record(history: &Path, label: &str, results: &[CaseResult]) -> Result<(),
 
 /// A readable report: a table per kind with every pipeline's score.
 pub fn report_markdown(results: &[CaseResult]) -> String {
-    let mut out = String::from("# Studio quality benchmark\n\n");
+    let mut out = String::from("# Zornov quality benchmark\n\n");
     out.push_str("| case | category | pipeline | score | bars | seconds | misses |\n|---|---|---|---:|---:|---:|---|\n");
     for c in results {
         for r in &c.runs {

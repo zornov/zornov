@@ -35,7 +35,7 @@ pub struct ImfSpec {
 
 impl ImfSpec {
     pub fn new(title: &str, width: u32, height: u32, fps: (u32, u32)) -> Self {
-        ImfSpec { title: title.into(), width, height, fps, bit_depth: 10, issuer: "Studio".into(), creator: "Studio by Ashrox LLC".into(), language: "en".into(), step: 1.0 }
+        ImfSpec { title: title.into(), width, height, fps, bit_depth: 10, issuer: "Zornov".into(), creator: "Zornov by Ashrox LLC".into(), language: "en".into(), step: 1.0 }
     }
 
     pub fn j2k_params(&self) -> j2k::Params {

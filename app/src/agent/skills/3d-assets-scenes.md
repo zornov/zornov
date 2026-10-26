@@ -311,7 +311,7 @@ shape keys already made. Any other model can be rigged with `rig`.
 |---|---|---|
 | `rig` | `clip`; `template` (humanoid, quadruped, chain with `count` + `start`), or `bones` (`[{"name", "parent", "head", "tail"}]`, model px); `face` (shape keys on a head base); `constraint` (`{"kind": "ik", "bone", "chain", "target", "pole"}`, `look_at`, `limit` with `min`/`max` degrees, `copy_rotation` with `from`); `skinning` (`linear`, or `dual_quaternion`: twisted forearms and bent knees keep their volume instead of pinching); `remove`; `list` | bones fitted to the model and the skin bound automatically (each vertex to the bones it can see, smoothed at the joints); or the rig in words |
 | `rig` with `rigid`: true | `bones` as above | each separate piece of the model follows the one bone nearest its middle, whole, with no blending: a lid on its hinge bone, a wheel on its axle; use it for hard objects, the default smooth skin for bodies |
-| `pose` | `clip`, `keys` (`[{"t", "bones", "shapes", "reach", "look_at", "ease"}]`) or one pose's fields with `t`; `ease` smooth, linear, ease, hold | bones in degrees `{"upper_arm.L": [x, y, z]}`, shape keys `{"smile": 1}`, IK `{"hand.R": [x, y, z]}` (false lets go), `look_at` `[x, y, z]` or `{"clip": id}`: keyed at seconds into the clip; Studio fills in between |
+| `pose` | `clip`, `keys` (`[{"t", "bones", "shapes", "reach", "look_at", "ease"}]`) or one pose's fields with `t`; `ease` smooth, linear, ease, hold | bones in degrees `{"upper_arm.L": [x, y, z]}`, shape keys `{"smile": 1}`, IK `{"hand.R": [x, y, z]}` (false lets go), `look_at` `[x, y, z]` or `{"clip": id}`: keyed at seconds into the clip; Zornov fills in between |
 | `act` | `clip`, `motion` (walk, run, idle, wave, jump, nod, shake_head, talk, dance, sneak) or `mocap` (a .bvh or rigged .glb file; `take`) or `action` (one the model brought); `at`, `speed`, `energy`, `cycle`, `loop`, `travel` (walks carry the layer forward; `duration`), `blend_to` + `over` `[t0, t1]`, `stop` | motion: procedural cycles, motion capture retargeted onto the rig by bone role, a blend from one into another |
 
 Bones are named by role: `hips`, `spine`, `chest`, `neck`, `head`,
@@ -620,7 +620,7 @@ stack of parts nudged frame by frame. Start from `shape: "character"`
 (rigged, skinned, a face with shape keys) or `rig` a model you made.
 - **Pose to pose.** Block the story poses first with `pose` (the
   extremes: crouch, leap, land, look), half a second to a second apart,
-  look at them as stills, then let Studio fill in between; add a
+  look at them as stills, then let Zornov fill in between; add a
   breakdown pose where an arc needs one. Hold a strong pose 6-12 frames
   so it reads.
 - **Weight and balance.** The hips carry the body: they lead a walk and

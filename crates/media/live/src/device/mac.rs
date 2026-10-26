@@ -554,7 +554,7 @@ fn screen(kind: Kind, id: &str, w: u32, h: u32, fps: f64) -> Result<Box<dyn Vide
             let _ = tx.send(SendBox(c));
         });
         let _: () = msg_send![class!(SCShareableContent), getShareableContentWithCompletionHandler: &*block];
-        let content = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "the system did not list what can be recorded".to_string())?.0.ok_or("the system would not list what can be recorded: is screen recording allowed for Studio?")?;
+        let content = rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "the system did not list what can be recorded".to_string())?.0.ok_or("the system would not list what can be recorded: is screen recording allowed for Zornov?")?;
         let (filter, width, height): (Retained<AnyObject>, usize, usize);
         if kind == Kind::Screen {
             let displays: Retained<AnyObject> = msg_send![&*content, displays];

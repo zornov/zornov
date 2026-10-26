@@ -1,7 +1,7 @@
 # studio-fx
 
 Effects, transitions, motion presets, speed ramps, stabilisation and
-tracking for Studio. Plain Rust, no runtime dependencies. Everything in the
+tracking for Zornov. Plain Rust, no runtime dependencies. Everything in the
 catalogue is our own design: names, ranges and defaults were chosen so a
 beginner gets a pleasing result without touching a slider.
 

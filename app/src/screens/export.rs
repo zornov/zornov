@@ -30,7 +30,7 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "4K master", sub: "H.264 · 3840 × 2160", icon: Icon::Monitor, res: 0, codec: Some(0), quality: 90.0 },
     Preset { name: "Vertical", sub: "H.264 · 1080 × 1920", icon: Icon::DeviceMobile, res: 5, codec: Some(0), quality: 70.0 },
     Preset { name: "GIF", sub: "Looping · 720p", icon: Icon::Image, res: 3, codec: Some(3), quality: 50.0 },
-    Preset { name: "Intermediate", sub: "Studio codec · CLV", icon: Icon::FilmSlate, res: 4, codec: Some(1), quality: 95.0 },
+    Preset { name: "Intermediate", sub: "Zornov codec · CLV", icon: Icon::FilmSlate, res: 4, codec: Some(1), quality: 95.0 },
     Preset { name: "PNG sequence", sub: "Lossless stills", icon: Icon::Stack, res: 4, codec: Some(2), quality: 100.0 },
     Preset { name: "Audio only", sub: "AAC · M4A", icon: Icon::MusicNote, res: 2, codec: Some(5), quality: 80.0 },
 ];

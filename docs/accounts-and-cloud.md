@@ -1,6 +1,6 @@
 # Accounts, credits, the cloud and the marketplace
 
-**Off by default.** A normal Studio build has none of this: no Account page
+**Off by default.** A normal Zornov build has none of this: no Account page
 in Settings, no sign-in, no plans, licences or credits, no marketplace, no
 cloud render, sync or review links, no `account` tool for the AI, and
 nothing about any of it in the guide or the interface. The whole editor
@@ -49,7 +49,7 @@ A licence file is JSON:
 ```
 
 The signature covers `studio-licence/1\n` followed by the payload bytes
-exactly, so the file is never re-serialised before checking. Studio
+exactly, so the file is never re-serialised before checking. Zornov
 accepts licences from:
 
 - keys built in at compile time or set at run time in
@@ -58,16 +58,16 @@ accepts licences from:
   your own server with "Trust licences this server signs").
 
 Checking needs no network. An expired licence keeps working for its
-`grace_days`, then Studio is on the free plan again (the editor keeps
-working). An edited or forged file is refused and Studio says why.
+`grace_days`, then Zornov is on the free plan again (the editor keeps
+working). An edited or forged file is refused and Zornov says why.
 
 A licence can add or remove features on top of its plan (`add`, `remove`)
 and override the monthly credits, so new offers need no app update.
 
 ## Where things are kept
 
-`~/Library/Application Support/Studio/account/` (macOS; `%LOCALAPPDATA%\Studio\account`,
-`$XDG_STATE_HOME/studio/account` elsewhere):
+`~/Library/Application Support/Zornov/account/` (macOS; `%LOCALAPPDATA%\Zornov\account`,
+`$XDG_STATE_HOME/zornov/account` elsewhere):
 
 ```text
 cloud.json         cloud on/off and the server address
@@ -116,10 +116,10 @@ is never blocked by the plan or the budget.
 cargo run --release -p studio-cloud-server -- serve --data ~/studio-cloud --addr 127.0.0.1:8787
 ```
 
-Then in Studio: Settings ▸ Account ▸ Server `http://localhost:8787`, tick
+Then in Zornov: Settings ▸ Account ▸ Server `http://localhost:8787`, tick
 "Trust licences this server signs", Connect, and create an account. To
 serve other computers put it behind a TLS proxy (Caddy, nginx) and use the
-`https://` address; Studio refuses plain `http://` to anything but this
+`https://` address; Zornov refuses plain `http://` to anything but this
 computer.
 
 `<data>/server.json` (every field optional):
@@ -168,9 +168,9 @@ key `issuer.pk8` (keep it secret and backed up), uploads under `review/`,
 Checkout uses Stripe Checkout with a **test** key; live keys (`sk_live_…`)
 and live-mode replies are refused, so no real payment can be taken. The
 server reads the key at start-up from `STUDIO_STRIPE_TEST_KEY` or, on
-macOS, the Keychain item "Studio API keys" / `stripe-test-secret-key`.
+macOS, the Keychain item "Zornov API keys" / `stripe-test-secret-key`.
 After paying, the buyer lands on `/billing/done`, which reads the session
-back from Stripe and fulfils the order once; Studio's "Check payment" does
+back from Stripe and fulfils the order once; Zornov's "Check payment" does
 the same. A webhook at `/v1/stripe/webhook` (secret in
 `STUDIO_STRIPE_WEBHOOK_SECRET`) is also accepted; its signature is
 checked and the session is read back from Stripe rather than trusted.

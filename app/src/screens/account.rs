@@ -141,7 +141,7 @@ mod on {
             "grace" => crate::i18n::tf(format!("Expired: still working for {} more days. Renew to keep it.", v.get("days_left").and_then(Value::as_u64).unwrap_or(0))),
             "expired" => "Expired: back on the free plan until renewed.".into(),
             "invalid" => crate::i18n::tf(format!("The licence file was not accepted ({}).", s(v, "reason"))),
-            "unknown_plan" => "The licence names a plan this Studio does not know.".into(),
+            "unknown_plan" => "The licence names a plan this Zornov does not know.".into(),
             _ => "No licence: the free plan.".into(),
         }
     }
@@ -163,7 +163,7 @@ mod on {
             note(ui, &crate::i18n::tf(format!("Includes: the whole editor, and {}.", features.join(", "))));
             kit::labeled_row(ui, "Licence file", |ui| {
                 if Button::secondary("Install…").icon(Icon::DownloadSimple).show(ui).clicked() {
-                    if let Some(p) = rfd::FileDialog::new().add_filter("Studio licence", &["json"]).pick_file() {
+                    if let Some(p) = rfd::FileDialog::new().add_filter("Zornov licence", &["json"]).pick_file() {
                         match acct::account().install_licence_file(&p) {
                             Ok(_) => st.note = Some("Licence installed.".into()),
                             Err(e) => st.note = Some(e),
@@ -176,7 +176,7 @@ mod on {
         });
 
         Section::new("set-account-cloud", "Cloud and sign-in").icon(Icon::LinkSimple).fixed().show(ui, |ui| {
-            note(ui, "Off until you turn it on: nothing is sent anywhere before you connect a server. Use the Studio cloud or a server you run yourself (studio-cloud-server).");
+            note(ui, "Off until you turn it on: nothing is sent anywhere before you connect a server. Use the Zornov cloud or a server you run yourself (studio-cloud-server).");
             kit::labeled_row(ui, "Server", |ui| {
                 ui.add(egui::TextEdit::singleline(&mut st.server).hint_text("https://… or http://localhost:8787").desired_width(240.0));
                 if cloud_on {
@@ -318,7 +318,7 @@ mod on {
                         }
                     });
                 }
-                note(ui, &format!("{} items installed in the Studio folder's Marketplace.", studio_commerce::market::installed(&studio_paths::studio()).len()));
+                note(ui, &format!("{} items installed in the Zornov folder's Marketplace.", studio_commerce::market::installed(&studio_paths::studio()).len()));
             });
         }
 

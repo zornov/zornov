@@ -63,7 +63,7 @@ pub struct DcpSpec {
 
 impl DcpSpec {
     pub fn new(title: &str, fps: u32) -> Self {
-        DcpSpec { title: title.into(), fps, standard: Standard::Smpte, shape: Shape::Flat, four_k: false, kind: "feature".into(), language: "en".into(), issuer: "Studio".into(), creator: "Studio by Ashrox LLC".into(), channels: 6, frame_cap: None, step: 1.5 }
+        DcpSpec { title: title.into(), fps, standard: Standard::Smpte, shape: Shape::Flat, four_k: false, kind: "feature".into(), language: "en".into(), issuer: "Zornov".into(), creator: "Zornov by Ashrox LLC".into(), channels: 6, frame_cap: None, step: 1.5 }
     }
 
     /// The container (stored picture) size.

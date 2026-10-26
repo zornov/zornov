@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Localisation for Studio.
+//! Localisation for Zornov.
 //!
 //! Messages live in `locales/<tag>.ftl` (a Fluent-style format, see
 //! [`ftl`]). English is the source; every other language must have every
@@ -10,10 +10,10 @@
 //!
 //! ```
 //! use studio_i18n::{tr, tr_in, Lang};
-//! assert_eq!(tr_in(Lang::En, "app-name", &[]), "Studio");
+//! assert_eq!(tr_in(Lang::En, "app-name", &[]), "Zornov");
 //! // The UI language is a process-wide setting:
 //! studio_i18n::set_lang(Lang::En);
-//! assert_eq!(tr("app-name"), "Studio");
+//! assert_eq!(tr("app-name"), "Zornov");
 //! ```
 //!
 //! Two ways to ask for text:

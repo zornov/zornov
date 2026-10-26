@@ -39,7 +39,7 @@ fn injections_are_caught() {
 #[test]
 fn ordinary_text_stays_quiet() {
     let quiet = [
-        "Exporting a 4K project to ProRes crashes at 87%. macOS 15, Studio 0.1.0.\n\n```\nthread 'main' panicked at crates/media/encode/src/lib.rs:120\n```",
+        "Exporting a 4K project to ProRes crashes at 87%. macOS 15, Zornov 0.1.0.\n\n```\nthread 'main' panicked at crates/media/encode/src/lib.rs:120\n```",
         "The AI editor's system prompt should mention the timeline. Could the assistant suggest cuts?",
         "Set font-size: 0.9em for captions and opacity: 0.5 for the overlay.",
         "The metadata: field is empty after import.",

@@ -91,7 +91,7 @@ pub fn download_file(url: &str, ctx: &Ctx) -> Result<Saved> {
         Err(studio_net::Failure::Failed(e)) => {
             let low = e.to_ascii_lowercase();
             return Err(if low.contains("401") || low.contains("403") {
-                Error::SignIn(format!("{} did not hand that over ({e}). It needs a signed-in account or a licence, and Studio does not sign in for you or get around that.", crate::url::host_of(url)))
+                Error::SignIn(format!("{} did not hand that over ({e}). It needs a signed-in account or a licence, and Zornov does not sign in for you or get around that.", crate::url::host_of(url)))
             } else {
                 let _ = std::fs::remove_file(&part);
                 Error::Net(format!("the download failed: {e}"))
@@ -128,7 +128,7 @@ fn combine(main: Vec<TrackData>, extra_audio: Option<Vec<TrackData>>, q: Quality
         }
     }
     if out.is_empty() {
-        return Err(Error::Unsupported(if q == Quality::AudioOnly { "That stream has no sound track to save.".into() } else { "The stream holds no video or sound Studio can take.".into() }));
+        return Err(Error::Unsupported(if q == Quality::AudioOnly { "That stream has no sound track to save.".into() } else { "The stream holds no video or sound Zornov can take.".into() }));
     }
     Ok(out)
 }
@@ -179,7 +179,7 @@ fn prepare_hls(media: &hls::Media, tag: &'static str, work: &Path, ctx: &Ctx) ->
     }
     let mut notes = Vec::new();
     if !media.endlist {
-        notes.push(format!("This stream has no end marker (it is live, or still being made); Studio saved the {:.0} seconds the playlist lists now.", media.seconds()));
+        notes.push(format!("This stream has no end marker (it is live, or still being made); Zornov saved the {:.0} seconds the playlist lists now.", media.seconds()));
     }
     // Keys the playlist hands out openly.
     let mut keys: HashMap<String, [u8; 16]> = HashMap::new();
@@ -192,10 +192,10 @@ fn prepare_hls(media: &hls::Media, tag: &'static str, work: &Path, ctx: &Ctx) ->
             continue;
         }
         if !crate::url::is_http(&uri) {
-            return Err(Error::Protected("This stream's key is not given openly (it is fetched through the player's protection). Studio does not work around copy protection.".into()));
+            return Err(Error::Protected("This stream's key is not given openly (it is fetched through the player's protection). Zornov does not work around copy protection.".into()));
         }
         let doc = http::get_doc(&uri, ctx.referer, 4096)?;
-        let key: [u8; 16] = doc.body.as_slice().try_into().map_err(|_| Error::Protected("This stream's key is not given openly (the key address does not return a plain 16-byte key). Studio does not work around copy protection.".into()))?;
+        let key: [u8; 16] = doc.body.as_slice().try_into().map_err(|_| Error::Protected("This stream's key is not given openly (the key address does not return a plain 16-byte key). Zornov does not work around copy protection.".into()))?;
         keys.insert(uri, key);
     }
     let key_of = |idx: Option<usize>, seq: u64| -> Option<([u8; 16], [u8; 16])> {
@@ -360,10 +360,10 @@ pub fn download_dash(url: &str, ctx: &Ctx) -> Result<Saved> {
     say(ctx, "joining")?;
     let mut notes = Vec::new();
     if mpd.periods > 1 {
-        notes.push(format!("The manifest has {} periods (parts, such as ad breaks); Studio saved the longest one.", mpd.periods));
+        notes.push(format!("The manifest has {} periods (parts, such as ad breaks); Zornov saved the longest one.", mpd.periods));
     }
     if mpd.dynamic {
-        notes.push("This stream is still being made (live); Studio saved what the manifest lists now.".into());
+        notes.push("This stream is still being made (live); Zornov saved what the manifest lists now.".into());
     }
     let main = match v {
         Some(v) => rep_tracks(v, "v", &work, &mut notes)?,

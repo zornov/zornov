@@ -116,7 +116,7 @@ fn unit(v: f64) -> f64 {
 
 /// One op.
 pub fn one(c: &mut Canvas, op: &Value, v: &mut dyn Vision) -> Result<Value, String> {
-    let name = s(op, "op").or_else(|| s(op, "cmd")).ok_or("each op needs `op` (a Studio op or any engine command id)")?;
+    let name = s(op, "op").or_else(|| s(op, "cmd")).ok_or("each op needs `op` (a Zornov op or any engine command id)")?;
     if op.get("op").is_none() || name.contains('.') {
         // An engine command.
         return c.run(name, rest(op, &[]));
@@ -180,7 +180,7 @@ pub fn one(c: &mut Canvas, op: &Value, v: &mut dyn Vision) -> Result<Value, Stri
         "snapshot" => c.run("history.newSnapshot", json!({"name": s(op, "name").unwrap_or("Snapshot")})),
         "summary" | "inspect" => c.summary(),
         other => Err(format!(
-            "unknown op \"{other}\"; Studio ops: new, open, picture, save, export, place, close, select, paint, fill, gradient, remove, adjust, layer, frequency_separation, animate, frame, flipbook, undo, redo, snapshot; or any engine command id (see `commands`)"
+            "unknown op \"{other}\"; Zornov ops: new, open, picture, save, export, place, close, select, paint, fill, gradient, remove, adjust, layer, frequency_separation, animate, frame, flipbook, undo, redo, snapshot; or any engine command id (see `commands`)"
         )),
     }
 }

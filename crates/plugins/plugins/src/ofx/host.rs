@@ -1061,7 +1061,7 @@ unsafe extern "C" fn fetch_suite(_host: Handle, name: *const c_char, version: c_
 pub fn host_props() -> Props {
     let p = Props::new();
     p.set_str(P_NAME, &["com.ashrox.studio"]);
-    p.set_str(P_LABEL, &["Studio"]);
+    p.set_str(P_LABEL, &["Zornov"]);
     p.set_int("OfxPropAPIVersion", &[1, 4]);
     p.set_int("OfxPropVersion", &[0, 1, 0]);
     p.set_str("OfxPropVersionLabel", &[env!("CARGO_PKG_VERSION")]);

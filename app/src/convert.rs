@@ -114,7 +114,7 @@ pub fn ensure_playable(path: &Path) -> Result<PathBuf, String> {
         Kind::Video => "mp4",
     };
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "media".into());
-    let out = path.with_file_name(format!("{stem} (Studio).{ext}"));
+    let out = path.with_file_name(format!("{stem} (Zornov).{ext}"));
     if out.is_file() && playable(&out) {
         return Ok(out);
     }
@@ -126,7 +126,7 @@ pub fn ensure_playable(path: &Path) -> Result<PathBuf, String> {
     if kind == Kind::Video && crate::transcode::handles(path) {
         return crate::transcode::to_mp4(path, &out).map(|()| out.clone()).map_err(|e| format!("Could not convert {}: {e}", path.display()));
     }
-    Err(format!("{} is in a format Studio cannot play or convert yet.", path.display()))
+    Err(format!("{} is in a format Zornov cannot play or convert yet.", path.display()))
 }
 
 /// Media items in `doc` whose files Studio cannot play: (id, path).

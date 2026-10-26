@@ -1,7 +1,7 @@
-# Studio interface text: English, the source language.
+# Zornov interface text: English, the source language.
 # Add new text here (id = English), then see docs/localisation.md.
 
-app-name = Studio
+app-name = Zornov
 3d-camera-and-lights = 3D camera and lights
 3d-layer-off = 3D layer off
 3d-layer-on = 3D layer on
@@ -535,7 +535,7 @@ range-tool = Range tool
 re-track = Re-track
 re-track-from-here = Re-track from here
 re-tracking = Re-tracking
-reading-studio-s-guide = Reading Studio's guide
+reading-studio-s-guide = Reading Zornov's guide
 reading-the-edit-reference = Reading the edit reference
 reading-the-timeline = Reading the timeline
 rectangle = Rectangle
@@ -588,7 +588,7 @@ reverse = Reverse
 right = Right
 ring = Ring
 rise = Rise
-risers-whooshes-booms-and-hits-are-made-by-s = Risers, whooshes, booms and hits are made by Studio itself. Any other sound described in words ("rain on a tin roof") comes from ElevenLabs.
+risers-whooshes-booms-and-hits-are-made-by-s = Risers, whooshes, booms and hits are made by Zornov itself. Any other sound described in words ("rain on a tin roof") comes from ElevenLabs.
 roll-like-balls = Roll like balls
 roll-z = Roll (Z)
 rotate = Rotate
@@ -725,9 +725,9 @@ stop-this-request-esc-what-is-done-stays-und = Stop this request (Esc). What is 
 stopped-what-was-already-done-is-kept-undo-t = Stopped. What was already done is kept; Undo takes it back.
 storage = Storage
 strength = Strength
-studio-codec-clv = Studio codec · CLV
-studio-never-lowers-preview-quality-by-itsel = Studio never lowers preview quality by itself.
-studio-render = Studio render
+studio-codec-clv = Zornov codec · CLV
+studio-never-lowers-preview-quality-by-itsel = Zornov never lowers preview quality by itself.
+studio-render = Zornov render
 studying-the-footage = Studying the footage
 style = Style
 stylise = Stylise
@@ -749,7 +749,7 @@ text-art = Text art
 text-colour = Text colour
 text-size = Text size
 the-ai-editor-could-not-open-its-connection = The AI editor could not open its connection for the command-line agents.
-the-ai-editor-crashed-earlier-reopen-studio = The AI editor crashed earlier; reopen Studio.
+the-ai-editor-crashed-earlier-reopen-studio = The AI editor crashed earlier; reopen Zornov.
 the-camera-s-motion-could-not-be-measured-he = The camera's motion could not be measured here (too dark, blurred or plain). Track a detailed point and stabilize on it.
 the-first-is-the-strongest-editor-the-last-i = The first is the strongest editor; the last is quickest and cheapest.
 the-mac-s-voices-are-switched-off-below-so-n = The Mac's voices are switched off below, so narration cannot be made until you choose a service.
@@ -797,7 +797,7 @@ tutorial = Tutorial
 two-node-aimed = Two-node (aimed)
 type = Type
 type-apply-apply-all-or-skip = Type apply, apply all or skip…
-type-for-studio-commands-k-opens-this-panel = Type / for Studio commands  ·  ⌘K opens this panel
+type-for-studio-commands-k-opens-this-panel = Type / for Zornov commands  ·  ⌘K opens this panel
 type-your-title = Type your title
 underline = Underline
 undo = Undo
@@ -988,7 +988,7 @@ guide-audio-step3 = Set a Fade out so the music ends smoothly.
 # --- Tour
 tour-step = Step { $n } of { $total }
 tour-finished = Tour finished. Press F1 at any time for help.
-tour-welcome-title = Welcome to Studio
+tour-welcome-title = Welcome to Zornov
 tour-welcome-body = A quick tour of the editor, about a minute. Use the arrow keys or the buttons. Press Escape to leave. You can replay it from Help.
 tour-library-title = Library
 tour-library-body = Your media, text styles, motions, effects, looks and sounds. Click an item to add it, or drag it onto the timeline. The AI section talks to the AI editor.
@@ -1005,7 +1005,7 @@ tour-ai-body = Press ⌘K and say what you want in plain words: cut the pauses, 
 tour-export-title = Export
 tour-export-body = When you are happy, Export makes the finished video for the web, social apps or archive.
 tour-help-title = Help is one key away
-tour-help-body = Press F1 to search the help. It covers every part of Studio, and the AI editor can answer questions from it too.
+tour-help-body = Press F1 to search the help. It covers every part of Zornov, and the AI editor can answer questions from it too.
 
 # --- Tips
 tip-start-templates = New here? Start from a template below, or open Learn by doing for a guided project.
@@ -1023,7 +1023,7 @@ workspace-edit-blurb = Cut and arrange: a big timeline with your media beside it
 # --- Help articles
 help-start-title = Getting started
 help-start-keys = begin first new project welcome tour overview basics
-help-start-body = Studio edits video on a timeline. Make a project from a template, open a sample, or start empty, then bring in video, pictures and sound with Import media in the Library.
+help-start-body = Zornov edits video on a timeline. Make a project from a template, open a sample, or start empty, then bring in video, pictures and sound with Import media in the Library.
     Drag clips onto the timeline or press the plus on a Library item. Press Space to play, S to split, M to add a marker and ⌘Z to undo anything.
     Press ⌘K to ask the AI editor to do a job in plain words. Press F1 whenever you want help.
 help-templates-title = Templates and sample projects
@@ -1032,7 +1032,7 @@ help-templates-body = On the home screen, Start from a template gives you a proj
     Learn by doing opens a sample project with steps marked on the timeline. Follow the markers to practise cutting, colour, titles and audio.
 help-import-title = Bringing in media
 help-import-keys = import media files video photos audio music drag drop folder library download link
-help-import-body = Choose File, Import media (⌘I), or drag files into the Library. Studio keeps your originals where they are and works from them. Formats it cannot play directly are converted for you.
+help-import-body = Choose File, Import media (⌘I), or drag files into the Library. Zornov keeps your originals where they are and works from them. Formats it cannot play directly are converted for you.
     The Download from a link button fetches media from a page when you have the right to use it. Use Add sample media to try things without your own footage.
 help-timeline-title = The timeline
 help-timeline-keys = timeline lanes clips playhead zoom snap magnetic markers range select move drag
@@ -1086,14 +1086,14 @@ help-captions-body = Auto captions turns speech into editable caption clips. The
 help-ai-editor-title = The AI editor
 help-ai-editor-keys = ai editor assistant claude codex chatgpt command k ask prompt plain words automate
 help-ai-editor-body = Press ⌘K, or open the AI section of the Library, and describe what you want: cut the pauses, add captions, make it vertical, match the colour between shots. The AI works with the same tools you have, and every request is one undo step.
-    Choose which assistant answers under Settings, AI. Studio tells you what is sent. If you prefer to approve changes first, turn on Ask first.
+    Choose which assistant answers under Settings, AI. Zornov tells you what is sent. If you prefer to approve changes first, turn on Ask first.
 help-export-title = Exporting
 help-export-keys = export render save video file mp4 format quality resolution social youtube share deliver
 help-export-body = Press ⌘E or the Export button. Pick a preset for the web, social apps or archive, check the size and quality, and choose where to save. Exports run in the background and the Jobs button in the top bar shows progress.
     Set in and out points with I and O to export only part of the edit.
 help-workspaces-title = Workspaces
 help-workspaces-keys = workspace layout edit colour audio vfx motion graphics production panels arrange dock docking drag move tab tabs float reset
-help-workspaces-body = A workspace arranges the editor for one kind of work. Edit, Colour, Audio, VFX, Motion graphics and Production are in the top bar and in the Layout menu; Alt with 1 to 6 switches from the keyboard. Drag any panel by its header or tab onto another panel to dock it left, right, above or below it, or into it as a tab; Esc cancels. Right-click a header, or press Shift F10 on a panel reached with F6, for the same moves from a menu. Layout ▸ Panels shows and hides panels, Save layout as keeps yours as a workspace, and Reset layout goes back to Studio’s own.
+help-workspaces-body = A workspace arranges the editor for one kind of work. Edit, Colour, Audio, VFX, Motion graphics and Production are in the top bar and in the Layout menu; Alt with 1 to 6 switches from the keyboard. Drag any panel by its header or tab onto another panel to dock it left, right, above or below it, or into it as a tab; Esc cancels. Right-click a header, or press Shift F10 on a panel reached with F6, for the same moves from a menu. Layout ▸ Panels shows and hides panels, Save layout as keeps yours as a workspace, and Reset layout goes back to Zornov’s own.
     A workspace only sets which panels are open and what the Library and Inspector show. You can still resize panels and change anything afterwards.
 help-shortcuts-title = Keyboard shortcuts
 help-shortcuts-keys = keyboard shortcuts keys hotkeys commands list customise remap
@@ -1101,7 +1101,7 @@ help-shortcuts-body = Space plays and pauses, J K L play backwards, stop and for
     Settings, Shortcuts lists every shortcut and lets you change them.
 help-keyboard-nav-title = Working with the keyboard and a screen reader
 help-keyboard-nav-keys = keyboard screen reader voiceover narrator nvda accessibility navigate blind focus tab landmarks announcements
-help-keyboard-nav-body = Studio works with VoiceOver, Narrator and other screen readers, and everything can be done without a mouse. Tab moves between controls; F6 and Shift F6 jump between the Library, Viewer, Inspector and Timeline.
+help-keyboard-nav-body = Zornov works with VoiceOver, Narrator and other screen readers, and everything can be done without a mouse. Tab moves between controls; F6 and Shift F6 jump between the Library, Viewer, Inspector and Timeline.
     On the timeline, ] and [ select the next and previous clip, Up and Down arrows jump to the next and previous edit point, Alt with Up and Down moves to the clip on the lane above or below, and Alt with Left and Right nudges the selected clip by a frame (Shift for a second). Alt and the full stop says where the playhead is.
     On the canvas, the full stop and the comma select the layer below and above at the playhead, Alt and the comma lists the layers, and Command with Alt and the arrow keys moves the selected layer by one percent of the picture (add Shift for five percent). Each step is spoken.
     Changes are spoken as they happen. You can turn spoken updates off in Settings, General, Accessibility.
@@ -1111,11 +1111,11 @@ help-accessibility-body = Settings, General has Interface size (up to 200 percen
     High contrast uses black or white backgrounds with pure text and strong outlines. The colour vision palettes keep clip and status colours apart.
 help-language-title = Language
 help-language-keys = language translation english hindi spanish french german japanese chinese arabic persian farsi right to left rtl
-help-language-body = Studio is available in English, Hindi, Spanish, French, German, Japanese, Simplified Chinese, Arabic and Persian. Choose one under Settings, General, Language. System default follows your computer.
+help-language-body = Zornov is available in English, Hindi, Spanish, French, German, Japanese, Simplified Chinese, Arabic and Persian. Choose one under Settings, General, Language. System default follows your computer.
     Arabic and Persian lay the editor out right to left. The timeline always runs left to right, as time does.
 help-saving-title = Saving and projects
 help-saving-keys = save open project folder autosave backup recent rename copy file
-help-saving-body = A project is a folder. Studio saves automatically 30 seconds after the last change and keeps 20 backups. Use File, Open to open a project folder, and rename a project by double-clicking its name in the top bar.
+help-saving-body = A project is a folder. Zornov saves automatically 30 seconds after the last change and keeps 20 backups. Use File, Open to open a project folder, and rename a project by double-clicking its name in the top bar.
     Your media is not copied into the project; keep it where it is.
 help-undo-title = Undo and redo
 help-undo-keys = undo redo history mistake revert change back
@@ -1123,7 +1123,7 @@ help-undo-body = ⌘Z undoes the last change and ⇧⌘Z redoes it, as many step
 help-problems-title = When something is slow or does not work
 help-problems-keys = slow lag playback dropped frames error problem cannot fails crash proxies cache quality preview
 help-problems-body = If playback stutters, lower the preview quality in Settings, Playback, or switch to the simple preview. Long projects benefit from a bigger frame cache.
-    If a file will not play, Studio converts it to a format it can; wait for the job in the top bar to finish. If you hit a crash, Studio asks before sending a report, and a report is sent only if you choose Send.
+    If a file will not play, Zornov converts it to a format it can; wait for the job in the top bar to finish. If you hit a crash, Zornov asks before sending a report, and a report is sent only if you choose Send.
 
 # --- Interface text added with these features
 accessibility = Accessibility
@@ -1167,8 +1167,8 @@ change-who-answers-in-settings-ai-k-tokens-i = Change who answers in Settings �
 claude-code-2 = Claude Code · { $v1 }
 clip-2 = Clip { $v1 }
 codex-2 = Codex · { $v1 }
-converting-name-to-a-format-studio-plays = Converting { $name } to a format Studio plays…
-converting-what-studio-can-t-play-yet-to-h-2 = Converting { $what } Studio can't play yet to H.264…
+converting-name-to-a-format-studio-plays = Converting { $name } to a format Zornov plays…
+converting-what-studio-can-t-play-yet-to-h-2 = Converting { $what } Zornov can't play yet to H.264…
 could-not-add = Could not add { $v1 }
 could-not-download-short = Could not download { $short }: { $v1 }
 could-not-export-e = Could not export: { $e }
@@ -1185,7 +1185,7 @@ export-3 = Export { $v1 }
 exported = Exported { $v1 }
 exporting-2 = Exporting · { $v1 }% · { $v2 }
 follows-track-of-name = Follows track { $v1 } of “{ $name }” ({ $v2 })
-from-from-kept-in-your-login-keychain-studio = From { $from }. Kept in your login Keychain; Studio never shows it again.
+from-from-kept-in-your-login-keychain-studio = From { $from }. Kept in your login Keychain; Zornov never shows it again.
 generated-placed-at-1-s = Generated { $v1 } placed at { $v2 }s
 generated-but-not-placed-e = Generated, but not placed: { $e }
 generating-failed-e = Generating failed: { $e }
@@ -1217,7 +1217,7 @@ switch-to-next = Switch to { $next }
 tracking-failed-e = Tracking failed: { $e }
 undid = Undid { $v1 }
 untitled = Untitled { $v1 }
-uses-your-name-sign-in-studio-s-tools-are-co = Uses your { $name } sign-in ({ $v1 }). Studio's tools are connected to this window.
+uses-your-name-sign-in-studio-s-tools-are-co = Uses your { $name } sign-in ({ $v1 }). Zornov's tools are connected to this window.
 warmed-the-grade-on-the-mountains-box-1-and = Warmed the grade on the mountains (box 1) and blurred the rock (spot 2).
 wobble-loop-or-step-without-more-keys-loop-n = Wobble, loop or step { $v1 } without more keys. Loop needs two keys or more.
 paste-the-key = paste the key
@@ -1478,7 +1478,7 @@ lay-over-characters = Lay over characters
 import-script = Import script
 plan-shots = Plan shots
 build-timeline = Build timeline
-bring-in-a-screenplay-or-a-narration-studio = Bring in a screenplay or a narration: Studio breaks it into scenes and shots you can plan, check and build the timeline from.
+bring-in-a-screenplay-or-a-narration-studio = Bring in a screenplay or a narration: Zornov breaks it into scenes and shots you can plan, check and build the timeline from.
 no-shots-yet-plan-shots = No shots yet: Plan shots
 on-timeline = on timeline
 what-happens-in-the-shot = What happens in the shot
@@ -1558,7 +1558,7 @@ find-gaps = Find gaps
 find-mouth = Find mouth
 cut-on = Cut on
 fill-colour = Fill colour
-write-or-paste-your-story-or-narration-below = Write or paste your story or narration below, or bring in a file (text, Markdown, Fountain, SRT, VTT, Word) or drop it here. Studio breaks it into scenes and lines you can time, plan and build the timeline from.
+write-or-paste-your-story-or-narration-below = Write or paste your story or narration below, or bring in a file (text, Markdown, Fountain, SRT, VTT, Word) or drop it here. Zornov breaks it into scenes and lines you can time, plan and build the timeline from.
 put-a-time-in-front-of-the-words-like-0-12-0 = Put a time in front of the words, like [0:12-0:18]. Lines without one follow their shot, or are paced by reading speed.
 type-or-paste-the-story-or-narration-here-sc = Type or paste the story or narration here.
 

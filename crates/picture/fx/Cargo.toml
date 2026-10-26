@@ -1,6 +1,6 @@
 [package]
 name = "studio-fx"
-description = "Studio effects, transitions, motion presets, speed ramps, stabilisation and tracking"
+description = "Zornov effects, transitions, motion presets, speed ramps, stabilisation and tracking"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

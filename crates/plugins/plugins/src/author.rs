@@ -55,7 +55,7 @@ pub fn sources_dir() -> PathBuf {
 pub fn toolchain() -> Result<PathBuf, String> {
     let home = studio_paths::home();
     let candidates = [PathBuf::from("cargo"), home.join(".cargo/bin/cargo")];
-    let cargo = candidates.into_iter().find(|c| Command::new(c).arg("--version").output().is_ok_and(|o| o.status.success())).ok_or("Rust is not installed on this Mac, so Studio cannot build plugins (install it from rustup.rs)")?;
+    let cargo = candidates.into_iter().find(|c| Command::new(c).arg("--version").output().is_ok_and(|o| o.status.success())).ok_or("Rust is not installed on this Mac, so Zornov cannot build plugins (install it from rustup.rs)")?;
     let rustc = if cargo.parent().is_some_and(|p| !p.as_os_str().is_empty()) { cargo.with_file_name("rustc") } else { PathBuf::from("rustc") };
     let sysroot = Command::new(rustc).args(["--print", "sysroot"]).output().map_err(|e| e.to_string())?;
     let sysroot = PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim());
@@ -102,7 +102,7 @@ pub fn pixel_source(spec: &Spec, body: &str) -> Result<String, String> {
         info.push_str("\n            .wgsl(include_str!(\"effect.wgsl\"))");
     }
     Ok(format!(
-        r#"// Made in Studio. SPDX-License-Identifier: Apache-2.0
+        r#"// Made in Zornov. SPDX-License-Identifier: Apache-2.0
 #![allow(unused_variables, unused_mut, clippy::all)]
 use studio_plugin_api::*;
 
@@ -129,7 +129,7 @@ impl Effect for Fx {{
 }}
 
 fn plugin() -> Plugin {{
-    Plugin::new({id}, {name}, "1.0.0").author("Made in Studio").description({desc}).license("Apache-2.0").effect(Fx)
+    Plugin::new({id}, {name}, "1.0.0").author("Made in Zornov").description({desc}).license("Apache-2.0").effect(Fx)
 }}
 
 export_plugin!(plugin);
@@ -301,6 +301,6 @@ fn packed_default(p: &crate::manifest::Param) -> [f32; 4] {
 /// Builds, tests and installs.
 pub fn create(host: &Host, spec: &Spec) -> Result<(Installed, Built), String> {
     let built = build(spec, &sources_dir())?;
-    let p = host.install_bytes(&built.wasm, "made in Studio")?;
+    let p = host.install_bytes(&built.wasm, "made in Zornov")?;
     Ok((p, built))
 }

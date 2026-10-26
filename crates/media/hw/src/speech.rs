@@ -326,7 +326,7 @@ mod tests {
     fn the_mac_speaks() {
         let v = voices();
         assert!(!v.is_empty(), "no system voices");
-        let s = speak("Studio can talk.", None, None).unwrap();
+        let s = speak("Zornov can talk.", None, None).unwrap();
         assert!(s.samples.len() as f32 / s.rate as f32 > 0.4, "too short");
         assert!(s.samples.iter().any(|x| x.abs() > 0.05), "silent");
     }

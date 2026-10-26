@@ -434,7 +434,7 @@ impl Store {
             }
         }
         if found.is_empty() {
-            return Err("no notes found: expected Studio notes, a CSV with time and note columns, an EDL with LOC markers, or lines like \"00:01:23:12 note\"".into());
+            return Err("no notes found: expected Zornov notes, a CSV with time and note columns, an EDL with LOC markers, or lines like \"00:01:23:12 note\"".into());
         }
         let frame = (1e6 / fps.max(1.0)) as m::Micros;
         let mut n = 0;

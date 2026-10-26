@@ -1,6 +1,6 @@
 [package]
 name = "ofx-fixture"
-description = "A small OpenFX plugin written in Rust, for testing Studio's OFX host"
+description = "A small OpenFX plugin written in Rust, for testing Zornov's OFX host"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"

@@ -3,7 +3,7 @@ name = "studio-quality"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Critics and a repeatable benchmark for Studio's AI-made 3D models, pictures and vectors: topology, UVs, materials, silhouettes, artefacts, vector cleanliness; scores kept over time."
+description = "Critics and a repeatable benchmark for Zornov's AI-made 3D models, pictures and vectors: topology, UVs, materials, silhouettes, artefacts, vector cleanliness; scores kept over time."
 
 [dependencies]
 studio-mesh = { path = "../mesh" }

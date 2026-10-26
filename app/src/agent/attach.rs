@@ -6,13 +6,13 @@
 //! The window listens on `$TMPDIR/studio-agent-PID.sock` (only this user
 //! can connect). On Windows, which has no Unix sockets here, that file holds
 //! a port on 127.0.0.1 and a random token instead: only someone who can read
-//! the file (this user) can connect. `studio mcp --attach SOCKET` is the MCP server Claude Code
+//! the file (this user) can connect. `zornov mcp --attach SOCKET` is the MCP server Claude Code
 //! starts, and it forwards each tool call there as one line of JSON
 //! (`{"name", "arguments"}`), getting back one line: the MCP result.
 //!
 //! Every open window also leaves a note in `windows/` under Studio's cache
-//! (its socket and the project folder it has open), so `studio mcp` and
-//! `studio agent` from any terminal find it and work on the project in the
+//! (its socket and the project folder it has open), so `zornov mcp` and
+//! `zornov agent` from any terminal find it and work on the project in the
 //! window rather than a copy on disk: the person and the agent edit the
 //! same project, and each sees the other's changes.
 
@@ -147,7 +147,7 @@ fn connection(reader: BufReader<Box<dyn Read + Send>>, mut out: Box<dyn Write + 
 }
 
 /// Says once in a while that an agent outside the app is at work (each
-/// `studio agent` call is a connection of its own).
+/// `zornov agent` call is a connection of its own).
 fn announce(gate: &Gate) {
     static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
@@ -155,16 +155,16 @@ fn announce(gate: &Gate) {
         return;
     }
     *last = Some(std::time::Instant::now());
-    gate.emit(super::brain::AgentEvent::Note("An agent outside the app is working on this project (Claude Code, studio agent or another MCP client). Its changes appear here and on the timeline.".into()));
+    gate.emit(super::brain::AgentEvent::Note("An agent outside the app is working on this project (Claude Code, zornov agent or another MCP client). Its changes appear here and on the timeline.".into()));
 }
 
-/// `studio mcp --attach SOCKET [--role ROLE]`: MCP on stdin / stdout,
+/// `zornov mcp --attach SOCKET [--role ROLE]`: MCP on stdin / stdout,
 /// tools run in the window (as that crew member).
 pub fn proxy(socket: &Path, role: Option<&str>) -> i32 {
     let (from_window, to_window) = match connect(socket) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("studio mcp: cannot reach the Studio window at {}: {e}", socket.display());
+            eprintln!("zornov mcp: cannot reach the Zornov window at {}: {e}", socket.display());
             return 1;
         }
     };
@@ -189,7 +189,7 @@ pub fn proxy(socket: &Path, role: Option<&str>) -> i32 {
         if let Some(r) = role {
             req["role"] = json!(r);
         }
-        ask(&req).unwrap_or_else(|| json!({"content": [{"type": "text", "text": "the Studio window closed"}], "isError": true}))
+        ask(&req).unwrap_or_else(|| json!({"content": [{"type": "text", "text": "the Zornov window closed"}], "isError": true}))
     };
     let mut list = || app_tools().unwrap_or_else(super::mcp::tools);
     super::mcp::serve_lines_listing(&mut call, &mut list);
@@ -203,7 +203,7 @@ fn missing_in_app(app: Option<&[String]>, name: &str) -> Option<String> {
     if app.iter().any(|t| t == name) || !super::mcp::tools().iter().any(|t| t["name"] == name) {
         return None;
     }
-    Some(format!("The open Studio is an older version than this helper and does not have the \"{name}\" tool. Restart Studio to update it, then try again; use only the tools the open Studio lists meanwhile."))
+    Some(format!("The open Zornov is an older version than this helper and does not have the \"{name}\" tool. Restart Zornov to update it, then try again; use only the tools the open Zornov lists meanwhile."))
 }
 
 fn windows_dir() -> PathBuf {
@@ -254,9 +254,9 @@ pub fn find_window(project: Option<&Path>) -> Option<PathBuf> {
     best.map(|(_, s)| s)
 }
 
-/// One tool call on an open window (for `studio agent`).
+/// One tool call on an open window (for `zornov agent`).
 pub fn call_window(socket: &Path, name: &str, args: &Value) -> Result<Vec<super::Content>, String> {
-    let (mut r, mut w) = connect(socket).map_err(|e| format!("cannot reach the Studio window: {e}"))?;
+    let (mut r, mut w) = connect(socket).map_err(|e| format!("cannot reach the Zornov window: {e}"))?;
     writeln!(w, "{}", json!({"name": name, "arguments": args})).and_then(|_| w.flush()).map_err(|e| e.to_string())?;
     let mut line = String::new();
     r.read_line(&mut line).map_err(|e| e.to_string())?;
@@ -305,7 +305,7 @@ mod tests {
     fn a_tool_the_open_studio_lacks_says_to_restart() {
         let old: Vec<String> = ["guide", "summary", "edit"].map(String::from).to_vec();
         let why = missing_in_app(Some(&old), "download").expect("refused");
-        assert!(why.contains("Restart Studio"), "{why}");
+        assert!(why.contains("Restart Zornov"), "{why}");
         assert!(missing_in_app(Some(&old), "edit").is_none());
         assert!(missing_in_app(Some(&old), "no_such_tool").is_none(), "the app words its own unknown-tool error");
         assert!(missing_in_app(None, "download").is_none(), "no list from the window: let it answer");
@@ -329,7 +329,7 @@ mod tests {
         let mut line = String::new();
         r.read_line(&mut line).unwrap();
         let v: Value = serde_json::from_str(&line).unwrap();
-        assert!(v["content"][0]["text"].as_str().unwrap().contains("Studio"));
+        assert!(v["content"][0]["text"].as_str().unwrap().contains("Zornov"));
         let _ = Content::Text(String::new());
     }
 }

@@ -33,7 +33,7 @@ beat map in `notes` → `contact_sheet` with `media` for each source →
 peaks, the strongest shot on the first drop → `fx_layer` hits on the
 drops → `check`, `script`, `contact_sheet` → `export`.
 
-## Reference: Scoring: original music made in Studio
+## Reference: Scoring: original music made in Zornov
 **Order**
 1. Read the cut first (`summary`, `listen`, markers): where does the story turn, where is the biggest moment, where does it end? Those times are the cues.
 2. Say what it is in a composer's words: genre, mood, who plays. `"noir jazz with sax and double bass, rainy night"`, `"hopeful acoustic folk, slow build"`, `"dark slow score"`, `"minimal electronic on a beat grid"`. Named instruments take the lead, the bass or the chords.

@@ -6,7 +6,7 @@
 //! A [`Session`] owns one open document and answers tool calls with compact
 //! JSON (and JPEG pictures for `frame` / `contact_sheet`). It runs on the
 //! same services the interface uses, so an agent can do anything a person
-//! can, headless (`studio mcp`) or live in the running app.
+//! can, headless (`zornov mcp`) or live in the running app.
 //!
 //! Design rules for agents:
 //! * times are seconds, clips are ids, library items are names (matched
@@ -1870,7 +1870,7 @@ impl Session {
             "plugins" => self.plugins_tool(a),
             "automation" => self.automation_tool(a),
             // The window runs it (`editor::dock_ui::agent_tool`); a shell has no panels.
-            "layout" => Err("layout arranges the Studio window's panels; there is no window here".into()),
+            "layout" => Err("layout arranges the Zornov window's panels; there is no window here".into()),
             "save_move" => text(self.save_move(a)?),
             "save_design" => text(self.save_design(a)?),
             "made" => text(self.made()),
@@ -2031,7 +2031,7 @@ impl Session {
                     let mut v = json!({"found": found, "use": "add with item (and panel) puts one on the timeline"});
                     // Say so when the library itself is missing, not "nothing".
                     if crate::content::find_dir().is_none() {
-                        v["note"] = json!("Studio's content library was not found on this Mac, so only the built-in samples were searched (set STUDIO_CONTENT to its folder, or open Studio.app once)");
+                        v["note"] = json!("Zornov's content library was not found on this Mac, so only the built-in samples were searched (set STUDIO_CONTENT to its folder, or open Zornov.app once)");
                     }
                     return text(v);
                 }
@@ -2247,7 +2247,7 @@ impl Session {
             "read" => text(web::read(a)?),
             "search_media" => self.search_media_tool(a),
             // Background jobs live in the window; here every call is waited for.
-            "job" => text(json!({"jobs": [], "note": "calls run to the end here: there are no background jobs outside the Studio window"})),
+            "job" => text(json!({"jobs": [], "note": "calls run to the end here: there are no background jobs outside the Zornov window"})),
             "download" => {
                 let url = a.get("url").and_then(Value::as_str).ok_or("download needs \"url\": a link to a video, sound or picture file, or to a web page whose video is openly available")?;
                 // Only the public web (tests fetch from a local server).
@@ -2298,7 +2298,7 @@ impl Session {
                 let file = match crate::convert::ensure_playable(&file) {
                     Ok(f) => f,
                     Err(e) if fetched.via == "file" && !download::is_media_name(&file) => {
-                        return text(json!({"file": file.display().to_string(), "kept_as_file": true, "note": "saved in Downloads as a file: it is not a video, sound, picture or 3D model Studio opens, so nothing was added to the project", "import_said": e}));
+                        return text(json!({"file": file.display().to_string(), "kept_as_file": true, "note": "saved in Downloads as a file: it is not a video, sound, picture or 3D model Zornov opens, so nothing was added to the project", "import_said": e}));
                     }
                     Err(e) => return Err(e),
                 };
@@ -2311,10 +2311,10 @@ impl Session {
                     // colour table) is kept as it is; what a page handed over
                     // that is not media is not.
                     if fetched.via == "file" && !download::is_media_name(&file) {
-                        return text(json!({"file": file.display().to_string(), "kept_as_file": true, "note": "saved in Downloads as a file: it is not a video, sound, picture or 3D model Studio opens, so nothing was added to the project", "import_said": why}));
+                        return text(json!({"file": file.display().to_string(), "kept_as_file": true, "note": "saved in Downloads as a file: it is not a video, sound, picture or 3D model Zornov opens, so nothing was added to the project", "import_said": why}));
                     }
                     let _ = std::fs::remove_file(&file);
-                    return Err(format!("What came from that link is not a video, sound or picture Studio can open, so it was not kept.{}", if why.is_empty() { String::new() } else { format!(" ({why})") }));
+                    return Err(format!("What came from that link is not a video, sound or picture Zornov can open, so it was not kept.{}", if why.is_empty() { String::new() } else { format!(" ({why})") }));
                 }
                 v["file"] = json!(file.display().to_string());
                 search_media::record_source(&file, &search_media::Hit { page: url.to_owned(), ..Default::default() });

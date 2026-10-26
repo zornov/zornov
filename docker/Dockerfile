@@ -1,11 +1,11 @@
 # The Linux build environment (macOS and Windows build natively on their own
-# CI runners: containers only run Linux): Rust, the system libraries Studio links to,
+# CI runners: containers only run Linux): Rust, the system libraries Zornov links to,
 # and a software Vulkan driver so the GPU tests run without a graphics card.
 # CI builds and tests Linux in it, and the dev container (.devcontainer) opens
 # the repository in it. The source is mounted, not copied:
 #
-#   docker build -t studio-linux docker
-#   docker run --rm -it -v "$PWD:/work" studio-linux cargo test --workspace
+#   docker build -t zornov-linux docker
+#   docker run --rm -it -v "$PWD:/work" zornov-linux cargo test --workspace
 #
 # The base is pinned by digest; update the tag and digest together.
 FROM rust:1.99.0-trixie@sha256:81015672d6939b0265f09adf96d5de125482bb1330106076956b0518e74edc90

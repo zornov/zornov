@@ -44,7 +44,7 @@ impl PriceTable {
     pub fn parse(json: &str) -> Result<PriceTable, String> {
         let t: PriceTable = serde_json::from_str(json).map_err(|e| format!("the price table is not valid: {e}"))?;
         if t.schema != 1 {
-            return Err(format!("the price table is schema {}, this Studio reads 1", t.schema));
+            return Err(format!("the price table is schema {}, this Zornov reads 1", t.schema));
         }
         Ok(t)
     }

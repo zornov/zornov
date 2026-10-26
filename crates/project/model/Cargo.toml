@@ -3,7 +3,7 @@ name = "studio-model"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio project data model, reversible edits, undo/redo, project file format and interchange"
+description = "Zornov project data model, reversible edits, undo/redo, project file format and interchange"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

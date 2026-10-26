@@ -31,14 +31,14 @@ turns it on).
   "query": "film burn light leak"}` looks through what can be installed;
   `plugins {"action": "list"}` shows what is installed and available.
 - Installing brings someone else's code in: ask the person first. In the
-  window Studio asks them when you call `plugins {"action": "install",
+  window Zornov asks them when you call `plugins {"action": "install",
   "id": ...}`; from a shell, install only what they asked for.
 - Installed effects and transitions are in the catalogue like built-in
   ones (Effects ▸ Plugins, Cuts ▸ Plugins): `{"op": "apply", "item":
   "Duotone", "clips": [4]}`, `{"op": "transition", "clip": 4, "item":
   "toolkit:iris"}`, and their settings with the `effect` op. Their ids are
   `plugin:item` (`ofx:<identifier>` for OpenFX).
-- `import` hands files Studio cannot read to a plugin that can (a `.ppm`
+- `import` hands files Zornov cannot read to a plugin that can (a `.ppm`
   becomes a picture in the media bin, a `.markers` list becomes markers).
   `plugins {"action": "export", "plugin", "exporter"}` writes the project
   in a plugin's format; `plugins {"action": "panel", "plugin", "panel",
@@ -56,7 +56,7 @@ turns it on).
   float, int, bool, choice (`options`), colour, point. Add `"animated":
   true` when it changes over time, `"wgsl"` with `fn effect(pos:
   vec2<f32>) -> vec4<f32>` for the GPU (`tex(pos)` samples, `u.p[i]` the
-  parameters, `u.time`, `u.size`). Studio builds it with Rust on this Mac,
+  parameters, `u.time`, `u.size`). Zornov builds it with Rust on this Mac,
   runs it on a test picture, installs it and answers with what to apply;
   a compile error comes back for you to fix. `source` instead of `pixel`
   takes a whole `lib.rs` (several effects, a transition, a panel: see

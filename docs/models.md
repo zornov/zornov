@@ -5,7 +5,7 @@ Every model is openly licensed and is downloaded only when the user asks
 download <id>`), from the upstream location below, into
 `~/Movies/Studio/Models/<id>/`. Each file is checked against the SHA-256 in
 [`crates/ai/ai/src/registry.rs`](../crates/ai/src/registry.rs) before it is used; URLs are pinned to a
-fixed revision so the checksums stay valid. Nothing is bundled with Studio.
+fixed revision so the checksums stay valid. Nothing is bundled with Zornov.
 
 | id | Model | Used for | Licence | Size | Upstream project | Files downloaded from |
 |---|---|---|---|---|---|---|

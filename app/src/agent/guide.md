@@ -1,12 +1,12 @@
-# Studio for agents
+# Zornov for agents
 
-Studio is a video editor built to be driven by you. Everything a person
+Zornov is a video editor built to be driven by you. Everything a person
 can do in the window is a tool call here, in plain words and units, and
 you can look at, listen to and read the work at every step.
 
 ## Your senses
 
-- **See (start here)**: `see` is Studio looking for you and saying what it
+- **See (start here)**: `see` is Zornov looking for you and saying what it
   sees, in a line per shot: light, clipping, contrast, colours, faces and
   how close, where the subject sits, camera motion, sharpness, bars,
   lettering, and what is playing there. `see` with `media` scouts footage
@@ -378,7 +378,7 @@ Each op is `{"op": "<name>", …fields}`.
 |---|---|---|
 | `place` | `media`, `at`, `lane`, `source_in`, `source_out` or `duration`, `speed`, `fit`, `x`, `y`, `volume`, `muted` | a piece of a file: which part, where, how fast, how framed (`fit`: `fit` / `fill` / `fill_picture`, which ignores letterbox bars). Footage used = duration × speed |
 | `add` | `item` (or `query` + `kind`, `mood`, `min_seconds`, `max_seconds`, `same`: an unused sound or track that fits), `at`, `lane`, `panel`, `duration`, `x`, `y`, `scale`, `fit`, `opacity`, `rotation`, `volume` | a library item (music, sound effect, sticker, emoji, frame, overlay, background, shape) placed and sized in one op; a `duration` longer than a motion graphic loops it |
-| `scene` | `say` (what it says), `show` (things to see), `title` (short words on screen), `where` (a place for the background), `mood`, `voice` (a voice name, or false for a silent caption), `duration`, `at` | one beat of a video, built by Studio: `say` is spoken and the scene lasts as long as it; pictures from the library are sized and laid out to fill the frame, the first at once and the others as the voice names them, kept moving; the spoken words appear as captions; a whoosh on the cut; it follows the scenes before it |
+| `scene` | `say` (what it says), `show` (things to see), `title` (short words on screen), `where` (a place for the background), `mood`, `voice` (a voice name, or false for a silent caption), `duration`, `at` | one beat of a video, built by Zornov: `say` is spoken and the scene lasts as long as it; pictures from the library are sized and laid out to fill the frame, the first at once and the others as the voice names them, kept moving; the spoken words appear as captions; a whoosh on the cut; it follows the scenes before it |
 | `narrate` | `say`, `at`, `voice`, `rate` (words a minute, 175), `volume` | speaks a line on the voice lane with the service chosen in Settings (Mac voices, Fish Audio, ElevenLabs or OpenAI: `voices` says which; `voice` is one of that service's voices); returns its words with their times. If it fails, say so: never work around it with another voice |
 | `music` | `genre` or `describe` ("noir jazz with sax and double bass", "hopeful acoustic folk", "minimal electronic", "dark slow score"), `mood`, `instruments`, `bpm`, `key` ("D minor"), `duration` (default: the whole video), `at`, `cues` (`[{"at": 2.0, "kind": "hit"}]` on the project timeline: hit, resolve, riser, drop, swell), `tail`, `variant`, `volume`; or `item` / only `mood` for a library track | composes original music here in any genre, key and tempo, played by synthesised instruments, exactly as long as asked, hitting each cue on a beat and ending on a last chord that rings out into the tail; the reply says the key, tempo, band and where each cue landed. With only a `mood` it takes a fitting library track under the whole video (a fade at the end) and composes when the library has nothing; under narration it sits low and dips while someone speaks (skill `music-beat-sync` part Scoring) |
 | `text` | `text`, `at`, `duration`, `style`, `x`, `y`, `size`, `colour`, `lane`, `backing` | a title; `backing: true` (or `{"colour": "black", "opacity": 70}`) puts a box sized to the text under it, so it reads on any picture; `backing: false` removes every box, the style's own plate too |
@@ -536,7 +536,7 @@ one place, one showing). Panels: `library`, `viewer`, `inspector`,
 prompter, live), `editorial` (timeline index, takes, script lines) and
 `ai` (you, the AI editor). Review, Record and Editorial can also float in
 a window inside the editor, and any panel but the Viewer can pop out into
-a window of the system's own (another screen). Only in the Studio window,
+a window of the system's own (another screen). Only in the Zornov window,
 not from a shell.
 
 - `layout {}` tells you every panel (`open`, `showing` when it is the tab
@@ -557,19 +557,19 @@ not from a shell.
 - `"workspace"` with `"name"` switches (Edit, Colour, Audio, VFX, Motion
   graphics, Production, or one the person saved); `"save_workspace"`
   keeps the window as it is now under a name; `"reset"` goes back to
-  Studio's own layout. `"set"` with a `tree` from `layout {}` lays out a
+  Zornov's own layout. `"set"` with a `tree` from `layout {}` lays out a
   whole tree at once.
 
 The layout is the person's: change it when they ask ("put the scopes next
 to the viewer", "a colour layout"), or when a panel you are using with
 them is closed (open the Sound panel before talking them through a mix).
-Say what you moved; Layout ▸ Reset layout puts Studio's own back.
+Say what you moved; Layout ▸ Reset layout puts Zornov's own back.
 
 ## From a shell
 
-`studio agent --project DIR TOOL '{"json": "args"}'` runs one tool on a
+`zornov agent --project DIR TOOL '{"json": "args"}'` runs one tool on a
 project folder (created if empty) and saves after every change; undo and
-redo carry across calls. `studio agent --project DIR -` reads calls
+redo carry across calls. `zornov agent --project DIR -` reads calls
 (`{"tool": …, "args": …}`, one per line or as one array) from stdin.
 Pictures are written as JPEG files and their paths printed.
-`studio mcp --project DIR` is the same as an MCP server.
+`zornov mcp --project DIR` is the same as an MCP server.

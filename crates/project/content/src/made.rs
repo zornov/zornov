@@ -14,7 +14,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 /// Credit line for everything we made.
-pub const ATTRIBUTION: &str = "Made for Studio";
+pub const ATTRIBUTION: &str = "Made for Zornov";
 
 #[derive(Deserialize)]
 struct Manifest {

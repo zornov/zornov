@@ -56,7 +56,7 @@ length limits), `netflix` (dialogue-gated -27 LKFS, -2 dBTP, strict
 levels and flashes, captions), `broadcast-r128` (1920 x 1080 at 25 fps,
 -23 LUFS, R 103 legal levels), `broadcast-atsc` (29.97 fps, -24 LKFS),
 `web-preview` (720p), and the packages `dcp-smpte`, `dcp-interop`,
-`imf-netflix`. The numbers are the published specs as Studio knew them in
+`imf-netflix`. The numbers are the published specs as Zornov knew them in
 2026: say so, and tell the user to check the platform's current page for
 anything contractual. A file spec makes an MP4; the QC report comes back
 in the answer.
@@ -67,20 +67,20 @@ in the answer.
   6 channels: the stereo mix in L R, silence in the rest), CPL, PKL,
   ASSETMAP, VOLINDEX. Frame rates 24, 25, 30, 48, 50, 60 (4K up to 30).
   Flat / scope follows the project's shape inside the 2K container. The
-  JPEG 2000 encoder is Studio's own (written from the standard; standard
+  JPEG 2000 encoder is Zornov's own (written from the standard; standard
   JPEG 2000 decoders read it), software only, about 2-4 s per 2K frame per
   machine: **give a feature to render nodes** (`distributed: true`). Not
   done: encryption / KDMs, signatures, subtitle tracks, 3D. Not tested on
   a cinema server: have it checked in a DCP player before sending it.
 - **IMF** (`imf-netflix`, App 2E): MXF track files, CPL, PKL, ASSETMAP.
   Experimental: its CPL descriptors are reduced and the codestream is
-  Studio's general profile, so run Netflix Photon over it before delivery.
+  Zornov's general profile, so run Netflix Photon over it before delivery.
 
 **`queue` renders in the background.** `queue add` (with `spec` or
 `preset`, `priority`, `qc`, `bundle`, `distributed`) puts the saved
-project in the render queue; the Studio window draws the queue while it
+project in the render queue; the Zornov window draws the queue while it
 is open (the jobs popover shows it with pause, resume, cancel and "run
-first"); from a shell `studio queue run` draws it, and `queue run` does
+first"); from a shell `zornov queue run` draws it, and `queue run` does
 the same inside an agent session. `pause` / `resume` / `cancel` /
 `priority` / `retry` / `clear` manage it from anywhere; jobs finish with
 a notice (`notices`) and a desktop notification. A render is cut into
@@ -91,13 +91,13 @@ own bytes). Sound is mixed once for the whole.
 `save_preset` / `presets` / `add` with `from_preset` keep favourite
 settings.
 
-**Render nodes.** On another computer on the network run `studio node`;
+**Render nodes.** On another computer on the network run `zornov node`;
 it prints an address and a pairing token. `queue add_node {addr, token}`
 here (`queue discover` finds nodes, `queue nodes` shows who answers).
 A job with `distributed: true` then shares its pieces with every node that
 answers (and this Mac), spreading them as machines free up and
 re-sending a piece to another machine if one fails. Everything draws with
-Studio's software H.264 encoder in that case, so the pieces join. The
+Zornov's software H.264 encoder in that case, so the pieces join. The
 project's files are sent once (checked by fingerprint, so a second render
 sends only what changed); media outside the project folder travels too.
 Fonts, LUTs and other files a project points at by absolute path must be
@@ -141,11 +141,11 @@ for long ones) -> read the QC findings, fix, render again -> `bundle`.
 
 ## Reference: tool `export`
 
-Render a file. Presets: Social 1080p, 4K master, Vertical, GIF, Intermediate, PNG sequence, HEVC 10-bit (smooth gradients, hardware), Audio only (M4A), masters (ProRes 422 HQ, ProRes 4444, ProRes Proxy, EXR / DPX / TIFF / PNG 16-bit sequences, DNxHR LB, DNxHR SQ, DNxHR HQ, DNxHR HQX, DNxHR 444: QuickTime with sound and timecode), Lottie (or dotLottie; also any path ending .json or .lottie): a vector animation for the web and apps, its pictures, titles, cards and shapes with their motion baked from Studio; the reply lists what Lottie cannot hold (video, sound, effects, masks). Waits for the file unless `wait` is false.
+Render a file. Presets: Social 1080p, 4K master, Vertical, GIF, Intermediate, PNG sequence, HEVC 10-bit (smooth gradients, hardware), Audio only (M4A), masters (ProRes 422 HQ, ProRes 4444, ProRes Proxy, EXR / DPX / TIFF / PNG 16-bit sequences, DNxHR LB, DNxHR SQ, DNxHR HQ, DNxHR HQX, DNxHR 444: QuickTime with sound and timecode), Lottie (or dotLottie; also any path ending .json or .lottie): a vector animation for the web and apps, its pictures, titles, cards and shapes with their motion baked from Zornov; the reply lists what Lottie cannot hold (video, sound, effects, masks). Waits for the file unless `wait` is false.
 
 ## Reference: tool `queue`
 
-The render queue: exports that run in the background, in priority order, with pause and resume, saved presets and notices, optionally shared with render nodes on the local network. action: add {name, spec | preset, path, range [from, to] seconds, qc (default true), bundle, priority (higher first), distributed (share chunks with nodes), chunk_secs, from_preset} / list / pause {job} / resume {job} / cancel {job} / retry {job} / priority {job, priority} / clear (finished) / run {wait} (draw the queue here until empty) / notices / presets / save_preset {name, spec, preset, qc, bundle, distributed, priority} / nodes (render computers and whether they answer) / add_node {addr, token, name} / remove_node {name} / discover. A job renders the saved project. A render node is another computer running `studio node`; it prints its address and a pairing token.
+The render queue: exports that run in the background, in priority order, with pause and resume, saved presets and notices, optionally shared with render nodes on the local network. action: add {name, spec | preset, path, range [from, to] seconds, qc (default true), bundle, priority (higher first), distributed (share chunks with nodes), chunk_secs, from_preset} / list / pause {job} / resume {job} / cancel {job} / retry {job} / priority {job, priority} / clear (finished) / run {wait} (draw the queue here until empty) / notices / presets / save_preset {name, spec, preset, qc, bundle, distributed, priority} / nodes (render computers and whether they answer) / add_node {addr, token, name} / remove_node {name} / discover. A job renders the saved project. A render node is another computer running `zornov node`; it prints its address and a pairing token.
 
 ## Reference: tool `qc`
 

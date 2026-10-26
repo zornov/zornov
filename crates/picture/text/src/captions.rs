@@ -686,7 +686,7 @@ impl CaptionTrack {
     pub fn to_ass(&self, canvas: &Canvas) -> String {
         let st = &self.style;
         let mut out = String::new();
-        let _ = writeln!(out, "[Script Info]\nTitle: Studio captions\nScriptType: v4.00+\nWrapStyle: 0\nScaledBorderAndShadow: yes\nPlayResX: {}\nPlayResY: {}\n", canvas.width, canvas.height);
+        let _ = writeln!(out, "[Script Info]\nTitle: Zornov captions\nScriptType: v4.00+\nWrapStyle: 0\nScaledBorderAndShadow: yes\nPlayResX: {}\nPlayResY: {}\n", canvas.width, canvas.height);
         out.push_str("[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n");
         let primary = st.text.fill.representative();
         let highlight = match &st.look {
@@ -715,7 +715,7 @@ impl CaptionTrack {
         let margin_y = (canvas.height as f32 * st.safe_margins[1]).round() as i32;
         let _ = writeln!(
             out,
-            "Style: Studio,{},{:.0},{},{},{},{},{},{},{},0,100,100,{:.1},0,{},{:.1},{:.1},{},{},{},{},1",
+            "Style: Zornov,{},{:.0},{},{},{},{},{},{},{},0,100,100,{:.1},0,{},{:.1},{:.1},{},{},{},{},1",
             st.text.font.family,
             size,
             ass_colour(prim),
@@ -765,7 +765,7 @@ impl CaptionTrack {
                     text.push_str(&w.text.replace('{', "(").replace('}', ")"));
                 }
             }
-            let _ = writeln!(out, "Dialogue: 0,{},{},Studio,{},0,0,0,,{}", ass_time(c.start), ass_time(c.end), name, text);
+            let _ = writeln!(out, "Dialogue: 0,{},{},Zornov,{},0,0,0,,{}", ass_time(c.start), ass_time(c.end), name, text);
         }
         out
     }
@@ -1318,8 +1318,8 @@ mod tests {
         assert!(vtt.contains("<00:00:0"));
         let ass = t.to_ass(&Canvas::HD);
         assert!(ass.contains("PlayResX: 1920"));
-        assert!(ass.contains("Style: Studio,Montserrat,46,&H003FD2FF,&H00FFFFFF"));
-        assert!(ass.contains("Dialogue: 0,0:00:00.50,0:00:02.50,Studio,Maya,0,0,0,,"));
+        assert!(ass.contains("Style: Zornov,Montserrat,46,&H003FD2FF,&H00FFFFFF"));
+        assert!(ass.contains("Dialogue: 0,0:00:00.50,0:00:02.50,Zornov,Maya,0,0,0,,"));
         assert!(ass.contains("{\\k"));
     }
 

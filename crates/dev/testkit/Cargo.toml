@@ -3,7 +3,7 @@ name = "studio-testkit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared test kit for Studio: generated fixtures with ground truth, mocks, tolerant golden comparison and proptest strategies"
+description = "Shared test kit for Zornov: generated fixtures with ground truth, mocks, tolerant golden comparison and proptest strategies"
 publish = false
 
 [dependencies]

@@ -36,7 +36,7 @@ tools: search_media, see, listen, analyse, frame, contact_sheet, media, import, 
   in timeline seconds per clip. Captions (`ai` `captions`) give the spoken
   words with their times.
 - **The library, as an inventory.** `catalogue` with no arguments says what
-  Studio's content library holds: counts by kind, category, mood and sound
+  Zornov's content library holds: counts by kind, category, mood and sound
   kind (hit, boom, swell, swoosh, long), which packs are installed, downloaded
   only as an index, or available, and how much needs a credit line in the film's credits. `catalogue {panel: "audio", query, kind, mood, min_seconds,
   max_seconds, fresh}` ranks sounds and music by name, tags, mood and what each
@@ -232,7 +232,7 @@ Bring media files (video, audio, images, layered PSD documents, Lottie animation
 
 ## Reference: tool `download`
 
-Bring media from the internet into the project: a link straight to a video, sound or picture file, or a web page whose video or sound is openly exposed. For a page Studio looks through its video and audio elements, Open Graph and player tags, VideoObject data, alternate links, oEmbed and the HLS (.m3u8) and DASH (.mpd) playlists named in the page or its scripts, then downloads the best version and, for a playlist, joins it into one MP4 (quality picks another: best, lowest, audio for sound only, or a height such as 720). Media that is protected (DRM), hidden behind a site's signature or sign-in, or not exposed at all is refused with the reason; Studio never logs in for the person or works around protection, so tell them plainly and ask for a file or another link. Saved in the project's Downloads folder and added to the media bin; with to_timeline also laid on the main lane. Only use media the person has the right to use.
+Bring media from the internet into the project: a link straight to a video, sound or picture file, or a web page whose video or sound is openly exposed. For a page Zornov looks through its video and audio elements, Open Graph and player tags, VideoObject data, alternate links, oEmbed and the HLS (.m3u8) and DASH (.mpd) playlists named in the page or its scripts, then downloads the best version and, for a playlist, joins it into one MP4 (quality picks another: best, lowest, audio for sound only, or a height such as 720). Media that is protected (DRM), hidden behind a site's signature or sign-in, or not exposed at all is refused with the reason; Zornov never logs in for the person or works around protection, so tell them plainly and ask for a file or another link. Saved in the project's Downloads folder and added to the media bin; with to_timeline also laid on the main lane. Only use media the person has the right to use.
 
 ## Reference: tool `search_media`
 
@@ -244,7 +244,7 @@ The look-ups an editor makes while cutting. ask: match_frame {t, lane} (the sour
 
 ## Reference: tool `search`
 
-Search everything Studio knows across every project on this Mac at once: on-screen text and titles, what narration says (and when), markers, media files and which projects use them, the AI editors' notes, saved moves and designs. Every word must match (prefixes count); best matches first. Use it to find where something was said or shown, reuse a move or a design, or find footage used before.
+Search everything Zornov knows across every project on this Mac at once: on-screen text and titles, what narration says (and when), markers, media files and which projects use them, the AI editors' notes, saved moves and designs. Every word must match (prefixes count); best matches first. Use it to find where something was said or shown, reuse a move or a design, or find footage used before.
 
 ## Reference: tool `catalogue`
 
@@ -252,7 +252,7 @@ What the library has: pictures (stickers, emoji, shapes, backgrounds), sounds an
 
 ## Reference: tool `see`
 
-Studio looks for you and says what it sees, in words (a few dozen tokens a line instead of hundreds for a picture): light (brightness, blown-out, pure black), contrast, dominant colours and how vivid, faces (how many, how close, where), where the subject sits, camera motion (still, pans which way, how fast), sharpness, black bars, lettering on screen, and what is playing there. No arguments: one line per main-lane shot. t: one moment. clips: those clips. media (+ from, to, every): footage before it is used, one line per step (times in the file). place + t: the backdrop read for staging (characters left out, or the clips in without): where the far land ends, which parts are ground, spots to stand on with the height a character there should have, and pieces (rocks, trunks, grass) a character can stand behind (foreground cuts one out). regions + t: what the backdrop is made of (sky, water, ground, path, trees, rocks, mountains, buildings, people, animals): how much, where, how far, so effects and particles can go inside one. Use frame / contact_sheet only when you need the picture itself.
+Zornov looks for you and says what it sees, in words (a few dozen tokens a line instead of hundreds for a picture): light (brightness, blown-out, pure black), contrast, dominant colours and how vivid, faces (how many, how close, where), where the subject sits, camera motion (still, pans which way, how fast), sharpness, black bars, lettering on screen, and what is playing there. No arguments: one line per main-lane shot. t: one moment. clips: those clips. media (+ from, to, every): footage before it is used, one line per step (times in the file). place + t: the backdrop read for staging (characters left out, or the clips in without): where the far land ends, which parts are ground, spots to stand on with the height a character there should have, and pieces (rocks, trunks, grass) a character can stand behind (foreground cuts one out). regions + t: what the backdrop is made of (sky, water, ground, path, trees, rocks, mountains, buildings, people, animals): how much, where, how far, so effects and particles can go inside one. Use frame / contact_sheet only when you need the picture itself.
 
 ## Reference: tool `listen`
 

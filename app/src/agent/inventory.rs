@@ -187,7 +187,7 @@ pub fn overview(entries: &[Entry], facts: &Facts, packs: &Packs, folder_found: b
         "find": "catalogue {query: [words]} searches pictures, sounds and motions at once; {panel: audio, query, kind, mood, max_seconds} narrows sounds and music",
     });
     if !folder_found {
-        o["note"] = json!("Studio's content library was not found on this Mac: only the built-in samples exist (open Studio.app once, or set the content folder in Settings)");
+        o["note"] = json!("Zornov's content library was not found on this Mac: only the built-in samples exist (open Zornov.app once, or set the content folder in Settings)");
     }
     o
 }
@@ -446,8 +446,8 @@ pub(crate) mod fixture {
             v.push(entry(&format!("Punch {i}"), Kind::Sound, "Hits & punches", "Beta SFX", &["hit", "punch"], Some(0.3), false));
         }
         v.push(entry("Rain Loop", Kind::Sound, "Nature", "Beta SFX", &["rain", "calm"], Some(20.0), false));
-        v.push(entry("Sunny Walk", Kind::Music, "Pop", "Studio Tunes", &["happy", "upbeat"], Some(120.0), true));
-        v.push(entry("Sunny Day", Kind::Music, "Pop", "Studio Tunes", &["happy", "groovy"], Some(100.0), true));
+        v.push(entry("Sunny Walk", Kind::Music, "Pop", "Zornov Tunes", &["happy", "upbeat"], Some(120.0), true));
+        v.push(entry("Sunny Day", Kind::Music, "Pop", "Zornov Tunes", &["happy", "groovy"], Some(100.0), true));
         v.push(entry("Night Hunt", Kind::Music, "Cinematic", "Dark Works", &["dark", "tense"], Some(150.0), false));
         v.push(entry("Still Water", Kind::Music, "Ambient", "Calm Co", &["chill", "peaceful"], Some(90.0), false));
         v.push(entry("Jingle Box", Kind::Music, "Jingles & stingers", "Calm Co", &["jingles"], Some(6.0), false));

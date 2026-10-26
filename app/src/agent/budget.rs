@@ -210,7 +210,7 @@ fn busy_session() -> Session {
     let mut s = Session::new(services::project::new_custom("Pictures", 1920, 1080, 30.0));
     let ops: Vec<Value> = (0..8).map(|i| json!({"op": "card", "colour": format!("#{:02x}{:02x}{:02x}", 40 + i * 25, 200 - i * 20, 90 + i * 10), "at": i as f64, "duration": 1.0, "lane": "main"})).collect();
     s.edit(&ops, "cards", false).unwrap();
-    s.edit(&[json!({"op": "text", "text": "Studio picture budget 0123456789", "at": 0, "duration": 8})], "title", false).unwrap();
+    s.edit(&[json!({"op": "text", "text": "Zornov picture budget 0123456789", "at": 0, "duration": 8})], "title", false).unwrap();
     s
 }
 

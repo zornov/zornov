@@ -383,7 +383,7 @@ pub fn relaunch() -> Result<(), String> {
         Some(a) => PathBuf::from(a),
         None => std::env::current_exe().map_err(|e| e.to_string())?,
     };
-    std::process::Command::new(exe).args(std::env::args_os().skip(1)).spawn().map(|_| ()).map_err(|e| format!("cannot start the new Studio: {e}"))
+    std::process::Command::new(exe).args(std::env::args_os().skip(1)).spawn().map(|_| ()).map_err(|e| format!("cannot start the new Zornov: {e}"))
 }
 
 #[cfg(test)]
@@ -458,12 +458,12 @@ mod tests {
     #[test]
     fn an_appimage_is_replaced_whole_and_stays_executable() {
         let d = scratch("appimage");
-        let (old, new) = (d.join("Studio.AppImage"), d.join("new"));
+        let (old, new) = (d.join("Zornov.AppImage"), d.join("new"));
         std::fs::write(&old, "old").unwrap();
         std::fs::write(&new, "new").unwrap();
         replace_file(&new, &old).unwrap();
         assert_eq!(std::fs::read_to_string(&old).unwrap(), "new");
-        assert!(!d.join(".Studio.AppImage.studio-new").exists());
+        assert!(!d.join(".Zornov.AppImage.studio-new").exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn a_staged_file_is_checked_against_its_signed_hash() {
         let d = scratch("filecheck");
-        let staged = d.join("Studio.msi");
+        let staged = d.join("Zornov.msi");
         std::fs::write(&staged, "installer").unwrap();
         let entry = Entry { url: String::new(), size: 9, sha256: feed::sha256_hex(b"installer"), signature: String::new() };
         let mut p = Pending { version: "0.2.0".into(), platform: "windows-x86_64-msi".into(), staged: staged.clone(), entry, kind: "msi".into() };

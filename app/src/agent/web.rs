@@ -79,7 +79,7 @@ pub fn read_with(a: &Value, fetch: Fetch, allow_local: bool) -> Result<Value, St
     Ok(v)
 }
 
-const UA: &str = "Studio (video editor; reads pages for its AI editor)";
+const UA: &str = "Zornov (video editor; reads pages for its AI editor)";
 
 /// `text` from character `from`, at most `max` characters, and how to go on.
 fn windowed(text: &str, from: usize, max: usize) -> Value {
@@ -102,7 +102,7 @@ pub(super) fn refuse_private(url: &str) -> Result<(), String> {
     let name = if host.starts_with('[') { host.trim_start_matches('[').split(']').next().unwrap_or("") } else { host.split(':').next().unwrap_or("") }.to_ascii_lowercase();
     let private_v4 = name.split('.').map(str::parse::<u8>).collect::<Result<Vec<_>, _>>().is_ok_and(|o| o.len() == 4 && (o[0] == 10 || o[0] == 127 || o[0] == 0 || (o[0] == 169 && o[1] == 254) || (o[0] == 172 && (16..32).contains(&o[1])) || (o[0] == 192 && o[1] == 168)));
     if name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local") || name.ends_with(".internal") || private_v4 || name == "::1" || name.starts_with("fe80") || name.starts_with("fc") || name.starts_with("fd") || !name.contains('.') && !name.contains(':') {
-        return Err("Studio only fetches from the public web, not this computer or its network".into());
+        return Err("Zornov only fetches from the public web, not this computer or its network".into());
     }
     Ok(())
 }

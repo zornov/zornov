@@ -192,7 +192,7 @@ pub fn export_stems(project: &m::Project, dir: &Path, layout: Layout, separate_b
         return Err("The timeline is empty: no stems to write".into());
     }
     let desk = Desk::of(project);
-    let title = if title.trim().is_empty() { "Studio".to_owned() } else { title.trim().to_owned() };
+    let title = if title.trim().is_empty() { "Zornov".to_owned() } else { title.trim().to_owned() };
     let mut jobs: Vec<(String, MixRequest)> = vec![
         ("DX".into(), MixRequest { layout: Some(layout), stem: Some(vec![BusKind::Dialogue]), ..Default::default() }),
         ("MX".into(), MixRequest { layout: Some(layout), stem: Some(vec![BusKind::Music]), ..Default::default() }),
@@ -212,7 +212,7 @@ pub fn export_stems(project: &m::Project, dir: &Path, layout: Layout, separate_b
     let mut out = Vec::new();
     for (name, req) in jobs {
         let chans = render(project, &req, 0, end);
-        let bext = Bext { description: format!("{title} {name} {}", layout.id()), originator: "Studio".into(), time_reference: 0 };
+        let bext = Bext { description: format!("{title} {name} {}", layout.id()), originator: "Zornov".into(), time_reference: 0 };
         let bytes = studio_sound::wav::write(&chans, RATE, SampleFormat::Pcm24, Some(layout), Some(&bext));
         let path = dir.join(format!("{} {}.wav", safe(&title), name.replace('&', "and")));
         std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -260,7 +260,7 @@ pub fn export_adm(project: &m::Project, path: &Path, layout: Layout, title: &str
         objects.push(studio_sound::adm::Object { name: lane.name.clone(), samples: mono, path: path_pts, width: (spec.surround.shape.width / 180.0).clamp(0.0, 1.0) });
     }
     let n = objects.len();
-    let bytes = studio_sound::adm::write(&bed, layout, &objects, RATE, if title.is_empty() { "Studio" } else { title });
+    let bytes = studio_sound::adm::write(&bed, layout, &objects, RATE, if title.is_empty() { "Zornov" } else { title });
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok((layout.channels(), n))
 }

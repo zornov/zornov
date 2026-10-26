@@ -279,7 +279,7 @@ impl AgentUi {
             let (tx, rx) = mpsc::channel();
             self.live.push(ToolCall { tool: "import".into(), args: serde_json::json!({ "paths": [p.display().to_string()] }), reply: tx, epoch: 0 });
             self.downloads.push((format!("converted {name} and imported it"), rx));
-            kit::push(ctx, crate::i18n::tf(format!("Converting {name} to a format Studio plays…")), None, Some(Icon::FilmStrip));
+            kit::push(ctx, crate::i18n::tf(format!("Converting {name} to a format Zornov plays…")), None, Some(Icon::FilmStrip));
         }
     }
 
@@ -349,7 +349,7 @@ impl AgentUi {
     }
 
     /// Every frame, panel open or not: agents in the app and outside it
-    /// (`studio mcp`, `studio agent`) work on the document in this window.
+    /// (`zornov mcp`, `zornov agent`) work on the document in this window.
     pub fn tick(app: &mut StudioApp, ctx: &egui::Context) {
         if app.agent.is_none() {
             app.agent = Some(AgentUi::new(ctx));
@@ -501,7 +501,7 @@ impl AgentUi {
                     a.live.push(ToolCall { tool: "make_playable".into(), args: serde_json::json!({ "media": need }), reply: tx, epoch: 0 });
                     let what = if need.len() == 1 { "a video".to_owned() } else { format!("{} videos", need.len()) };
                     a.downloads.push((format!("converted {what} to H.264 so it plays"), rx));
-                    kit::push(ctx, crate::i18n::tf(format!("Converting {what} Studio can't play yet to H.264…")), None, Some(Icon::FilmStrip));
+                    kit::push(ctx, crate::i18n::tf(format!("Converting {what} Zornov can't play yet to H.264…")), None, Some(Icon::FilmStrip));
                 }
             }
         }
@@ -563,7 +563,7 @@ impl AgentUi {
         let brain: Box<dyn Brain> = if want.2 { Box::new(CrewBrain::new(cast)) } else { cast(None)? };
         // Swapped in by the thread that runs the next request (after the
         // previous one has let go).
-        *self.tabs[tab].pending_brain.lock().map_err(|_| "the AI editor crashed; reopen Studio")? = Some(brain);
+        *self.tabs[tab].pending_brain.lock().map_err(|_| "the AI editor crashed; reopen Zornov")? = Some(brain);
         self.tabs[tab].brain_for = Some(want);
         Ok(())
     }
@@ -719,7 +719,7 @@ impl AgentUi {
                             None => Err("no AI editor".into()),
                         }
                     }
-                    Err(_) => Err("The AI editor crashed earlier; reopen Studio.".into()),
+                    Err(_) => Err("The AI editor crashed earlier; reopen Zornov.".into()),
                 };
                 if let Err(e) = r {
                     if !gate.stopped() {
@@ -1485,7 +1485,7 @@ fn empty_state(input: &mut String, focus_input: &mut bool, ui: &mut egui::Ui, w:
         ui.add_space(gap);
     }
     ui.add_space(8.0);
-    centred(ui, "Type / for Studio commands  ·  ⌘K opens this panel", theme::caption(), t.text_2, w);
+    centred(ui, "Type / for Zornov commands  ·  ⌘K opens this panel", theme::caption(), t.text_2, w);
 }
 
 fn centred(ui: &mut egui::Ui, text: &str, font: FontId, colour: Color32, w: f32) {
@@ -1553,7 +1553,7 @@ fn step_icon(tool: &str) -> Icon {
 fn step_name(tool: &str) -> String {
     let w = |s: &str| crate::i18n::t(s).into_owned();
     match tool {
-        "guide" | "edit_schema" => w("Reading Studio's guide"),
+        "guide" | "edit_schema" => w("Reading Zornov's guide"),
         "summary" | "script" => w("Reading the timeline"),
         "inspect" | "pick" | "canvas_layout" => w("Inspecting"),
         "media" => w("Checking the media"),
@@ -1582,7 +1582,7 @@ fn step_name(tool: &str) -> String {
 
 /// Status lines about the AI's own set-up, not about the person's work.
 fn note_is_harness(n: &str) -> bool {
-    n.starts_with("The director is") || n.contains("look up Studio's tools") || n.ends_with("steps left for this request")
+    n.starts_with("The director is") || n.contains("look up Zornov's tools") || n.ends_with("steps left for this request")
 }
 
 fn digest_steps<'a>(entries: &'a [Entry], idx: &[usize]) -> Vec<digest::Step<'a>> {

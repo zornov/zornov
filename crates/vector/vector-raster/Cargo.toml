@@ -3,7 +3,7 @@ name = "studio-vector-raster"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's vector rasterizer: exact-area anti-aliasing, non-zero and even-odd fills, strokes (joins, caps, miter limits, dashes, variable width), linear/radial/conic/freeform/mesh gradients, images and patterns, blend modes, clips, masks and effects, on the CPU and on the GPU (WGSL compute)."
+description = "Zornov's vector rasterizer: exact-area anti-aliasing, non-zero and even-odd fills, strokes (joins, caps, miter limits, dashes, variable width), linear/radial/conic/freeform/mesh gradients, images and patterns, blend modes, clips, masks and effects, on the CPU and on the GPU (WGSL compute)."
 
 [features]
 default = ["gpu"]

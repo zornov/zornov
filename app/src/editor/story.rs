@@ -140,7 +140,7 @@ pub fn panel(app: &mut StudioApp, ui: &mut egui::Ui, chip: usize, body: Rect) {
         let pad = theme::space::PANEL_PAD;
         egui::ScrollArea::vertical().id_salt(("story-empty", chip)).auto_shrink([false, false]).show_v(&mut bui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: pad as i8, right: pad as i8, top: 6, bottom: 8 }).show(ui, |ui| {
-                ui.label(RichText::new("Write or paste your story or narration below, or bring in a file (text, Markdown, Fountain, SRT, VTT, Word) or drop it here. Studio breaks it into scenes and lines you can time, plan and build the timeline from.").font(theme::body()).color(t.text_2));
+                ui.label(RichText::new("Write or paste your story or narration below, or bring in a file (text, Markdown, Fountain, SRT, VTT, Word) or drop it here. Zornov breaks it into scenes and lines you can time, plan and build the timeline from.").font(theme::body()).color(t.text_2));
                 ui.add_space(4.0);
                 if Button::secondary("Import script").icon(Icon::DownloadSimple).compact().show(ui).clicked() {
                     import_dialog(app, &ctx);

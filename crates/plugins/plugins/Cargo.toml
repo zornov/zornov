@@ -1,6 +1,6 @@
 [package]
 name = "studio-plugins"
-description = "Studio's plugin host: sandboxed WebAssembly plugins (effects, generators, transitions, importers, exporters, panels), the plugin store, and an OpenFX host on macOS"
+description = "Zornov's plugin host: sandboxed WebAssembly plugins (effects, generators, transitions, importers, exporters, panels), the plugin store, and an OpenFX host on macOS"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

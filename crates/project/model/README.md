@@ -1,6 +1,6 @@
 # studio-model
 
-The project data model for Studio: what a project *is*, how it changes, and
+The project data model for Zornov: what a project *is*, how it changes, and
 how it is stored and exchanged. No pixels or samples here. `render` reads
 the model to draw frames; `app` changes it only through edits.
 
@@ -146,8 +146,8 @@ let (edl, report) = interchange::edl::export(&project, seq, Default::default())?
 ```
 
 Every call returns a `Report` of what could not be carried over; show it
-to the user. OTIO export embeds the full Studio objects in
-`metadata.studio`, so Studio → OTIO → Studio is lossless. FCPXML import
+to the user. OTIO export embeds the full Zornov objects in
+`metadata.studio`, so Zornov → OTIO → Zornov is lossless. FCPXML import
 covers 1.9+ spine, connected clips, titles, gaps, compound clips,
 transitions and markers. EDL export is CMX3600 for the spine (cuts,
 dissolves, M2 speed lines, drop-frame for 29.97/59.94).

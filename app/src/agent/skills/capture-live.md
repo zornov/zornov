@@ -34,7 +34,7 @@ separately recorded sound up with picture.
 **Real devices and permissions.** A camera, microphone, screen or window
 is opened only when the person asked for it: pass `user_approved: true`
 only when their own words in this conversation asked you to use that
-device or to stream. The system must also have given Studio access:
+device or to stream. The system must also have given Zornov access:
 `capture {action: devices}` lists what is connected and the state of
 camera / microphone / screen access (listing never asks anything and
 never turns a camera on). If access has not been given, tell the person

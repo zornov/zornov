@@ -5,12 +5,12 @@
 //!
 //! ```text
 //! studio                       the Studio prompt in this project folder
-//! studio new my-video          a new project in ./my-video
-//! studio see                   one command and out (any command below)
+//! zornov new my-video          a new project in ./my-video
+//! zornov see                   one command and out (any command below)
 //! studio card colour=red at=0 duration=2
-//! studio make "a 10 second intro about the ocean"
-//! studio app                   the editor window (studio open DIR: on that project)
-//! studio help [command]
+//! zornov make "a 10 second intro about the ocean"
+//! zornov app                   the editor window (zornov open DIR: on that project)
+//! zornov help [command]
 //! ```
 //!
 //! At the prompt, a line that starts with a command runs it; anything else
@@ -110,7 +110,7 @@ pub(crate) fn parse(words: &[String]) -> Result<(String, Value), String> {
         }
     }
     if let Some(extra) = it.next() {
-        return Err(format!("\"{}\" is extra: say which field it is (field=value); `studio help {cmd}` lists them", extra.as_str().map(str::to_owned).unwrap_or(extra.to_string())));
+        return Err(format!("\"{}\" is extra: say which field it is (field=value); `zornov help {cmd}` lists them", extra.as_str().map(str::to_owned).unwrap_or(extra.to_string())));
     }
     // An edit op on its own is an edit of one op.
     if OPS.contains(&cmd.as_str()) || cmd == "repeat" {
@@ -302,35 +302,35 @@ fn help(topic: Option<&str>, st: &Style) {
             if let Some(p) = pos.first() {
                 println!("  {} studio {cmd} <{p}> field=value …", st.dim("short:"));
             }
-            println!("\n  `studio guide ops` explains every field.");
+            println!("\n  `zornov guide ops` explains every field.");
             return;
         }
-        println!("no command \"{cmd}\"; `studio help` lists them");
+        println!("no command \"{cmd}\"; `zornov help` lists them");
         return;
     }
     println!(
         "{}
 
-  studio                 the Studio prompt in this project
-  studio new NAME        a new project in ./NAME  (--vertical, --square, --size 1080x1920, --fps 60)
-  studio make \"...\"      ask the AI editor to make or change something
-  studio app             the editor window   (studio open DIR: on that project)
-  studio COMMAND ...     one command, e.g.  studio see   studio check   studio export out.mp4
+  studio                 the Zornov prompt in this project
+  zornov new NAME        a new project in ./NAME  (--vertical, --square, --size 1080x1920, --fps 60)
+  zornov make \"...\"      ask the AI editor to make or change something
+  zornov app             the editor window   (zornov open DIR: on that project)
+  zornov COMMAND ...     one command, e.g.  zornov see   zornov check   zornov export out.mp4
 
 {}  summary  script  see  listen  inspect CLIP  pick X Y  frame T  check  media  catalogue PANEL [QUERY]
 {}  import FILE…  text \"Hi\" at=1  card colour=red at=0  place MEDIA at=2  set CLIP x=100
           animate clip=CLIP property=x keys=[[0,0],[1,500]]  trim  split  delete  move  transition …
-          undo  redo  export [PATH]   (`studio help COMMAND` shows its fields)
+          undo  redo  export [PATH]   (`zornov help COMMAND` shows its fields)
 {}  guide [TOPIC]   the full reference
 ",
-        st.bold("Studio, from the terminal"),
+        st.bold("Zornov, from the terminal"),
         st.dim("look  "),
         st.dim("change"),
         st.dim("learn ")
     );
 }
 
-/// `studio new [NAME] [--vertical | --square | --size WxH] [--fps N]`
+/// `zornov new [NAME] [--vertical | --square | --size WxH] [--fps N]`
 fn new_project(args: &[String], st: &Style) -> i32 {
     let mut name = None;
     let (mut w, mut h, mut fps) = (1920u32, 1080u32, 30.0f64);
@@ -382,8 +382,8 @@ fn new_project(args: &[String], st: &Style) -> i32 {
         Ok(_) => {
             println!("{} {} {}", st.accent("made"), st.bold(&title), st.dim(&format!("({w}×{h}, {fps} fps) in {}", dir.display())));
             match &name {
-                Some(n) => println!("next: {} then {}", st.bold(&format!("cd {n}")), st.bold("studio")),
-                None => println!("next: {}", st.bold("studio")),
+                Some(n) => println!("next: {} then {}", st.bold(&format!("cd {n}")), st.bold("zornov")),
+                None => println!("next: {}", st.bold("zornov")),
             }
             0
         }
@@ -457,7 +457,7 @@ fn ai_event(v: &Value, resume: &mut Option<String>, st: &Style, doing: &mut Stri
 /// tools); `resume` carries the conversation from one turn to the next.
 /// In a terminal a spinner runs while it works and Esc stops it.
 fn ai_turn(dir: &Path, brief: &str, resume: &mut Option<String>, model: Option<&str>, st: &Style) -> bool {
-    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "studio".into());
+    let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "zornov".into());
     let cfg = json!({"mcpServers": {"studio": {"command": exe, "args": ["mcp", "--project", dir.display().to_string()]}}}).to_string();
     let mut cmd = std::process::Command::new("claude");
     cmd.current_dir(dir).args(["-p", brief, "--mcp-config", &cfg, "--strict-mcp-config", "--tools", "", "--allowedTools", "mcp__studio", "--output-format", "stream-json", "--verbose"]);
@@ -581,14 +581,14 @@ fn banner(s: &Session, dir: Option<&Path>, st: &Style) {
     match dir {
         Some(d) => {
             let p = &s.doc.project;
-            let head = format!("✻ Studio  {}", p.name);
-            println!("{}", line(&format!("{} {}", st.accent("✻"), st.bold(&format!("Studio  {}", p.name))), head.chars().count()));
+            let head = format!("✻ Zornov  {}", p.name);
+            println!("{}", line(&format!("{} {}", st.accent("✻"), st.bold(&format!("Zornov  {}", p.name))), head.chars().count()));
             let info = format!("{}×{} · {:.1}s · {} clips · {}", p.width, p.height, p.duration() as f64 / 1e6, p.clips.len(), d.display());
             let info: String = info.chars().take(w - 6).collect();
             println!("{}", line(&format!("  {}", st.dim(&info)), info.chars().count() + 2));
         }
         None => {
-            println!("{}", line(&format!("{} {}", st.accent("✻"), st.bold("Studio")), 8));
+            println!("{}", line(&format!("{} {}", st.accent("✻"), st.bold("Zornov")), 8));
             println!("{}", line(&format!("  {}", st.dim("no project here: /new NAME makes one")), 39));
         }
     }
@@ -732,7 +732,7 @@ pub(crate) fn split_words(line: &str) -> Result<Vec<String>, String> {
 }
 
 fn open_app(dir: Option<&Path>) {
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("studio"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("zornov"));
     let mut c = std::process::Command::new(exe);
     c.arg("--window");
     if let Some(d) = dir {
@@ -747,7 +747,7 @@ pub fn main(argv: &[String]) -> Option<i32> {
     let st = Style { on: tty && std::env::var_os("NO_COLOR").is_none() };
     let here = std::env::current_dir().unwrap_or_default();
     let first = argv.first().map(String::as_str);
-    // The window: from Finder / the Dock (no terminal), `studio app`, or
+    // The window: from Finder / the Dock (no terminal), `zornov app`, or
     // its own flags.
     match first {
         None if !std::io::stdin().is_terminal() => return None,
@@ -788,7 +788,7 @@ pub fn main(argv: &[String]) -> Option<i32> {
         }
         Some("make" | "ask") => {
             let Some(d) = dir else {
-                eprintln!("{} no project here: `studio new NAME` makes one", st.red("error:"));
+                eprintln!("{} no project here: `zornov new NAME` makes one", st.red("error:"));
                 return Some(1);
             };
             let mut model = None;
@@ -802,7 +802,7 @@ pub fn main(argv: &[String]) -> Option<i32> {
                 }
             }
             if brief.is_empty() {
-                eprintln!("{} say what to make: studio make \"a 10 second intro about the ocean\"", st.red("error:"));
+                eprintln!("{} say what to make: zornov make \"a 10 second intro about the ocean\"", st.red("error:"));
                 return Some(2);
             }
             let mut resume = None;
@@ -811,7 +811,7 @@ pub fn main(argv: &[String]) -> Option<i32> {
         Some(c) if is_command(c) => {
             let needs_project = !matches!(c, "guide" | "howto" | "catalogue" | "edit_schema" | "made");
             if needs_project && dir.is_none() {
-                eprintln!("{} no Studio project here. Make one: {}", st.red("error:"), st.bold("studio new my-video"));
+                eprintln!("{} no Zornov project here. Make one: {}", st.red("error:"), st.bold("zornov new my-video"));
                 return Some(1);
             }
             let (tool, args) = match parse(&words) {
@@ -831,7 +831,7 @@ pub fn main(argv: &[String]) -> Option<i32> {
             if run_one(&mut s, dir.as_deref(), &tool, &args, &st, raw || !tty) { 0 } else { 1 }
         }
         Some(other) => {
-            eprintln!("{} no command \"{other}\". {}", st.red("error:"), st.dim("`studio help` lists them; to ask the AI editor: studio make \"…\""));
+            eprintln!("{} no command \"{other}\". {}", st.red("error:"), st.dim("`zornov help` lists them; to ask the AI editor: zornov make \"…\""));
             2
         }
     })

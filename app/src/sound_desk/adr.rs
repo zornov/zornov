@@ -109,7 +109,7 @@ pub struct TakeReport {
 
 /// Mono samples of a sound file at the mixing rate.
 pub fn read_mono(path: &std::path::Path) -> Result<Vec<f32>, String> {
-    let d = crate::sound_bridge::decode_uncached(path).ok_or_else(|| format!("{}: no sound Studio can read", path.display()))?;
+    let d = crate::sound_bridge::decode_uncached(path).ok_or_else(|| format!("{}: no sound Zornov can read", path.display()))?;
     let mono: Vec<f32> = d.left.iter().zip(d.right.iter()).map(|(l, r)| 0.5 * (l + r)).collect();
     let rate = crate::sound_bridge::RATE;
     Ok(if d.rate == rate { mono } else { studio_sound::resample::resample(&mono, &mono, d.rate, rate, studio_sound::Quality::Best).0 })

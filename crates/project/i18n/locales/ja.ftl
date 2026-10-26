@@ -1,4 +1,4 @@
-app-name = Studio
+app-name = Zornov
 3d-camera-and-lights = 3Dカメラとライト
 3d-layer-off = 3Dレイヤーをオフ
 3d-layer-on = 3Dレイヤーをオン
@@ -532,7 +532,7 @@ range-tool = 範囲ツール
 re-track = 再追跡
 re-track-from-here = ここから再追跡
 re-tracking = 再追跡中
-reading-studio-s-guide = Studioのガイドを参照中
+reading-studio-s-guide = Zornovのガイドを参照中
 reading-the-edit-reference = 編集リファレンスを参照中
 reading-the-timeline = タイムラインを読み取り中
 rectangle = 長方形
@@ -585,7 +585,7 @@ reverse = 逆再生
 right = 右
 ring = リング
 rise = 上昇
-risers-whooshes-booms-and-hits-are-made-by-s = ライザー、ウーシュ、ブーム、ヒットはStudio自体が生成します。それ以外の言葉で指定した音（「トタン屋根に降る雨」など）はElevenLabsで生成します。
+risers-whooshes-booms-and-hits-are-made-by-s = ライザー、ウーシュ、ブーム、ヒットはZornov自体が生成します。それ以外の言葉で指定した音（「トタン屋根に降る雨」など）はElevenLabsで生成します。
 roll-like-balls = ボールのように転がる
 roll-z = ロール（Z）
 rotate = 回転
@@ -722,9 +722,9 @@ stop-this-request-esc-what-is-done-stays-und = このリクエストを停止（
 stopped-what-was-already-done-is-kept-undo-t = 停止しました。完了した変更は保持されます。「取り消し」で元に戻せます。
 storage = ストレージ
 strength = 強度
-studio-codec-clv = Studioコーデック · CLV
-studio-never-lowers-preview-quality-by-itsel = Studioがプレビュー画質を自動で下げることはありません。
-studio-render = Studioレンダー
+studio-codec-clv = Zornovコーデック · CLV
+studio-never-lowers-preview-quality-by-itsel = Zornovがプレビュー画質を自動で下げることはありません。
+studio-render = Zornovレンダー
 studying-the-footage = 映像を分析中
 style = スタイル
 stylise = スタイライズ
@@ -746,7 +746,7 @@ text-art = テキストアート
 text-colour = テキストの色
 text-size = テキストサイズ
 the-ai-editor-could-not-open-its-connection = AIエディタはコマンドラインエージェントへの接続を確立できませんでした。
-the-ai-editor-crashed-earlier-reopen-studio = AIエディタが以前クラッシュしました。Studioを開き直してください。
+the-ai-editor-crashed-earlier-reopen-studio = AIエディタが以前クラッシュしました。Zornovを開き直してください。
 the-camera-s-motion-could-not-be-measured-he = ここではカメラの動きを測定できませんでした（暗すぎる、ぼけている、特徴が少ないなど）。特徴のある点を追跡し、その点を基準にスタビライズしてください。
 the-first-is-the-strongest-editor-the-last-i = 最初は最も高性能なエディタ、最後は最も高速で低コストです。
 the-mac-s-voices-are-switched-off-below-so-n = 下の設定でMacの音声がオフになっているため、サービスを選択するまでナレーションを作成できません。
@@ -794,7 +794,7 @@ tutorial = チュートリアル
 two-node-aimed = 2ノード（注視点あり）
 type = 種類
 type-apply-apply-all-or-skip = 「適用」「すべて適用」「スキップ」を入力…
-type-for-studio-commands-k-opens-this-panel = /でStudioコマンドを入力  ·  ⌘Kでこのパネルを開く
+type-for-studio-commands-k-opens-this-panel = /でZornovコマンドを入力  ·  ⌘Kでこのパネルを開く
 type-your-title = タイトルを入力
 underline = 下線
 undo = 取り消し
@@ -966,7 +966,7 @@ guide-audio-step2 = 音楽を選択し、インスペクタの「オーディオ
 guide-audio-step3 = フェードアウトを設定して、音楽を滑らかに終わらせます。
 tour-step = ステップ{ $n } / { $total }
 tour-finished = ツアーが終了しました。いつでもF1でヘルプを開けます。
-tour-welcome-title = Studioへようこそ
+tour-welcome-title = Zornovへようこそ
 tour-welcome-body = 約1分でエディタを紹介します。矢印キーかボタンで進み、Escapeで終了します。ヘルプから再度表示できます。
 tour-library-title = ライブラリ
 tour-library-body = メディア、テキストスタイル、モーション、エフェクト、ルック、サウンドが揃っています。項目をクリックして追加するか、タイムラインにドラッグしてください。AIセクションではAIエディタと対話できます。
@@ -983,7 +983,7 @@ tour-ai-body = ⌘Kを押して、無音部分のカット、字幕の追加、�
 tour-export-title = 書き出し
 tour-export-body = 仕上がったら「書き出し」で、Web、SNSアプリ、アーカイブ用の完成動画を作成します。
 tour-help-title = キー1つでヘルプを表示
-tour-help-body = F1でヘルプを検索できます。Studioのすべての機能を説明しており、AIエディタもその内容をもとに質問に回答できます。
+tour-help-body = F1でヘルプを検索できます。Zornovのすべての機能を説明しており、AIエディタもその内容をもとに質問に回答できます。
 tip-start-templates = 初めてですか？下のテンプレートから始めるか、「実践しながら学ぶ」でガイド付きプロジェクトを開きましょう。
 tip-empty-timeline = ここにメディアをドラッグするか、ライブラリ項目のプラスを押すと再生ヘッド位置に追加できます。
 tip-select-clip = クリップをクリックして選択すると、インスペクタに設定が表示されます。
@@ -995,7 +995,7 @@ tip-keyboard = すべてキーボードで操作できます。F1を押して「
 workspace-edit-blurb = カットと配置：大きなタイムラインと、その横にメディアを表示します。
 help-start-title = はじめに
 help-start-keys = 開始 初めて 新規 プロジェクト ようこそ ツアー 概要 基本
-help-start-body = Studioはタイムラインで動画を編集します。テンプレートからプロジェクトを作成するか、サンプルを開くか、空の状態から始め、ライブラリの「メディアを読み込み」で動画、画像、音声を追加します。
+help-start-body = Zornovはタイムラインで動画を編集します。テンプレートからプロジェクトを作成するか、サンプルを開くか、空の状態から始め、ライブラリの「メディアを読み込み」で動画、画像、音声を追加します。
     クリップをタイムラインにドラッグするか、ライブラリ項目のプラスを押します。Spaceで再生、Sで分割、Mでマーカー追加、⌘Zで変更を取り消せます。
     ⌘KでAIエディタに普段の言葉で作業を依頼できます。ヘルプが必要なときはF1を押してください。
 help-templates-title = テンプレートとサンプルプロジェクト
@@ -1004,7 +1004,7 @@ help-templates-body = ホーム画面の「テンプレートから開始」で�
     「実践しながら学ぶ」では、タイムライン上に手順を示したサンプルプロジェクトが開きます。マーカーに沿って、カット、カラー、タイトル、オーディオを練習できます。
 help-import-title = メディアの読み込み
 help-import-keys = 読み込み メディア ファイル 動画 写真 オーディオ 音楽 ドラッグ ドロップ フォルダ ライブラリ ダウンロード リンク
-help-import-body = 「ファイル」から「メディアを読み込み」（⌘I）を選択するか、ライブラリにファイルをドラッグします。Studioは元のファイルを移動せず、そのまま使用します。直接再生できない形式は自動的に変換します。
+help-import-body = 「ファイル」から「メディアを読み込み」（⌘I）を選択するか、ライブラリにファイルをドラッグします。Zornovは元のファイルを移動せず、そのまま使用します。直接再生できない形式は自動的に変換します。
     「リンクからダウンロード」ボタンでは、使用権のあるメディアをページから取得できます。「サンプルメディアを追加」を使えば、自分の映像がなくても試せます。
 help-timeline-title = タイムライン
 help-timeline-keys = タイムライン トラック クリップ 再生ヘッド ズーム スナップ マグネティック マーカー 範囲 選択 移動 ドラッグ
@@ -1058,14 +1058,14 @@ help-captions-body = 自動字幕は音声を編集可能な字幕クリップ�
 help-ai-editor-title = AIエディタ
 help-ai-editor-keys = AI エディタ アシスタント Claude Codex ChatGPT Command K 質問 プロンプト 普段の言葉 自動化
 help-ai-editor-body = ⌘Kを押すかライブラリの「AI」を開き、無音部分のカット、字幕の追加、縦向きへの変更、ショット間のカラーマッチなど、希望を伝えてください。AIはユーザーと同じツールを使い、各リクエストは1回の取り消しで元に戻せます。
-    設定の「AI」で回答するアシスタントを選べます。Studioは送信する内容を表示します。変更を事前に承認したい場合は「実行前に確認」をオンにしてください。
+    設定の「AI」で回答するアシスタントを選べます。Zornovは送信する内容を表示します。変更を事前に承認したい場合は「実行前に確認」をオンにしてください。
 help-export-title = 書き出し
 help-export-keys = 書き出し レンダリング 保存 動画 ファイル MP4 形式 品質 解像度 SNS YouTube 共有 納品
 help-export-body = ⌘Eまたは「書き出し」ボタンを押します。Web、SNSアプリ、アーカイブ用のプリセットを選び、サイズと品質を確認して保存先を指定します。書き出しはバックグラウンドで実行され、上部バーの「ジョブ」ボタンに進行状況が表示されます。
     IとOでイン点とアウト点を設定すると、編集の一部だけを書き出せます。
 help-workspaces-title = ワークスペース
 help-workspaces-keys = ワークスペース レイアウト 編集 カラー オーディオ VFX モーショングラフィックス 制作 パネル 配置 ドッキング ドラッグ 移動 タブ フローティング リセット
-help-workspaces-body = ワークスペースは作業に合わせてエディタを配置します。編集、カラー、オーディオ、VFX、モーショングラフィックス、制作が上部バーと「レイアウト」メニューにあり、Altと1～6で切り替えられます。パネルのヘッダーやタブを別のパネルへドラッグすると、その左・右・上・下にドッキングするか、タブとして重ねられます。Escで取り消せます。ヘッダーを右クリックするか、F6で移動したパネルでShift+F10を押すと、同じ操作をメニューから行えます。「レイアウト」▸「パネル」でパネルの表示と非表示を切り替え、「名前を付けてレイアウトを保存」で自分の配置をワークスペースとして残し、「レイアウトをリセット」でStudio標準の配置に戻ります。
+help-workspaces-body = ワークスペースは作業に合わせてエディタを配置します。編集、カラー、オーディオ、VFX、モーショングラフィックス、制作が上部バーと「レイアウト」メニューにあり、Altと1～6で切り替えられます。パネルのヘッダーやタブを別のパネルへドラッグすると、その左・右・上・下にドッキングするか、タブとして重ねられます。Escで取り消せます。ヘッダーを右クリックするか、F6で移動したパネルでShift+F10を押すと、同じ操作をメニューから行えます。「レイアウト」▸「パネル」でパネルの表示と非表示を切り替え、「名前を付けてレイアウトを保存」で自分の配置をワークスペースとして残し、「レイアウトをリセット」でZornov標準の配置に戻ります。
     ワークスペースは、開くパネルとライブラリやインスペクタの表示内容だけを設定します。その後もパネルのサイズや設定は自由に変更できます。
 help-shortcuts-title = キーボードショートカット
 help-shortcuts-keys = キーボード ショートカット キー ホットキー コマンド 一覧 カスタマイズ 割り当て変更
@@ -1073,7 +1073,7 @@ help-shortcuts-body = Spaceで再生と一時停止、J K Lで逆再生、停止
     設定の「ショートカット」にはすべてのショートカットが一覧表示され、変更できます。
 help-keyboard-nav-title = キーボードとスクリーンリーダーでの操作
 help-keyboard-nav-keys = キーボード スクリーンリーダー VoiceOver ナレーター NVDA アクセシビリティ ナビゲーション 視覚障害 フォーカス Tab ランドマーク 読み上げ
-help-keyboard-nav-body = StudioはVoiceOver、Narratorなどのスクリーンリーダーに対応しており、すべての操作をマウスなしで行えます。Tabでコントロール間を移動し、F6とShift F6でライブラリ、ビューア、インスペクタ、タイムライン間を移動します。
+help-keyboard-nav-body = ZornovはVoiceOver、Narratorなどのスクリーンリーダーに対応しており、すべての操作をマウスなしで行えます。Tabでコントロール間を移動し、F6とShift F6でライブラリ、ビューア、インスペクタ、タイムライン間を移動します。
     タイムラインでは、]と[で次のクリップと前のクリップを選択し、上矢印キーと下矢印キーで次の編集点と前の編集点に移動します。Altと上矢印キーまたは下矢印キーで上または下のレーンのクリップに移動し、Altと左矢印キーまたは右矢印キーで選択したクリップを1フレームずつ移動します（Shiftを加えると1秒ずつ移動します）。Altとピリオドキーで再生ヘッドの位置を読み上げます。
     キャンバスでは、ピリオドキーとカンマキーで再生ヘッド位置にある下または上のレイヤーを選択し、Altとカンマキーでレイヤーの一覧を読み上げます。CommandとAltと矢印キーで、選択したレイヤーを画面サイズの1パーセントずつ移動します（Shiftを加えると5パーセントずつ移動します）。各操作の結果が読み上げられます。
     変更内容はその都度読み上げられます。読み上げによる通知は「設定」の「一般」にある「アクセシビリティ」でオフにできます。
@@ -1083,11 +1083,11 @@ help-accessibility-body = 設定の「一般」には、インターフェイス
     ハイコントラストでは黒または白の背景に明瞭な文字と強い輪郭を使用します。色覚対応パレットはクリップやステータスの色を区別しやすくします。
 help-language-title = 言語
 help-language-keys = 言語 翻訳 英語 ヒンディー語 スペイン語 フランス語 ドイツ語 日本語 中国語 アラビア語 ペルシャ語 ファルシ語 右から左 RTL
-help-language-body = Studioは英語、ヒンディー語、スペイン語、フランス語、ドイツ語、日本語、簡体字中国語、アラビア語、ペルシャ語に対応しています。設定の「一般」から「言語」で選択してください。「システムのデフォルト」はコンピュータの設定に従います。
+help-language-body = Zornovは英語、ヒンディー語、スペイン語、フランス語、ドイツ語、日本語、簡体字中国語、アラビア語、ペルシャ語に対応しています。設定の「一般」から「言語」で選択してください。「システムのデフォルト」はコンピュータの設定に従います。
     アラビア語とペルシャ語では、エディタを右から左に配置します。タイムラインは時間の進行に合わせ、常に左から右に進みます。
 help-saving-title = 保存とプロジェクト
 help-saving-keys = 保存 開く プロジェクト フォルダ 自動保存 バックアップ 最近 名前変更 コピー ファイル
-help-saving-body = プロジェクトはフォルダとして保存されます。Studioは最後の変更から30秒後に自動保存し、バックアップを20個保持します。「ファイル」の「開く」でプロジェクトフォルダを開けます。上部バーのプロジェクト名をダブルクリックすると名前を変更できます。
+help-saving-body = プロジェクトはフォルダとして保存されます。Zornovは最後の変更から30秒後に自動保存し、バックアップを20個保持します。「ファイル」の「開く」でプロジェクトフォルダを開けます。上部バーのプロジェクト名をダブルクリックすると名前を変更できます。
     メディアはプロジェクト内にコピーされません。元の場所に保管してください。
 help-undo-title = 取り消しとやり直し
 help-undo-keys = 取り消し やり直し 履歴 ミス 復元 変更 戻す
@@ -1095,7 +1095,7 @@ help-undo-body = ⌘Zで直前の変更を取り消し、⇧⌘Zでやり直せ�
 help-problems-title = 動作が遅い、またはうまく動かないとき
 help-problems-keys = 遅い 遅延 再生 フレーム落ち エラー 問題 できない 失敗 クラッシュ プロキシ キャッシュ 品質 プレビュー
 help-problems-body = 再生が途切れる場合は、設定の「再生」でプレビュー画質を下げるか、シンプルプレビューに切り替えてください。長いプロジェクトではフレームキャッシュを増やすと効果があります。
-    再生できないファイルはStudioが対応形式に変換します。上部バーのジョブが完了するまでお待ちください。クラッシュした場合、Studioはレポート送信前に確認します。「送信」を選択した場合のみ送信されます。
+    再生できないファイルはZornovが対応形式に変換します。上部バーのジョブが完了するまでお待ちください。クラッシュした場合、Zornovはレポート送信前に確認します。「送信」を選択した場合のみ送信されます。
 accessibility = アクセシビリティ
 high-contrast = ハイコントラスト
 colour-vision = 色覚
@@ -1135,8 +1135,8 @@ change-who-answers-in-settings-ai-k-tokens-i = 設定 ▸ AIで回答するAIを
 claude-code-2 = Claude Code · { $v1 }
 clip-2 = クリップ{ $v1 }
 codex-2 = Codex · { $v1 }
-converting-name-to-a-format-studio-plays = { $name }をStudioで再生できる形式に変換中…
-converting-what-studio-can-t-play-yet-to-h-2 = Studioがまだ再生できない{ $what }をH.264に変換中…
+converting-name-to-a-format-studio-plays = { $name }をZornovで再生できる形式に変換中…
+converting-what-studio-can-t-play-yet-to-h-2 = Zornovがまだ再生できない{ $what }をH.264に変換中…
 could-not-add = { $v1 }を追加できませんでした
 could-not-download-short = { $short }をダウンロードできませんでした：{ $v1 }
 could-not-export-e = 書き出しできませんでした：{ $e }
@@ -1153,7 +1153,7 @@ export-3 = { $v1 }を書き出し
 exported = { $v1 }を書き出しました
 exporting-2 = 書き出し中 · { $v1 }% · { $v2 }
 follows-track-of-name = 「{ $name }」のトラッキング{ $v1 }に追従（{ $v2 }）
-from-from-kept-in-your-login-keychain-studio = 取得元：{ $from }。ログインキーチェーンに保存され、Studioで再表示されることはありません。
+from-from-kept-in-your-login-keychain-studio = 取得元：{ $from }。ログインキーチェーンに保存され、Zornovで再表示されることはありません。
 generated-placed-at-1-s = 生成した{ $v1 }を{ $v2 }秒に配置しました
 generated-but-not-placed-e = 生成しましたが配置できませんでした：{ $e }
 generating-failed-e = 生成に失敗しました：{ $e }
@@ -1185,7 +1185,7 @@ switch-to-next = { $next }に切り替え
 tracking-failed-e = トラッキングに失敗しました：{ $e }
 undid = { $v1 }を取り消しました
 untitled = 名称未設定{ $v1 }
-uses-your-name-sign-in-studio-s-tools-are-co = { $name }のサインイン（{ $v1 }）を使用します。Studioのツールはこのウィンドウに接続されています。
+uses-your-name-sign-in-studio-s-tools-are-co = { $name }のサインイン（{ $v1 }）を使用します。Zornovのツールはこのウィンドウに接続されています。
 warmed-the-grade-on-the-mountains-box-1-and = 山（枠1）のグレーディングを暖色にし、岩（ポイント2）をぼかしました。
 wobble-loop-or-step-without-more-keys-loop-n = キーフレームを増やさずに{ $v1 }を揺らしたり、ループやステップにしたりできます。ループには2つ以上のキーフレームが必要です。
 paste-the-key = キーを貼り付け

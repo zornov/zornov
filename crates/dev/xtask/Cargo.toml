@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Studio's build and packaging tasks in Rust: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | update-key | feed | licenses | sbs"
+description = "Zornov's build and packaging tasks in Rust: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | update-key | feed | licenses | sbs"
 
 [dependencies]
 studio-media = { path = "../../media/media" }

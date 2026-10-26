@@ -1,6 +1,6 @@
 [package]
 name = "studio-render"
-description = "Studio frame compositor: sequence resolver, decode cache, linear-light compositing on the GPU (wgpu) with a CPU reference path, export renderer and hit-testing"
+description = "Zornov frame compositor: sequence resolver, decode cache, linear-light compositing on the GPU (wgpu) with a CPU reference path, export renderer and hit-testing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

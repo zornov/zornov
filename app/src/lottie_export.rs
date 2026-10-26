@@ -347,7 +347,7 @@ pub fn export(doc: &Doc, path: &Path, start: i64, end: i64) -> Result<Report, St
     let json = serde_json::to_vec(&docv).map_err(|e| e.to_string())?;
     let bytes = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lottie")) {
         let id = "animation";
-        let manifest = json!({"version": "1", "generator": "Studio", "animations": [{"id": id}]}).to_string();
+        let manifest = json!({"version": "1", "generator": "Zornov", "animations": [{"id": id}]}).to_string();
         studio_lottie::write_dotlottie(&[("manifest.json", manifest.as_bytes()), (&format!("animations/{id}.json"), &json)])
     } else {
         json

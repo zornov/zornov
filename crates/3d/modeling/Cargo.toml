@@ -3,7 +3,7 @@ name = "studio-modeling"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's 3D content creation: polygon modeling, subdivision with creases, modifiers, curves and surfaces, procedural geometry, sculpting, retopology, UVs, baking, layered materials and hair."
+description = "Zornov's 3D content creation: polygon modeling, subdivision with creases, modifiers, curves and surfaces, procedural geometry, sculpting, retopology, UVs, baking, layered materials and hair."
 
 [dependencies]
 studio-mesh = { path = "../mesh" }

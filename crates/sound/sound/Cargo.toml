@@ -3,7 +3,7 @@ name = "studio-sound"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Mixing and audio processing for Studio: graph mixer, automation, effects, loudness, beats"
+description = "Mixing and audio processing for Zornov: graph mixer, automation, effects, loudness, beats"
 
 [dependencies]
 studio-audio = { path = "../audio" }

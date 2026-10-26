@@ -164,7 +164,7 @@ impl Cache {
     pub fn from_bytes(bytes: &[u8]) -> Result<Cache, String> {
         let bad = || "the simulation cache is damaged".to_string();
         if bytes.get(..8) != Some(MAGIC) {
-            return Err("not a Studio simulation cache (.scache)".into());
+            return Err("not a Zornov simulation cache (.scache)".into());
         }
         let mut at = 8usize;
         let mut take = |n: usize| -> Result<&[u8], String> {

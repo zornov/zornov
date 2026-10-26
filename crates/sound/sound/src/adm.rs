@@ -158,7 +158,7 @@ pub fn write(bed: &[Vec<f32>], layout: Layout, objects: &[Object], rate: u32, ti
     }
     // Tracks stay in ADM order (the chna map says what each is), so no WAV
     // speaker mask or reordering.
-    write_with(&chans, rate, SampleFormat::Pcm24, None, Some(&Bext { description: title.into(), originator: "Studio".into(), time_reference: 0 }), &[(*b"chna", chna), (*b"axml", xml.into_bytes())])
+    write_with(&chans, rate, SampleFormat::Pcm24, None, Some(&Bext { description: title.into(), originator: "Zornov".into(), time_reference: 0 }), &[(*b"chna", chna), (*b"axml", xml.into_bytes())])
 }
 
 #[cfg(test)]

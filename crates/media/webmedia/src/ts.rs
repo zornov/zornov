@@ -305,8 +305,8 @@ impl Collector {
         // track's times are already in it; audio was converted above.
         if tracks.is_empty() {
             return Err(Error::Unsupported(match self.notes.first() {
-                Some(n) => format!("The stream carries {n}, which Studio cannot take apart yet."),
-                None => "The segments hold no video or audio Studio can read.".into(),
+                Some(n) => format!("The stream carries {n}, which Zornov cannot take apart yet."),
+                None => "The segments hold no video or audio Zornov can read.".into(),
             }));
         }
         Ok(tracks)

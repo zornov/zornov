@@ -5,7 +5,7 @@
 //!
 //! OFX plugins are native code, so Studio never loads one into the
 //! editor. Each bundle runs in its own worker process (the Studio binary
-//! started as `studio ofx-worker <bundle>`, or `studio-ofx-worker`), which
+//! started as `zornov ofx-worker <bundle>`, or `studio-ofx-worker`), which
 //! hosts the plugin with the suites in [`host`] and renders frames sent
 //! over a pipe ([`worker`]). A worker that crashes or hangs is restarted a
 //! few times and then left off; the picture passes through unchanged.
@@ -121,7 +121,7 @@ impl Settings {
 /// How to start a worker: `STUDIO_OFX_WORKER`, a `studio-ofx-worker` next
 /// to this program, or this program itself with `ofx-worker`.
 fn worker_command(bundle: &Path) -> Command {
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("studio"));
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("zornov"));
     let program = std::env::var_os("STUDIO_OFX_WORKER").map(PathBuf::from).or_else(|| Some(exe.with_file_name("studio-ofx-worker")).filter(|p| p.is_file())).unwrap_or(exe);
     let mut c = Command::new(program);
     c.arg("ofx-worker").arg(bundle);
@@ -225,7 +225,7 @@ impl Bundle {
         if g.is_none() {
             let mut c = self.crashes.lock().unwrap_or_else(|e| e.into_inner());
             if *c >= MAX_CRASHES {
-                return Err(format!("{} crashed {MAX_CRASHES} times and is off until Studio restarts", self.path.display()));
+                return Err(format!("{} crashed {MAX_CRASHES} times and is off until Zornov restarts", self.path.display()));
             }
             *c += 1;
             *g = Some(Worker::start(&self.path)?.0);

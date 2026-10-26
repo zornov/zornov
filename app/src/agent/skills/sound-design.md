@@ -130,7 +130,7 @@ inserts and surround position; the buses; the master; the layout.
 
 ## Reference: Sound editing
 
-The craft of cutting, chopping, fading and shaping sound, with Studio's
+The craft of cutting, chopping, fading and shaping sound, with Zornov's
 tools (`split`, `trim`, `move`, `slip`, `animate` `volume` / `pan`,
 `audio` for fades, curves and effects, `listen` to hear what you did).
 
@@ -147,7 +147,7 @@ tools (`split`, `trim`, `move`, `slip`, `animate` `volume` / `pan`,
 - **Endings**: end on the song's own last hit (a button ending) or fade
   out over 2-4 s; a song cut dead mid-phrase sounds like a mistake
   (`check`: `music_cut_off`).
-- Studio puts a 4 ms ramp on every hard sound edge so cuts never click,
+- Zornov puts a 4 ms ramp on every hard sound edge so cuts never click,
   except where a clip simply continues into the next piece of the same
   recording.
 - **J and L cuts** (split edits): start the next shot's sound under the
@@ -302,7 +302,7 @@ Subtitles and captions per language. list; make {lang, spec: netflix|bbc|social,
 
 Dubbing into other languages. characters: who speaks (from subtitles) and their voices per language; voice {character, lang, voice, pace}: the voice a character speaks a language with (a voice of the speech service chosen in Settings; see voices); make {lang, fit: span|phrases|natural, cues, characters}: every subtitle of that language spoken by its character's voice, fitted to when the original actor speaks (phrases follows the original's pauses, for lips), laid on the language's dub lane; the language then gets its own mix (M&E + dub) and audio track in exports; lines that cannot fit within 25% are reported to reword. list: dubbed languages.
 
-## Reference: Foley, effects and singing made in Studio
+## Reference: Foley, effects and singing made in Zornov
 **Order**
 1. List the sounds the scene needs and when each happens (spot sounds at moments, beds under places).
 2. `sfx` each one: `describe` in words ("a match strike", "distant period traffic", "café murmur", "pig oinking") or `kind` with settings. They are made here by physical models, so they always work. Several sounds in one description become one passage; "then" puts them in order; separate ops give finer control.

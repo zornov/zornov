@@ -382,7 +382,7 @@ pub fn from_bytes(b: &[u8]) -> Result<Mesh, String> {
         Some(m) if m == MAGIC_3 => 3,
         Some(m) if m == MAGIC => 2,
         Some(m) if m == MAGIC_1 => 1,
-        _ => return Err("not a Studio model (.smesh) file".into()),
+        _ => return Err("not a Zornov model (.smesh) file".into()),
     };
     let mut r = Reader { b, at: 8 };
     let (nv, ni, ng, nm) = (r.u32()? as usize, r.u32()? as usize, r.u32()? as usize, r.u32()? as usize);

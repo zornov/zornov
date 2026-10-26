@@ -3,7 +3,7 @@ name = "studio-live"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Capture and live production for Studio: recording, voice-over, teleprompter, vision mixer, RTMP and SRT streaming, card ingest with verified copies, audio sync."
+description = "Capture and live production for Zornov: recording, voice-over, teleprompter, vision mixer, RTMP and SRT streaming, card ingest with verified copies, audio sync."
 
 [dependencies]
 studio-encode = { path = "../encode" }

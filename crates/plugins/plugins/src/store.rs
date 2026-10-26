@@ -305,7 +305,7 @@ impl Host {
             }
             Some("ops") if head["ops"].is_array() => Ok(Imported::Ops(head["ops"].clone())),
             Some("error") => Err(head["message"].as_str().unwrap_or("the importer failed").to_owned()),
-            _ => Err(format!("{} returned something Studio does not understand", p.manifest.name)),
+            _ => Err(format!("{} returned something Zornov does not understand", p.manifest.name)),
         }
     }
 

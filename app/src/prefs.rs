@@ -121,7 +121,7 @@ impl Default for Prefs {
             magnetic: true,
             cache_gb: 8.0,
             cache_dir: studio_paths::cache().display().to_string(),
-            proxy_dir: studio_paths::videos().join("Studio Proxies").display().to_string(),
+            proxy_dir: studio_paths::videos().join("Zornov Proxies").display().to_string(),
             autosave: true,
             preview_engine: 0,
             library_list: false,

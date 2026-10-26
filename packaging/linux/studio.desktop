@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Studio
-Comment=Video editor
-Exec=studio
-Icon=studio
-Terminal=false
-Categories=AudioVideo;Video;AudioVideoEditing;

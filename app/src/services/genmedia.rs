@@ -311,7 +311,7 @@ pub fn load_picture(path: &Path) -> Result<Frame, String> {
             if p != path {
                 return load_picture(&p);
             }
-            return Err(format!("{} is not a picture Studio reads (PNG or JPEG)", path.display()));
+            return Err(format!("{} is not a picture Zornov reads (PNG or JPEG)", path.display()));
         }
     };
     Frame::new(img.width as usize, img.height as usize, img.pixels).map_err(|e| e.to_string())

@@ -90,7 +90,7 @@ pub fn write(mesh: &Mesh, asset: &Asset, path: &Path) -> Result<(), String> {
 /// Binary STL (y up).
 pub fn stl(m: &Mesh) -> Vec<u8> {
     let mut b = vec![0u8; 80];
-    b[..21].copy_from_slice(b"Studio 3D model, STL ");
+    b[..21].copy_from_slice(b"Zornov 3D model, STL ");
     b.extend_from_slice(&(m.triangles() as u32).to_le_bytes());
     for t in 0..m.triangles() {
         let n = out_p(m.face_normal(t));
@@ -118,7 +118,7 @@ pub fn ply(m: &Mesh) -> String {
             vcol[v] = [(srgb(c[0]) * 255.0) as u8, (srgb(c[1]) * 255.0) as u8, (srgb(c[2]) * 255.0) as u8];
         }
     }
-    let _ = writeln!(s, "ply\nformat ascii 1.0\ncomment Studio\nelement vertex {}\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty float s\nproperty float t\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face {}\nproperty list uchar int vertex_indices\nend_header", m.positions.len(), m.triangles());
+    let _ = writeln!(s, "ply\nformat ascii 1.0\ncomment Zornov\nelement vertex {}\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty float s\nproperty float t\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face {}\nproperty list uchar int vertex_indices\nend_header", m.positions.len(), m.triangles());
     for (i, p) in m.positions.iter().enumerate() {
         let (p, n, uv) = (out_p(*p), out_p(m.normals.get(i).copied().unwrap_or([0.0, -1.0, 0.0])), m.uvs.get(i).copied().unwrap_or([0.0, 0.0]));
         let c = vcol[i];
@@ -133,8 +133,8 @@ pub fn ply(m: &Mesh) -> String {
 
 /// OBJ + MTL with every part as a group and faces as they are.
 pub fn obj(parts: &[OutPart], mtl_name: &str) -> (String, String, Vec<(String, Vec<u8>)>) {
-    let mut o = format!("# Studio 3D asset\nmtllib {mtl_name}\n");
-    let mut mtl = String::from("# Studio materials\n");
+    let mut o = format!("# Zornov 3D asset\nmtllib {mtl_name}\n");
+    let mut mtl = String::from("# Zornov materials\n");
     let mut pics = Vec::new();
     let (mut vbase, mut tbase, mut nbase) = (1usize, 1usize, 1usize);
     for p in parts {
@@ -195,7 +195,7 @@ pub fn usda(parts: &[OutPart], asset: &Asset, tex_dir: &str) -> (String, Vec<(St
     let mut s = String::new();
     let mut pics = Vec::new();
     let root = safe(&asset.name);
-    let _ = writeln!(s, "#usda 1.0\n(\n    defaultPrim = \"{root}\"\n    metersPerUnit = {}\n    upAxis = \"Y\"\n    doc = \"Studio 3D asset\"\n)\n\ndef Xform \"{root}\" (\n    kind = \"component\"\n)\n{{", 1.0 / asset.px_per_metre.max(1e-6));
+    let _ = writeln!(s, "#usda 1.0\n(\n    defaultPrim = \"{root}\"\n    metersPerUnit = {}\n    upAxis = \"Y\"\n    doc = \"Zornov 3D asset\"\n)\n\ndef Xform \"{root}\" (\n    kind = \"component\"\n)\n{{", 1.0 / asset.px_per_metre.max(1e-6));
     let list = |v: &mut String, items: &mut dyn Iterator<Item = String>| {
         let mut first = true;
         for it in items {
@@ -545,7 +545,7 @@ pub fn fbx(parts: &[OutPart], asset: &Asset) -> Vec<u8> {
             }
         }
     }
-    let header = Node::new("FBXHeaderExtension", vec![]).with(Node::new("FBXHeaderVersion", vec![Prop::I32(1003)])).with(Node::new("FBXVersion", vec![Prop::I32(7400)])).with(Node::new("Creator", vec![s("Studio")]));
+    let header = Node::new("FBXHeaderExtension", vec![]).with(Node::new("FBXHeaderVersion", vec![Prop::I32(1003)])).with(Node::new("FBXVersion", vec![Prop::I32(7400)])).with(Node::new("Creator", vec![s("Zornov")]));
     let settings = Node::new("GlobalSettings", vec![]).with(Node::new("Version", vec![Prop::I32(1000)])).with(
         Node::new("Properties70", vec![])
             .with(p70("UpAxis", "int", "Integer", "", vec![Prop::I32(1)]))
@@ -557,7 +557,7 @@ pub fn fbx(parts: &[OutPart], asset: &Asset) -> Vec<u8> {
             .with(p70("UnitScaleFactor", "double", "Number", "", vec![Prop::F64(1.0)])),
     );
     let defs = Node::new("Definitions", vec![]).with(Node::new("Version", vec![Prop::I32(100)]));
-    fbx_bytes(&[header, Node::new("FileId", vec![Prop::Raw(vec![0x28, 0xb3, 0x2a, 0xeb, 0xb6, 0x24, 0xcc, 0xc2, 0xbf, 0xc8, 0xb0, 0x2a, 0xa9, 0x2b, 0xfc, 0xf1])]), Node::new("CreationTime", vec![s("1970-01-01 10:00:00:000")]), Node::new("Creator", vec![s("Studio")]), settings, defs, objects, conns])
+    fbx_bytes(&[header, Node::new("FileId", vec![Prop::Raw(vec![0x28, 0xb3, 0x2a, 0xeb, 0xb6, 0x24, 0xcc, 0xc2, 0xbf, 0xc8, 0xb0, 0x2a, 0xa9, 0x2b, 0xfc, 0xf1])]), Node::new("CreationTime", vec![s("1970-01-01 10:00:00:000")]), Node::new("Creator", vec![s("Zornov")]), settings, defs, objects, conns])
 }
 
 // ------------------------------------------------------------- reading
@@ -840,7 +840,7 @@ pub fn usdz_text(b: &[u8]) -> Result<String, String> {
             return Ok(String::from_utf8_lossy(data).into_owned());
         }
         if name.ends_with(".usdc") || name.ends_with(".usd") {
-            return Err("this USDZ holds a binary USD layer, which Studio doesn't read yet; export it with a .usda layer".into());
+            return Err("this USDZ holds a binary USD layer, which Zornov doesn't read yet; export it with a .usda layer".into());
         }
         at = data_at + size;
     }

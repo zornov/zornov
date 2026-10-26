@@ -420,7 +420,7 @@ impl Session {
                 }
                 bt.encode_rgb(lin).map(|v| v.clamp(0.0, 1.0))
             });
-            studio_colour::write_lut(Path::new(path), &lut, &format!("Studio clip {id}"))?;
+            studio_colour::write_lut(Path::new(path), &lut, &format!("Zornov clip {id}"))?;
             let spatial = grade.basic.clarity != 0.0 || grade.basic.sharpen.amount != 0.0 || grade.basic.vignette.amount != 0.0 || grade.basic.grain.amount != 0.0 || grade.basic.dehaze != 0.0;
             return text(json!({ "lut": path, "size": size, "input_output": "Rec.709 / BT.1886 video levels in and out", "not_in_lut": { "spatial_tools": spatial, "window_nodes": skipped } }));
         }

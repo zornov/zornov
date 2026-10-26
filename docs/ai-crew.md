@@ -1,6 +1,6 @@
 # The AI editor as a production crew
 
-Studio's AI editor (the AI panel) can work alone or as a crew. Either way it
+Zornov's AI editor (the AI panel) can work alone or as a crew. Either way it
 uses the same tools on the open project, and one Undo takes back a request.
 
 ## Crew or solo
@@ -33,7 +33,7 @@ The chip next to the provider in the panel's header switches between
   approves it or sends steps back with notes (two review rounds at most).
 
 Code: `app/src/agent/crew.rs` (roles, `Board`, `CrewBrain`),
-`brain.rs` (`Gate::call_as`), `attach.rs` (`studio mcp --attach SOCKET
+`brain.rs` (`Gate::call_as`), `attach.rs` (`zornov mcp --attach SOCKET
 --role ROLE`).
 
 ## Following and steering a run
@@ -73,7 +73,7 @@ Code: `app/src/agent/taste.rs`.
 
 ## Honesty and speed
 
-- `capabilities` answers "can Studio do this, and with what?" from every
+- `capabilities` answers "can Zornov do this, and with what?" from every
   tool, every `edit` op, the guide and the craft book, best first. Every
   brief says to call it before saying something cannot be done or reaching
   for a workaround.
@@ -82,7 +82,7 @@ Code: `app/src/agent/taste.rs`.
   (`crew::honest_turn`).
 - A guide topic read twice in one request is answered from memory, and
   specialists get their chapters up front, so they rarely call `guide`.
-- Codex runs Studio's tools with parallel calls allowed and a 15 minute
+- Codex runs Zornov's tools with parallel calls allowed and a 15 minute
   tool timeout; the crew runs independent steps in parallel.
 - Estimates: per-role averages of minutes and tokens (learned from finished
   plans in `Studio/AI/crew-stats.json`), along the plan's longest chain of
@@ -90,12 +90,12 @@ Code: `app/src/agent/taste.rs`.
 
 ## Evaluation
 
-`studio eval` runs real jobs headless, exactly as the panel does (the same
+`zornov eval` runs real jobs headless, exactly as the panel does (the same
 gate, crew, plan, corrections and taste), on projects it builds itself, and
 scores the result:
 
 ```text
-studio eval --out DIR [--provider codex|claude] [--model M] [--solo]
+zornov eval --out DIR [--provider codex|claude] [--model M] [--solo]
             [--tasks story_scene,music_video,fix_colour,honest_animation,steer_title]
             [--minutes 30]
 ```
@@ -110,10 +110,10 @@ studio eval --out DIR [--provider codex|claude] [--model M] [--solo]
 
 Results go to `DIR/results.json`; each run adds a line to
 `DIR/history.jsonl`, and the summary shows the change since the last run.
-Run it with `HOME` set to a scratch folder (Studio's folder then lives
+Run it with `HOME` set to a scratch folder (Zornov's folder then lives
 there), `CODEX_HOME` pointing at your Codex sign-in, `STUDIO_CONTENT` at the
 content library, and the current `codex` linked into the scratch home's
-`.local/bin` (otherwise Studio may find an older Codex elsewhere, such as
+`.local/bin` (otherwise Zornov may find an older Codex elsewhere, such as
 Homebrew's, which refuses newer models):
 
 ```bash
@@ -121,7 +121,7 @@ mkdir -p /tmp/eval-home/.local/bin && ln -sf ~/.local/bin/codex /tmp/eval-home/.
 ```
 
 ```bash
-HOME=/tmp/eval-home CODEX_HOME=~/.codex STUDIO_CONTENT=~/content-build studio eval --out /tmp/evals
+HOME=/tmp/eval-home CODEX_HOME=~/.codex STUDIO_CONTENT=~/content-build zornov eval --out /tmp/evals
 ```
 
 Unit tests run the whole crew offline with scripted agents

@@ -474,7 +474,7 @@ fn run() -> Result<(), String> {
     // index.json and LICENSES.md (measured after writing, see below).
     let total_budget = args.budget_mb * 1024 * 1024;
     let budget = total_budget.saturating_sub(INDEX_RESERVE_MB * 1024 * 1024);
-    let mut core = Pack::new(PackSpec { id: "core".into(), name: "Studio core library".into(), description: "Ships inside the app: stickers, emoji, shapes, text art, frames, green-screen stills and clips, overlays, backgrounds, sounds and a set of fonts.".into(), core: true, share_alike: false });
+    let mut core = Pack::new(PackSpec { id: "core".into(), name: "Zornov core library".into(), description: "Ships inside the app: stickers, emoji, shapes, text art, frames, green-screen stills and clips, overlays, backgrounds, sounds and a set of fonts.".into(), core: true, share_alike: false });
     let mut packs: BTreeMap<String, Pack> = BTreeMap::new();
     let spec = |id: &str, name: &str, desc: &str, sa: bool| PackSpec { id: id.into(), name: name.into(), description: desc.into(), core: false, share_alike: sa };
     let overflow = |kind: Kind| -> (String, String, String) {

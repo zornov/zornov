@@ -1,6 +1,6 @@
 # studio-ai
 
-Local AI features for Studio, built on the in-house `studio-nn` inference
+Local AI features for Zornov, built on the in-house `studio-nn` inference
 engine. Everything runs on the user's machine; the only network access is
 the model download the user starts. See [`docs/models.md`](../../docs/models.md) for every
 model, its source and licence.

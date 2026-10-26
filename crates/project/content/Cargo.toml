@@ -3,7 +3,7 @@ name = "studio-content"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio library content: index, loaders, search, thumbnails, auto chroma key, quality gate and packaging"
+description = "Zornov library content: index, loaders, search, thumbnails, auto chroma key, quality gate and packaging"
 
 [dependencies]
 studio-media = { path = "../../media/media" }

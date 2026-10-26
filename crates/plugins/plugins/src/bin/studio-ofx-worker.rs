@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The OFX worker process: `studio-ofx-worker ofx-worker <bundle>`. The
-//! Studio app runs the same code as `studio ofx-worker <bundle>`.
+//! Studio app runs the same code as `zornov ofx-worker <bundle>`.
 
 fn main() {
     studio_plugins::ofx::worker_if_asked();

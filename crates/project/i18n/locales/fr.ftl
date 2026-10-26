@@ -1,4 +1,4 @@
-app-name = Studio
+app-name = Zornov
 3d-camera-and-lights = Caméra et lumières 3D
 3d-layer-off = Calque 3D désactivé
 3d-layer-on = Calque 3D activé
@@ -532,7 +532,7 @@ range-tool = Outil Plage
 re-track = Relancer le suivi
 re-track-from-here = Relancer le suivi à partir d’ici
 re-tracking = Nouveau suivi en cours
-reading-studio-s-guide = Lecture du guide de Studio
+reading-studio-s-guide = Lecture du guide de Zornov
 reading-the-edit-reference = Lecture de la référence de montage
 reading-the-timeline = Lecture de la timeline
 rectangle = Rectangle
@@ -585,7 +585,7 @@ reverse = Inverser
 right = Droite
 ring = Anneau
 rise = Montée
-risers-whooshes-booms-and-hits-are-made-by-s = Les montées, souffles, grondements et impacts sont créés par Studio. Tout autre son décrit avec des mots (« pluie sur un toit en tôle ») provient d’ElevenLabs.
+risers-whooshes-booms-and-hits-are-made-by-s = Les montées, souffles, grondements et impacts sont créés par Zornov. Tout autre son décrit avec des mots (« pluie sur un toit en tôle ») provient d’ElevenLabs.
 roll-like-balls = Rouler comme des billes
 roll-z = Roulis (Z)
 rotate = Faire pivoter
@@ -722,9 +722,9 @@ stop-this-request-esc-what-is-done-stays-und = Arrêter cette requête (Esc). Le
 stopped-what-was-already-done-is-kept-undo-t = Arrêté. Le travail déjà effectué est conservé ; Annuler permet de revenir en arrière.
 storage = Stockage
 strength = Intensité
-studio-codec-clv = Codec Studio · CLV
-studio-never-lowers-preview-quality-by-itsel = Studio ne réduit jamais la qualité de l’aperçu de lui-même.
-studio-render = Rendu Studio
+studio-codec-clv = Codec Zornov · CLV
+studio-never-lowers-preview-quality-by-itsel = Zornov ne réduit jamais la qualité de l’aperçu de lui-même.
+studio-render = Rendu Zornov
 studying-the-footage = Analyse des rushes
 style = Style
 stylise = Styliser
@@ -746,7 +746,7 @@ text-art = Texte artistique
 text-colour = Couleur du texte
 text-size = Taille du texte
 the-ai-editor-could-not-open-its-connection = L’assistant de montage IA n’a pas pu ouvrir la connexion pour les agents en ligne de commande.
-the-ai-editor-crashed-earlier-reopen-studio = L’assistant de montage IA a planté précédemment ; rouvrez Studio.
+the-ai-editor-crashed-earlier-reopen-studio = L’assistant de montage IA a planté précédemment ; rouvrez Zornov.
 the-camera-s-motion-could-not-be-measured-he = Le mouvement de la caméra n’a pas pu être mesuré ici (image trop sombre, floue ou uniforme). Suivez un point détaillé et stabilisez dessus.
 the-first-is-the-strongest-editor-the-last-i = Le premier est l’assistant de montage le plus performant ; le dernier est le plus rapide et le moins cher.
 the-mac-s-voices-are-switched-off-below-so-n = Les voix du Mac sont désactivées ci-dessous ; la narration ne peut donc pas être créée tant que vous n’avez pas choisi un service.
@@ -794,7 +794,7 @@ tutorial = Tutoriel
 two-node-aimed = Deux nœuds (avec cible)
 type = Type
 type-apply-apply-all-or-skip = Saisissez appliquer, tout appliquer ou passer…
-type-for-studio-commands-k-opens-this-panel = Tapez / pour les commandes Studio  ·  ⌘K ouvre ce panneau
+type-for-studio-commands-k-opens-this-panel = Tapez / pour les commandes Zornov  ·  ⌘K ouvre ce panneau
 type-your-title = Saisissez votre titre
 underline = Souligné
 undo = Annuler
@@ -970,7 +970,7 @@ guide-audio-step2 = Sélectionnez la musique, ouvrez Inspecteur, Audio et baisse
 guide-audio-step3 = Réglez un fondu à la fermeture pour que la musique se termine en douceur.
 tour-step = Étape { $n } sur { $total }
 tour-finished = Visite terminée. Appuyez sur F1 à tout moment pour obtenir de l’aide.
-tour-welcome-title = Bienvenue dans Studio
+tour-welcome-title = Bienvenue dans Zornov
 tour-welcome-body = Une visite rapide de l’éditeur, d’environ une minute. Utilisez les touches fléchées ou les boutons. Appuyez sur Escape pour quitter. Vous pouvez la relancer depuis l’aide.
 tour-library-title = Bibliothèque
 tour-library-body = Vos médias, styles de texte, mouvements, effets, looks et sons. Cliquez sur un élément pour l’ajouter, ou faites-le glisser sur la timeline. La section IA permet de dialoguer avec l’assistant de montage IA.
@@ -987,7 +987,7 @@ tour-ai-body = Appuyez sur ⌘K et décrivez simplement votre demande : couper l
 tour-export-title = Exporter
 tour-export-body = Quand le résultat vous convient, Exporter crée la vidéo finale pour le Web, les réseaux sociaux ou l’archivage.
 tour-help-title = L’aide à portée de touche
-tour-help-body = Appuyez sur F1 pour rechercher dans l’aide. Elle couvre toutes les fonctions de Studio, et l’assistant de montage IA peut aussi s’y référer pour répondre à vos questions.
+tour-help-body = Appuyez sur F1 pour rechercher dans l’aide. Elle couvre toutes les fonctions de Zornov, et l’assistant de montage IA peut aussi s’y référer pour répondre à vos questions.
 tip-start-templates = Vous débutez ? Partez d’un modèle ci-dessous, ou ouvrez Apprendre par la pratique pour un projet guidé.
 tip-empty-timeline = Faites glisser des médias ici, ou appuyez sur le plus d’un élément de la Bibliothèque pour l’ajouter à la tête de lecture.
 tip-select-clip = Cliquez sur un clip pour le sélectionner. Ses réglages apparaissent dans l’Inspecteur.
@@ -999,7 +999,7 @@ tip-keyboard = Tout fonctionne au clavier. Appuyez sur F1 et recherchez clavier 
 workspace-edit-blurb = Monter et agencer : une grande timeline avec vos médias à côté.
 help-start-title = Premiers pas
 help-start-keys = commencer premier nouveau projet bienvenue visite aperçu bases
-help-start-body = Studio monte les vidéos sur une timeline. Créez un projet à partir d’un modèle, ouvrez un exemple ou partez de zéro, puis ajoutez des vidéos, des images et du son avec Importer des médias dans la Bibliothèque.
+help-start-body = Zornov monte les vidéos sur une timeline. Créez un projet à partir d’un modèle, ouvrez un exemple ou partez de zéro, puis ajoutez des vidéos, des images et du son avec Importer des médias dans la Bibliothèque.
     Faites glisser les clips sur la timeline ou appuyez sur le plus d’un élément de la Bibliothèque. Appuyez sur Space pour lire, S pour diviser, M pour ajouter un marqueur et ⌘Z pour annuler toute action.
     Appuyez sur ⌘K pour demander simplement une tâche à l’assistant de montage IA. Appuyez sur F1 dès que vous avez besoin d’aide.
 help-templates-title = Modèles et projets d’exemple
@@ -1008,7 +1008,7 @@ help-templates-body = Sur l’écran d’accueil, Commencer à partir d’un mod
     Apprendre par la pratique ouvre un projet d’exemple dont les étapes sont indiquées sur la timeline. Suivez les marqueurs pour vous exercer au montage, à la couleur, aux titres et à l’audio.
 help-import-title = Importer des médias
 help-import-keys = importer médias fichiers vidéo photos audio musique glisser déposer dossier bibliothèque télécharger lien
-help-import-body = Choisissez Fichier, Importer des médias (⌘I), ou faites glisser des fichiers dans la Bibliothèque. Studio laisse vos originaux à leur emplacement et travaille à partir d’eux. Les formats qu’il ne peut pas lire directement sont convertis pour vous.
+help-import-body = Choisissez Fichier, Importer des médias (⌘I), ou faites glisser des fichiers dans la Bibliothèque. Zornov laisse vos originaux à leur emplacement et travaille à partir d’eux. Les formats qu’il ne peut pas lire directement sont convertis pour vous.
     Le bouton Télécharger depuis un lien récupère des médias sur une page lorsque vous avez le droit de les utiliser. Utilisez Ajouter des médias d’exemple pour faire des essais sans vos propres rushes.
 help-timeline-title = La timeline
 help-timeline-keys = timeline pistes clips tête de lecture zoom magnétisme magnétique marqueurs plage sélectionner déplacer glisser
@@ -1062,14 +1062,14 @@ help-captions-body = La fonction Sous-titres automatiques transforme la parole e
 help-ai-editor-title = L’assistant de montage IA
 help-ai-editor-keys = ia montage assistant claude codex chatgpt command k demander requête mots simples automatiser
 help-ai-editor-body = Appuyez sur ⌘K, ou ouvrez la section IA de la Bibliothèque, et décrivez votre demande : couper les pauses, ajouter des sous-titres, passer au format vertical, faire correspondre les couleurs entre les plans. L’IA utilise les mêmes outils que vous, et chaque requête s’annule en une seule étape.
-    Choisissez l’assistant qui répond dans Réglages, IA. Studio vous indique les données envoyées. Si vous préférez approuver les modifications au préalable, activez Demander d’abord.
+    Choisissez l’assistant qui répond dans Réglages, IA. Zornov vous indique les données envoyées. Si vous préférez approuver les modifications au préalable, activez Demander d’abord.
 help-export-title = Exporter
 help-export-keys = exporter rendu enregistrer vidéo fichier mp4 format qualité résolution réseaux sociaux youtube partager livrer
 help-export-body = Appuyez sur ⌘E ou sur le bouton Exporter. Choisissez un préréglage pour le Web, les réseaux sociaux ou l’archivage, vérifiez la taille et la qualité, puis choisissez l’emplacement d’enregistrement. Les exports s’exécutent en arrière-plan et le bouton Tâches de la barre supérieure affiche leur progression.
     Définissez les points d’entrée et de sortie avec I et O pour exporter seulement une partie du montage.
 help-workspaces-title = Espaces de travail
 help-workspaces-keys = espace de travail disposition montage couleur audio vfx motion design production panneaux organiser ancrer glisser déplacer onglet onglets flottant réinitialiser
-help-workspaces-body = Un espace de travail organise l’éditeur pour un type de tâche. Montage, Couleur, Audio, VFX, Motion design et Production sont accessibles dans la barre supérieure et le menu Disposition ; Alt avec 1 à 6 permet de changer au clavier. Glissez un panneau par son en-tête ou son onglet sur un autre pour l’ancrer à sa gauche, à sa droite, au-dessus, en dessous, ou dedans en onglet ; Échap annule. Un clic droit sur un en-tête, ou Maj F10 sur un panneau atteint avec F6, propose les mêmes déplacements dans un menu. Disposition ▸ Panneaux affiche et masque les panneaux, « Enregistrer la disposition sous » garde la vôtre comme espace de travail, et « Réinitialiser la disposition » revient à celle de Studio.
+help-workspaces-body = Un espace de travail organise l’éditeur pour un type de tâche. Montage, Couleur, Audio, VFX, Motion design et Production sont accessibles dans la barre supérieure et le menu Disposition ; Alt avec 1 à 6 permet de changer au clavier. Glissez un panneau par son en-tête ou son onglet sur un autre pour l’ancrer à sa gauche, à sa droite, au-dessus, en dessous, ou dedans en onglet ; Échap annule. Un clic droit sur un en-tête, ou Maj F10 sur un panneau atteint avec F6, propose les mêmes déplacements dans un menu. Disposition ▸ Panneaux affiche et masque les panneaux, « Enregistrer la disposition sous » garde la vôtre comme espace de travail, et « Réinitialiser la disposition » revient à celle de Zornov.
     Un espace de travail définit uniquement les panneaux ouverts et le contenu affiché par la Bibliothèque et l’Inspecteur. Vous pouvez toujours redimensionner les panneaux et tout modifier ensuite.
 help-shortcuts-title = Raccourcis clavier
 help-shortcuts-keys = clavier raccourcis touches commandes liste personnaliser réattribuer
@@ -1077,7 +1077,7 @@ help-shortcuts-body = Space lance la lecture et met en pause ; J K L lisent en a
     Réglages, Raccourcis répertorie tous les raccourcis et permet de les modifier.
 help-keyboard-nav-title = Travailler au clavier et avec un lecteur d’écran
 help-keyboard-nav-keys = clavier lecteur écran voiceover narrateur nvda accessibilité naviguer aveugle focus tab repères annonces
-help-keyboard-nav-body = Studio fonctionne avec VoiceOver, Narrator et d’autres lecteurs d’écran, et tout peut se faire sans souris. Tab permet de passer d’une commande à l’autre ; F6 et Shift F6 permettent de passer d’un panneau à l’autre : Bibliothèque, Visualiseur, Inspecteur et Timeline.
+help-keyboard-nav-body = Zornov fonctionne avec VoiceOver, Narrator et d’autres lecteurs d’écran, et tout peut se faire sans souris. Tab permet de passer d’une commande à l’autre ; F6 et Shift F6 permettent de passer d’un panneau à l’autre : Bibliothèque, Visualiseur, Inspecteur et Timeline.
     Sur la timeline, ] et [ sélectionnent le clip suivant et précédent, les flèches haut et bas passent au point de montage suivant et précédent, Alt avec les flèches haut et bas sélectionne le clip sur la piste au-dessus ou en dessous, et Alt avec les flèches gauche et droite décale le clip sélectionné d’une image (Shift pour une seconde). Alt et la touche point annoncent la position de la tête de lecture.
     Sur le canevas, les touches point et virgule sélectionnent le calque en dessous et au-dessus à la position de la tête de lecture, Alt et la touche virgule énumèrent les calques, et Command avec Alt et les touches fléchées déplacent le calque sélectionné de 1 pour cent de la taille de l’image (ajoutez Shift pour 5 pour cent). Chaque étape est annoncée.
     Les modifications sont annoncées au fur et à mesure. Vous pouvez désactiver les annonces dans Réglages, Général, Accessibilité.
@@ -1087,11 +1087,11 @@ help-accessibility-body = Réglages, Général propose Taille de l’interface (
     Le contraste élevé utilise des arrière-plans noirs ou blancs avec du texte uni et des contours marqués. Les palettes de vision des couleurs permettent de distinguer les couleurs des clips et des états.
 help-language-title = Langue
 help-language-keys = langue traduction anglais hindi espagnol français allemand japonais chinois arabe persan farsi droite à gauche rtl
-help-language-body = Studio est disponible en anglais, hindi, espagnol, français, allemand, japonais, chinois simplifié, arabe et persan. Choisissez une langue dans Réglages, Général, Langue. Valeur par défaut du système suit la langue de votre ordinateur.
+help-language-body = Zornov est disponible en anglais, hindi, espagnol, français, allemand, japonais, chinois simplifié, arabe et persan. Choisissez une langue dans Réglages, Général, Langue. Valeur par défaut du système suit la langue de votre ordinateur.
     L’arabe et le persan disposent l’éditeur de droite à gauche. La timeline se déroule toujours de gauche à droite, dans le sens du temps.
 help-saving-title = Enregistrement et projets
 help-saving-keys = enregistrer ouvrir projet dossier enregistrement automatique sauvegarde récent renommer copier fichier
-help-saving-body = Un projet est un dossier. Studio enregistre automatiquement 30 secondes après la dernière modification et conserve 20 sauvegardes. Utilisez Fichier, Ouvrir pour ouvrir un dossier de projet, et renommez un projet en double-cliquant sur son nom dans la barre supérieure.
+help-saving-body = Un projet est un dossier. Zornov enregistre automatiquement 30 secondes après la dernière modification et conserve 20 sauvegardes. Utilisez Fichier, Ouvrir pour ouvrir un dossier de projet, et renommez un projet en double-cliquant sur son nom dans la barre supérieure.
     Vos médias ne sont pas copiés dans le projet ; laissez-les à leur emplacement.
 help-undo-title = Annuler et rétablir
 help-undo-keys = annuler rétablir historique erreur revenir modification retour
@@ -1099,7 +1099,7 @@ help-undo-body = ⌘Z annule la dernière modification et ⇧⌘Z la rétablit, 
 help-problems-title = En cas de lenteur ou de dysfonctionnement
 help-problems-keys = lent latence lecture images perdues erreur problème impossible échec plantage proxys cache qualité aperçu
 help-problems-body = Si la lecture saccade, réduisez la qualité de l’aperçu dans Réglages, Lecture, ou passez à l’aperçu simple. Un cache d’images plus grand est utile pour les projets longs.
-    Si un fichier ne peut pas être lu, Studio le convertit dans un format compatible ; attendez la fin de la tâche dans la barre supérieure. En cas de plantage, Studio vous demande votre accord avant d’envoyer un rapport, qui n’est envoyé que si vous choisissez Envoyer.
+    Si un fichier ne peut pas être lu, Zornov le convertit dans un format compatible ; attendez la fin de la tâche dans la barre supérieure. En cas de plantage, Zornov vous demande votre accord avant d’envoyer un rapport, qui n’est envoyé que si vous choisissez Envoyer.
 accessibility = Accessibilité
 high-contrast = Contraste élevé
 colour-vision = Vision des couleurs
@@ -1139,8 +1139,8 @@ change-who-answers-in-settings-ai-k-tokens-i = Changez d’assistant dans Régla
 claude-code-2 = Claude Code · { $v1 }
 clip-2 = Clip { $v1 }
 codex-2 = Codex · { $v1 }
-converting-name-to-a-format-studio-plays = Conversion de { $name } dans un format lisible par Studio…
-converting-what-studio-can-t-play-yet-to-h-2 = Conversion en H.264 de { $what }, que Studio ne peut pas encore lire…
+converting-name-to-a-format-studio-plays = Conversion de { $name } dans un format lisible par Zornov…
+converting-what-studio-can-t-play-yet-to-h-2 = Conversion en H.264 de { $what }, que Zornov ne peut pas encore lire…
 could-not-add = Impossible d’ajouter { $v1 }
 could-not-download-short = Impossible de télécharger { $short } : { $v1 }
 could-not-export-e = Impossible d’exporter : { $e }
@@ -1157,7 +1157,7 @@ export-3 = Exporter { $v1 }
 exported = { $v1 } exporté
 exporting-2 = Export · { $v1 }% · { $v2 }
 follows-track-of-name = Suit la trajectoire { $v1 } de « { $name } » ({ $v2 })
-from-from-kept-in-your-login-keychain-studio = Depuis { $from }. Conservé dans votre Trousseau de session ; Studio ne l’affiche plus ensuite.
+from-from-kept-in-your-login-keychain-studio = Depuis { $from }. Conservé dans votre Trousseau de session ; Zornov ne l’affiche plus ensuite.
 generated-placed-at-1-s = { $v1 } généré et placé à { $v2 }s
 generated-but-not-placed-e = Généré, mais non placé : { $e }
 generating-failed-e = Échec de la génération : { $e }
@@ -1189,7 +1189,7 @@ switch-to-next = Passer à { $next }
 tracking-failed-e = Échec du suivi : { $e }
 undid = { $v1 } annulé
 untitled = Sans titre { $v1 }
-uses-your-name-sign-in-studio-s-tools-are-co = Utilise votre connexion { $name } ({ $v1 }). Les outils de Studio sont connectés à cette fenêtre.
+uses-your-name-sign-in-studio-s-tools-are-co = Utilise votre connexion { $name } ({ $v1 }). Les outils de Zornov sont connectés à cette fenêtre.
 warmed-the-grade-on-the-mountains-box-1-and = L’étalonnage des montagnes a été réchauffé (rectangle 1) et le rocher flouté (point 2).
 wobble-loop-or-step-without-more-keys-loop-n = Faites osciller, boucler ou évoluer par paliers { $v1 } sans ajouter d’images clés. Une boucle nécessite au moins deux images clés.
 paste-the-key = collez la clé

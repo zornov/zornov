@@ -2,7 +2,7 @@
 
 Anyone can write issues, comments and pull requests, so any automation that
 reads them is reading text a stranger may have written to steer it (prompt
-injection). Studio keeps this safe in two ways:
+injection). Zornov keeps this safe in two ways:
 
 - **Limits:** automation only ever proposes (labels, comments, draft pull
   requests); people merge and release. Jobs that read outside text hold no

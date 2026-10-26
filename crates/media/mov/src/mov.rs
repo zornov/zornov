@@ -184,10 +184,10 @@ impl MovWriter {
                 }
                 atom(t, b"mdia", |md| {
                     mdhd(md, self.timescale, video_dur);
-                    hdlr(md, b"mhlr", b"vide", "Studio Video");
+                    hdlr(md, b"mhlr", b"vide", "Zornov Video");
                     atom(md, b"minf", |mi| {
                         full(mi, b"vmhd", 0, 1, |b| b.extend_from_slice(&[0, 0x40, 0x80, 0, 0x80, 0, 0x80, 0]));
-                        hdlr(mi, b"dhlr", b"alis", "Studio Data");
+                        hdlr(mi, b"dhlr", b"alis", "Zornov Data");
                         dinf(mi);
                         atom(mi, b"stbl", |st| {
                             full(st, b"stsd", 0, 0, |b| {
@@ -208,10 +208,10 @@ impl MovWriter {
                 self.trak(m, 2, dur_movie, |t| {
                     atom(t, b"mdia", |md| {
                         mdhd(md, a.sample_rate, self.audio_frames);
-                        hdlr(md, b"mhlr", b"soun", "Studio Sound");
+                        hdlr(md, b"mhlr", b"soun", "Zornov Sound");
                         atom(md, b"minf", |mi| {
                             full(mi, b"smhd", 0, 0, |b| b.extend_from_slice(&[0u8; 4]));
-                            hdlr(mi, b"dhlr", b"alis", "Studio Data");
+                            hdlr(mi, b"dhlr", b"alis", "Zornov Data");
                             dinf(mi);
                             atom(mi, b"stbl", |st| {
                                 full(st, b"stsd", 0, 0, |b| {
@@ -239,7 +239,7 @@ impl MovWriter {
                 self.trak(m, tc_id, video_dur, |t| {
                     atom(t, b"mdia", |md| {
                         mdhd(md, self.timescale, video_dur);
-                        hdlr(md, b"mhlr", b"tmcd", "Studio Time Code");
+                        hdlr(md, b"mhlr", b"tmcd", "Zornov Time Code");
                         atom(md, b"minf", |mi| {
                             atom(mi, b"gmhd", |g| {
                                 full(g, b"gmin", 0, 0, |b| b.extend_from_slice(&[0, 0x40, 0x80, 0, 0x80, 0, 0x80, 0, 0, 0, 0, 0]));
@@ -253,7 +253,7 @@ impl MovWriter {
                                     });
                                 });
                             });
-                            hdlr(mi, b"dhlr", b"alis", "Studio Data");
+                            hdlr(mi, b"dhlr", b"alis", "Zornov Data");
                             dinf(mi);
                             atom(mi, b"stbl", |st| {
                                 full(st, b"stsd", 0, 0, |b| {

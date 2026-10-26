@@ -80,7 +80,7 @@ fn a_signed_update_downloads_and_installs_on_restart() {
     let feed_json = serde_json::to_vec(&Feed { schema: 1, version: new_version.into(), notes: "big news".into(), date: String::new(), platforms: BTreeMap::from([(platform.clone(), entry)]) }).unwrap();
     let base = serve(BTreeMap::from([("/feed.json".to_owned(), feed_json), ("/studio.update.tar.gz".to_owned(), arc)]));
 
-    let install = home.join("Studio-install");
+    let install = home.join("Zornov-install");
     std::fs::create_dir_all(&install).unwrap();
     std::fs::write(install.join("studio"), "OLD BINARY").unwrap();
     std::fs::write(install.join("old-only.txt"), "bye").unwrap();

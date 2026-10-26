@@ -3,7 +3,7 @@ name = "studio-i18n"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio localisation: Fluent-style messages, plural rules, Arabic/Persian shaping and bidirectional text"
+description = "Zornov localisation: Fluent-style messages, plural rules, Arabic/Persian shaping and bidirectional text"
 
 [features]
 # The Settings > Account messages (see app feature `commerce`).

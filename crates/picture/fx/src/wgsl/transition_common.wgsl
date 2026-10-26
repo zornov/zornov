@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Shared prelude for Studio transition shaders.
+// Shared prelude for Zornov transition shaders.
 //
 // Binding layout (group 0):
 //   0: outgoing picture A, 1: incoming picture B (linear premultiplied)

@@ -1,6 +1,6 @@
 # studio-colour
 
-Colour science for Studio: transfer functions, colour spaces, grading
+Colour science for Zornov: transfer functions, colour spaces, grading
 tools, LUTs, automatic corrections and scopes. No runtime dependencies
 (`naga` is a dev-dependency used only to validate the WGSL in tests).
 
@@ -47,7 +47,7 @@ let out = p.apply_rgb([0.18, 0.18, 0.18]);
 | `scopes`    | downscale, luma waveform, RGB parade, vectorscope (+75 % targets, skin line), histogram |
 | `grade`     | `Grade` (all parameters), the fixed processing order, `GradeProcessor` |
 | `gpu`       | WGSL sources (`shaders/`), uniform packing, LUT texels, scope params |
-| `looks`     | Studio's own looks as grade parameters |
+| `looks`     | Zornov's own looks as grade parameters |
 
 Every formula and parameter mapping that is our own design (tone-range
 weights, fade, vibrance, wheel → CDL mapping, tonal masks, HSL weights,

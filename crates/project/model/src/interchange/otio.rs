@@ -238,7 +238,7 @@ fn note_lossy(c: &Clip, name: &str, report: &mut Report) {
         lost.push("speed curve (exported as its average speed)");
     }
     if !lost.is_empty() {
-        report.add(name, format!("{} kept only in Studio metadata", lost.join(", ")));
+        report.add(name, format!("{} kept only in Zornov metadata", lost.join(", ")));
     }
 }
 

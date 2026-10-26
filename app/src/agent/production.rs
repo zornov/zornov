@@ -896,7 +896,7 @@ mod tests {
         assert_eq!(sp["recent"][0]["shot"], shot.as_str());
         let b = prod(&mut s, json!({"do": "budget", "view": "scenes"}));
         assert_eq!(b["total"]["ai_spend"], 2.5, "{b}");
-        let manual = prod(&mut s, json!({"do": "spend", "dollars": 4, "model": "midjourney", "note": "outside Studio"}));
+        let manual = prod(&mut s, json!({"do": "spend", "dollars": 4, "model": "midjourney", "note": "outside Zornov"}));
         assert!(manual["recorded"].as_u64().is_some());
         assert_eq!(prod(&mut s, json!({"do": "spend"}))["total_usd"], 6.5);
         let _ = std::fs::remove_dir_all(&dir);

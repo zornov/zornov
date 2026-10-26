@@ -3,7 +3,7 @@ name = "studio-crash"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Crash reports for Studio in Rust: panics and native crashes saved locally, sent only if the person agrees."
+description = "Crash reports for Zornov in Rust: panics and native crashes saved locally, sent only if the person agrees."
 
 [dependencies]
 studio-update = { path = "../update" }

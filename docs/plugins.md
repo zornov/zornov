@@ -1,12 +1,12 @@
-# Writing Studio plugins
+# Writing Zornov plugins
 
-Studio plugins add **effects**, **generators**, **transitions**,
+Zornov plugins add **effects**, **generators**, **transitions**,
 **importers**, **exporters** and **panels**. They are written in Rust with
 the `studio-plugin-api` crate and compiled to WebAssembly
-(`wasm32-unknown-unknown`). Studio runs them in a sandbox, so a plugin
+(`wasm32-unknown-unknown`). Zornov runs them in a sandbox, so a plugin
 can be installed from anyone without giving it the run of the computer.
 
-Studio also loads existing **OpenFX** (OFX) image effect plugins; see
+Zornov also loads existing **OpenFX** (OFX) image effect plugins; see
 [OpenFX](#openfx) at the end.
 
 Two complete examples live in `plugins/examples/`:
@@ -16,7 +16,7 @@ Two complete examples live in `plugins/examples/`:
   (Netpbm pictures, marker lists), an exporter (clip list as CSV) and a
   panel (Shot list).
 
-Both ship with Studio (Library ▸ AI ▸ Available) and are built into
+Both ship with Zornov (Library ▸ AI ▸ Available) and are built into
 `plugins/dist/`.
 
 ## Quick start
@@ -110,8 +110,8 @@ parameter id once people use it**: their projects would lose the effect
 ### Pictures
 
 Every picture is linear-light, premultiplied RGBA `f32` (`Px = [f32; 4]`),
-rows top to bottom, the same as Studio's own effects. Values above 1 are
-highlights; do not produce negative or non-finite values (Studio replaces
+rows top to bottom, the same as Zornov's own effects. Values above 1 are
+highlights; do not produce negative or non-finite values (Zornov replaces
 them, but the result will not be what you meant). The output has the
 input's size: an effect changes `frame.pixels` in place.
 
@@ -121,9 +121,9 @@ input's size: an effect changes `frame.pixels` in place.
 
 `Context` has `time` (seconds since the clip started), `frame_rate`,
 `seed` (per clip, so two clips with the same effect differ) and, for
-transitions, `progress` (0 to 1, strictly inside: Studio itself shows the
+transitions, `progress` (0 to 1, strictly inside: Zornov itself shows the
 outgoing picture at 0 and the incoming one at 1). Effects must be pure
-functions of their inputs, parameters and context: Studio renders frames
+functions of their inputs, parameters and context: Zornov renders frames
 in any order, on several threads, and may run several copies of a plugin.
 
 ### Parameters
@@ -138,7 +138,7 @@ Param::point("centre", "Centre", [0.5, 0.5])        // 0..1, top-left origin
 ```
 
 `.fixed()` makes a parameter non-animatable. Every other parameter can be
-keyframed in Studio; the plugin always sees the value at the frame being
+keyframed in Zornov; the plugin always sees the value at the frame being
 rendered. Read them with `p.float`, `p.int`, `p.bool`, `p.choice` (index),
 `p.colour` (premultiplied) and `p.point`. Up to 16 parameters per item.
 
@@ -146,7 +146,7 @@ rendered. Read them with `p.float`, `p.int`, `p.bool`, `p.choice` (index),
 
 - `Effect`: `info()` and `apply(ctx, frame, params)`.
 - `Generator`: same shape, `generate`. A generator draws over its input
-  (Studio puts it on an empty layer for a picture of its own); give it a
+  (Zornov puts it on an empty layer for a picture of its own); give it a
   `mix`/opacity parameter as the built-in ones have. It shows up with the
   effects under Plugins.
 - `Transition`: `apply(ctx, a, b, params)`; `a` is the outgoing picture
@@ -154,15 +154,15 @@ rendered. Read them with `p.float`, `p.int`, `p.bool`, `p.choice` (index),
   Plugins**.
 
 `EffectInfo` also takes `.category(...)` (where it is grouped),
-`.animated()` (the result depends on time or seed; otherwise Studio may
+`.animated()` (the result depends on time or seed; otherwise Zornov may
 reuse a frame while nothing changes), `.wgsl(body)` and `.gpu_only()`.
 
 ### GPU shaders
 
-Give an item `.wgsl(include_str!("my.wgsl"))` and Studio's GPU renderer
+Give an item `.wgsl(include_str!("my.wgsl"))` and Zornov's GPU renderer
 runs the shader instead of the CPU code (the CPU code is still used for
 thumbnails, by the CPU renderer and as the reference). You write only the
-body; Studio puts its prelude in front:
+body; Zornov puts its prelude in front:
 
 - Effects and generators: write `fn effect(pos: vec2<f32>) -> vec4<f32>`.
   `pos` is in pixels (centres at +0.5). `tex(pos)` samples the input,
@@ -180,7 +180,7 @@ texture, 1 sampler, 2 output `rgba16float` storage texture, 3 uniforms
 (`size`, `time`, `seed`, `p: array<vec4<f32>, 16>`); transitions 0 A, 1 B,
 2 sampler, 3 output, 4 uniforms with `progress` in place of `time`. The
 full preludes are `crates/picture/fx/src/wgsl/common.wgsl` and
-`transition_common.wgsl`. Studio checks the shader with naga when the
+`transition_common.wgsl`. Zornov checks the shader with naga when the
 plugin loads: a shader that does not compile is reported in the plugin's
 details and the CPU code is used. `.gpu_only()` items (no CPU code) are
 turned off when their shader fails and pass the picture through on the
@@ -197,7 +197,7 @@ impl Importer for Pnm {
 }
 ```
 
-Studio sends files whose type it does not read itself to the first
+Zornov sends files whose type it does not read itself to the first
 enabled importer for their extension (from the media import, a drop, or
 the AI's `import`). Return `Imported::Image { width, height, rgba8 }`
 (straight-alpha sRGB, saved as a PNG in the project's `Imported` folder and
@@ -224,7 +224,7 @@ upwards and -1, -2, ... for sound lanes downwards.
 
 ### Panels
 
-A panel is a small column of widgets in the AI library (Installed). Studio
+A panel is a small column of widgets in the AI library (Installed). Zornov
 calls `Panel::update(&event, &project)` when it is opened and whenever a
 button is pressed or a slider or toggle changes; you return what to show
 and, optionally, edit ops to apply:
@@ -275,13 +275,13 @@ Plugins are plain Rust, so test them natively with `cargo test`: build a
 `run_import`, `run_export` and `run_panel` with `defaults(&params)` or
 your own packed values (see the tests in `plugins/examples/*/src/lib.rs`).
 `crates/plugins/plugins/tests/examples.rs` shows the examples installed into a
-scratch folder and run through Studio's own effect lookups. To try a
-plugin on a scratch project without opening a window, give Studio a
-scratch home (so nothing lands in your own Studio folder) and send it
+scratch folder and run through Zornov's own effect lookups. To try a
+plugin on a scratch project without opening a window, give Zornov a
+scratch home (so nothing lands in your own Zornov folder) and send it
 calls on stdin, one JSON object per line:
 
 ```bash
-HOME=/tmp/plugin-home studio agent --headless --project /tmp/plugin-test --out /tmp/plugin-out - < calls.jsonl
+HOME=/tmp/plugin-home zornov agent --headless --project /tmp/plugin-test --out /tmp/plugin-out - < calls.jsonl
 ```
 
 with `calls.jsonl` holding, for example,
@@ -306,7 +306,7 @@ and are refused.
 ## Versions and the ABI
 
 `studio-plugin-api` is versioned on its own (1.0.0). Every 1.x release
-keeps **ABI 1**; Studio refuses a module whose `studio_abi` it does not
+keeps **ABI 1**; Zornov refuses a module whose `studio_abi` it does not
 know and says which side to update. The ABI, for people writing plugins
 without the crate (any language that targets wasm32):
 
@@ -370,9 +370,9 @@ SHA-256 matches. Newer versions offer an update.
 
 ## Plugins the AI writes
 
-When nothing fits, Studio's AI can write an effect itself (`plugins
+When nothing fits, Zornov's AI can write an effect itself (`plugins
 {"action": "create"}`): it supplies the body of a per-pixel function and
-its parameters (or a whole `lib.rs`), and Studio writes a crate under
+its parameters (or a whole `lib.rs`), and Zornov writes a crate under
 `~/Movies/Studio/Plugin sources/<id>/` against a copy of this API, builds
 it offline with the Rust toolchain on the Mac, runs every item on a test
 picture and installs it. The source stays there to read, change and
@@ -381,15 +381,15 @@ AI says so.
 
 ## OpenFX
 
-Studio hosts OFX image effect plugins (`.ofx.bundle`) from
+Zornov hosts OFX image effect plugins (`.ofx.bundle`) from
 `/Library/OFX/Plugins`, `~/Library/OFX/Plugins`, `OFX_PLUGIN_PATH` and
 folders listed in `~/Movies/Studio/Plugins/ofx.json`. Loading them is off
 until the person turns it on (Library ▸ AI ▸ Available ▸ OpenFX, or the
 AI with their consent), because OFX plugins are native code from their
 vendors and are **not sandboxed**. Each bundle runs in its own worker
-process (`studio ofx-worker <bundle>`), so a plugin that crashes or hangs
+process (`zornov ofx-worker <bundle>`), so a plugin that crashes or hangs
 takes only its worker down; it is restarted up to three times, then left
-off until Studio restarts, and the picture passes through.
+off until Zornov restarts, and the picture passes through.
 
 Supported: the OFX Image Effect API 1.4 in the filter, general (one
 source), generator and transition contexts; CPU rendering of whole frames
@@ -403,9 +403,9 @@ Not supported (plugins that need these fail to load or render and are
 listed with the reason): overlays and custom interacts, GPU rendering
 (OpenGL, Metal, CUDA, OpenCL), tiles and multi-resolution, reading other
 frames than the current one (temporal effects), parametric parameters,
-animated parameters inside the plugin (Studio animates a parameter by
+animated parameters inside the plugin (Zornov animates a parameter by
 sending its value for each frame), the progress, timeline and dialog
-suites. Studio works in linear light; frames go to OFX plugins sRGB-encoded
+suites. Zornov works in linear light; frames go to OFX plugins sRGB-encoded
 (most expect display-referred pixels) unless the plugin is listed under
 `linear` in `ofx.json`.
 

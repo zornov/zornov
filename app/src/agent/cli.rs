@@ -4,9 +4,9 @@
 //! The agent entry points on the command line.
 //!
 //! ```text
-//! studio mcp [--project DIR]                    MCP server on stdin / stdout
-//! studio agent [--project DIR] TOOL [JSON]      one tool call, result on stdout
-//! studio agent [--project DIR] -                calls from stdin, each
+//! zornov mcp [--project DIR]                    MCP server on stdin / stdout
+//! zornov agent [--project DIR] TOOL [JSON]      one tool call, result on stdout
+//! zornov agent [--project DIR] -                calls from stdin, each
 //!                                               {"tool": "...", "args": {...}}
 //! ```
 //!
@@ -20,7 +20,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn usage() -> i32 {
-    eprintln!("usage: studio agent [--project DIR] [--out DIR] TOOL [JSON-ARGS]\n       studio agent [--project DIR] -        (one {{\"tool\", \"args\"}} per stdin line)\n       studio mcp [--project DIR]\ntools: guide, summary, inspect, media, catalogue, edit, check, undo, redo, new_project, open, save, import, download, ai, analyse, frame, contact_sheet, export, export_status, qc, deliver, queue, bundle, cutdown, edit_schema");
+    eprintln!("usage: zornov agent [--project DIR] [--out DIR] TOOL [JSON-ARGS]\n       zornov agent [--project DIR] -        (one {{\"tool\", \"args\"}} per stdin line)\n       zornov mcp [--project DIR]\ntools: guide, summary, inspect, media, catalogue, edit, check, undo, redo, new_project, open, save, import, download, ai, analyse, frame, contact_sheet, export, export_status, qc, deliver, queue, bundle, cutdown, edit_schema");
     2
 }
 
@@ -64,14 +64,14 @@ fn open_window(args: &[String], project: &Option<PathBuf>) -> Option<PathBuf> {
     super::attach::find_window(project.as_deref())
 }
 
-/// `studio mcp …`
+/// `zornov mcp …`
 pub fn mcp(args: &[String]) -> i32 {
     // Claude Code driving the editor window: tools run there.
     if args.first().map(String::as_str) == Some("--attach") {
         return match args.get(1) {
             Some(sock) => super::attach::proxy(std::path::Path::new(sock), args.iter().position(|a| a == "--role").and_then(|i| args.get(i + 1)).map(String::as_str)),
             None => {
-                eprintln!("studio mcp: --attach needs the window's socket");
+                eprintln!("zornov mcp: --attach needs the window's socket");
                 2
             }
         };
@@ -81,7 +81,7 @@ pub fn mcp(args: &[String]) -> i32 {
     if let Ok(o) = opts(&args) {
         if let Some(sock) = open_window(all, &o.project) {
             // The person has this project open: work on it there.
-            eprintln!("studio mcp: working in the open Studio window");
+            eprintln!("zornov mcp: working in the open Zornov window");
             return super::attach::proxy(&sock, None);
         }
     }
@@ -91,18 +91,18 @@ pub fn mcp(args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("studio mcp: {e}");
+            eprintln!("zornov mcp: {e}");
             1
         }
     }
 }
 
-/// `studio agent …`
+/// `zornov agent …`
 pub fn agent(args: &[String]) -> i32 {
     let o = match opts(args) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("studio agent: {e}");
+            eprintln!("zornov agent: {e}");
             return usage();
         }
     };
@@ -110,12 +110,12 @@ pub fn agent(args: &[String]) -> i32 {
     // The person has the project open: the calls run in that window.
     let window = open_window(args, &o.project);
     if window.is_some() {
-        eprintln!("studio agent: working in the open Studio window");
+        eprintln!("zornov agent: working in the open Zornov window");
     }
     let mut s = match session(&o.project) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("studio agent: {e}");
+            eprintln!("zornov agent: {e}");
             return 1;
         }
     };
@@ -185,7 +185,7 @@ pub fn agent(args: &[String]) -> i32 {
         Some(j) => match serde_json::from_str(j) {
             Ok(v) => v,
             Err(e) => {
-                eprintln!("studio agent: the arguments are not JSON ({e})");
+                eprintln!("zornov agent: the arguments are not JSON ({e})");
                 return 2;
             }
         },

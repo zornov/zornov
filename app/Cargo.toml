@@ -1,12 +1,12 @@
 [package]
 name = "studio-app"
-description = "Studio desktop application: editor user interface built on eframe/egui and wgpu"
+description = "Zornov desktop application: editor user interface built on eframe/egui and wgpu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "studio"
+name = "zornov"
 path = "src/main.rs"
 
 [features]

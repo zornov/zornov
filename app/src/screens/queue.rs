@@ -3,7 +3,7 @@
 
 //! The render queue in the jobs popover: each queued export with its
 //! progress, pause / resume and cancel, and how many render nodes are set up.
-//! The queue itself lives in a file shared with the AI and `studio queue`
+//! The queue itself lives in a file shared with the AI and `zornov queue`
 //! (see `deliver_run`); this only draws it and sends clicks back.
 
 use crate::icons::Icon;
@@ -90,7 +90,7 @@ pub fn section(ui: &mut egui::Ui) {
         }
     }
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
-    let msg = if nodes == 0 { "No render nodes · run `studio node` on another Mac and add it with the AI (queue add_node)".to_owned() } else { format!("{nodes} render node(s) set up · jobs marked distributed share their pieces") };
+    let msg = if nodes == 0 { "No render nodes · run `zornov node` on another Mac and add it with the AI (queue add_node)".to_owned() } else { format!("{nodes} render node(s) set up · jobs marked distributed share their pieces") };
     kit::paint_text_clipped(ui.painter(), egui::pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, &msg, theme::caption(), t.text_2, r.width() - 12.0);
     if let Some((id, what)) = act {
         let store = crate::deliver_run::store();

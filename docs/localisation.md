@@ -1,6 +1,6 @@
 # Localisation
 
-Studio's interface is available in English, Hindi, Spanish, French, German,
+Zornov's interface is available in English, Hindi, Spanish, French, German,
 Japanese, Simplified Chinese, Arabic and Persian. Arabic and Persian lay the
 editor out right to left. Pick the language in **Settings ▸ General ▸
 Language**; "System default" follows the computer.
@@ -135,7 +135,7 @@ In right-to-left languages the panels mirror (Library on the right, Inspector
 on the left), menus and sections start at the right edge, and the timeline
 keeps running left to right as time does. The fonts for Arabic, Persian,
 Devanagari, Japanese and Chinese come from the operating system (egui looks
-them up on demand); Studio bundles none of them.
+them up on demand); Zornov bundles none of them.
 
 ### Known limits
 
@@ -150,4 +150,4 @@ them up on demand); Studio bundles none of them.
 * Dates, file sizes and times use ASCII digits except where a message goes
   through `tr_args` with a number.
 * Text in the AI editor's replies and anything an AI wrote is in the language
-  the AI chose, not translated by Studio.
+  the AI chose, not translated by Zornov.

@@ -1,6 +1,6 @@
 [package]
 name = "studio-deliver"
-description = "Studio finishing and delivery: automated QC, delivery specs, render-queue and render-node protocol, DCP/IMF mastering (own JPEG 2000 encoder, MXF writer), deliverables bundle"
+description = "Zornov finishing and delivery: automated QC, delivery specs, render-queue and render-node protocol, DCP/IMF mastering (own JPEG 2000 encoder, MXF writer), deliverables bundle"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

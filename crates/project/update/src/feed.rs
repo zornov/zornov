@@ -70,7 +70,7 @@ pub fn verify(public_key_hex: &str, platform: &str, version: &str, entry: &Entry
     let sig = crate::unhex(&entry.signature).ok_or("the update's signature is not hex")?;
     UnparsedPublicKey::new(&signature::ED25519, key)
         .verify(&message(platform, version, &entry.sha256, entry.size), &sig)
-        .map_err(|_| "the update's signature does not match: it was not signed with Studio's update key".to_owned())
+        .map_err(|_| "the update's signature does not match: it was not signed with Zornov's update key".to_owned())
 }
 
 /// `1.2.3` (a leading `v` and a `-pre` or `+build` tail are ignored).
@@ -103,7 +103,7 @@ pub fn resolve(feed_url: &str, url: &str) -> String {
 pub fn parse(bytes: &[u8]) -> Result<Feed, String> {
     let f: Feed = serde_json::from_slice(bytes).map_err(|e| format!("the update feed is not valid: {e}"))?;
     if f.schema != 1 {
-        return Err(format!("the update feed is schema {}, this Studio reads 1", f.schema));
+        return Err(format!("the update feed is schema {}, this Zornov reads 1", f.schema));
     }
     Ok(f)
 }

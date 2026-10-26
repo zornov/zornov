@@ -3,6 +3,6 @@ name = "studio-rig"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Character rigging math shared by Studio's 2D skeletons and 3D armatures: IK solvers (two-bone with poles, FABRIK, CCD, soft IK, stretch), paths, foot pinning, skin weights and painting, dual-quaternion skinning, mirroring, retargeting, pose readers and pose checks."
+description = "Character rigging math shared by Zornov's 2D skeletons and 3D armatures: IK solvers (two-bone with poles, FABRIK, CCD, soft IK, stretch), paths, foot pinning, skin weights and painting, dual-quaternion skinning, mirroring, retargeting, pose readers and pose checks."
 
 [dependencies]

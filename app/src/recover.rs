@@ -85,7 +85,7 @@ impl StudioApp {
             e.library_query = q.to_owned();
         }
         let name = self.doc.project.name.clone();
-        kit::push(ctx, format!("Studio closed unexpectedly. {name} is back where you were{}.", if newer.is_some() { ", with your last unsaved changes" } else { "" }), None, Some(Icon::CheckCircle));
+        kit::push(ctx, format!("Zornov closed unexpectedly. {name} is back where you were{}.", if newer.is_some() { ", with your last unsaved changes" } else { "" }), None, Some(Icon::CheckCircle));
         true
     }
 }

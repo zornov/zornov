@@ -259,7 +259,7 @@ pub fn parse(manifest_url: &str, text: &str) -> Result<Mpd> {
                             *r as u64
                         } else {
                             // Until the next entry starts, or the period ends.
-                            let stop = tl.get(i + 1).and_then(|x| x.0).or(end).ok_or_else(|| Error::Unsupported("This is a live stream with no end; Studio saves recorded videos, not live ones.".into()))?;
+                            let stop = tl.get(i + 1).and_then(|x| x.0).or(end).ok_or_else(|| Error::Unsupported("This is a live stream with no end; Zornov saves recorded videos, not live ones.".into()))?;
                             (stop.saturating_sub(t) / (*d).max(1)).saturating_sub(1)
                         };
                         for _ in 0..=repeats {
@@ -273,7 +273,7 @@ pub fn parse(manifest_url: &str, text: &str) -> Result<Mpd> {
                     }
                 } else {
                     let d = tmpl.duration.ok_or_else(|| Error::Bad("the manifest gives no segment length".into()))?.max(1);
-                    let secs = plen.or(total).ok_or_else(|| Error::Unsupported("This is a live stream with no end; Studio saves recorded videos, not live ones.".into()))?;
+                    let secs = plen.or(total).ok_or_else(|| Error::Unsupported("This is a live stream with no end; Zornov saves recorded videos, not live ones.".into()))?;
                     let count = ((secs * ts as f64) / d as f64).ceil() as u64;
                     if count > 200_000 {
                         return Err(Error::Bad("the manifest lists an unreasonable number of segments".into()));
@@ -376,12 +376,12 @@ pub fn choose<'a>(m: &'a Mpd, q: Quality, lang: Option<&str>) -> Result<(Option<
     let usable = |k: Kind| -> Vec<&'a Rep> { m.reps.iter().filter(|r| r.kind == k && !r.trick).collect() };
     let (video, audio) = (usable(Kind::Video), usable(Kind::Audio));
     if video.is_empty() && audio.is_empty() {
-        return Err(Error::NotExposed("The manifest lists no video or sound Studio can take.".into()));
+        return Err(Error::NotExposed("The manifest lists no video or sound Zornov can take.".into()));
     }
     let open_v: Vec<&Rep> = video.iter().copied().filter(|r| !r.protected).collect();
     let open_a: Vec<&Rep> = audio.iter().copied().filter(|r| !r.protected).collect();
     if open_v.is_empty() && open_a.is_empty() {
-        return Err(Error::Protected("This video is protected (the manifest asks for DRM, such as Widevine, PlayReady or FairPlay). Studio does not work around copy protection, so it cannot be downloaded.".into()));
+        return Err(Error::Protected("This video is protected (the manifest asks for DRM, such as Widevine, PlayReady or FairPlay). Zornov does not work around copy protection, so it cannot be downloaded.".into()));
     }
     let rank = |r: &&Rep| (r.height, r.bandwidth);
     let v = if q == Quality::AudioOnly {
@@ -402,7 +402,7 @@ pub fn choose<'a>(m: &'a Mpd, q: Quality, lang: Option<&str>) -> Result<(Option<
     };
     let a = open_a.iter().copied().max_by_key(score);
     if v.is_none() && a.is_none() {
-        return Err(Error::Protected("This video is protected (the manifest asks for DRM). Studio does not work around copy protection, so it cannot be downloaded.".into()));
+        return Err(Error::Protected("This video is protected (the manifest asks for DRM). Zornov does not work around copy protection, so it cannot be downloaded.".into()));
     }
     Ok((v, a))
 }

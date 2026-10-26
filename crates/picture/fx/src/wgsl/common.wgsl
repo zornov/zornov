@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Shared prelude for Studio effect shaders.
+// Shared prelude for Zornov effect shaders.
 //
 // Binding layout (group 0):
 //   0: input texture (linear premultiplied RGBA)

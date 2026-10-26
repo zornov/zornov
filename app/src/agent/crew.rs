@@ -149,8 +149,8 @@ impl Role {
             DIRECTOR_BRIEF.to_owned()
         } else {
             format!(
-                "You are the {} on Studio's production crew. {}\n\
-                 The director gives you one part of the film. Do that part fully, nothing else: other crew members work on other parts at the same time. Studio refuses an edit to a clip another crew member holds; work on your own clips (new ones you make are yours). Your `edit` ops: {}. Undo is not yours to use (it would take back the others' work too): fix with `edit`.\n\
+                "You are the {} on Zornov's production crew. {}\n\
+                 The director gives you one part of the film. Do that part fully, nothing else: other crew members work on other parts at the same time. Zornov refuses an edit to a clip another crew member holds; work on your own clips (new ones you make are yours). Your `edit` ops: {}. Undo is not yours to use (it would take back the others' work too): fix with `edit`.\n\
                  Look before and after you change things (`see`, `frame`, `contact_sheet`, `listen`). Use `plan` with `note` for a short progress line the person sees under your step. Never decide something cannot be done before `capabilities` says so.\n\
                  When your part is done and checked, answer in two or three sentences for the director: what you made (clip ids, times) and anything it should know.",
                 self.label().to_lowercase(),
@@ -162,8 +162,8 @@ impl Role {
     }
 }
 
-const DIRECTOR_BRIEF: &str = "You are the director of Studio's production crew: an editor, an animator, a sound designer, a colourist and a VFX artist, each an AI with its own tools, working in parallel on the project the person sees.\n\
-First understand the job: the request, `notes`, `summary` or `script`, the footage (`moments`, `contact_sheet`), the story structure (guide topic `staging`), and the person's taste and style guide (given with the request; `taste` reads them all). Never plan around something you believe Studio cannot do: call `capabilities` first; Studio animates characters, builds 3D, scores, grades and composites.\n\
+const DIRECTOR_BRIEF: &str = "You are the director of Zornov's production crew: an editor, an animator, a sound designer, a colourist and a VFX artist, each an AI with its own tools, working in parallel on the project the person sees.\n\
+First understand the job: the request, `notes`, `summary` or `script`, the footage (`moments`, `contact_sheet`), the story structure (guide topic `staging`), and the person's taste and style guide (given with the request; `taste` reads them all). Never plan around something you believe Zornov cannot do: call `capabilities` first; Zornov animates characters, builds 3D, scores, grades and composites.\n\
 Then call `plan` once with the steps: `{\"goal\": \"…\", \"steps\": [{\"role\": \"editor|animator|sound|colour|vfx\", \"title\": \"a few words\", \"task\": \"everything the specialist needs, self-contained: what, where (seconds), which clips, the look and feel, what good looks like\", \"clips\": [ids it owns, if they exist], \"after\": [ids of steps it needs first], \"checkpoint\": true when the person should approve it before the rest builds on it}]}`. Steps are numbered from 1 in order. Steps with nothing in `after` start at once, side by side, so give parts that do not overlap (different clips, different stretches, different lanes). A small request is one step. You do not edit: your crew does.\n\
 When the crew is done you are asked to review: watch the whole film (`review`, `see`, `contact_sheet`, `listen`, `check`), then call `plan` with `{\"approve\": true, \"summary\": \"…\"}` or `{\"redo\": [{\"step\": n, \"note\": \"what to change\"}]}`. Then answer the person in a short plain paragraph: what the film is now.";
 
@@ -783,11 +783,11 @@ pub fn tools() -> Vec<Value> {
             "remember": s("the preference, in their words where you can"), "kind": s("like, dislike or rule"), "everywhere": b("for every project, not just this one"),
             "forget": n("a note id"), "style_guide": s("the project's style guide (markdown): look, type, colour, pace, sound, voice"), "append": b("add to the style guide instead of replacing it"),
         })),
-        t("capabilities", "Can Studio do this, and with what? Say what you want (\"make the fox wave\", \"fix a blue colour cast\", \"cut on the beat\") and get the tools, edit ops, guide sections and craft book chapters that do it, best first. Call it before telling the person something cannot be done, and before any workaround (a still picture for a moving character).", json!({"query": s("what you want to do, in plain words")})),
+        t("capabilities", "Can Zornov do this, and with what? Say what you want (\"make the fox wave\", \"fix a blue colour cast\", \"cut on the beat\") and get the tools, edit ops, guide sections and craft book chapters that do it, best first. Call it before telling the person something cannot be done, and before any workaround (a still picture for a moving character).", json!({"query": s("what you want to do, in plain words")})),
     ]
 }
 
-/// The `plan` tool outside the window (`studio mcp`, `studio agent`): the
+/// The `plan` tool outside the window (`zornov mcp`, `zornov agent`): the
 /// plan is kept for the process and read back, with no one to approve.
 pub fn headless_plan(args: &Value) -> Result<String, String> {
     static BOARD: std::sync::OnceLock<Board> = std::sync::OnceLock::new();
@@ -873,7 +873,7 @@ pub fn claims_cannot(said: &str) -> bool {
     CANNOT.iter().any(|w| s.contains(w))
 }
 
-const NUDGE: &str = "You said something cannot be done without checking. Studio has far more than you assumed (characters that act, 3D, rigs, generation, compositing). Call `capabilities` with what you wanted now, and if it exists, do it properly instead of the workaround; if it truly does not, say exactly what you searched for.";
+const NUDGE: &str = "You said something cannot be done without checking. Zornov has far more than you assumed (characters that act, 3D, rigs, generation, compositing). Call `capabilities` with what you wanted now, and if it exists, do it properly instead of the workaround; if it truly does not, say exactly what you searched for.";
 
 /// One turn, then once more if the agent claimed something is impossible
 /// without calling `capabilities`.
@@ -884,7 +884,7 @@ pub fn honest_turn(brain: &mut dyn Brain, request: &str, gate: &Gate, caller: &s
         return Ok(());
     }
     if !gate.board.checked(caller) && claims_cannot(&gate.board.said(caller)) {
-        gate.emit(AgentEvent::Note("It said something can't be done without checking; asked it to look up Studio's tools first.".into()));
+        gate.emit(AgentEvent::Note("It said something can't be done without checking; asked it to look up Zornov's tools first.".into()));
         gate.board.clear_said(caller);
         brain.turn(NUDGE, gate)?;
     }
@@ -1239,7 +1239,7 @@ mod tests {
     #[test]
     fn impossibility_claims_are_caught() {
         assert!(claims_cannot("Animation isn’t possible here, so I used still panels."));
-        assert!(claims_cannot("Studio can't animate characters"));
+        assert!(claims_cannot("Zornov can't animate characters"));
         assert!(!claims_cannot("I animated the fox's wave and added birdsong."));
     }
 

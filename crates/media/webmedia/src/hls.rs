@@ -162,7 +162,7 @@ pub fn parse(base: &str, text: &str) -> Result<Playlist> {
     if !text.trim_start().starts_with("#EXTM3U") {
         return Err(Error::Bad("that is not a playlist (it does not start with #EXTM3U)".into()));
     }
-    let abs = |u: &str| join(base, u).ok_or_else(|| Error::Bad(format!("the playlist points at an address Studio cannot use: {u}")));
+    let abs = |u: &str| join(base, u).ok_or_else(|| Error::Bad(format!("the playlist points at an address Zornov cannot use: {u}")));
     let mut master = Master::default();
     let mut media = Media::default();
     let mut is_master = false;
@@ -268,7 +268,7 @@ impl Media {
     /// Why this stream is protected, if it is.
     pub fn protection(&self) -> Option<String> {
         self.keys.iter().find_map(|k| match &k.method {
-            KeyMethod::Protected(why) => Some(format!("This stream is protected ({why}). Studio does not work around copy protection (DRM), so it cannot be downloaded.")),
+            KeyMethod::Protected(why) => Some(format!("This stream is protected ({why}). Zornov does not work around copy protection (DRM), so it cannot be downloaded.")),
             _ => None,
         })
     }

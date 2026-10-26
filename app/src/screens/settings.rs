@@ -297,10 +297,10 @@ fn playback(app: &mut StudioApp, ui: &mut egui::Ui) {
                 ed.quality = i;
             }
         });
-        note(ui, "Studio never lowers preview quality by itself.");
+        note(ui, "Zornov never lowers preview quality by itself.");
         kit::labeled_row(ui, "Preview engine", |ui| {
             let mut i = p.preview_engine as usize;
-            if kit::segmented(ui, "set-engine", &mut i, &[Segment::text("Studio render"), Segment::text("Simple")], Some(260.0), None).changed() {
+            if kit::segmented(ui, "set-engine", &mut i, &[Segment::text("Zornov render"), Segment::text("Simple")], Some(260.0), None).changed() {
                 p.preview_engine = i as u8;
             }
         });
@@ -480,7 +480,7 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
                 }
             });
             note(ui, &match found {
-                Some(path) => crate::i18n::tf(format!("Uses your {name} sign-in ({}). Studio's tools are connected to this window.", path.display())),
+                Some(path) => crate::i18n::tf(format!("Uses your {name} sign-in ({}). Zornov's tools are connected to this window.", path.display())),
                 None => format!("{name} is not installed. Install it ({install}), or pick another AI editor."),
             });
         } else {
@@ -520,7 +520,7 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                 }
             });
-            let default_note = crate::i18n::tf(format!("From {from}. Kept in your login Keychain; Studio never shows it again."));
+            let default_note = crate::i18n::tf(format!("From {from}. Kept in your login Keychain; Zornov never shows it again."));
             note(ui, st.ai_key_note.as_deref().unwrap_or(&default_note));
         }
         kit::labeled_row(ui, "Changes", |ui| {
@@ -557,7 +557,7 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
     let all = st.lessons.clone().unwrap_or_default();
     let mut changed = false;
     Section::new("set-ai-lessons", "What the AI has learned").icon(Icon::Sparkle).fixed().show(ui, |ui| {
-        note(ui, "After a job, and after you correct it, the AI saves a short lesson. A lesson loads with its skill the next time that kind of work starts. Lessons are kept on this computer in your Studio folder, never in a project. Edit one to make it yours (it is then kept for good), or delete what is wrong.");
+        note(ui, "After a job, and after you correct it, the AI saves a short lesson. A lesson loads with its skill the next time that kind of work starts. Lessons are kept on this computer in your Zornov folder, never in a project. Edit one to make it yours (it is then kept for good), or delete what is wrong.");
         if all.is_empty() {
             note(ui, "Nothing learned yet.");
             return;
@@ -716,7 +716,7 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
         kit::labeled_row(ui, "Described sounds", |ui| {
             ui.label(egui::RichText::new(if sound_saved { "ElevenLabs key saved: any sound in words" } else { "Need an ElevenLabs key (choose ElevenLabs above to add it)" }).font(theme::body()));
         });
-        note(ui, "Risers, whooshes, booms and hits are made by Studio itself. Any other sound described in words (\"rain on a tin roof\") comes from ElevenLabs.");
+        note(ui, "Risers, whooshes, booms and hits are made by Zornov itself. Any other sound described in words (\"rain on a tin roof\") comes from ElevenLabs.");
     });
     if v != before {
         if let Err(e) = v.save() {
@@ -737,7 +737,7 @@ fn generated_media(ui: &mut egui::Ui) {
         kit::labeled_row(ui, "Video, music, sound", |ui| {
             ui.label(egui::RichText::new(crate::i18n::shown("Not available yet")).font(theme::body()));
         });
-        note(ui, "Pictures the AI editor makes from words come from the Codex app's image generation, on your own ChatGPT plan: no API key, nothing billed by Studio. Video, music and sound effects made from words are not available yet; Studio's library music, made-to-measure sound effects and camera moves cover them for now.");
+        note(ui, "Pictures the AI editor makes from words come from the Codex app's image generation, on your own ChatGPT plan: no API key, nothing billed by Zornov. Video, music and sound effects made from words are not available yet; Zornov's library music, made-to-measure sound effects and camera moves cover them for now.");
     });
 }
 

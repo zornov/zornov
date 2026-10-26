@@ -25,16 +25,9 @@ pub use account::{Account, FileSecrets, Secrets, Settings, Status};
 use serde_json::Value;
 use std::time::Duration;
 
-/// Studio's per-user data folder (as `studio-update` has it).
+/// Zornov's per-user data folder (as `studio-update` has it).
 pub fn data_dir() -> std::path::PathBuf {
-    let home = studio_paths::home();
-    if cfg!(target_os = "macos") {
-        home.join("Library/Application Support/Studio")
-    } else if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).map(std::path::PathBuf::from).unwrap_or_else(|| home.join("AppData/Local")).join("Studio")
-    } else {
-        std::env::var_os("XDG_STATE_HOME").filter(|v| !v.is_empty()).map(std::path::PathBuf::from).unwrap_or_else(|| home.join(".local/state")).join("studio")
-    }
+    studio_paths::data_dir()
 }
 
 /// Checks a server address: `https://...`, or plain `http://` to this

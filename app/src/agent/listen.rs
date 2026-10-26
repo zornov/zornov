@@ -226,7 +226,7 @@ impl Session {
         };
         let from = a.get("from").and_then(Value::as_f64).unwrap_or(from).max(0.0);
         let to = a.get("to").and_then(Value::as_f64).unwrap_or(to);
-        let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or("that file has no sound Studio can decode")?;
+        let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or("that file has no sound Zornov can decode")?;
         let rate = d.rate as f64;
         let (i0, i1) = ((from * rate) as usize, ((to * rate) as usize).min(d.left.len()));
         if i1 <= i0 {

@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn surround_round_trips_in_wav_order() {
         let chans: Vec<Vec<f32>> = (0..8).map(|c| vec![c as f32 * 0.1; 10]).collect();
-        let bytes = write(&chans, 48_000, SampleFormat::Pcm24, Some(Layout::Surround71), Some(&Bext { description: "DX".into(), originator: "Studio".into(), time_reference: 48_000 * 3600 }));
+        let bytes = write(&chans, 48_000, SampleFormat::Pcm24, Some(Layout::Surround71), Some(&Bext { description: "DX".into(), originator: "Zornov".into(), time_reference: 48_000 * 3600 }));
         let p = parse(&bytes).unwrap();
         assert_eq!((p.rate, p.bits, p.mask, p.chans.len()), (48_000, 24, 0x63F, 8));
         // WAV slot 4 (back left) carries crate channel 6 (Lrs).

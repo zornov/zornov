@@ -1,4 +1,4 @@
-app-name = Studio
+app-name = Zornov
 3d-camera-and-lights = 3D 摄像机和灯光
 3d-layer-off = 3D 图层关闭
 3d-layer-on = 3D 图层开启
@@ -532,7 +532,7 @@ range-tool = 范围工具
 re-track = 重新跟踪
 re-track-from-here = 从此处重新跟踪
 re-tracking = 正在重新跟踪
-reading-studio-s-guide = 正在阅读 Studio 指南
+reading-studio-s-guide = 正在阅读 Zornov 指南
 reading-the-edit-reference = 正在阅读编辑参考
 reading-the-timeline = 正在读取时间线
 rectangle = 矩形
@@ -585,7 +585,7 @@ reverse = 反向
 right = 右
 ring = 圆环
 rise = 上升
-risers-whooshes-booms-and-hits-are-made-by-s = 渐强、呼啸、轰鸣和冲击音效由 Studio 自行生成。其他通过文字描述的声音（“雨落在铁皮屋顶上”）由 ElevenLabs 生成。
+risers-whooshes-booms-and-hits-are-made-by-s = 渐强、呼啸、轰鸣和冲击音效由 Zornov 自行生成。其他通过文字描述的声音（“雨落在铁皮屋顶上”）由 ElevenLabs 生成。
 roll-like-balls = 像球一样滚动
 roll-z = 翻滚（Z）
 rotate = 旋转
@@ -722,9 +722,9 @@ stop-this-request-esc-what-is-done-stays-und = 停止此请求（Esc）。已完
 stopped-what-was-already-done-is-kept-undo-t = 已停止。已完成的更改会保留；可通过撤销还原。
 storage = 存储
 strength = 强度
-studio-codec-clv = Studio 编解码器 · CLV
-studio-never-lowers-preview-quality-by-itsel = Studio 不会自动降低预览画质。
-studio-render = Studio 渲染
+studio-codec-clv = Zornov 编解码器 · CLV
+studio-never-lowers-preview-quality-by-itsel = Zornov 不会自动降低预览画质。
+studio-render = Zornov 渲染
 studying-the-footage = 正在分析素材
 style = 样式
 stylise = 风格化
@@ -746,7 +746,7 @@ text-art = 艺术字
 text-colour = 文本颜色
 text-size = 字号
 the-ai-editor-could-not-open-its-connection = AI 编辑助手无法为命令行智能体建立连接。
-the-ai-editor-crashed-earlier-reopen-studio = AI 编辑助手之前崩溃了；请重新打开 Studio。
+the-ai-editor-crashed-earlier-reopen-studio = AI 编辑助手之前崩溃了；请重新打开 Zornov。
 the-camera-s-motion-could-not-be-measured-he = 无法测量此处的摄像机运动（画面过暗、模糊或缺少细节）。请跟踪一个细节清晰的点，并以此进行防抖。
 the-first-is-the-strongest-editor-the-last-i = 第一个编辑能力最强；最后一个速度最快、费用最低。
 the-mac-s-voices-are-switched-off-below-so-n = 下方已关闭 Mac 语音，因此您需要选择服务后才能生成旁白。
@@ -794,7 +794,7 @@ tutorial = 教程
 two-node-aimed = 双节点（定向）
 type = 类型
 type-apply-apply-all-or-skip = 输入应用、全部应用或跳过…
-type-for-studio-commands-k-opens-this-panel = 输入 / 使用 Studio 命令  ·  ⌘K 打开此面板
+type-for-studio-commands-k-opens-this-panel = 输入 / 使用 Zornov 命令  ·  ⌘K 打开此面板
 type-your-title = 输入字幕标题
 underline = 下划线
 undo = 撤销
@@ -966,7 +966,7 @@ guide-audio-step2 = 选中音乐，打开检查器、音频，将音量降至约
 guide-audio-step3 = 设置淡出，让音乐平滑结束。
 tour-step = 第 { $n } 步，共 { $total } 步
 tour-finished = 导览已结束。随时按 F1 获取帮助。
-tour-welcome-title = 欢迎使用 Studio
+tour-welcome-title = 欢迎使用 Zornov
 tour-welcome-body = 约 1 分钟的编辑器快速导览。使用方向键或按钮操作。按 Escape 退出。您可以从帮助中重新播放导览。
 tour-library-title = 素材库
 tour-library-body = 您的媒体、文本样式、运动、效果、调色预设和声音。点击项目即可添加，或将其拖到时间线上。AI 部分可与 AI 编辑助手对话。
@@ -983,7 +983,7 @@ tour-ai-body = 按 ⌘K，用日常语言描述需求：剪掉停顿、添加字
 tour-export-title = 导出
 tour-export-body = 满意后，使用导出功能生成适用于网页、社交应用或存档的成片。
 tour-help-title = 一键获取帮助
-tour-help-body = 按 F1 搜索帮助。帮助涵盖 Studio 的所有部分，AI 编辑助手也能根据帮助内容回答问题。
+tour-help-body = 按 F1 搜索帮助。帮助涵盖 Zornov 的所有部分，AI 编辑助手也能根据帮助内容回答问题。
 tip-start-templates = 初次使用？从下方模板开始，或打开“边做边学”体验引导项目。
 tip-empty-timeline = 将媒体拖到此处，或点击素材库项目上的加号，将其添加到播放头处。
 tip-select-clip = 点击片段以选中。其设置会显示在检查器中。
@@ -995,7 +995,7 @@ tip-keyboard = 所有操作都可通过键盘完成。按 F1 并搜索“键盘�
 workspace-edit-blurb = 剪辑和编排：宽大的时间线，旁边就是媒体素材。
 help-start-title = 入门
 help-start-keys = 开始 首次 新建项目 欢迎 导览 概览 基础
-help-start-body = Studio 在时间线上编辑视频。从模板创建项目、打开示例或从空白项目开始，然后使用素材库中的导入媒体功能添加视频、图片和声音。
+help-start-body = Zornov 在时间线上编辑视频。从模板创建项目、打开示例或从空白项目开始，然后使用素材库中的导入媒体功能添加视频、图片和声音。
     将片段拖到时间线上，或点击素材库项目上的加号。按 Space 播放，S 分割，M 添加标记，⌘Z 撤销任意操作。
     按 ⌘K，用日常语言让 AI 编辑助手完成任务。需要帮助时随时按 F1。
 help-templates-title = 模板和示例项目
@@ -1004,7 +1004,7 @@ help-templates-body = 在主屏幕上，“从模板开始”可创建适合特�
     “边做边学”会打开示例项目，时间线上标有操作步骤。跟随标记练习剪辑、调色、字幕标题和音频操作。
 help-import-title = 导入媒体
 help-import-keys = 导入 媒体 文件 视频 照片 音频 音乐 拖放 文件夹 素材库 下载 链接
-help-import-body = 选择文件、导入媒体（⌘I），或将文件拖入素材库。Studio 保留原始文件的位置，并直接使用它们。无法直接播放的格式会自动转换。
+help-import-body = 选择文件、导入媒体（⌘I），或将文件拖入素材库。Zornov 保留原始文件的位置，并直接使用它们。无法直接播放的格式会自动转换。
     当您有权使用媒体时，可通过“通过链接下载”按钮从网页获取媒体。使用“添加示例媒体”即可在没有自备素材的情况下尝试编辑。
 help-timeline-title = 时间线
 help-timeline-keys = 时间线 轨道 片段 播放头 缩放 吸附 磁性 标记 范围 选择 移动 拖动
@@ -1058,14 +1058,14 @@ help-captions-body = 自动字幕可将语音转换为可编辑的字幕片段�
 help-ai-editor-title = AI 编辑助手
 help-ai-editor-keys = ai 编辑助手 助手 claude codex chatgpt Command K 提问 提示词 日常语言 自动化
 help-ai-editor-body = 按 ⌘K，或打开素材库的 AI 部分，描述您的需求：剪掉停顿、添加字幕、改为竖屏、匹配镜头之间的颜色。AI 使用与您相同的工具，每次请求对应一个撤销步骤。
-    在设置、AI 中选择回复的助手。Studio 会告知发送的内容。如果希望先批准更改，请开启“先询问”。
+    在设置、AI 中选择回复的助手。Zornov 会告知发送的内容。如果希望先批准更改，请开启“先询问”。
 help-export-title = 导出
 help-export-keys = 导出 渲染 保存 视频 文件 mp4 格式 质量 分辨率 社交媒体 youtube 分享 交付
 help-export-body = 按 ⌘E 或导出按钮。选择适用于网页、社交应用或存档的预设，检查尺寸和质量，然后选择保存位置。导出在后台运行，顶部栏的任务按钮会显示进度。
     使用 I 和 O 设置入点和出点，即可仅导出剪辑的一部分。
 help-workspaces-title = 工作区
 help-workspaces-keys = 工作区 布局 剪辑 调色 音频 vfx 动态图形 制作 面板 排列 停靠 拖动 移动 标签页 浮动 重置
-help-workspaces-body = 工作区为特定工作安排编辑器布局。顶部栏和布局菜单中提供剪辑、调色、音频、VFX、动态图形和制作；按 Alt 和 1 至 6 可通过键盘切换。按住面板的标题栏或标签页拖到另一个面板上，即可停靠在它的左侧、右侧、上方或下方，或作为标签页放入其中；按 Esc 取消。右键点按标题栏，或用 F6 切换到面板后按 Shift F10，可在菜单中完成同样的操作。布局 ▸ 面板可显示或隐藏面板，“布局另存为”将你的布局保存为工作区，“重置布局”恢复 Studio 的默认布局。
+help-workspaces-body = 工作区为特定工作安排编辑器布局。顶部栏和布局菜单中提供剪辑、调色、音频、VFX、动态图形和制作；按 Alt 和 1 至 6 可通过键盘切换。按住面板的标题栏或标签页拖到另一个面板上，即可停靠在它的左侧、右侧、上方或下方，或作为标签页放入其中；按 Esc 取消。右键点按标题栏，或用 F6 切换到面板后按 Shift F10，可在菜单中完成同样的操作。布局 ▸ 面板可显示或隐藏面板，“布局另存为”将你的布局保存为工作区，“重置布局”恢复 Zornov 的默认布局。
     工作区仅设置打开哪些面板，以及素材库和检查器显示什么内容。之后您仍可调整面板大小并更改任何设置。
 help-shortcuts-title = 键盘快捷键
 help-shortcuts-keys = 键盘 快捷键 按键 热键 命令 列表 自定义 重新映射
@@ -1073,7 +1073,7 @@ help-shortcuts-body = Space 播放和暂停，J K L 分别倒放、停止和正�
     设置、快捷键中列出所有快捷键，并允许您更改。
 help-keyboard-nav-title = 使用键盘和屏幕阅读器
 help-keyboard-nav-keys = 键盘 屏幕阅读器 VoiceOver 讲述人 nvda 辅助功能 导航 盲人 焦点 Tab 地标 播报
-help-keyboard-nav-body = Studio 支持 VoiceOver、Narrator 和其他屏幕阅读器，所有操作均可在不使用鼠标的情况下完成。按 Tab 在控件之间切换；按 F6 和 Shift F6 在素材库、查看器、检查器和时间线之间切换。
+help-keyboard-nav-body = Zornov 支持 VoiceOver、Narrator 和其他屏幕阅读器，所有操作均可在不使用鼠标的情况下完成。按 Tab 在控件之间切换；按 F6 和 Shift F6 在素材库、查看器、检查器和时间线之间切换。
     在时间线上，按 ] 和 [ 选择下一个和上一个片段，按向上和向下箭头键跳转到下一个和上一个剪辑点，按 Alt 加向上或向下箭头键选择上方或下方轨道上的片段，按 Alt 加向左或向右箭头键将所选片段微移一帧（同时按住 Shift 则移动一秒）。按 Alt 加句点键可播报播放头的位置。
     在画布上，按句点键和逗号键选择播放头处的下方和上方图层，按 Alt 加逗号键列出图层，按 Command 加 Alt 加箭头键将所选图层移动画面尺寸的百分之一（同时按住 Shift 则移动百分之五）。每一步操作都会播报。
     更改会实时播报。您可以在“设置”的“通用”中的“辅助功能”里关闭更改播报。
@@ -1083,11 +1083,11 @@ help-accessibility-body = 设置、通用中提供界面大小（最高 200%）�
     高对比度使用黑色或白色背景、纯色文字和鲜明轮廓。色觉配色让片段和状态颜色更易区分。
 help-language-title = 语言
 help-language-keys = 语言 翻译 英语 印地语 西班牙语 法语 德语 日语 中文 阿拉伯语 波斯语 从右到左 rtl
-help-language-body = Studio 支持英语、印地语、西班牙语、法语、德语、日语、简体中文、阿拉伯语和波斯语。在设置、通用、语言中选择。系统默认会跟随您的电脑设置。
+help-language-body = Zornov 支持英语、印地语、西班牙语、法语、德语、日语、简体中文、阿拉伯语和波斯语。在设置、通用、语言中选择。系统默认会跟随您的电脑设置。
     阿拉伯语和波斯语采用从右到左的编辑器布局。时间线始终随时间从左向右延伸。
 help-saving-title = 保存与项目
 help-saving-keys = 保存 打开 项目 文件夹 自动保存 备份 最近 重命名 复制 文件
-help-saving-body = 项目是一个文件夹。Studio 会在最后一次更改后 30 秒自动保存，并保留 20 份备份。使用文件、打开来打开项目文件夹，双击顶部栏中的项目名称可重命名。
+help-saving-body = 项目是一个文件夹。Zornov 会在最后一次更改后 30 秒自动保存，并保留 20 份备份。使用文件、打开来打开项目文件夹，双击顶部栏中的项目名称可重命名。
     媒体不会复制到项目中；请保留在原位置。
 help-undo-title = 撤销与重做
 help-undo-keys = 撤销 重做 历史记录 错误 还原 更改 返回
@@ -1095,7 +1095,7 @@ help-undo-body = ⌘Z 撤销上一次更改，⇧⌘Z 重做，可按需重复�
 help-problems-title = 运行缓慢或无法正常工作时
 help-problems-keys = 缓慢 卡顿 播放 丢帧 错误 问题 无法 失败 崩溃 代理媒体 缓存 质量 预览
 help-problems-body = 如果播放卡顿，请在设置、播放中降低预览画质，或切换到简单预览。较大的帧缓存有助于改善长项目的性能。
-    如果文件无法播放，Studio 会将其转换为支持的格式；请等待顶部栏中的任务完成。如果发生崩溃，Studio 会在发送报告前询问，只有选择发送后才会发送报告。
+    如果文件无法播放，Zornov 会将其转换为支持的格式；请等待顶部栏中的任务完成。如果发生崩溃，Zornov 会在发送报告前询问，只有选择发送后才会发送报告。
 accessibility = 辅助功能
 high-contrast = 高对比度
 colour-vision = 色觉
@@ -1135,8 +1135,8 @@ change-who-answers-in-settings-ai-k-tokens-i = 在设置 ▸ AI 中更换回复�
 claude-code-2 = Claude Code · { $v1 }
 clip-2 = 片段 { $v1 }
 codex-2 = Codex · { $v1 }
-converting-name-to-a-format-studio-plays = 正在将 { $name } 转换为 Studio 可播放的格式…
-converting-what-studio-can-t-play-yet-to-h-2 = 正在将 Studio 尚无法播放的 { $what } 转换为 H.264…
+converting-name-to-a-format-studio-plays = 正在将 { $name } 转换为 Zornov 可播放的格式…
+converting-what-studio-can-t-play-yet-to-h-2 = 正在将 Zornov 尚无法播放的 { $what } 转换为 H.264…
 could-not-add = 无法添加 { $v1 }
 could-not-download-short = 无法下载 { $short }：{ $v1 }
 could-not-export-e = 无法导出：{ $e }
@@ -1153,7 +1153,7 @@ export-3 = 导出 { $v1 }
 exported = 已导出 { $v1 }
 exporting-2 = 正在导出 · { $v1 }% · { $v2 }
 follows-track-of-name = 跟随“{ $name }”的跟踪 { $v1 }（{ $v2 }）
-from-from-kept-in-your-login-keychain-studio = 来自 { $from }。保存在您的登录钥匙串中；Studio 不会再次显示它。
+from-from-kept-in-your-login-keychain-studio = 来自 { $from }。保存在您的登录钥匙串中；Zornov 不会再次显示它。
 generated-placed-at-1-s = 生成的 { $v1 } 已放置在 { $v2 } 秒处
 generated-but-not-placed-e = 已生成，但未放置：{ $e }
 generating-failed-e = 生成失败：{ $e }
@@ -1185,7 +1185,7 @@ switch-to-next = 切换到 { $next }
 tracking-failed-e = 跟踪失败：{ $e }
 undid = 已撤销 { $v1 }
 untitled = 未命名 { $v1 }
-uses-your-name-sign-in-studio-s-tools-are-co = 使用您的 { $name } 登录（{ $v1 }）。Studio 的工具已连接到此窗口。
+uses-your-name-sign-in-studio-s-tools-are-co = 使用您的 { $name } 登录（{ $v1 }）。Zornov 的工具已连接到此窗口。
 warmed-the-grade-on-the-mountains-box-1-and = 已将山脉（方框 1）的调色调暖，并模糊了岩石（点位 2）。
 wobble-loop-or-step-without-more-keys-loop-n = 无需更多关键帧，即可让 { $v1 } 抖动、循环或步进。循环至少需要两个关键帧。
 paste-the-key = 粘贴密钥

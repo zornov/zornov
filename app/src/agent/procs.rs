@@ -345,7 +345,7 @@ mod tests {
         assert!(all.iter().all(|p| alive(*p)));
         studio.kill().unwrap();
         let _ = studio.wait();
-        assert!(wait_gone(&all, 15), "programs outlived their Studio");
+        assert!(wait_gone(&all, 15), "programs outlived their Zornov");
         release(child.id());
         let _ = std::fs::remove_dir_all(&dir);
     }

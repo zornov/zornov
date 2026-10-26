@@ -1,5 +1,5 @@
 {
-  "about": "Studio quality benchmark cases. Units are canvas pixels, x right, y down (up is -y), z away. 3D recipes use the words of the AI's model op.",
+  "about": "Zornov quality benchmark cases. Units are canvas pixels, x right, y down (up is -y), z away. 3D recipes use the words of the AI's model op.",
   "models": [
     { "id": "character-realistic-bust", "category": "character, realistic", "class": "character",
       "prompt": "a realistic human head and neck, neutral expression",

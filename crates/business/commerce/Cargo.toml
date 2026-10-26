@@ -3,7 +3,7 @@ name = "studio-commerce"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's optional paid parts: account sign-in, hosted AI credits, cloud clients, the marketplace and Stripe test-mode checkout."
+description = "Zornov's optional paid parts: account sign-in, hosted AI credits, cloud clients, the marketplace and Stripe test-mode checkout."
 
 [dependencies]
 studio-entitlements = { path = "../entitlements" }

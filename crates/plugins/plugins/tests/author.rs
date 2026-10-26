@@ -37,7 +37,7 @@ fn pixel_function_becomes_an_installed_effect() {
     assert!(built.dir.join("src/lib.rs").is_file(), "the source is kept");
     assert!(built.tested[0].starts_with("Warm vignette: ran"), "{:?}", built.tested);
     let host = Host::at(root.join("installed"));
-    host.install_bytes(&built.wasm, "made in Studio").unwrap();
+    host.install_bytes(&built.wasm, "made in Zornov").unwrap();
     let def = effects::find("warm-vignette:effect").unwrap();
     let img = Image::filled(40, 20, [0.5, 0.5, 0.5, 1.0]);
     let out = def.apply(&EffectContext::still(), &img, &def.defaults());

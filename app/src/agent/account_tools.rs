@@ -175,7 +175,7 @@ pub mod on {
             "licence" => acct.install_licence_file(&PathBuf::from(need(a, "path", "licence")?)),
             "render" => {
                 let project = serde_json::to_value(&sess.doc.model).map_err(|e| e.to_string())?;
-                let name = st(a, "name").map(str::to_owned).unwrap_or_else(|| sess.doc.folder.as_ref().and_then(|f| f.root().file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Studio project".into()));
+                let name = st(a, "name").map(str::to_owned).unwrap_or_else(|| sess.doc.folder.as_ref().and_then(|f| f.root().file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Zornov project".into()));
                 acct.render_submit(&name, &project, &json!({"format": st(a, "format").unwrap_or("mp4")}))
             }
             "render_status" => acct.render_status(need(a, "id", "render_status")?),

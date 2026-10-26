@@ -432,7 +432,7 @@ pub fn export(doc: &Document, artboard: Option<&str>, opts: &BuildOptions) -> Ve
     let k: Vec<String> = kids.iter().map(|k| format!("{k} 0 R")).collect();
     w.set(pages, format!("<< /Type /Pages /Kids [{}] /Count {} >>", k.join(" "), kids.len()).into_bytes());
     w.set(catalog, format!("<< /Type /Catalog /Pages {pages} 0 R >>").into_bytes());
-    let info = w.add(format!("<< /Producer (Studio) /Title ({}) >>", doc.name.replace(['(', ')', '\\'], "")));
+    let info = w.add(format!("<< /Producer (Zornov) /Title ({}) >>", doc.name.replace(['(', ')', '\\'], "")));
     let mut out = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n".to_vec();
     let mut offsets = Vec::new();
     for (i, o) in w.objs.iter().enumerate() {

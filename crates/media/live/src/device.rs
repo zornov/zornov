@@ -62,8 +62,8 @@ pub fn explain(kind: Kind, a: Access) -> String {
     };
     match a {
         Access::Authorized => String::new(),
-        Access::NotDetermined => format!("Studio has not been given {what} yet. Ask the person to allow it (capture permissions with request: true, which shows the system's own question)"),
-        Access::Denied => format!("Access to {what} was turned off. The person can turn it on for Studio in System Settings, Privacy & Security, {pane}"),
+        Access::NotDetermined => format!("Zornov has not been given {what} yet. Ask the person to allow it (capture permissions with request: true, which shows the system's own question)"),
+        Access::Denied => format!("Access to {what} was turned off. The person can turn it on for Zornov in System Settings, Privacy & Security, {pane}"),
         Access::Restricted => format!("Access to {what} is blocked on this computer by a system setting or profile"),
         Access::Unavailable => format!("This computer cannot provide {what}"),
     }

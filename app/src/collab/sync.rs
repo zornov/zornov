@@ -113,7 +113,7 @@ impl FolderRemote {
         if self.root.join("studio-sync.json").exists() {
             Ok(())
         } else {
-            Err(format!("{} is not a Studio sync folder (share the project there first)", self.root.display()))
+            Err(format!("{} is not a Zornov sync folder (share the project there first)", self.root.display()))
         }
     }
 }

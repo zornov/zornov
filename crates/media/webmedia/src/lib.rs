@@ -224,19 +224,19 @@ pub fn find(url: &str, opts: &Options, report: Report) -> Result<Found> {
         return Err(nothing_found(&drm, blob));
     }
     if cands.iter().all(|c| c.kind == CKind::File && c.origin == "an address in the page") {
-        notes.push("The only media addresses found were ones inside the page's scripts; Studio tried those.".into());
+        notes.push("The only media addresses found were ones inside the page's scripts; Zornov tried those.".into());
     }
     Ok(Found { page_url: base, title, candidates: cands, notes })
 }
 
 fn nothing_found(drm: &[&'static str], blob: bool) -> Error {
     if !drm.is_empty() {
-        return Error::Protected(format!("This page's video is protected ({}). Studio does not work around copy protection, or get around a site's signature or cipher, so it cannot be downloaded.", drm.join(", ")));
+        return Error::Protected(format!("This page's video is protected ({}). Zornov does not work around copy protection, or get around a site's signature or cipher, so it cannot be downloaded.", drm.join(", ")));
     }
     if blob {
-        return Error::NotExposed("This page's player builds the video inside the browser and does not expose a file or a playlist address, so there is nothing for Studio to download. Studio only takes media a page openly links.".into());
+        return Error::NotExposed("This page's player builds the video inside the browser and does not expose a file or a playlist address, so there is nothing for Zornov to download. Zornov only takes media a page openly links.".into());
     }
-    Error::NotExposed("I looked through the page (its video and audio elements, Open Graph and player tags, VideoObject data, alternate links, oEmbed and the playlists named in its scripts) and found no media it openly exposes. If the video needs you to sign in or pay, Studio cannot get it: it does not log in for you. Only download what you have the right to use.".into())
+    Error::NotExposed("I looked through the page (its video and audio elements, Open Graph and player tags, VideoObject data, alternate links, oEmbed and the playlists named in its scripts) and found no media it openly exposes. If the video needs you to sign in or pay, Zornov cannot get it: it does not log in for you. Only download what you have the right to use.".into())
 }
 
 fn stem_from_url(url: &str) -> String {

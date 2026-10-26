@@ -148,9 +148,9 @@ impl Plugin {
             return Err(format!("could not describe itself (status {st})"));
         }
         let contexts = desc.props.strs(P_CONTEXTS);
-        let context = [CONTEXT_FILTER, CONTEXT_GENERAL, CONTEXT_GENERATOR, CONTEXT_TRANSITION].into_iter().find(|c| contexts.iter().any(|x| x == c)).ok_or_else(|| format!("runs only in contexts Studio does not offer ({})", contexts.join(", ")))?;
+        let context = [CONTEXT_FILTER, CONTEXT_GENERAL, CONTEXT_GENERATOR, CONTEXT_TRANSITION].into_iter().find(|c| contexts.iter().any(|x| x == c)).ok_or_else(|| format!("runs only in contexts Zornov does not offer ({})", contexts.join(", ")))?;
         let depths = desc.props.strs(P_DEPTHS);
-        let depth = [DEPTH_FLOAT, DEPTH_SHORT, DEPTH_BYTE].into_iter().find(|d| depths.is_empty() || depths.iter().any(|x| x == d)).ok_or("supports no pixel depth Studio offers")?;
+        let depth = [DEPTH_FLOAT, DEPTH_SHORT, DEPTH_BYTE].into_iter().find(|d| depths.is_empty() || depths.iter().any(|x| x == d)).ok_or("supports no pixel depth Zornov offers")?;
         // Described again for the chosen context, on a copy of the
         // descriptor.
         let cd = Effect::with_props(desc.props.copy());

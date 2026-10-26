@@ -3,7 +3,7 @@ name = "studio-canvas"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's raster painting and photo editing: pictures on the pixel engine, AI selections, strokes from paths, frame-by-frame animation, and the ops the AI editor drives"
+description = "Zornov's raster painting and photo editing: pictures on the pixel engine, AI selections, strokes from paths, frame-by-frame animation, and the ops the AI editor drives"
 
 [features]
 default = ["ai", "gpu"]

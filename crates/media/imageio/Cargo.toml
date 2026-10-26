@@ -3,7 +3,7 @@ name = "studio-imageio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's pro still and image-sequence formats: OpenEXR, DPX, TIFF and 16-bit PNG, read and written in Rust"
+description = "Zornov's pro still and image-sequence formats: OpenEXR, DPX, TIFF and 16-bit PNG, read and written in Rust"
 
 [dependencies]
 studio-media = { path = "../media" }

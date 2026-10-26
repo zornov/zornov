@@ -38,7 +38,7 @@ fn is_exec(p: &Path) -> bool {
     }
     #[cfg(not(unix))]
     {
-        p.extension().is_some_and(|e| e == "exe") || p.file_name().is_some_and(|n| n == "studio")
+        p.extension().is_some_and(|e| e == "exe") || p.file_name().is_some_and(|n| n == "zornov")
     }
 }
 
@@ -175,7 +175,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("xtask-repro-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("sub")).unwrap();
-        std::fs::write(d.join("studio"), "binary").unwrap();
+        std::fs::write(d.join("zornov"), "binary").unwrap();
         std::fs::write(d.join("sub/z.txt"), "z").unwrap();
         std::fs::write(d.join("a.txt"), "a").unwrap();
         d
@@ -191,9 +191,9 @@ mod tests {
         update_archive(&d, &b, true).unwrap();
         assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
         let items = collect(&d).unwrap();
-        zip(&c, "studio", &items, &[]).unwrap();
+        zip(&c, "zornov", &items, &[]).unwrap();
         let z1 = std::fs::read(&c).unwrap();
-        zip(&c, "studio", &items, &[]).unwrap();
+        zip(&c, "zornov", &items, &[]).unwrap();
         assert_eq!(z1, std::fs::read(&c).unwrap());
         let _ = std::fs::remove_dir_all(&d);
         for f in [a, b, c] {
@@ -209,7 +209,7 @@ mod tests {
         let out = d.join("../r4-out");
         studio_update::apply::stage(&arc, &out).unwrap();
         let m = std::fs::read_to_string(out.join(studio_update::apply::MANIFEST)).unwrap();
-        assert_eq!(m, "a.txt\nstudio\nstudio.install\nsub/z.txt\n");
+        assert_eq!(m, "a.txt\nstudio.install\nsub/z.txt\nzornov\n");
         assert!(out.join("studio.install").is_file());
         let _ = std::fs::remove_dir_all(&d);
         let _ = std::fs::remove_dir_all(&out);

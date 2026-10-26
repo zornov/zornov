@@ -304,8 +304,8 @@ pub fn fetch(cfg: &Config, offer: &Offer, target: &Target, download: Download) -
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let name = match target {
         Target::Folder(_) => "update.tar.gz",
-        Target::Msi => "Studio.msi",
-        Target::AppImage(_) => "Studio.AppImage",
+        Target::Msi => "Zornov.msi",
+        Target::AppImage(_) => "Zornov.AppImage",
     };
     let file = dir.join(name);
     download(&feed::resolve(&cfg.feed_url, &entry.url), &file, entry.size)?;

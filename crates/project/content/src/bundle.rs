@@ -89,7 +89,7 @@ mod tests {
             file: "stickers/Things/Thing 01.png".into(),
             preview: None,
             licence: Licence::Studio,
-            attribution: "Made for Studio".into(),
+            attribution: "Made for Zornov".into(),
             source: Source::studio(),
             details: Details::default(),
         });

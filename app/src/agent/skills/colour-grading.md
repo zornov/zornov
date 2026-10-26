@@ -32,7 +32,7 @@ as a finishing house works. Tools: `colour`, `conform`, `media_manage`,
 and the `export` presets for masters.
 
 **How colour flows.** Every source is decoded from what it is (its input
-colour space) into Studio's working space: scene-linear light, BT.709
+colour space) into Zornov's working space: scene-linear light, BT.709
 primaries kept unbounded (wide-gamut colours survive as negative values,
 nothing clips), with grading done in ACEScct on AP1 primaries. At the end
 of the frame a view transform turns scene light into display light, then
@@ -52,8 +52,8 @@ the output space encodes it (Rec.709, P3, Rec.2020 PQ or HLG). So:
 - A studio OCIO config: `colour {"action": "ocio", "config": "/path/config.ocio"}`,
   then inputs `"ocio:ARRI LogC3 (EI800)"` and views
   `"ocio:sRGB - Display/ACES 1.0 - SDR Video"`. Configs with ACES 2.0
-  output transforms are read, but those views are refused (Studio has
-  ACES 1.3); use Studio's own `aces` view or an ACES 1.x config.
+  output transforms are read, but those views are refused (Zornov has
+  ACES 1.3); use Zornov's own `aces` view or an ACES 1.x config.
 
 **Grading.** `colour {"action": "grade", "clip": 7, "params": {...}}`
 sets any grade parameter (null removes one): `exposure` (stops),
@@ -82,7 +82,7 @@ then `{"apply": "Day ext A", "clips": [9, 12]}`.
 `cdl` imports `.cdl` / `.cc` / `.ccc` from set (or slope/offset/power/sat)
 and exports a `.ccc` of the given clips.
 
-**Formats.** Studio plays these as they are (no conversion): H.264, HEVC,
+**Formats.** Zornov plays these as they are (no conversion): H.264, HEVC,
 Apple ProRes 422 / HQ / LT / Proxy / 4444 / 4444 XQ in MOV at full 10/12-bit
 precision with PCM sound, OpenEXR (none, RLE, ZIP), DPX (8/10/12/16-bit,
 Cineon log decoded), TIFF (8/16-bit, float) and 16-bit PNG, alone or as
@@ -92,7 +92,7 @@ frame sequences: `import` a pattern like `/plates/sh010.####.exr` (or
 reel name), `EXR sequence (ACES)` (ACES2065-1 half float, the ACES
 container), `DPX sequence` (10-bit), `TIFF sequence`, `PNG 16-bit sequence`,
 `DNxHR LB`, `DNxHR SQ`, `DNxHR HQ` (8-bit 4:2:2), `DNxHR HQX`
-(10-bit 4:2:2) and `DNxHR 444` (10-bit 4:4:4), written by Studio itself
+(10-bit 4:2:2) and `DNxHR 444` (10-bit 4:4:4), written by Zornov itself
 in MOV with the same sound and timecode (4:2:2 needs an even width).
 Not available: DNxHD/DNxHR decoding without conversion,
 EXR PIZ / DWA / B44 compression (re-save as ZIP), alpha in EXR/ProRes
@@ -165,7 +165,7 @@ with `{"action": "angle", "clip": 21, "at": 12.5, "angle": 2}`.
   backdrop (`card` with `gradient: ["#1b1f3b", "#05060c"]`, `angle: 90`)
   beats a flat colour. `radial: true` makes a soft spotlight behind the
   hero.
-- **How Studio makes them clean** (so you do not have to fight it):
+- **How Zornov makes them clean** (so you do not have to fight it):
   colours mix in OKLab, where equal steps look equal (no bright plateau
   that suddenly falls off, no grey middle between two hues); the ramp
   eases smoothly through every stop with no crease where it starts, ends
@@ -196,7 +196,7 @@ with `{"action": "angle", "clip": 21, "at": 12.5, "angle": 2}`.
 
 ## Reference: Colour quality, bits, HDR, alpha, luma
 
-- Studio composites in linear light at high precision and exports 8-bit
+- Zornov composites in linear light at high precision and exports 8-bit
   Rec.709 (the standard for social and web), dithered so gradients do
   not band. Flat colours come out exact.
 - **8-bit banding**: very dark, very smooth gradients and big soft glows

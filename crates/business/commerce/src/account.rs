@@ -170,7 +170,7 @@ impl Account {
     pub fn connect(&self, server: &str, trust_issuer: bool) -> Result<Value, String> {
         let server = server_address(server)?;
         let c = Client { base: server.clone(), token: None };
-        let issuer = c.get("/v1/issuer").map_err(|e| format!("{server} is not a Studio cloud server ({e})"))?;
+        let issuer = c.get("/v1/issuer").map_err(|e| format!("{server} is not a Zornov cloud server ({e})"))?;
         if trust_issuer {
             self.store().trust(TrustedKey { public_key: st(&issuer, "public_key").into(), name: format!("{} ({server})", st(&issuer, "name")) })?;
         }

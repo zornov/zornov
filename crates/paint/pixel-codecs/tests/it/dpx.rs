@@ -280,13 +280,13 @@ fn only_the_first_of_several_image_elements_is_imported() {
 #[test]
 fn listed_header_fields_survive_a_round_trip() {
     let mut fx = Fixture::new(50, 10, 1, 2, 2);
-    fx.strings = vec![((160, 100), "Resolve 20.1"), ((260, 200), "Reel 7"), ((460, 200), "(c) 2026 Studio"), ((136, 24), "2026:10:12:09:30:00UTC")];
+    fx.strings = vec![((160, 100), "Resolve 20.1"), ((260, 200), "Reel 7"), ((460, 200), "(c) 2026 Zornov"), ((136, 24), "2026:10:12:09:30:00UTC")];
     (fx.transfer, fx.colorimetric, fx.frame_position, fx.frame_rate, fx.time_code) = (3, 1, 86400, 23.976, 0x0102_0304);
     let img = decode(&fx.bytes()).unwrap();
     for (k, v) in [
         ("DPX:Creator", "Resolve 20.1"),
         ("DPX:Project", "Reel 7"),
-        ("DPX:Copyright", "(c) 2026 Studio"),
+        ("DPX:Copyright", "(c) 2026 Zornov"),
         ("DPX:CreationTime", "2026:10:12:09:30:00UTC"),
         ("DPX:Transfer", "3"),
         ("DPX:Colorimetric", "1"),

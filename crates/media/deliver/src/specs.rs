@@ -222,7 +222,7 @@ pub const SPECS: &[DeliverySpec] = &[
         expect_audio: true,
         captions: false,
         strict: true,
-        notes: &["JPEG 2000 (Studio's own encoder; X'Y'Z' with the DCI 2.6 gamma, sRGB or Rec.709 pictures converted) in MXF, PCM 24-bit 48 kHz, CPL/PKL/ASSETMAP, SMPTE 429.", "Containers: 2K flat 1998 x 1080, 2K scope 2048 x 858, 4K flat 3996 x 2160, 4K scope 4096 x 1716; 24 fps (also 25, 30, 48 ...).", "Cinema loudness is set by the room (7 on the Dolby scale, about -27 LKFS programme): leave the mix at its mastering level."],
+        notes: &["JPEG 2000 (Zornov's own encoder; X'Y'Z' with the DCI 2.6 gamma, sRGB or Rec.709 pictures converted) in MXF, PCM 24-bit 48 kHz, CPL/PKL/ASSETMAP, SMPTE 429.", "Containers: 2K flat 1998 x 1080, 2K scope 2048 x 858, 4K flat 3996 x 2160, 4K scope 4096 x 1716; 24 fps (also 25, 30, 48 ...).", "Cinema loudness is set by the room (7 on the Dolby scale, about -27 LKFS programme): leave the mix at its mastering level."],
     },
     DeliverySpec {
         id: "dcp-interop",

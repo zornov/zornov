@@ -425,13 +425,13 @@ pub fn tool(a: &Value) -> Result<String, String> {
     if q.is_empty() {
         let ops = index().iter().filter(|e| e.kind == "op").map(|e| e.name.as_str()).collect::<Vec<_>>().join(", ");
         let tools = index().iter().filter(|e| e.kind == "tool").map(|e| e.name.as_str()).collect::<Vec<_>>().join(", ");
-        return Ok(format!("Say what you want to do in `query` (\"animate a character waving\"). Studio's tools: {tools}.\n`edit` ops: {ops}."));
+        return Ok(format!("Say what you want to do in `query` (\"animate a character waving\"). Zornov's tools: {tools}.\n`edit` ops: {ops}."));
     }
     let found = search(q, 12);
     if found.is_empty() {
-        return Ok(format!("Nothing matched \"{q}\" by name. Studio is broad: try other words (what it looks or sounds like, the craft term), or read `guide` with topic `all`. Do not tell the person it cannot be done on this alone."));
+        return Ok(format!("Nothing matched \"{q}\" by name. Zornov is broad: try other words (what it looks or sounds like, the craft term), or read `guide` with topic `all`. Do not tell the person it cannot be done on this alone."));
     }
-    let mut out = vec![format!("For \"{q}\", Studio has:")];
+    let mut out = vec![format!("For \"{q}\", Zornov has:")];
     for (kind, name, does) in &found {
         let how = match *kind {
             "op" => format!("`edit` op `{name}`"),
@@ -446,7 +446,7 @@ pub fn tool(a: &Value) -> Result<String, String> {
         };
         out.push(format!("- {how}: {does}"));
     }
-    out.push("Use the ops and tools above; read how with `skill {name}` (the procedure for a kind of work) or `guide` (topic word). Only if none of this fits, try other words before saying Studio cannot do it.".into());
+    out.push("Use the ops and tools above; read how with `skill {name}` (the procedure for a kind of work) or `guide` (topic word). Only if none of this fits, try other words before saying Zornov cannot do it.".into());
     Ok(out.join("\n"))
 }
 

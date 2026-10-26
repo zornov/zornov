@@ -120,7 +120,7 @@ pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
         let soon = match kind {
             Kind::Picture => None,
             Kind::Video => Some("Video from words is not available yet. Animate a still under Change instead."),
-            Kind::Music => Some("Music from words is not available yet. The AI editor scores from Studio's library."),
+            Kind::Music => Some("Music from words is not available yet. The AI editor scores from Zornov's library."),
             Kind::Sound => Some("Sound from words is not available yet. The AI editor makes risers, whooshes, booms and hits to measure."),
         };
         if let Some(m) = soon {

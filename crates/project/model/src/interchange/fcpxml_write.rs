@@ -364,7 +364,7 @@ pub fn export(project: &Project, seq: SequenceId, opts: FcpxmlOptions) -> Result
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n<fcpxml version=\"1.10\">\n  <resources>\n");
     out.push_str(&fmt);
     out.push_str(&w.resources);
-    out.push_str("  </resources>\n  <library>\n    <event name=\"Studio\">\n");
+    out.push_str("  </resources>\n  <library>\n    <event name=\"Zornov\">\n");
     writeln!(out, "      <project name=\"{}\">", esc(&s.name)).ok();
     out.push_str(&body);
     out.push_str("      </project>\n    </event>\n  </library>\n</fcpxml>\n");

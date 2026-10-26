@@ -81,8 +81,8 @@ impl fmt::Display for FileError {
         match self {
             FileError::Io(e) => write!(f, "file error: {e}"),
             FileError::Json(e) => write!(f, "project file is malformed: {e}"),
-            FileError::NotAProject => write!(f, "not a Studio project file"),
-            FileError::TooNew { found, supported } => write!(f, "project was saved by a newer Studio (format {found}; this version reads up to {supported})"),
+            FileError::NotAProject => write!(f, "not a Zornov project file"),
+            FileError::TooNew { found, supported } => write!(f, "project was saved by a newer Zornov (format {found}; this version reads up to {supported})"),
             FileError::Migration(e) => write!(f, "could not upgrade the project: {e}"),
             FileError::Invalid(v) => write!(f, "project is damaged: {v}"),
         }

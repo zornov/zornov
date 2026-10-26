@@ -1,6 +1,6 @@
 ## Account, credits and the cloud
 
-Studio works fully with no account: the editor, and AI with the person's
+Zornov works fully with no account: the editor, and AI with the person's
 own API keys. The `account` tool covers the optional extras.
 
 - `account` (status) says the plan, what it allows (`features`), the
@@ -21,7 +21,7 @@ own API keys. The `account` tool covers the optional extras.
   turns a rendered file into a link others can watch and leave notes on;
   `review_notes` reads them back.
 - `market` browses templates, plugins, LUTs, sounds and assets; `buy`
-  installs free and owned items into the Studio folder's Marketplace.
+  installs free and owned items into the Zornov folder's Marketplace.
 - Nothing is sent anywhere until the person connects a server
   (`connect`). Never sign in, buy or spend on their behalf unless they
   asked you to.

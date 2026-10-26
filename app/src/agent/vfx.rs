@@ -829,7 +829,7 @@ impl Session {
             serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?
         };
         std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))?;
-        let note = if path.ends_with(".json") { String::new() } else { format!(" (units: {units} per Studio pixel; Y up)") };
+        let note = if path.ends_with(".json") { String::new() } else { format!(" (units: {units} per Zornov pixel; Y up)") };
         Ok(format!("camera {cam} written to {path}{note}"))
     }
 

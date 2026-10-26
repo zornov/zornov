@@ -1384,7 +1384,7 @@ fn main_header(p: &Params, bands: &[Band]) -> Vec<u8> {
         o.extend_from_slice(&((((b.eps as u16) << 11) | b.mu as u16)).to_be_bytes());
     }
     // COM
-    let text = b"Studio JPEG 2000";
+    let text = b"Zornov JPEG 2000";
     o.extend_from_slice(&[0xff, 0x64]);
     o.extend_from_slice(&((4 + text.len()) as u16).to_be_bytes());
     o.extend_from_slice(&1u16.to_be_bytes());

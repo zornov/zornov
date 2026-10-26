@@ -194,7 +194,7 @@ mod tests {
     fn licences_document_groups_by_licence_and_source() {
         let tw = Source::new("twemoji", "Twemoji", "https://github.com/jdecked/twemoji", "v17");
         let mut pack = Pack::new(PackSpec { id: "core".into(), name: "Core".into(), description: "Ships with the app.".into(), core: true, share_alike: false });
-        pack.items.push(item("A", Kind::Sticker, Licence::Studio, Source::studio(), "Made for Studio", true));
+        pack.items.push(item("A", Kind::Sticker, Licence::Studio, Source::studio(), "Made for Zornov", true));
         pack.items.push(item("B", Kind::Emoji, Licence::CcBy4, tw.clone(), "Twemoji graphics, CC BY 4.0", false));
         pack.items.push(item("C", Kind::Emoji, Licence::CcBy4, tw, "Twemoji graphics, CC BY 4.0", false));
         pack.items.push(item("Inter", Kind::Font, Licence::Ofl11, Source::new("google-fonts", "Google Fonts", "", ""), "Copyright 2020 The Inter Project Authors", false));
@@ -203,7 +203,7 @@ mod tests {
             LicenceText { licence: Licence::Mit, source_id: "tabler".into(), title: "Tabler MIT".into(), text: "MIT TEXT".into() },
         ];
         let md = licenses_md(&pack, &texts);
-        assert!(md.contains("## Made for Studio (Studio)"));
+        assert!(md.contains("## Made for Zornov (Studio)"));
         assert!(md.contains("## Creative Commons Attribution 4.0 International (CC-BY-4.0)"));
         assert!(md.contains("### Twemoji — <https://github.com/jdecked/twemoji> (version v17)"));
         assert_eq!(md.matches("- Twemoji graphics, CC BY 4.0").count(), 1, "credit lines are deduplicated");

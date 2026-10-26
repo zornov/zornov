@@ -10,7 +10,7 @@ tools: capabilities, guide, edit_schema, howto, skill, inspect, summary, undo, m
 3. Fields you are unsure of: `edit_schema` (ops), `guide {topic: "tool:<name>"}` (a tool's fields), or `capabilities {query}` (what does this and with what).
 4. Media that will not preview or play: `make_playable`. A long job: `job` shows its state. Stale ids after merge, unmerge, flatten or delete: use the ids the last result names.
 5. A call that did the wrong thing: `undo` takes back the whole last call; then redo it smaller.
-6. Before saying Studio cannot do something, or reaching for a workaround, call `capabilities` with what you want and load the matching skill.
+6. Before saying Zornov cannot do something, or reaching for a workaround, call `capabilities` with what you want and load the matching skill.
 7. When you find a fix that was not obvious, save it: `skill {do: "learn", skill, lesson, kind: "fixed"}`, tagged to the skill the job belonged to.
 
 **Checks**

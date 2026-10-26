@@ -56,7 +56,7 @@ pub fn report_json(r: &qc::Report, report_file: Option<&Path>) -> Value {
 impl Session {
     /// The project's folder; the project is saved first so a render reads what the agent sees.
     fn project_root(&mut self) -> Result<PathBuf, String> {
-        let root = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf())).ok_or_else(|| "work in a project folder first (studio agent --project DIR, or open one): renders and nodes read the saved project".to_owned())?;
+        let root = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf())).ok_or_else(|| "work in a project folder first (zornov agent --project DIR, or open one): renders and nodes read the saved project".to_owned())?;
         if self.doc.folder.is_some() || self.home.is_some() {
             let _ = proj::save(&mut self.doc, None);
         }
@@ -135,7 +135,7 @@ impl Session {
                     let _ = run::store().update(|q| q.cancel(id));
                 });
                 let ahead = store.read().jobs.iter().filter(|j| !j.state.finished() && j.id != id).count();
-                Ok(json!({"job": id, "name": name, "ahead_of_it": ahead, "next": "queue {\"action\": \"run\"} draws the queue here; the Studio window draws it while open; studio queue run draws it from a shell"}))
+                Ok(json!({"job": id, "name": name, "ahead_of_it": ahead, "next": "queue {\"action\": \"run\"} draws the queue here; the Zornov window draws it while open; zornov queue run draws it from a shell"}))
             }
             "list" => Ok(json!({"jobs": run::queue_json(&store.read())})),
             "pause" => {
@@ -204,7 +204,7 @@ impl Session {
                         }
                     })
                     .collect();
-                Ok(json!({"nodes": out, "how": "on each render computer run: studio node (it prints its address and pairing token); then queue {\"action\": \"add_node\", \"addr\": \"HOST:7878\", \"token\": \"…\"}; jobs with distributed: true share their chunks with every node that answers"}))
+                Ok(json!({"nodes": out, "how": "on each render computer run: zornov node (it prints its address and pairing token); then queue {\"action\": \"add_node\", \"addr\": \"HOST:7878\", \"token\": \"…\"}; jobs with distributed: true share their chunks with every node that answers"}))
             }
             "add_node" => {
                 let addr = st(a, "addr").ok_or("add_node needs \"addr\": HOST:PORT")?.to_owned();

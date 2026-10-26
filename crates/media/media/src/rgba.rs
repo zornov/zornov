@@ -35,7 +35,7 @@ impl RgbaImage {
 
     pub fn load(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        let bad = || io::Error::new(io::ErrorKind::InvalidData, "not a Studio RGBA file");
+        let bad = || io::Error::new(io::ErrorKind::InvalidData, "not a Zornov RGBA file");
         if bytes.len() < 12 || &bytes[..4] != MAGIC {
             return Err(bad());
         }

@@ -168,7 +168,7 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
     heading(ui, "Plugins");
     let ctx = ui.ctx().clone();
     if app.cli.shot.is_none() && Button::ghost("Install from file…").icon(Icon::FolderOpen).show(ui).clicked() {
-        if let Some(path) = rfd::FileDialog::new().add_filter("Studio plugin", &["wasm"]).pick_file() {
+        if let Some(path) = rfd::FileDialog::new().add_filter("Zornov plugin", &["wasm"]).pick_file() {
             match host().install_file(&path) {
                 Ok(p) => kit::push(&ctx, format!("Installed {} ({})", p.manifest.name, p.manifest.summary()), None, Some(Icon::CheckCircle)),
                 Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
@@ -357,7 +357,7 @@ fn available(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
                 }
             });
             ui.label(egui::RichText::new(format!("{} {}.", e.description, e.provides)).font(theme::body()).color(t.text_2));
-            let from = if e.bundled() { "Ships with Studio. Runs sandboxed: no files, no network.".to_owned() } else { format!("From {}. Runs sandboxed: no files, no network.", e.url) };
+            let from = if e.bundled() { "Ships with Zornov. Runs sandboxed: no files, no network.".to_owned() } else { format!("From {}. Runs sandboxed: no files, no network.", e.url) };
             ui.label(egui::RichText::new(from).font(theme::caption()).color(t.text_2));
         });
     }

@@ -141,7 +141,7 @@ impl Pdf {
             obj(&mut out, &format!("<< /Type /Font /Subtype /Type1 /BaseFont /{f} /Encoding /WinAnsiEncoding >>"));
         }
         let title: String = self.title.chars().map(|c| winansi(c) as char).filter(|c| !matches!(c, '(' | ')' | '\\')).collect();
-        obj(&mut out, &format!("<< /Title ({title}) /Producer (Studio production office) >>"));
+        obj(&mut out, &format!("<< /Title ({title}) /Producer (Zornov production office) >>"));
         let blank = Page::default();
         for i in 0..n {
             let page = self.pages.get(i).unwrap_or(&blank);

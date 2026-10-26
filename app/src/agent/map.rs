@@ -144,7 +144,7 @@ const DEPTS: &[Dept] = &[
         lines: &[
             ("what the content library has", "tool:catalogue tool:search"),
             ("your files across projects", "tool:assets tool:project_care"),
-            ("Studio help; skills (the procedure for a kind of work) and lessons", "tool:howto tool:capabilities tool:guide tool:skill"),
+            ("Zornov help; skills (the procedure for a kind of work) and lessons", "tool:howto tool:capabilities tool:guide tool:skill"),
         ],
     },
     Dept {
@@ -246,7 +246,7 @@ pub fn stale() -> Vec<String> {
 /// The map as text: about 1 to 2 thousand tokens.
 pub fn capability_map() -> String {
     let mut s = String::from(
-        "# What Studio can do (capability map)\n\
+        "# What Zornov can do (capability map)\n\
          Read once; plan from it. Bare names are ops inside `edit` ({\"op\": name, ...}); `tool:x` is a tool you call on its own. Fields: `edit_schema` or `capabilities {query}`; detail: `guide {topic}`.\n",
     );
     for d in DEPTS {
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn no_line_names_something_that_is_gone() {
         let s = stale();
-        assert!(s.is_empty(), "map.rs mentions names Studio no longer has: {s:?}");
+        assert!(s.is_empty(), "map.rs mentions names Zornov no longer has: {s:?}");
     }
 
     #[test]

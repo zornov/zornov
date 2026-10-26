@@ -3,7 +3,7 @@ name = "studio-mov"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "QuickTime masters for Studio: ProRes MOV writing with 24-bit PCM audio and a timecode track, and reading source timecode and reel names from camera files"
+description = "QuickTime masters for Zornov: ProRes MOV writing with 24-bit PCM audio and a timecode track, and reading source timecode and reel names from camera files"
 
 [dependencies]
 studio-prores = { path = "../../codecs/prores" }

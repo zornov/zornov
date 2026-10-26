@@ -241,7 +241,7 @@ impl Session {
         }
         let mi = c.media.and_then(|m| p.media(m)).ok_or_else(|| format!("clip {vid} has no sound file"))?;
         let path = mi.path.clone().ok_or_else(|| format!("clip {vid} has no sound file"))?;
-        let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or_else(|| format!("clip {vid}'s file has no sound Studio can decode"))?;
+        let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or_else(|| format!("clip {vid}'s file has no sound Zornov can decode"))?;
         let pace = (c.speed as f64 / 100.0).max(0.05);
         let file_at = |t: f64| secs(c.src_in) + (t - secs(c.start)) * pace;
         let (f0, f1) = (file_at(t0).max(0.0), file_at(t1));
@@ -330,7 +330,7 @@ impl Session {
         }
         if eyes.is_empty() && mouth.is_none() {
             return Err(format!(
-                "no face found in clip {id}'s picture (Studio looks for pupils in eye whites and a mouth line below them): give \"face\": {{\"eyes\": [[x, y], …], \"mouth\": [x, y], \"mouth_width\": px}} in canvas pixels (look with frame first)"
+                "no face found in clip {id}'s picture (Zornov looks for pupils in eye whites and a mouth line below them): give \"face\": {{\"eyes\": [[x, y], …], \"mouth\": [x, y], \"mouth_width\": px}} in canvas pixels (look with frame first)"
             ));
         }
         let mut pins = Vec::new();

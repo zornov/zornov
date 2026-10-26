@@ -1,4 +1,4 @@
-Studio
+Zornov
 Copyright 2026 Ashrox LLC and contributors
 
 Licensed under the GNU Affero General Public License, version 3 or (at your
@@ -10,10 +10,10 @@ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
 details.
 
-Studio is also available under a commercial licence from Ashrox LLC for use
+Zornov is also available under a commercial licence from Ashrox LLC for use
 that the AGPL does not suit. See LICENSING.md.
 
-Parts of Studio come from other projects under their own permissive licences
+Parts of Zornov come from other projects under their own permissive licences
 (MIT, Apache-2.0 and others); their notices are kept in their files, in the
 list below and in ATTRIBUTIONS.md.
 
@@ -40,7 +40,7 @@ copyright and licence, stated at the top of their files:
   shapes-gradient) and the goldens drawn from them: from EffectCraft
   (https://github.com/storytold/effectcraft), Copyright (c) 2026 ArtCraft Team and
   the EffectCraft contributors, MIT OR Apache-2.0. The Lottie player itself is
-  written for Studio, with EffectCraft's Lottie importer as its reference.
+  written for Zornov, with EffectCraft's Lottie importer as its reference.
 - crates/pixel-* (studio-pixel-geom, -color, -cms, -raster, -doc, -ops,
   -psd, -codecs, -heif, -raw, -affinity, -compose, -paint, -algo, -io, -text,
   -vector, -format, -plugins, -engine, -gpu, -tablet, -testkit): the pixel
@@ -91,7 +91,7 @@ Fonts and icons built into the program (crates/app/assets):
 - Phosphor icons: Copyright (c) 2023 Phosphor Icons (https://phosphoricons.com),
   MIT; see Phosphor-LICENSE.txt.
 
-The Rust crates compiled into Studio, with their licences and notices, are
+The Rust crates compiled into Zornov, with their licences and notices, are
 listed in THIRD-PARTY-LICENSES.txt (made by `cargo xtask licenses`).
 
 JPEG export uses the jpeg-encoder crate, which is under the Independent JPEG

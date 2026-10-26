@@ -85,7 +85,7 @@ pub fn write(dir: &Path, p: &m::Project, notes: &Store, version: Option<(&str, &
     put(
         "README.txt",
         &format!(
-            "Review: {}\n{version_line}Length: {:.1} s at {} fps\n\n{}Write your notes in notes-template.csv (one per line: timecode as hh:mm:ss:ff, the note,\nyour name), or as plain lines like \"00:01:23:12 the music comes in late\", and send\nthe file back. Notes made in Studio are in notes.json; replies there are kept.\n",
+            "Review: {}\n{version_line}Length: {:.1} s at {} fps\n\n{}Write your notes in notes-template.csv (one per line: timecode as hh:mm:ss:ff, the note,\nyour name), or as plain lines like \"00:01:23:12 the music comes in late\", and send\nthe file back. Notes made in Zornov are in notes.json; replies there are kept.\n",
             info.sequence,
             info.duration_seconds,
             info.fps,

@@ -1,4 +1,4 @@
-# Releasing Studio
+# Releasing Zornov
 
 Everything runs through `cargo xtask`. Nothing here is secret except what you
 keep in your keychain or CI secrets; no command prints a key, password or
@@ -6,12 +6,12 @@ token, and none of them is committed.
 
 | Command | Makes |
 | --- | --- |
-| `cargo xtask release-mac` | `dist/release/Studio-<ver>-macos-<arch>.dmg` (Developer ID signed, hardened runtime, notarized, stapled) and a signed update archive |
-| `cargo xtask package-msi` | `dist/release/Studio-<ver>-windows-<arch>.msi` (needs WiX) |
-| `cargo xtask package-windows` | `dist/studio-windows-<arch>.zip` (portable) + signed update archive |
-| `cargo xtask package-deb` | `dist/release/studio_<ver>_<arch>.deb` |
-| `cargo xtask package-appimage` | `dist/release/Studio-<ver>-<arch>.AppImage` (needs `appimagetool`) |
-| `cargo xtask package-linux` | `dist/studio-linux-<arch>.tar.gz` (portable) + signed update archive |
+| `cargo xtask release-mac` | `dist/release/Zornov-<ver>-macos-<arch>.dmg` (Developer ID signed, hardened runtime, notarized, stapled) and a signed update archive |
+| `cargo xtask package-msi` | `dist/release/Zornov-<ver>-windows-<arch>.msi` (needs WiX) |
+| `cargo xtask package-windows` | `dist/zornov-windows-<arch>.zip` (portable) + signed update archive |
+| `cargo xtask package-deb` | `dist/release/zornov_<ver>_<arch>.deb` |
+| `cargo xtask package-appimage` | `dist/release/Zornov-<ver>-<arch>.AppImage` (needs `appimagetool`) |
+| `cargo xtask package-linux` | `dist/zornov-linux-<arch>.tar.gz` (portable) + signed update archive |
 | `cargo xtask update-key` | the Ed25519 update signing key, once |
 | `cargo xtask feed` | `dist/release/feed.json`, the signed update feed |
 | `cargo xtask licenses` | `dist/THIRD-PARTY-LICENSES.txt`, the licences of every crate built in |
@@ -23,14 +23,14 @@ the same `.tar.gz`, `.zip` and `.deb`.
 
 ## Licence notices
 
-Every package carries Studio's `LICENSE`, `NOTICE` and `ATTRIBUTIONS.md`, the
+Every package carries Zornov's `LICENSE`, `NOTICE` and `ATTRIBUTIONS.md`, the
 licences of the fonts and icons in `app/assets`, the ACES licence
 (`crates/picture/colour/LICENSE-ACES.md`) and `THIRD-PARTY-LICENSES.txt`: on macOS in
-`Studio.app/Contents/Resources/Licenses/`, in the `.deb` and AppImage in
-`/usr/share/doc/studio/`, and in the portable archives and the MSI next to the
+`Zornov.app/Contents/Resources/Licenses/`, in the `.deb` and AppImage in
+`/usr/share/doc/zornov/`, and in the portable archives and the MSI next to the
 program. The packaging commands make `THIRD-PARTY-LICENSES.txt` themselves
 from `cargo metadata --locked` for every release target: each crate compiled
-into Studio (normal and build dependencies; Studio's own crates are left out
+into Zornov (normal and build dependencies; Zornov's own crates are left out
 unless vendored under another licence) with its licence expression and the
 licence and notice files it ships, including those of fonts or C code it
 bundles. A crate that ships none gets the standard text of its licence from
@@ -64,14 +64,14 @@ You need an Apple Developer Program membership.
    `cargo xtask release-mac --check`. Anything missing is listed together and
    the command stops before the long build.
 
-`cargo xtask release-mac` then builds, assembles `Studio.app`, signs it with
-the hardened runtime and `packaging/macos/Studio.entitlements`, notarizes and
+`cargo xtask release-mac` then builds, assembles `Zornov.app`, signs it with
+the hardened runtime and `packaging/macos/Zornov.entitlements`, notarizes and
 staples it, builds the DMG, signs, notarizes and staples that too, and writes
 the signed update archive. Options: `--no-notarize` (signed DMG, no Apple
 round trip), `--identity ID`, `--exe PATH` (use a binary you already built).
 Without credentials it fails with the list of what is missing.
 
-The entitlements file asks for only the microphone (voice-overs). Studio loads
+The entitlements file asks for only the microphone (voice-overs). Zornov loads
 no third-party libraries and generates no code at run time, so it needs
 neither library-validation nor JIT exceptions; add one there only if a new
 dependency requires it.
@@ -86,8 +86,8 @@ install and checks it, then **Restart now** installs it (or it installs at the
 next start). **Later** keeps the notice away for a day.
 
 1. `cargo xtask update-key` makes the private key
-   (`~/Library/Application Support/Studio/signing/update-key.hex` on macOS,
-   mode 0600) and prints the **public** key. Back the private key up: apps
+   (`~/Library/Application Support/Zornov/signing/update-key.hex` on macOS,
+   mode 0600; a `Studio` folder left by the app's earlier name is moved to `Zornov` the first time `cargo xtask` or the app runs, key included) and prints the **public** key. Back the private key up: apps
    built with a public key accept only updates signed by its private half. In
    CI put the same hex in the secret `STUDIO_UPDATE_KEY`.
 2. Edit `packaging/release.conf`: `public_key =` the printed key and
@@ -114,7 +114,7 @@ Each kind of install has its own feed key, so its own signature:
 | --- | --- | --- |
 | macOS `.app` (from the DMG) | `macos-<arch>` | files swapped inside the bundle |
 | Portable folder (`studio.install` beside the program, writable) | `windows-<arch>`, `linux-<arch>` | files swapped in the folder |
-| Windows MSI (Program Files) | `windows-<arch>-msi` | the new `.msi` runs after Studio quits, then starts it |
+| Windows MSI (Program Files) | `windows-<arch>-msi` | the new `.msi` runs after Zornov quits, then starts it |
 | Linux AppImage | `linux-<arch>-appimage` | the new file replaces the old one |
 
 `package-msi` and `package-appimage` sign their output for the feed. A `.deb`
@@ -171,9 +171,9 @@ Nothing is pushed or published by the workflow.
 
 ## Crash reports
 
-Studio saves a report for a panic or a native crash (segfault, abort, Windows
-exception) in `~/Library/Application Support/Studio/crashes/` (Windows:
-`%LOCALAPPDATA%\Studio\crashes`, Linux: `$XDG_STATE_HOME/studio/crashes`). It
+Zornov saves a report for a panic or a native crash (segfault, abort, Windows
+exception) in `~/Library/Application Support/Zornov/crashes/` (Windows:
+`%LOCALAPPDATA%\Zornov\crashes`, Linux: `$XDG_STATE_HOME/zornov/crashes`). It
 holds the version, system, time, the message or signal and a backtrace, with
 your home folder shown as `~`; no projects, media or keys. **Nothing is sent
 by default.** If `crash_endpoint` in `packaging/release.conf` (or

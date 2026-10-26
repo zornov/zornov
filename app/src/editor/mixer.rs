@@ -638,7 +638,7 @@ fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                 let title = app.doc.project.name.clone();
                 spawn("Writing stems", move || {
                     let w = desk::render::export_stems(&model, &dir, layout, bg, &title);
-                    let a = adm.then(|| desk::render::export_adm(&model, &dir.join(format!("{} ADM.wav", if title.is_empty() { "Studio" } else { &title })), layout, &title));
+                    let a = adm.then(|| desk::render::export_adm(&model, &dir.join(format!("{} ADM.wav", if title.is_empty() { "Zornov" } else { &title })), layout, &title));
                     Done::Stems(w, a)
                 });
             }

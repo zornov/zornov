@@ -224,7 +224,7 @@ pub fn encode(width: u32, height: u32, pixels: &[[f32; 4]], opts: &WriteOptions)
     put32(&mut out, 24, 1664); // generic header size
     put32(&mut out, 28, 384); // industry header size
     put32(&mut out, 32, 0);
-    putstr(&mut out, 160, 100, "Studio");
+    putstr(&mut out, 160, 100, "Zornov");
     put32(&mut out, 660, 0xFFFF_FFFF);
     // Image information.
     put16(&mut out, 768, 0);

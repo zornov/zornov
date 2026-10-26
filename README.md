@@ -129,7 +129,7 @@ Zornov is written in Rust (edition 2024).
 
 ```bash
 cargo build --release -p studio-app
-./target/release/studio
+./target/release/zornov
 ```
 
 To make a signed macOS app bundle:
@@ -164,7 +164,7 @@ The container has a software graphics driver, so the GPU tests run without a gra
 Zornov can be driven without a window, for scripts, tests and automation. Every film above was made this way:
 
 ```bash
-studio agent --headless --project path/to/project --out path/to/out -
+zornov agent --headless --project path/to/project --out path/to/out -
 ```
 
 Send one JSON line per tool call on standard input, for example `{"tool": "frame", "args": {"t": 2.0}}`.

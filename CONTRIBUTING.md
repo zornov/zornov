@@ -30,8 +30,8 @@ the container in `docker/Dockerfile`, which CI uses too:
 - **Any terminal with Docker:**
 
   ```
-  docker build -t studio-linux docker
-  docker run --rm -it -v "$PWD:/work" studio-linux cargo test --workspace
+  docker build -t zornov-linux docker
+  docker run --rm -it -v "$PWD:/work" zornov-linux cargo test --workspace
   ```
 
 The container has a software graphics driver, so the GPU tests run without a
@@ -44,7 +44,7 @@ To check that a change still compiles for Windows without a Windows machine
 the container:
 
 ```
-docker run --rm -v "$PWD:/work" studio-linux cargo check --target x86_64-pc-windows-gnu --workspace --all-targets
+docker run --rm -v "$PWD:/work" zornov-linux cargo check --target x86_64-pc-windows-gnu --workspace --all-targets
 ```
 
 It compiles but does not run anything; running and testing Windows needs

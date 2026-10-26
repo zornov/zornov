@@ -532,7 +532,7 @@ impl Session {
 
     fn project_title(&self) -> String {
         let n = self.doc.project.name.trim();
-        if n.is_empty() { "Studio".into() } else { n.to_owned() }
+        if n.is_empty() { "Zornov".into() } else { n.to_owned() }
     }
 
     fn stems_tool(&mut self, a: &Value) -> Result<Value, String> {

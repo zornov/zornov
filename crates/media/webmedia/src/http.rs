@@ -13,12 +13,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-const UA: &str = "Mozilla/5.0 (compatible; Studio)";
+const UA: &str = "Mozilla/5.0 (compatible; Zornov)";
 
 fn status_error(status: u16, url: &str) -> Error {
     let host = crate::url::host_of(url);
     match status {
-        401 | 403 => Error::SignIn(format!("{host} did not hand that over (HTTP {status}). It needs a signed-in account or a licence, and Studio does not sign in for you or get around that.")),
+        401 | 403 => Error::SignIn(format!("{host} did not hand that over (HTTP {status}). It needs a signed-in account or a licence, and Zornov does not sign in for you or get around that.")),
         404 | 410 => Error::Net(format!("{host} says it is gone (HTTP {status})")),
         _ => Error::Net(format!("{host} answered HTTP {status}")),
     }

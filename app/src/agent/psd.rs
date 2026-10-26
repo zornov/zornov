@@ -114,7 +114,7 @@ mod tests {
         let super::super::Content::Text(t) = &parts[0] else { panic!() };
         let v: Value = serde_json::from_str(t).unwrap();
         assert_eq!(v["media"].as_array().unwrap().len(), 1, "{v}");
-        assert!(v["converted"][0]["to"].as_str().unwrap().ends_with("Flat (Studio).png"), "{v}");
+        assert!(v["converted"][0]["to"].as_str().unwrap().ends_with("Flat (Zornov).png"), "{v}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

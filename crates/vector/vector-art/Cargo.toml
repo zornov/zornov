@@ -3,7 +3,7 @@ name = "studio-vector-art"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's vector illustration documents: artboards, layers, paths and live shapes, appearance stacks, swatches and styles, symbols, repeats, blends, envelopes and perspective, type, image trace, pathfinder, SVG/PDF/EPS, animation, and the operations the AI and the app edit them with."
+description = "Zornov's vector illustration documents: artboards, layers, paths and live shapes, appearance stacks, swatches and styles, symbols, repeats, blends, envelopes and perspective, type, image trace, pathfinder, SVG/PDF/EPS, animation, and the operations the AI and the app edit them with."
 
 [features]
 default = ["gpu"]

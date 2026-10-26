@@ -28,7 +28,7 @@ static VERSION: OnceLock<String> = OnceLock::new();
 /// The text every report starts with.
 pub fn header(kind: &str) -> String {
     format!(
-        "Studio crash report\nversion: {}\nos: {} {}\nkind: {kind}\ntime: {} (seconds since 1970)\n",
+        "Zornov crash report\nversion: {}\nos: {} {}\nkind: {kind}\ntime: {} (seconds since 1970)\n",
         VERSION.get().map_or("unknown", String::as_str),
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -148,7 +148,7 @@ pub fn endpoint() -> Option<String> {
 
 /// Sends one report. Call only after the person said yes to this report.
 pub fn send(r: &Report, endpoint: &str) -> Result<(), String> {
-    let reply = studio_net::post(endpoint, &[("Content-Type", "text/plain; charset=utf-8"), ("User-Agent", "Studio-crash-report")], r.text().as_bytes(), Duration::from_secs(20))?;
+    let reply = studio_net::post(endpoint, &[("Content-Type", "text/plain; charset=utf-8"), ("User-Agent", "Zornov-crash-report")], r.text().as_bytes(), Duration::from_secs(20))?;
     if (200..300).contains(&reply.status) { Ok(()) } else { Err(format!("the report server answered {}", reply.status)) }
 }
 

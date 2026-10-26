@@ -479,8 +479,8 @@ mod tests {
 
     #[test]
     fn references_and_literals() {
-        let src = "name = Studio\nb = { name } uses { \"{\" }braces{ \"}\" }\n";
-        assert_eq!(run(src, "b", Lang::En, &[]), "Studio uses {braces}");
+        let src = "name = Zornov\nb = { name } uses { \"{\" }braces{ \"}\" }\n";
+        assert_eq!(run(src, "b", Lang::En, &[]), "Zornov uses {braces}");
     }
 
     #[test]

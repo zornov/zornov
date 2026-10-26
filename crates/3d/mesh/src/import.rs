@@ -45,7 +45,7 @@ pub fn load(path: &Path, fit: f32) -> Result<Imported, String> {
         other => {
             return Err(match crate::foreign::unsupported(other) {
                 Some(way) => format!("{}: {way}", path.display()),
-                None => format!("{}: .{other} is not a model Studio reads (glb, gltf, obj, stl, ply, fbx)", path.display()),
+                None => format!("{}: .{other} is not a model Zornov reads (glb, gltf, obj, stl, ply, fbx)", path.display()),
             })
         }
     };
@@ -385,7 +385,7 @@ fn gltf(bytes: &[u8], dir: &Path) -> Result<Imported, String> {
         let rig = gltf_rig(doc, &buffers, &global, &parent_of, &joint_nodes, &joint_bone, any_skin.then_some((skin_joints, skin_weights)), &morphs, &morph_of_mesh, mesh.positions.len(), &mut notes);
         mesh.rig = Some(std::sync::Arc::new(rig));
     } else if doc.animations().next().is_some() {
-        notes.push("animation of whole objects left out: the model comes in at rest; animate it with Studio's 3D transform".into());
+        notes.push("animation of whole objects left out: the model comes in at rest; animate it with Zornov's 3D transform".into());
     }
     let missing_normals = mesh.normals.iter().all(|n| *n == [0.0; 3]);
     mesh.regroup(&mats);

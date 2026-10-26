@@ -351,7 +351,7 @@ impl Config {
         let d = self.displays.iter().find(|d| d.name.eq_ignore_ascii_case(display)).ok_or_else(|| format!("no display \"{display}\"; displays: {}", self.displays.iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")))?;
         let v = d.views.iter().find(|v| v.name.eq_ignore_ascii_case(view)).ok_or_else(|| format!("display \"{}\" has no view \"{view}\"; views: {}", d.name, d.views.iter().map(|v| v.name.as_str()).collect::<Vec<_>>().join(", ")))?;
         if v.looks.as_deref().is_some_and(|l| !l.is_empty()) {
-            return Err(format!("view \"{}\" uses looks, which Studio does not apply", v.name));
+            return Err(format!("view \"{}\" uses looks, which Zornov does not apply", v.name));
         }
         if let Some(cs) = &v.colorspace {
             let dst = self.space(cs).ok_or_else(|| format!("view \"{}\" names unknown colour space \"{cs}\"", v.name))?;
@@ -614,7 +614,7 @@ fn invert_ops(ops: Vec<Op>) -> Result<Vec<Op>, String> {
             Op::Range { min_in, max_in, min_out, max_out } => Op::Range { min_in: min_out, max_in: max_out, min_out: min_in, max_out: max_in },
             Op::Allocation { lg2, lo, hi, offset, inverse } => Op::Allocation { lg2, lo, hi, offset, inverse: !inverse },
             Op::Lut1(l, i) => Op::Lut1(l, !i),
-            Op::Lut3(_) => return Err("a 3D LUT in the config would have to be inverted, which Studio does not do".into()),
+            Op::Lut3(_) => return Err("a 3D LUT in the config would have to be inverted, which Zornov does not do".into()),
             Op::Curve(c, i) => Op::Curve(c, !i),
             Op::Transfer(t, i) => Op::Transfer(t, !i),
             Op::Pq100(i) => Op::Pq100(!i),
@@ -988,7 +988,7 @@ fn builtin(style: &str) -> Result<Vec<Op>, String> {
         }
         "ACES-LMT - ACES 1.3 Reference Gamut Compression" => vec![Op::GamutComp(GamutComp::ACES13, false)],
         other if other.contains("_2.0") && other.starts_with("ACES-OUTPUT") => {
-            return Err(format!("BuiltinTransform \"{other}\" is an ACES 2.0 output transform; Studio implements the ACES 1.3 ones (choose an ACES 1.x config or Studio's own ACES view)"));
+            return Err(format!("BuiltinTransform \"{other}\" is an ACES 2.0 output transform; Zornov implements the ACES 1.3 ones (choose an ACES 1.x config or Zornov's own ACES view)"));
         }
         other => return Err(format!("BuiltinTransform \"{other}\" is not supported")),
     })
@@ -1042,7 +1042,7 @@ impl Config {
         if let Some(a) = self.role("aces_interchange").or_else(|| self.space("ACES2065-1")) {
             return Ok(self.processor(src, &a.name)?.then(Processor::aces_to_working()));
         }
-        Err(format!("{} has no linear Rec.709 or ACES2065-1 colour space to reach Studio's working space", self.label()))
+        Err(format!("{} has no linear Rec.709 or ACES2065-1 colour space to reach Zornov's working space", self.label()))
     }
 
     /// Studio working space → `dst`.

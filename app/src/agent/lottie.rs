@@ -129,7 +129,7 @@ mod tests {
             let studio = s.frames.rgba(&s.doc, micros(t), 1920).unwrap();
             let played = anim.render_rgba(t * anim.fps, 1920, 1080);
             let (a, b) = (centre(&studio.pixels, 1920), centre(&played, 1920));
-            assert!((a.0 - b.0).abs() < 2.0 && (a.1 - b.1).abs() < 2.0, "at {t}s Studio {a:?}, Lottie {b:?}");
+            assert!((a.0 - b.0).abs() < 2.0 && (a.1 - b.1).abs() < 2.0, "at {t}s Zornov {a:?}, Lottie {b:?}");
         }
         // dotLottie too.
         let lot = dir.join("move.lottie");

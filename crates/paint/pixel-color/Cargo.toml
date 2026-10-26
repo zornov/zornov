@@ -9,7 +9,7 @@ autoexamples = false
 
 # Vendored: the upstream test suites stay in the tree (run them with
 # `cargo test -p <crate> --lib`; the tests/ folders need autotests back on) but are not part
-# of Studio's workspace test run.
+# of Zornov's workspace test run.
 [lib]
 test = false
 doctest = false

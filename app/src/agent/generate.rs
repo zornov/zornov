@@ -65,9 +65,9 @@ impl Kind {
     pub fn unavailable(self) -> Option<&'static str> {
         match self {
             Kind::Picture => None,
-            Kind::Video => Some("video from words is not available yet. Make it move in Studio instead: generate the pictures (make: picture; the subject with transparent: true, the background separately), put them in 3D (three_d, parallax) with light and a camera move, and keyframe them over time. guide topic \"generated\" has the recipe"),
-            Kind::Music => Some("music is made in Studio by the edit op music, not by generate: it composes original music in a genre (genre or describe, instruments, bpm, key, duration, cues for the moments to land on, tail), or takes a library track for a mood. skill music-beat-sync part Scoring"),
-            Kind::Sound => Some("sound is made in Studio by the edit op sfx, not by generate: foley and effects from a description (footsteps on gravel, a match strike, distant traffic, a pig oinking), made to measure, or catalogue panel audio for library sounds; the edit op sing sings notes and syllables. skill sound-design part Foley"),
+            Kind::Video => Some("video from words is not available yet. Make it move in Zornov instead: generate the pictures (make: picture; the subject with transparent: true, the background separately), put them in 3D (three_d, parallax) with light and a camera move, and keyframe them over time. guide topic \"generated\" has the recipe"),
+            Kind::Music => Some("music is made in Zornov by the edit op music, not by generate: it composes original music in a genre (genre or describe, instruments, bpm, key, duration, cues for the moments to land on, tail), or takes a library track for a mood. skill music-beat-sync part Scoring"),
+            Kind::Sound => Some("sound is made in Zornov by the edit op sfx, not by generate: foley and effects from a description (footsteps on gravel, a match strike, distant traffic, a pig oinking), made to measure, or catalogue panel audio for library sounds; the edit op sing sings notes and syllables. skill sound-design part Foley"),
         }
     }
 }
@@ -611,8 +611,8 @@ impl Session {
                 "makes": {
                     "picture": {"available": true, "by": "Codex image generation", "needs": "the codex command on this Mac"},
                     "video": {"available": false, "note": Kind::Video.unavailable()},
-                    "music": {"available": true, "by": "Studio's own composer", "how": Kind::Music.unavailable()},
-                    "sound": {"available": true, "by": "Studio's own sound models", "how": Kind::Sound.unavailable()},
+                    "music": {"available": true, "by": "Zornov's own composer", "how": Kind::Music.unavailable()},
+                    "sound": {"available": true, "by": "Zornov's own sound models", "how": Kind::Sound.unavailable()},
                 },
                 "codex": super::brain::find_codex().is_some() || cfg!(test),
             }));
@@ -696,7 +696,7 @@ mod tests {
         assert!(e.contains("not available yet") && e.contains("three_d"), "{e}");
         for (make, hint) in [("music", "edit op music"), ("sound", "edit op sfx")] {
             let e = s.generate(&json!({"make": make, "prompt": "x"})).unwrap_err();
-            assert!(e.contains("made in Studio") && e.contains(hint) && !e.contains("not available"), "{e}");
+            assert!(e.contains("made in Zornov") && e.contains(hint) && !e.contains("not available"), "{e}");
         }
         assert!(s.generate(&json!({"prompt": "x"})).unwrap_err().contains("\"make\""));
         assert!(s.generate(&json!({"make": "hologram", "prompt": "x"})).unwrap_err().contains("not \"hologram\""));

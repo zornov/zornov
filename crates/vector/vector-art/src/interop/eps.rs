@@ -212,7 +212,7 @@ pub fn export(doc: &Document, artboard: Option<&str>, opts: &BuildOptions) -> St
     Ex { scale: 300.0 / 72.0 }.items(&scene, &mut body);
     let (w, h) = (rect.width().ceil(), rect.height().ceil());
     format!(
-        "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 {} {}\n%%HiResBoundingBox: 0 0 {} {}\n%%Creator: Studio\n%%Title: {}\n%%LanguageLevel: 3\n%%EndComments\nsave\n{body}restore\nshowpage\n%%EOF\n",
+        "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 {} {}\n%%HiResBoundingBox: 0 0 {} {}\n%%Creator: Zornov\n%%Title: {}\n%%LanguageLevel: 3\n%%EndComments\nsave\n{body}restore\nshowpage\n%%EOF\n",
         w as i64,
         h as i64,
         n(rect.width()),

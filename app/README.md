@@ -1,6 +1,6 @@
 # studio-app
 
-The Studio desktop application (`studio` binary): eframe/egui on wgpu.
+The Zornov desktop application (`zornov` binary): eframe/egui on wgpu.
 
 ## Layout of the crate
 
@@ -48,7 +48,7 @@ export.
 ## Development flags
 
 ```
-studio --screen start|editor|export|settings|gallery --theme dark|light
+zornov --screen start|editor|export|settings|gallery --theme dark|light
        --size 1440x900 --project demo|empty|one|big --select N
        --shot out.png [--frames N] [--scroll Y]
        --tabs=N --hover=X,Y --script=path --media=a.mp4,b.mov

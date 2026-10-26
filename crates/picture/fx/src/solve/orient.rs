@@ -365,7 +365,7 @@ pub struct CameraFile {
 
 /// The point cloud as OBJ vertices (Y up, as most 3D programs read OBJ).
 pub fn points_obj(points: &[[f64; 4]], units: f64) -> String {
-    let mut s = String::from("# Studio camera solve point cloud\n");
+    let mut s = String::from("# Zornov camera solve point cloud\n");
     for p in points {
         let q = la::scale(la::mv(&FLIP, [p[0], p[1], p[2]]), units);
         s.push_str(&format!("v {:.6} {:.6} {:.6}\n", q[0], q[1], q[2]));

@@ -227,7 +227,7 @@ pub fn glb(m: &Mesh) -> Vec<u8> {
     }
     let textures: Vec<String> = (0..images.len()).map(|i| format!("{{\"source\":{i}}}")).collect();
     let mut json = format!(
-        "{{\"asset\":{{\"version\":\"2.0\",\"generator\":\"Studio\"}},\"scene\":0,\"scenes\":[{{\"nodes\":[{}]}}],\"nodes\":[{}],\"meshes\":[{{\"primitives\":[{}]{mesh_extra}}}],\"materials\":[{}],\"accessors\":[{}],\"bufferViews\":[{}],\"buffers\":[{{\"byteLength\":{}}}]{skins}",
+        "{{\"asset\":{{\"version\":\"2.0\",\"generator\":\"Zornov\"}},\"scene\":0,\"scenes\":[{{\"nodes\":[{}]}}],\"nodes\":[{}],\"meshes\":[{{\"primitives\":[{}]{mesh_extra}}}],\"materials\":[{}],\"accessors\":[{}],\"bufferViews\":[{}],\"buffers\":[{{\"byteLength\":{}}}]{skins}",
         scene_nodes.join(","), nodes.join(","), prims.join(","), materials.join(","), accessors.join(","), views.join(","), bin.len()
     );
     if !animations.is_empty() {
@@ -262,7 +262,7 @@ pub fn glb(m: &Mesh) -> Vec<u8> {
 /// the texture pictures the MTL names, as (file name, PNG bytes).
 pub fn obj(m: &Mesh, mtl_name: &str) -> (String, String, Vec<(String, Vec<u8>)>) {
     use std::fmt::Write;
-    let mut o = format!("# Studio\nmtllib {mtl_name}\n");
+    let mut o = format!("# Zornov\nmtllib {mtl_name}\n");
     for p in &m.positions {
         let q = to_y_up(*p);
         let _ = writeln!(o, "v {} {} {}", q[0], q[1], q[2]);

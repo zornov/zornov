@@ -134,7 +134,7 @@ impl Manifest {
     /// `fx` when items are registered.
     pub fn validate(&self) -> Result<(), String> {
         if !SUPPORTED_ABI.contains(&self.abi) {
-            return Err(format!("the plugin is built for plugin ABI {} and this Studio runs ABI {}; update {}", self.abi, SUPPORTED_ABI.iter().map(u32::to_string).collect::<Vec<_>>().join(", "), if self.abi > 1 { "Studio" } else { "the plugin" }));
+            return Err(format!("the plugin is built for plugin ABI {} and this Zornov runs ABI {}; update {}", self.abi, SUPPORTED_ABI.iter().map(u32::to_string).collect::<Vec<_>>().join(", "), if self.abi > 1 { "Zornov" } else { "the plugin" }));
         }
         if !good_id(&self.id) {
             return Err(format!("plugin id `{}` must be lower case letters, digits, - or _", self.id));

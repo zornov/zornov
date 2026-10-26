@@ -1,12 +1,12 @@
 # Accessibility
 
-Studio is built to be used without a mouse, with a screen reader, in strong
+Zornov is built to be used without a mouse, with a screen reader, in strong
 light or none, at large sizes, and by people who see colour differently.
 
 ## Screen readers
 
 egui's AccessKit support exposes the interface to VoiceOver (macOS), Narrator
-and NVDA (Windows) and Orca (Linux). What Studio adds:
+and NVDA (Windows) and Orca (Linux). What Zornov adds:
 
 * **Every shared control has a name.** `kit` widgets (buttons, icon buttons,
   toggles, segmented controls, chips, menus, sliders, fields, sections, tiles)

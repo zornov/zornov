@@ -208,8 +208,8 @@ mod tests {
     #[test]
     fn latin_names_inside_arabic_read_left_to_right() {
         // "Studio" first in an RTL paragraph is rightmost; the Arabic goes to its left.
-        assert_eq!(display("Studio سلام", true), "سلام Studio");
-        assert_eq!(display("سلام Studio", true), "Studio سلام");
+        assert_eq!(display("Zornov سلام", true), "سلام Zornov");
+        assert_eq!(display("سلام Zornov", true), "Zornov سلام");
         // Two Latin words stay in reading order.
         assert_eq!(display("ملف Rough Cut", true), "Rough Cut ملف");
     }

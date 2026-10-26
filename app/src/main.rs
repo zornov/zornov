@@ -6,9 +6,9 @@
 //! Command-line options (mostly for development and visual checks):
 //!
 //! ```text
-//! studio mcp [--project DIR]          agent server (MCP over stdio, headless)
-//! studio agent [--project DIR] TOOL [JSON]   one agent call from a shell
-//! studio eval --out DIR [--solo]       the AI editor on scored jobs, headless
+//! zornov mcp [--project DIR]          agent server (MCP over stdio, headless)
+//! zornov agent [--project DIR] TOOL [JSON]   one agent call from a shell
+//! zornov eval --out DIR [--solo]       the AI editor on scored jobs, headless
 //! studio [--screen start|editor|export|settings|gallery] [--theme dark|light]
 //!        [--size 1440x900] [--project demo|empty|one|big] [--select N]
 //!        [--shot out.png] [--frames N] [--fresh]
@@ -88,27 +88,30 @@ mod theme;
 mod thumbs;
 
 fn main() -> eframe::Result {
-    // `studio ofx-worker BUNDLE`: hosts one OpenFX bundle for the editor.
+    // `zornov ofx-worker BUNDLE`: hosts one OpenFX bundle for the editor.
     studio_plugins::ofx::worker_if_asked();
+    // Folders kept under the old name (Studio) move to Zornov before
+    // anything reads settings, the signing key or the window layout.
+    studio_paths::migrate_legacy();
     studio_crash::install(env!("CARGO_PKG_VERSION"));
     plugins::start();
-    // `studio mcp`: the agent server on stdin / stdout, no window.
+    // `zornov mcp`: the agent server on stdin / stdout, no window.
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match argv.first().map(String::as_str) {
         Some("mcp") => std::process::exit(agent::cli::mcp(&argv[1..])),
-        // `studio agent TOOL JSON`: one call from a shell or script.
+        // `zornov agent TOOL JSON`: one call from a shell or script.
         Some("agent") => std::process::exit(agent::cli::agent(&argv[1..])),
-        // `studio eval`: the AI editor on scored jobs, headless.
+        // `zornov eval`: the AI editor on scored jobs, headless.
         Some("eval") => std::process::exit(agent::eval::main(&argv[1..])),
-        // `studio node`: a render node other Studios on the network send pieces of a render to.
+        // `zornov node`: a render node other Studios on the network send pieces of a render to.
         #[cfg(feature = "render")]
         Some("node") => std::process::exit(deliver_run::node_main(&argv[1..])),
-        // `studio queue run|list`: the render queue from a shell.
+        // `zornov queue run|list`: the render queue from a shell.
         #[cfg(feature = "render")]
         Some("queue") => std::process::exit(deliver_run::queue_main(&argv[1..])),
         _ => {}
     }
-    // `studio` in a terminal: the prompt, `studio new`, `studio see`…
+    // `studio` in a terminal: the prompt, `zornov new`, `zornov see`…
     if let Some(code) = agent::shell::main(&argv) {
         std::process::exit(code);
     }
@@ -120,8 +123,8 @@ fn main() -> eframe::Result {
     }
     let (w, h) = cli.size.unwrap_or((1440.0, 900.0));
     let viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("Studio")
-        .with_app_id("studio")
+        .with_title("Zornov")
+        .with_app_id("zornov")
         .with_icon(std::sync::Arc::new(eframe::icon_data::from_png_bytes(include_bytes!("../../packaging/brand/hicolor/256x256/apps/zornov.png")).unwrap_or_default()))
         .with_inner_size([w, h])
         .with_min_inner_size([960.0, 600.0])
@@ -139,5 +142,5 @@ fn main() -> eframe::Result {
         persistence_path: cli.fresh.then(|| std::env::temp_dir().join(format!("studio-fresh-{}", std::process::id()))),
         ..Default::default()
     };
-    eframe::run_native("Studio", options, Box::new(move |cc| Ok(Box::new(app::StudioApp::new(cc, cli)))))
+    eframe::run_native("Zornov", options, Box::new(move |cc| Ok(Box::new(app::StudioApp::new(cc, cli)))))
 }

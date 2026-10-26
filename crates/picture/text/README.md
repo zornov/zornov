@@ -1,6 +1,6 @@
 # studio-text
 
-Text for Studio: font discovery and fallback, shaping and layout, the
+Text for Zornov: font discovery and fallback, shaping and layout, the
 styling stack, a catalogue of text styles, animated text templates, and
 captions with word timings and subtitle export. Pure Rust, CPU
 rasterisation; output is `studio_colour::Image` (linear-light,

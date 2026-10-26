@@ -26,7 +26,7 @@ fn content_items(content: Option<&Path>) -> Result<Vec<Item>, String> {
 }
 
 fn desktop_file() -> Result<Vec<u8>, String> {
-    let p = crate::root().join("packaging/linux/studio.desktop");
+    let p = crate::root().join("packaging/linux/zornov.desktop");
     std::fs::read(&p).map_err(|e| format!("{}: {e}", p.display()))
 }
 
@@ -57,26 +57,26 @@ fn gz_tar(items: &[Item], made: &[Made], prefix: Option<&str>, tmp: &Path) -> Re
 }
 
 /// Where Linux packages put the licence notices.
-pub const LINUX_DOC: &str = "usr/share/doc/studio";
+pub const LINUX_DOC: &str = "usr/share/doc/zornov";
 
 /// Builds `out` (a `.deb`) from the release binary, content and licence
-/// notices (in `/usr/share/doc/studio`).
+/// notices (in `/usr/share/doc/zornov`).
 pub fn deb_from(exe: &Path, content: Option<&Path>, notices: &Notices, out: &Path) -> Result<(), String> {
     let arch = deb_arch()?;
     let mut items = content_items(content)?;
-    items.push(Item { rel: "studio".into(), src: exe.to_owned(), exec: true });
-    let items: Vec<Item> = items.into_iter().map(|i| Item { rel: format!("usr/lib/studio/{}", i.rel), ..i }).collect();
+    items.push(Item { rel: "zornov".into(), src: exe.to_owned(), exec: true });
+    let items: Vec<Item> = items.into_iter().map(|i| Item { rel: format!("usr/lib/zornov/{}", i.rel), ..i }).collect();
     let size_kb = (items.iter().map(|i| std::fs::metadata(&i.src).map(|m| m.len()).unwrap_or(0)).sum::<u64>() + notices.iter().map(|n| n.1.len() as u64).sum::<u64>() + 1023) / 1024;
     let mut made = vec![
-        Made::link("usr/bin/studio", "../lib/studio/studio"),
-        Made::file("usr/share/applications/studio.desktop", desktop_file()?, false),
-        Made::file("usr/share/icons/hicolor/256x256/apps/studio.png", icon_png(), false),
+        Made::link("usr/bin/zornov", "../lib/zornov/zornov"),
+        Made::file("usr/share/applications/zornov.desktop", desktop_file()?, false),
+        Made::file("usr/share/icons/hicolor/256x256/apps/zornov.png", icon_png(), false),
     ];
     made.extend(notices.iter().map(|(name, data)| Made::file(&format!("{LINUX_DOC}/{name}"), data.clone(), false)));
     let tmp = out.with_extension("tmp");
     let data = gz_tar(&items, &made, Some("."), &tmp)?;
     let control = format!(
-        "Package: studio\nVersion: {VERSION}\nSection: video\nPriority: optional\nArchitecture: {arch}\nInstalled-Size: {size_kb}\nMaintainer: Ashrox LLC <noreply@ashrox.invalid>\nDepends: libc6 (>= 2.31), libasound2t64 | libasound2, libvulkan1\nDescription: Studio video editor\n A video editor with an AI editor, 3D, effects and export, in Rust.\n"
+        "Package: zornov\nVersion: {VERSION}\nSection: video\nPriority: optional\nArchitecture: {arch}\nInstalled-Size: {size_kb}\nMaintainer: Ashrox LLC <noreply@ashrox.invalid>\nDepends: libc6 (>= 2.31), libasound2t64 | libasound2, libvulkan1\nDescription: Zornov video editor\n A video editor with an AI editor, 3D, effects and export, in Rust.\n"
     );
     let ctl = gz_tar(&[], &[Made::file("control", control.into_bytes(), false)], Some("."), &tmp)?;
     let deb = ar(&[("debian-binary", b"2.0\n".to_vec()), ("control.tar.gz", ctl), ("data.tar.gz", data)], repro::epoch());
@@ -86,7 +86,7 @@ pub fn deb_from(exe: &Path, content: Option<&Path>, notices: &Notices, out: &Pat
 pub fn package_deb() -> Result<String, String> {
     let exe = crate::build_app_repro()?;
     std::fs::create_dir_all(release_dir()).map_err(|e| e.to_string())?;
-    let out = release_dir().join(format!("studio_{VERSION}_{}.deb", deb_arch()?));
+    let out = release_dir().join(format!("zornov_{VERSION}_{}.deb", deb_arch()?));
     deb_from(&exe, crate::content_core().as_deref(), &crate::licenses::notices()?, &out)?;
     Ok(rel(&out))
 }
@@ -94,7 +94,7 @@ pub fn package_deb() -> Result<String, String> {
 // -------------------------------------------------------------- AppImage
 
 /// The AppDir: `AppRun` is a link to the program, which finds its content
-/// beside itself; the licence notices are in `usr/share/doc/studio`.
+/// beside itself; the licence notices are in `usr/share/doc/zornov`.
 pub fn appdir_from(exe: &Path, content: Option<&Path>, notices: &Notices, dir: &Path) -> Result<(), String> {
     crate::fresh_dir(dir)?;
     let w = |rel: &str, data: &[u8]| -> Result<(), String> {
@@ -102,27 +102,27 @@ pub fn appdir_from(exe: &Path, content: Option<&Path>, notices: &Notices, dir: &
         std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::write(&p, data).map_err(|e| format!("{}: {e}", p.display()))
     };
-    std::fs::create_dir_all(dir.join("usr/lib/studio")).map_err(|e| e.to_string())?;
-    std::fs::copy(exe, dir.join("usr/lib/studio/studio")).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dir.join("usr/lib/zornov")).map_err(|e| e.to_string())?;
+    std::fs::copy(exe, dir.join("usr/lib/zornov/zornov")).map_err(|e| e.to_string())?;
     if let Some(core) = content {
-        crate::copy_dir(core, &dir.join("usr/lib/studio/content-build/core"))?;
+        crate::copy_dir(core, &dir.join("usr/lib/zornov/content-build/core"))?;
     }
-    w("studio.desktop", &desktop_file()?)?;
-    w("studio.png", &icon_png())?;
+    w("zornov.desktop", &desktop_file()?)?;
+    w("zornov.png", &icon_png())?;
     crate::write_notices(notices, &dir.join(LINUX_DOC))?;
     #[cfg(unix)]
-    std::os::unix::fs::symlink("usr/lib/studio/studio", dir.join("AppRun")).map_err(|e| e.to_string())?;
+    std::os::unix::fs::symlink("usr/lib/zornov/zornov", dir.join("AppRun")).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn package_appimage() -> Result<String, String> {
     let tool = std::env::var("APPIMAGETOOL").unwrap_or_else(|_| "appimagetool".into());
     let exe = crate::build_app_repro()?;
-    let dir = crate::target_dir().join("appdir/Studio.AppDir");
+    let dir = crate::target_dir().join("appdir/Zornov.AppDir");
     appdir_from(&exe, crate::content_core().as_deref(), &crate::licenses::notices()?, &dir)?;
     std::fs::create_dir_all(release_dir()).map_err(|e| e.to_string())?;
     let arch = std::env::consts::ARCH;
-    let out = release_dir().join(format!("Studio-{VERSION}-{arch}.AppImage"));
+    let out = release_dir().join(format!("Zornov-{VERSION}-{arch}.AppImage"));
     let st = Command::new(&tool).env("ARCH", arch).env("SOURCE_DATE_EPOCH", repro::epoch().to_string()).arg(&dir).arg(&out).status().map_err(|e| format!("cannot run {tool} ({e}); install appimagetool or set APPIMAGETOOL"))?;
     if !st.success() {
         return Err("appimagetool failed".into());
@@ -147,15 +147,15 @@ fn portable_tree(exe: &Path, exe_name: &str, content: Option<&Path>, notices: &N
     Ok(())
 }
 
-/// `dist/studio-linux-<arch>.tar.gz` plus its signed update archive.
+/// `dist/zornov-linux-<arch>.tar.gz` plus its signed update archive.
 pub fn portable_linux_from(exe: &Path, content: Option<&Path>, notices: &Notices, out_dir: &Path, sign: bool) -> Result<String, String> {
-    let name = format!("studio-linux-{}", crate::arch());
+    let name = format!("zornov-linux-{}", crate::arch());
     let tree = out_dir.join(&name);
-    portable_tree(exe, "studio", content, notices, &tree)?;
-    std::fs::copy(crate::root().join("packaging/linux/studio.desktop"), tree.join("studio.desktop")).map_err(|e| format!("packaging/linux/studio.desktop: {e}"))?;
+    portable_tree(exe, "zornov", content, notices, &tree)?;
+    std::fs::copy(crate::root().join("packaging/linux/zornov.desktop"), tree.join("zornov.desktop")).map_err(|e| format!("packaging/linux/zornov.desktop: {e}"))?;
     let items = repro::collect(&tree)?;
     repro::tar_gz(&out_dir.join(format!("{name}.tar.gz")), Some(&name), &items, &[])?;
-    let upd = out_dir.join(format!("Studio-{VERSION}-linux-{}.update.tar.gz", std::env::consts::ARCH));
+    let upd = out_dir.join(format!("Zornov-{VERSION}-linux-{}.update.tar.gz", std::env::consts::ARCH));
     repro::update_archive(&tree, &upd, true)?;
     let _ = std::fs::remove_dir_all(&tree);
     let signed = sign && sign_update(&upd, &format!("linux-{}", std::env::consts::ARCH)).is_ok();
@@ -163,12 +163,12 @@ pub fn portable_linux_from(exe: &Path, content: Option<&Path>, notices: &Notices
 }
 
 pub fn portable_windows_from(exe: &Path, content: Option<&Path>, notices: &Notices, out_dir: &Path, sign: bool) -> Result<String, String> {
-    let name = format!("studio-windows-{}", crate::arch());
+    let name = format!("zornov-windows-{}", crate::arch());
     let tree = out_dir.join(&name);
-    portable_tree(exe, "studio.exe", content, notices, &tree)?;
+    portable_tree(exe, "zornov.exe", content, notices, &tree)?;
     let items = repro::collect(&tree)?;
     repro::zip(&out_dir.join(format!("{name}.zip")), &name, &items, &[])?;
-    let upd = out_dir.join(format!("Studio-{VERSION}-windows-{}.update.tar.gz", std::env::consts::ARCH));
+    let upd = out_dir.join(format!("Zornov-{VERSION}-windows-{}.update.tar.gz", std::env::consts::ARCH));
     repro::update_archive(&tree, &upd, true)?;
     let _ = std::fs::remove_dir_all(&tree);
     let signed = sign && sign_update(&upd, &format!("windows-{}", std::env::consts::ARCH)).is_ok();
@@ -191,19 +191,19 @@ pub fn wxs() -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="Studio" Manufacturer="Ashrox LLC" Version="{VERSION}" UpgradeCode="{upgrade}" Scope="perMachine" Compressed="yes">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Studio is already installed." />
+  <Package Name="Zornov" Manufacturer="Ashrox LLC" Version="{VERSION}" UpgradeCode="{upgrade}" Scope="perMachine" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Zornov is already installed." />
     <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Studio">
+      <Directory Id="INSTALLFOLDER" Name="Zornov">
         <Files Include="$(var.SourceDir)\**">
-          <Exclude Files="$(var.SourceDir)\studio.exe" />
+          <Exclude Files="$(var.SourceDir)\zornov.exe" />
         </Files>
-        <Component Id="StudioExeComponent" Guid="{shortcut}">
-          <File Id="StudioExe" Source="$(var.SourceDir)\studio.exe" KeyPath="yes">
-            <Shortcut Id="StartMenuStudio" Directory="ProgramMenuFolder" Name="Studio" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" Advertise="yes" />
+        <Component Id="ZornovExeComponent" Guid="{shortcut}">
+          <File Id="ZornovExe" Source="$(var.SourceDir)\zornov.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuZornov" Directory="ProgramMenuFolder" Name="Zornov" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" Advertise="yes" />
           </File>
         </Component>
       </Directory>
@@ -221,12 +221,12 @@ pub fn wxs() -> String {
 pub fn package_msi() -> Result<String, String> {
     let exe = crate::build_app_repro()?;
     let src = crate::target_dir().join("msi/src");
-    portable_tree(&exe, "studio.exe", crate::content_core().as_deref(), &crate::licenses::notices()?, &src)?;
-    let wxs_file = crate::target_dir().join("msi/studio.wxs");
+    portable_tree(&exe, "zornov.exe", crate::content_core().as_deref(), &crate::licenses::notices()?, &src)?;
+    let wxs_file = crate::target_dir().join("msi/zornov.wxs");
     std::fs::write(&wxs_file, wxs()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(release_dir()).map_err(|e| e.to_string())?;
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" };
-    let out = release_dir().join(format!("Studio-{VERSION}-windows-{arch}.msi"));
+    let out = release_dir().join(format!("Zornov-{VERSION}-windows-{arch}.msi"));
     let st = Command::new("wix")
         .env("SOURCE_DATE_EPOCH", repro::epoch().to_string())
         .args(["build", "-arch", arch, "-d"])
@@ -265,7 +265,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("xtask-pkg-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("core")).unwrap();
-        std::fs::write(d.join("studio-bin"), "binary").unwrap();
+        std::fs::write(d.join("zornov-bin"), "binary").unwrap();
         std::fs::write(d.join("core/index.json"), "{}").unwrap();
         d
     }
@@ -274,8 +274,8 @@ mod tests {
     fn deb_is_an_ar_with_three_members_and_is_reproducible() {
         let d = scratch("deb");
         let (a, b) = (d.join("a.deb"), d.join("b.deb"));
-        deb_from(&d.join("studio-bin"), Some(&d.join("core")), &notices(), &a).unwrap();
-        deb_from(&d.join("studio-bin"), Some(&d.join("core")), &notices(), &b).unwrap();
+        deb_from(&d.join("zornov-bin"), Some(&d.join("core")), &notices(), &a).unwrap();
+        deb_from(&d.join("zornov-bin"), Some(&d.join("core")), &notices(), &b).unwrap();
         let bytes = std::fs::read(&a).unwrap();
         assert_eq!(bytes, std::fs::read(&b).unwrap(), "same sources, same package");
         assert!(bytes.starts_with(b"!<arch>\ndebian-binary   "));
@@ -287,11 +287,11 @@ mod tests {
     #[test]
     fn appdir_has_apprun_desktop_icon_and_content() {
         let d = scratch("appdir");
-        appdir_from(&d.join("studio-bin"), Some(&d.join("core")), &notices(), &d.join("AppDir")).unwrap();
-        for f in ["AppRun", "studio.desktop", "studio.png", "usr/lib/studio/studio", "usr/lib/studio/content-build/core/index.json"] {
+        appdir_from(&d.join("zornov-bin"), Some(&d.join("core")), &notices(), &d.join("AppDir")).unwrap();
+        for f in ["AppRun", "zornov.desktop", "zornov.png", "usr/lib/zornov/zornov", "usr/lib/zornov/content-build/core/index.json"] {
             assert!(d.join("AppDir").join(f).exists(), "{f}");
         }
-        assert!(std::fs::read_to_string(d.join("AppDir/studio.desktop")).unwrap().contains("Icon=studio"));
+        assert!(std::fs::read_to_string(d.join("AppDir/zornov.desktop")).unwrap().contains("Icon=zornov"));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -302,12 +302,12 @@ mod tests {
         let out2 = d.join("o2");
         std::fs::create_dir_all(&out1).unwrap();
         std::fs::create_dir_all(&out2).unwrap();
-        portable_linux_from(&d.join("studio-bin"), Some(&d.join("core")), &notices(), &out1, false).unwrap();
-        portable_linux_from(&d.join("studio-bin"), Some(&d.join("core")), &notices(), &out2, false).unwrap();
-        let n = format!("studio-linux-{}.tar.gz", crate::arch());
+        portable_linux_from(&d.join("zornov-bin"), Some(&d.join("core")), &notices(), &out1, false).unwrap();
+        portable_linux_from(&d.join("zornov-bin"), Some(&d.join("core")), &notices(), &out2, false).unwrap();
+        let n = format!("zornov-linux-{}.tar.gz", crate::arch());
         assert_eq!(std::fs::read(out1.join(&n)).unwrap(), std::fs::read(out2.join(&n)).unwrap());
-        portable_windows_from(&d.join("studio-bin"), None, &notices(), &out1, false).unwrap();
-        assert!(out1.join(format!("studio-windows-{}.zip", crate::arch())).is_file());
+        portable_windows_from(&d.join("zornov-bin"), None, &notices(), &out1, false).unwrap();
+        assert!(out1.join(format!("zornov-windows-{}.zip", crate::arch())).is_file());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -340,7 +340,7 @@ mod tests {
     #[test]
     fn every_package_carries_the_licence_notices() {
         let d = scratch("notices");
-        let (bin, core) = (d.join("studio-bin"), d.join("core"));
+        let (bin, core) = (d.join("zornov-bin"), d.join("core"));
         let notices = crate::licenses::notices().unwrap();
         let names: Vec<&str> = notices.iter().map(|n| n.0.as_str()).collect();
         for r in REQUIRED {
@@ -356,7 +356,7 @@ mod tests {
         };
 
         // macOS
-        let app = d.join("Studio.app");
+        let app = d.join("Zornov.app");
         crate::assemble_app(&bin, Some(&core), &notices, &app).unwrap();
         let app_files: Vec<String> = repro::collect(&app).unwrap().into_iter().map(|i| i.rel).collect();
         has_all(&app_files, "Contents/Resources/Licenses");
@@ -365,7 +365,7 @@ mod tests {
         has_all(&tar_paths(&std::fs::read(&upd).unwrap()), "Contents/Resources/Licenses");
 
         // .deb
-        let deb = d.join("studio.deb");
+        let deb = d.join("zornov.deb");
         deb_from(&bin, Some(&core), &notices, &deb).unwrap();
         has_all(&tar_paths(&ar_member(&std::fs::read(&deb).unwrap(), "data.tar.gz")), LINUX_DOC);
 
@@ -380,24 +380,24 @@ mod tests {
         std::fs::create_dir_all(&o2).unwrap();
         portable_linux_from(&bin, Some(&core), &notices, &o1, false).unwrap();
         portable_linux_from(&bin, Some(&core), &notices, &o2, false).unwrap();
-        let linux = format!("studio-linux-{}", crate::arch());
+        let linux = format!("zornov-linux-{}", crate::arch());
         let tgz = std::fs::read(o1.join(format!("{linux}.tar.gz"))).unwrap();
         assert_eq!(tgz, std::fs::read(o2.join(format!("{linux}.tar.gz"))).unwrap(), "same sources, same archive");
         has_all(&tar_paths(&tgz), &linux);
-        let linux_upd = o1.join(format!("Studio-{VERSION}-linux-{}.update.tar.gz", std::env::consts::ARCH));
+        let linux_upd = o1.join(format!("Zornov-{VERSION}-linux-{}.update.tar.gz", std::env::consts::ARCH));
         has_all(&tar_paths(&std::fs::read(linux_upd).unwrap()), "");
         portable_windows_from(&bin, None, &notices, &o1, false).unwrap();
-        let win = format!("studio-windows-{}", crate::arch());
+        let win = format!("zornov-windows-{}", crate::arch());
         let z = zip::ZipArchive::new(std::fs::File::open(o1.join(format!("{win}.zip"))).unwrap()).unwrap();
         let zipped: Vec<String> = z.file_names().map(str::to_owned).collect();
         has_all(&zipped, &win);
-        assert!(zipped.contains(&format!("{win}/studio.exe")));
+        assert!(zipped.contains(&format!("{win}/zornov.exe")));
 
-        // The MSI is harvested from this folder: the notices sit next to studio.exe.
-        portable_tree(&bin, "studio.exe", None, &notices, &d.join("msi")).unwrap();
+        // The MSI is harvested from this folder: the notices sit next to zornov.exe.
+        portable_tree(&bin, "zornov.exe", None, &notices, &d.join("msi")).unwrap();
         let msi: Vec<String> = repro::collect(&d.join("msi")).unwrap().into_iter().map(|i| i.rel).collect();
         has_all(&msi, "");
-        assert!(msi.contains(&"studio.exe".to_owned()));
+        assert!(msi.contains(&"zornov.exe".to_owned()));
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -409,6 +409,54 @@ mod tests {
         assert_eq!(g, guid("x"));
         assert_ne!(g, guid("y"));
         assert!(wxs().contains("UpgradeCode=\"") && wxs().contains(&format!("Version=\"{VERSION}\"")));
+    }
+
+    #[test]
+    fn the_app_is_named_zornov_in_every_package() {
+        let d = scratch("names");
+        let (bin, core) = (d.join("zornov-bin"), d.join("core"));
+        let notices = notices();
+
+        // macOS: bundle names, the identifier and the permission texts.
+        let app = d.join("Zornov.app");
+        crate::assemble_app(&bin, Some(&core), &notices, &app).unwrap();
+        let plist = std::fs::read_to_string(app.join("Contents/Info.plist")).unwrap();
+        for want in [
+            "<key>CFBundleName</key><string>Zornov</string>",
+            "<key>CFBundleDisplayName</key><string>Zornov</string>",
+            "<key>CFBundleIdentifier</key><string>com.zornov.app</string>",
+            "<key>CFBundleExecutable</key><string>zornov</string>",
+            "<string>Zornov records voice-overs",
+            "<string>Zornov records from your camera",
+        ] {
+            assert!(plist.contains(want), "{want} missing from the Info.plist");
+        }
+        assert!(!plist.contains("Studio") && !plist.contains("org.studio"), "{plist}");
+        assert!(app.join("Contents/MacOS/zornov").is_file());
+
+        // Linux: the desktop entry and the .deb control file.
+        let desktop = String::from_utf8(desktop_file().unwrap()).unwrap();
+        for want in ["Name=Zornov\n", "Exec=zornov\n", "Icon=zornov\n", "StartupWMClass=zornov\n"] {
+            assert!(desktop.contains(want), "{want} missing from {desktop}");
+        }
+        assert!(!desktop.contains("Studio"), "{desktop}");
+        let deb = d.join("zornov.deb");
+        deb_from(&bin, Some(&core), &notices, &deb).unwrap();
+        let ctl = tar_paths(&ar_member(&std::fs::read(&deb).unwrap(), "control.tar.gz"));
+        assert!(ctl.iter().any(|p| p.ends_with("control")));
+        let data = tar_paths(&ar_member(&std::fs::read(&deb).unwrap(), "data.tar.gz"));
+        for want in ["usr/bin/zornov", "usr/lib/zornov/zornov", "usr/share/applications/zornov.desktop", "usr/share/icons/hicolor/256x256/apps/zornov.png"] {
+            assert!(data.iter().any(|p| p.trim_start_matches("./") == want), "{want} missing from {data:?}");
+        }
+
+        // Windows: the package name, folder, shortcut and program, with the old UpgradeCode.
+        let w = wxs();
+        for want in ["Package Name=\"Zornov\"", "Name=\"Zornov\"", "zornov.exe"] {
+            assert!(w.contains(want), "{want} missing from the WiX source");
+        }
+        assert!(!w.contains("Studio") && !w.contains("studio.exe"), "{w}");
+        assert!(w.contains(&format!("UpgradeCode=\"{}\"", guid("studio-upgrade-code"))), "the UpgradeCode must not change");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

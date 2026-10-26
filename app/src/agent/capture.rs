@@ -168,7 +168,7 @@ impl Session {
                 return Err("permission questions are switched off in this environment".into());
             }
             let r = device::request(k)?;
-            return Ok(json!({"asked": what, "result": r, "means": if r.ok() { "allowed".to_owned() } else { device::explain(k, r) }, "note": if k == Kind::Screen { "Screen recording access may need Studio to be restarted before it counts." } else { "" }}));
+            return Ok(json!({"asked": what, "result": r, "means": if r.ok() { "allowed".to_owned() } else { device::explain(k, r) }, "note": if k == Kind::Screen { "Screen recording access may need Zornov to be restarted before it counts." } else { "" }}));
         }
         Ok(json!({"camera": status(Kind::Camera), "microphone": status(Kind::Mic), "screen": status(Kind::Screen), "how_to_ask": "capture {action: permissions, request: camera|microphone|screen, user_approved: true}, only when the person asked to use it"}))
     }
@@ -542,7 +542,7 @@ impl Session {
         let source: Box<dyn FnMut(usize) -> Vec<f32> + Send> = if let Some(m) = a.get("media") {
             let mi = self.media_item(m)?;
             let path = mi.path.clone().ok_or("that media has no file")?;
-            let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or("that media has no sound Studio can decode")?;
+            let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or("that media has no sound Zornov can decode")?;
             let mono: Vec<f32> = d.left.iter().zip(d.right.iter()).map(|(l, r)| 0.5 * (l + r)).collect();
             let mono = if d.rate == 16_000 { mono } else { studio_live::sync::resample(&mono, d.rate, 16_000) };
             let mut pos = 0usize;
@@ -704,7 +704,7 @@ impl Session {
         let load = |m: u32| -> Result<(Vec<f32>, u32), String> {
             let mi = p.media(m).ok_or("that media is gone")?;
             let path = mi.path.clone().ok_or("that media has no file")?;
-            let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or_else(|| format!("{} has no sound Studio can decode", mi.name))?;
+            let d = crate::sound_bridge::decoded(&path.to_string_lossy()).ok_or_else(|| format!("{} has no sound Zornov can decode", mi.name))?;
             let mono: Vec<f32> = d.left.iter().zip(d.right.iter()).map(|(l, r)| 0.5 * (l + r)).collect();
             Ok((mono, d.rate))
         };

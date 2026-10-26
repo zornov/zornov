@@ -88,7 +88,7 @@ impl Format {
     pub fn label(self) -> &'static str {
         match self {
             Format::H264 => "H.264 (MP4)",
-            Format::Clv => "Studio intermediate (CLV)",
+            Format::Clv => "Zornov intermediate (CLV)",
             Format::Png => "PNG sequence",
             Format::Gif => "GIF",
             Format::Hevc10 => "HEVC 10-bit (MP4)",

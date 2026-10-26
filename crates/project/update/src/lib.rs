@@ -21,19 +21,12 @@ pub mod state;
 /// The version this build was made as.
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Studio's per-user data folder (settings, staged updates, crash reports):
-/// `~/Library/Application Support/Studio`, `%LOCALAPPDATA%\Studio` or
-/// `$XDG_STATE_HOME/studio`.
+/// Zornov's per-user data folder (settings, staged updates, crash reports,
+/// the signing key): `~/Library/Application Support/Zornov`,
+/// `%LOCALAPPDATA%\Zornov` or `$XDG_STATE_HOME/zornov`. A folder left by the
+/// app's earlier name (`Studio`) is moved over on first use.
 pub fn data_dir() -> std::path::PathBuf {
-    let env = |n: &str| std::env::var_os(n).filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-    let home = || env(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_else(|| ".".into());
-    if cfg!(target_os = "macos") {
-        home().join("Library/Application Support/Studio")
-    } else if cfg!(windows) {
-        env("LOCALAPPDATA").unwrap_or_else(|| home().join("AppData/Local")).join("Studio")
-    } else {
-        env("XDG_STATE_HOME").unwrap_or_else(|| home().join(".local/state")).join("studio")
-    }
+    studio_paths::data_dir()
 }
 
 /// Lower-case hex.

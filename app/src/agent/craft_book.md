@@ -15,7 +15,7 @@ out. One strong idea done well beats ten done at once.
 
 ## Layering
 
-How Studio stacks pictures:
+How Zornov stacks pictures:
 - **Lanes higher up draw over lanes lower down.** The main lane is the
   bottom of the picture; overlay lanes above it are drawn in order, the
   top lane last (in front). Sound lanes do not draw.
@@ -94,7 +94,7 @@ anything that sweeps across everything (a flash, a light leak).
 
 - A **drop shadow** lifts a card, a cut-out or a title off what is
   behind it (`card` `shadow: true`, or `effect` `drop_shadow`: distance
-  0.5-2, softness 1-4, opacity 0.3-0.6, falling down: angle 90). Studio
+  0.5-2, softness 1-4, opacity 0.3-0.6, falling down: angle 90). Zornov
   draws it in three layers as real shadows fall (a tight dark one where
   it meets the ground, a softer one, a wide faint one), so it fades out
   with no edge. Soft and subtle; a hard black offset shadow looks dated.
@@ -172,7 +172,7 @@ anything that sweeps across everything (a flash, a light leak).
 
 ## Searching
 
-- `search` looks through **everything Studio knows across every
+- `search` looks through **everything Zornov knows across every
   project** at once: titles and on-screen text, what narration says and
   when, markers, media files and where they are used, notes, saved moves
   and designs. Use it before making something again: the line that worked

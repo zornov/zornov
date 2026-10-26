@@ -23,7 +23,7 @@ pub fn is_model_file(p: &std::path::Path) -> bool {
 pub fn dir(doc: &Doc) -> std::path::PathBuf {
     match doc.folder.as_ref() {
         Some(f) => f.root().join("Models"),
-        None => std::env::temp_dir().join("Studio Models"),
+        None => std::env::temp_dir().join("Zornov Models"),
     }
 }
 

@@ -465,7 +465,7 @@ mod tests {
             return;
         }
         let p = tmp("speech.wav");
-        let ok = std::process::Command::new("say").args(["-o", p.to_str().unwrap(), "--data-format=LEI16@16000", "Hello and welcome to Studio. This is a caption test."]).status().map(|s| s.success()).unwrap_or(false);
+        let ok = std::process::Command::new("say").args(["-o", p.to_str().unwrap(), "--data-format=LEI16@16000", "Hello and welcome to Zornov. This is a caption test."]).status().map(|s| s.success()).unwrap_or(false);
         if !ok {
             eprintln!("skipped: say not available");
             return;

@@ -115,7 +115,7 @@ unsafe fn describe(effect: H, label: &CStr, context: &CStr) -> St {
         let mut p: H = std::ptr::null_mut();
         (fx().get_property_set)(effect, &mut p);
         (props().set_string)(p, c"OfxPropLabel".as_ptr(), 0, label.as_ptr());
-        (props().set_string)(p, c"OfxImageEffectPluginPropGrouping".as_ptr(), 0, c"Studio tests".as_ptr());
+        (props().set_string)(p, c"OfxImageEffectPluginPropGrouping".as_ptr(), 0, c"Zornov tests".as_ptr());
         (props().set_string)(p, c"OfxImageEffectPropSupportedContexts".as_ptr(), 0, context.as_ptr());
         (props().set_string)(p, c"OfxImageEffectPropSupportedPixelDepths".as_ptr(), 0, c"OfxBitDepthFloat".as_ptr());
         (props().set_string)(p, c"OfxImageEffectPropSupportedPixelDepths".as_ptr(), 1, c"OfxBitDepthByte".as_ptr());

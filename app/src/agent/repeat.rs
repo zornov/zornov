@@ -146,7 +146,7 @@ fn eval(src: &str, vars: &Map<String, Value>) -> Result<Option<Value>, String> {
     if src.is_empty() || !src.chars().all(|c| c.is_ascii_alphanumeric() || " _+-*/%().[]".contains(c)) {
         return Ok(None);
     }
-    let toks = lex(src).ok_or_else(|| format!("\"{{{src}}}\" is not a sum Studio can work out"))?;
+    let toks = lex(src).ok_or_else(|| format!("\"{{{src}}}\" is not a sum Zornov can work out"))?;
     // One unknown word in braces is text ("{curly}"), not a mistake.
     if let [Tok::Name(n)] = toks.as_slice() {
         if !vars.contains_key(n) {

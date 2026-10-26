@@ -791,7 +791,7 @@ pub fn viewport_id(p: Panel) -> egui::ViewportId {
 fn popped_window(app: &mut StudioApp, ctx: &egui::Context, p: Panel, size: Option<[f32; 2]>, lay: &Layout, rtl: bool, narrow: bool) {
     let min = p.min_size() + Vec2::new(0.0, BAR_H);
     let size = size.map_or_else(|| p.preferred_size(), |s| Vec2::new(s[0], s[1])).max(min);
-    let title = format!("{} · Studio", crate::i18n::t(p.name()));
+    let title = format!("{} · Zornov", crate::i18n::t(p.name()));
     let mut out = (false, None);
     if ctx.embed_viewports() {
         egui::Window::new(crate::i18n::visual(&title).into_owned())

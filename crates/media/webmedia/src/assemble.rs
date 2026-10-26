@@ -59,7 +59,7 @@ pub fn assemble(work: &Path, tag: &str, inits: &[PathBuf], pieces: &[Piece], not
             col.push_packed_audio(&data)?;
         }
     } else {
-        return Err(Error::Unsupported("the segments are in a format Studio does not read (it takes MPEG transport streams, MP4 fragments and AAC sound)".into()));
+        return Err(Error::Unsupported("the segments are in a format Zornov does not read (it takes MPEG transport streams, MP4 fragments and AAC sound)".into()));
     }
     notes.extend(col.notes.clone());
     col.finish()

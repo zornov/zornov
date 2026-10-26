@@ -50,7 +50,7 @@ To work through notes ("fix every open note"):
 
 `export` `{"format": "csv" | "markdown" | "edl" | "json", "path"}` writes
 the list (EDL markers open in other editing suites). `import` `{"path"}`
-reads notes back: Studio's own, a CSV with time and note columns, an EDL
+reads notes back: Zornov's own, a CSV with time and note columns, an EDL
 with `LOC` markers, or plain lines `00:01:23:12 the music is late`; notes
 already there are skipped.
 

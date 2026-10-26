@@ -3,7 +3,7 @@
 
 //! Render nodes on the local network.
 //!
-//! A node (`studio node`) listens on a TCP port. The coordinator connects,
+//! A node (`zornov node`) listens on a TCP port. The coordinator connects,
 //! proves it knows the pairing token (a challenge, answered with
 //! SHA-256(token || nonce)), sends the project's files that the node does
 //! not already hold (by fingerprint), asks it to render a frame range, and
@@ -415,7 +415,7 @@ impl RemoteNode {
             return Err(format!("{}: {}", self.addr, String::from_utf8_lossy(&n)));
         }
         if k != kind::CHALLENGE {
-            return Err(format!("{}: not a Studio node", self.addr));
+            return Err(format!("{}: not a Zornov node", self.addr));
         }
         write_frame(&mut s, kind::AUTH, &auth_answer(&self.token, &n)).map_err(io)?;
         let (k, r) = read_frame(&mut s).map_err(io)?;

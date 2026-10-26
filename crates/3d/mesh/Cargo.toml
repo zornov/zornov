@@ -3,7 +3,7 @@ name = "studio-mesh"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "3D models for Studio: meshes, primitives, glTF/OBJ/STL import and export, and modeling (subdivision, smoothing, sculpting, booleans, decimation, extrusion, UVs)."
+description = "3D models for Zornov: meshes, primitives, glTF/OBJ/STL import and export, and modeling (subdivision, smoothing, sculpting, booleans, decimation, extrusion, UVs)."
 
 [dependencies]
 studio-media = { path = "../../media/media" }

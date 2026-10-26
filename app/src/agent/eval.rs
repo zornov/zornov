@@ -1,18 +1,18 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `studio eval`: the AI editor on real jobs, scored, so a change to it
+//! `zornov eval`: the AI editor on real jobs, scored, so a change to it
 //! is measured rather than guessed.
 //!
 //! ```text
-//! studio eval --out DIR [--provider codex|claude] [--model M] [--solo]
+//! zornov eval --out DIR [--provider codex|claude] [--model M] [--solo]
 //!             [--tasks story_scene,music_video,...] [--minutes 30]
 //! ```
 //!
 //! Each task builds a fresh project under `DIR` (its own footage, written
 //! here; never the person's projects), runs the request exactly as the AI
 //! panel does (the same gate, crew, plan, corrections and taste; Codex or
-//! Claude Code through `studio mcp --attach`), headless, then scores what
+//! Claude Code through `zornov mcp --attach`), headless, then scores what
 //! is on the timeline: checks with weights, 0 to 100 a task. Results go to
 //! `DIR/results.json` and a line is added to `DIR/history.jsonl`, and the
 //! table shows the change since the last run.
@@ -445,11 +445,11 @@ pub fn run_task(task: &Task, dir: &Path, cast: impl FnOnce(PathBuf) -> crew::Cas
     Ok((checks, run))
 }
 
-/// `studio eval …`
+/// `zornov eval …`
 pub fn main(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let Some(out) = get("--out").map(PathBuf::from) else {
-        eprintln!("usage: studio eval --out DIR [--provider codex|claude] [--model M] [--solo] [--tasks a,b] [--minutes 30]\ntasks: {}", tasks().iter().map(|t| t.name).collect::<Vec<_>>().join(", "));
+        eprintln!("usage: zornov eval --out DIR [--provider codex|claude] [--model M] [--solo] [--tasks a,b] [--minutes 30]\ntasks: {}", tasks().iter().map(|t| t.name).collect::<Vec<_>>().join(", "));
         return 2;
     };
     let out = std::path::absolute(&out).unwrap_or(out);

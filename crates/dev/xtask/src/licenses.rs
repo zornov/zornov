@@ -222,9 +222,9 @@ pub fn render(crates: &[Crate]) -> String {
     }
     let number = |t: &str| order.iter().position(|o| *o == t).unwrap() + 1;
     let mut s = String::new();
-    s += "Third-party software in Studio\n==============================\n\n";
+    s += "Third-party software in Zornov\n==============================\n\n";
     s += &format!(
-        "Studio includes the {} open-source crates listed below, each used under\nthe licence shown. Their licence and notice texts follow the list; a text\nshared by several crates is given once. Studio's own licence is in LICENSE\nand NOTICE; fonts, icons and library content are credited in their own\nlicence files and in ATTRIBUTIONS.md.\n\nRelease targets: {}.\n\n",
+        "Zornov includes the {} open-source crates listed below, each used under\nthe licence shown. Their licence and notice texts follow the list; a text\nshared by several crates is given once. Zornov's own licence is in LICENSE\nand NOTICE; fonts, icons and library content are credited in their own\nlicence files and in ATTRIBUTIONS.md.\n\nRelease targets: {}.\n\n",
         crates.len(),
         TARGETS.join(", ")
     );
@@ -330,7 +330,7 @@ mod tests {
         for name in ["serde", "serde_json", "egui", "wgpu"] {
             assert!(list.iter().any(|c| c.name == name), "{name} is missing");
         }
-        assert!(list.iter().all(|c| !c.name.starts_with("studio-") || c.license != "AGPL-3.0-or-later"), "Studio's own crates are not third-party");
+        assert!(list.iter().all(|c| !c.name.starts_with("studio-") || c.license != "AGPL-3.0-or-later"), "Zornov's own crates are not third-party");
         assert_eq!(render(&list), render(&crates(&meta).unwrap()));
     }
 }

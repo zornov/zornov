@@ -3,7 +3,7 @@
 
 //! Finishing and delivery in the app: the render queue's runner, render
 //! pieces for this machine and for render nodes, quality control of
-//! exports, mastering packages (DCP) and the node server (`studio node`).
+//! exports, mastering packages (DCP) and the node server (`zornov node`).
 //!
 //! The pure parts (queue file, pieces, merge, protocol, QC, J2K, MXF) live
 //! in `studio-deliver`; this module connects them to projects and to the
@@ -276,7 +276,7 @@ impl ChunkRenderer for LocalPieces {
 
 // ----------------------------------------------------------- the nodes
 
-/// What `studio node` runs: draws pieces from projects sent to it.
+/// What `zornov node` runs: draws pieces from projects sent to it.
 pub struct AppWorker {
     pub name: String,
 }
@@ -814,7 +814,7 @@ pub fn start_background_runner() {
 
 // ----------------------------------------------------- command line
 
-/// `studio node [--listen ADDR] [--token T] [--name N] [--work DIR]`
+/// `zornov node [--listen ADDR] [--token T] [--name N] [--work DIR]`
 pub fn node_main(args: &[String]) -> i32 {
     let (mut listen, mut token, mut name, mut work) = (format!("0.0.0.0:{}", wire::DEFAULT_PORT), None, None, None);
     let mut it = args.iter();
@@ -825,11 +825,11 @@ pub fn node_main(args: &[String]) -> i32 {
             "--name" => name = it.next().cloned(),
             "--work" => work = it.next().map(PathBuf::from),
             "--help" | "-h" => {
-                eprintln!("usage: studio node [--listen ADDR:PORT] [--token SECRET] [--name NAME] [--work DIR]\nRuns a render node: other Studios on the network send it pieces of a render. The pairing token (shown on start, or kept in the work folder) must be given to the Studio that uses it: queue {{\"action\": \"add_node\", \"addr\": \"HOST:PORT\", \"token\": \"…\"}}.");
+                eprintln!("usage: zornov node [--listen ADDR:PORT] [--token SECRET] [--name NAME] [--work DIR]\nRuns a render node: other Zornov apps on the network send it pieces of a render. The pairing token (shown on start, or kept in the work folder) must be given to the Zornov that uses it: queue {{\"action\": \"add_node\", \"addr\": \"HOST:PORT\", \"token\": \"…\"}}.");
                 return 0;
             }
             other => {
-                eprintln!("studio node: unknown option {other}");
+                eprintln!("zornov node: unknown option {other}");
                 return 2;
             }
         }
@@ -842,19 +842,19 @@ pub fn node_main(args: &[String]) -> i32 {
         let _ = std::fs::write(&token_file, &t);
         t
     });
-    let name = name.unwrap_or_else(|| std::env::var("HOSTNAME").or_else(|_| std::env::var("HOST")).unwrap_or_else(|_| "studio-node".into()));
+    let name = name.unwrap_or_else(|| std::env::var("HOSTNAME").or_else(|_| std::env::var("HOST")).unwrap_or_else(|_| "zornov-node".into()));
     // Projects older than a week are not kept.
     prune(&work.join("projects"), 7 * 24 * 3600);
     let _ = crate::content::get_blocking();
     let server = match wire::NodeServer::bind(&listen, &token, &work, Arc::new(AppWorker { name: name.clone() })) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("studio node: {e}");
+            eprintln!("zornov node: {e}");
             return 1;
         }
     };
     let _ = server.announce(wire::DISCOVERY_PORT);
-    println!("Studio render node \"{name}\" listening on {}", server.local_addr());
+    println!("Zornov render node \"{name}\" listening on {}", server.local_addr());
     println!("Pairing token: {token}");
     println!("On the computer that renders: queue {{\"action\": \"add_node\", \"addr\": \"{}:{}\", \"token\": \"{token}\"}}", local_hint(), server.local_addr().port());
     server.serve();
@@ -876,7 +876,7 @@ fn prune(dir: &Path, max_age_secs: u64) {
     }
 }
 
-/// `studio queue run|list` for a shell or a cron job.
+/// `zornov queue run|list` for a shell or a cron job.
 pub fn queue_main(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("run") => {
@@ -887,7 +887,7 @@ pub fn queue_main(args: &[String]) -> i32 {
                     0
                 }
                 Err(e) => {
-                    eprintln!("studio queue: {e}");
+                    eprintln!("zornov queue: {e}");
                     1
                 }
             }
@@ -897,7 +897,7 @@ pub fn queue_main(args: &[String]) -> i32 {
             0
         }
         Some(other) => {
-            eprintln!("studio queue: unknown command {other}; use run or list");
+            eprintln!("zornov queue: unknown command {other}; use run or list");
             2
         }
     }

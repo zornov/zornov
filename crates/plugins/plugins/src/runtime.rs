@@ -100,7 +100,7 @@ impl Runtime {
         for imp in module.imports() {
             if (imp.module(), imp.name()) != ("studio", "log") {
                 return Err(format!(
-                    "the plugin asks for `{}.{}`, which Studio does not give plugins (plugins may only import studio.log; build for wasm32-unknown-unknown, not WASI)",
+                    "the plugin asks for `{}.{}`, which Zornov does not give plugins (plugins may only import studio.log; build for wasm32-unknown-unknown, not WASI)",
                     imp.module(),
                     imp.name()
                 ));
@@ -138,7 +138,7 @@ impl Runtime {
         let free = instance.get_typed_func::<(u32, u32), ()>(&mut store, "studio_free").map_err(|e| e.to_string())?;
         let abi = instance.get_typed_func::<(), u32>(&mut store, "studio_abi").map_err(|e| e.to_string())?.call(&mut store, ()).map_err(|e| e.to_string())?;
         if !crate::manifest::SUPPORTED_ABI.contains(&abi) {
-            return Err(format!("the plugin speaks plugin ABI {abi}, which this Studio does not"));
+            return Err(format!("the plugin speaks plugin ABI {abi}, which this Zornov does not"));
         }
         Ok(Inst { store, instance, memory, alloc, free })
     }

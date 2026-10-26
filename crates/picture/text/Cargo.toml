@@ -3,7 +3,7 @@ name = "studio-text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Text shaping, layout, styling, templates and captions for Studio"
+description = "Text shaping, layout, styling, templates and captions for Zornov"
 
 [dependencies]
 studio-paths = { path = "../../project/paths" }

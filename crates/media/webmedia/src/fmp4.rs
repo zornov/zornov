@@ -100,7 +100,7 @@ fn read_moov(path: &Path) -> Result<Vec<u8>> {
     Err(Error::Bad("the video has no index (moov) to read".into()))
 }
 
-const PROTECTED: &str = "This video is encrypted with a content protection scheme (DRM). Studio does not work around copy protection, so it cannot be downloaded.";
+const PROTECTED: &str = "This video is encrypted with a content protection scheme (DRM). Zornov does not work around copy protection, so it cannot be downloaded.";
 
 /// All the video and sound tracks of an MP4 file (whole or fragmented).
 pub fn tracks_from_mp4(path: &Path) -> Result<Vec<TrackData>> {
@@ -137,7 +137,7 @@ pub fn tracks_from_mp4(path: &Path) -> Result<Vec<TrackData>> {
         });
     }
     if out.is_empty() {
-        return Err(Error::Unsupported("the file holds no video or sound track Studio can take".into()));
+        return Err(Error::Unsupported("the file holds no video or sound track Zornov can take".into()));
     }
     Ok(out)
 }

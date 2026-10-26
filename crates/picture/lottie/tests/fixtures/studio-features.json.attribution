@@ -1,7 +1,7 @@
 asset:        studio-features.json
 title:        Lottie fixture: parenting, spatial curves, path morphs, dashes, radial gradients, masks, a luma matte, multiply, holds and time remap
-author:       Studio contributors
+author:       Zornov contributors
 source:       original work
 license:      Apache-2.0
 added:        2026-10-24
-notes:        Hand-written for Studio's Lottie player tests from the public Lottie format description.
+notes:        Hand-written for Zornov's Lottie player tests from the public Lottie format description.

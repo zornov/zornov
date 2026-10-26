@@ -6,7 +6,7 @@ tools: body, joint, drop, throw, push, break, settle, ragdoll, jiggle, bake_phys
 ---
 **Order**
 1. Build real solids first (skill `3d-assets-scenes`): closed models with thickness. Physics measures the solid's volume, so a flat card or an open shell has no weight and collides like paper (`3d_flat`, `3d_open`: fix with `mesh` step `solid`).
-2. Scale: Studio works it out (people about 1.7 m, worlds at their own scale, else 475 px to the metre). If the scene is something else (a toy table, a city), say it once: `physics_world {px_per_metre}`. Gravity is real (9.81 m/s²) at that scale, so small things fall fast and big things slowly.
+2. Scale: Zornov works it out (people about 1.7 m, worlds at their own scale, else 475 px to the metre). If the scene is something else (a toy table, a city), say it once: `physics_world {px_per_metre}`. Gravity is real (9.81 m/s²) at that scale, so small things fall fast and big things slowly.
 3. New models rest on what is under them when placed (`rest: false` on `model` to float it on purpose). Put the ground, floor or table in first, then what stands on it.
 4. Say what each thing is: `body {clip, type, material}`. Props that move are `dynamic`; scenery is `static` by default; animated clips and characters push things out of their way (kinematic) without being moved. A material sets density (mass from the real volume), friction, bounce and whether it breaks: glass, porcelain, ceramic, ice, plaster shatter when hit hard.
 5. Joints for what is held: `joint {clip, kind: hinge, at_point, axis, limits}` for doors, lids, pendulums; `rope`/`chain`/`spring` for hanging things; `slider` for drawers; `fixed` to glue two together; `breaks` (N) to snap.

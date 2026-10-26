@@ -27,7 +27,7 @@ tools: text, text_3d, template, chart, shape, card, ai, animate, motion, stagger
 
 ## Reference: Motion graphics
 
-Studio does motion design with layers, keys and expressions, for you and in the app
+Zornov does motion design with layers, keys and expressions, for you and in the app
 (the viewer toolbar's shapes button: templates, shape presets, charts, 3D
 text; the Inspector: template controls, shape items, text animators).
 

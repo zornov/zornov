@@ -3,7 +3,7 @@ name = "pack-content"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-description = "Builds the Studio content folder: the core bundle and optional packs, with licences and review sheets"
+description = "Builds the Zornov content folder: the core bundle and optional packs, with licences and review sheets"
 publish = false
 
 # Stand-alone package (not a workspace member) so the root manifest needs no

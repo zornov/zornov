@@ -217,7 +217,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let db = Db::open(&path).unwrap();
         db.exec("CREATE VIRTUAL TABLE t USING fts5(kind, body)").unwrap();
-        db.run("INSERT INTO t VALUES (?, ?)", &["spoken".into(), "Studio renders five times faster".into()]).unwrap();
+        db.run("INSERT INTO t VALUES (?, ?)", &["spoken".into(), "Zornov renders five times faster".into()]).unwrap();
         db.run("INSERT INTO t VALUES (?, ?)", &["title".into(), "The render race".into()]).unwrap();
         let hits = db.query("SELECT kind FROM t WHERE t MATCH ? ORDER BY rank", &["render*".into()]).unwrap();
         assert_eq!(hits.len(), 2);

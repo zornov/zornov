@@ -5,15 +5,15 @@
 //! and Python scripts in `tools/`):
 //!
 //! ```text
-//! cargo xtask bundle            dist/Studio.app (macOS)
-//! cargo xtask package-linux     dist/studio-linux-<arch>.tar.gz
-//! cargo xtask package-windows   dist\studio-windows-<arch>.zip
+//! cargo xtask bundle            dist/Zornov.app (macOS)
+//! cargo xtask package-linux     dist/zornov-linux-<arch>.tar.gz
+//! cargo xtask package-windows   dist\zornov-windows-<arch>.zip
 //! cargo xtask sbs REF SHOT OUT [WIDTH]   a reference above a Studio shot
 //! cargo xtask signing           the local signing identity (made once)
 //! cargo xtask release-mac       Developer ID signed, notarized DMG (docs/releasing.md)
-//! cargo xtask package-deb       dist/release/studio_<ver>_<arch>.deb
-//! cargo xtask package-appimage  dist/release/Studio-<ver>-<arch>.AppImage
-//! cargo xtask package-msi       dist/release/Studio-<ver>-windows-<arch>.msi
+//! cargo xtask package-deb       dist/release/zornov_<ver>_<arch>.deb
+//! cargo xtask package-appimage  dist/release/Zornov-<ver>-<arch>.AppImage
+//! cargo xtask package-msi       dist/release/Zornov-<ver>-windows-<arch>.msi
 //! cargo xtask update-key        the update signing key (made once)
 //! cargo xtask feed              dist/release/feed.json, signed
 //! cargo xtask headers [--check] the copyright header on every Studio file
@@ -90,13 +90,18 @@ fn build_app_repro() -> Result<PathBuf, String> {
     build(true)
 }
 
+/// The file name of the app's release binary: the `[[bin]]` name in `app/Cargo.toml`.
+fn app_exe_name() -> &'static str {
+    if cfg!(windows) { "zornov.exe" } else { "zornov" }
+}
+
 fn build(repro: bool) -> Result<PathBuf, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut c = Command::new(cargo);
     c.current_dir(root()).env("CARGO_TARGET_DIR", target_dir()).args(["build", "--release", "-p", "studio-app"]);
     if repro {
         let mut flags = std::env::var("RUSTFLAGS").unwrap_or_default();
-        flags += &format!(" --remap-path-prefix={}=/studio", root().display());
+        flags += &format!(" --remap-path-prefix={}=/zornov", root().display());
         if let Some(home) = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(|h| PathBuf::from(h).join(".cargo"))) {
             flags += &format!(" --remap-path-prefix={}=/cargo", home.display());
         }
@@ -106,8 +111,8 @@ fn build(repro: bool) -> Result<PathBuf, String> {
     if !ok {
         return Err("the build failed".into());
     }
-    let exe = target_dir().join("release").join(if cfg!(windows) { "studio.exe" } else { "studio" });
-    exe.is_file().then_some(exe).ok_or_else(|| "the build made no studio binary".into())
+    let exe = target_dir().join("release").join(app_exe_name());
+    exe.is_file().then_some(exe).ok_or_else(|| "the build made no zornov binary".into())
 }
 
 /// The core content library, if it is there (the Assets and Audio panels
@@ -158,14 +163,14 @@ fn version() -> String {
     Command::new("git").current_dir(root()).args(["describe", "--always", "--dirty"]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).filter(|v| !v.is_empty()).unwrap_or_else(|| "dev".into())
 }
 
-/// dist/Studio.app: the release binary, Info.plist and the core content
+/// dist/Zornov.app: the release binary, Info.plist and the core content
 /// library, signed for this Mac.
 fn bundle() -> Result<String, String> {
     let exe = build_app()?;
-    let app = root().join("dist/Studio.app");
+    let app = root().join("dist/Zornov.app");
     let v = assemble_app(&exe, content_core().as_deref(), &licenses::notices()?, &app)?;
     sign(&app)?;
-    Ok(format!("dist/Studio.app ({v})"))
+    Ok(format!("dist/Zornov.app ({v})"))
 }
 
 /// The unsigned `.app` made from `exe` at `app`, with the licence notices
@@ -175,7 +180,7 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
     let macos = app.join("Contents/MacOS");
     std::fs::create_dir_all(&macos).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(app.join("Contents/Resources")).map_err(|e| e.to_string())?;
-    std::fs::copy(exe, macos.join("studio")).map_err(|e| format!("cannot copy the binary: {e}"))?;
+    std::fs::copy(exe, macos.join("zornov")).map_err(|e| format!("cannot copy the binary: {e}"))?;
     write_notices(notices, &app.join("Contents/Resources/Licenses"))?;
     std::fs::copy(root().join("packaging/brand/zornov.icns"), app.join("Contents/Resources/AppIcon.icns")).map_err(|e| format!("cannot copy the app icon: {e}"))?;
     if let Some(core) = content {
@@ -186,10 +191,10 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>Studio</string>
-  <key>CFBundleDisplayName</key><string>Studio</string>
-  <key>CFBundleIdentifier</key><string>org.studio.editor</string>
-  <key>CFBundleExecutable</key><string>studio</string>
+  <key>CFBundleName</key><string>Zornov</string>
+  <key>CFBundleDisplayName</key><string>Zornov</string>
+  <key>CFBundleIdentifier</key><string>com.zornov.app</string>
+  <key>CFBundleExecutable</key><string>zornov</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>{short}</string>
@@ -197,8 +202,8 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
   <key>CFBundleVersion</key><string>{v}</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSMicrophoneUsageDescription</key><string>Studio records voice-overs and sound from your microphone when you press Record.</string>
-  <key>NSCameraUsageDescription</key><string>Studio records from your camera when you press Record.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Zornov records voice-overs and sound from your microphone when you press Record.</string>
+  <key>NSCameraUsageDescription</key><string>Zornov records from your camera when you press Record.</string>
 </dict></plist>
 "#,
         short = release::VERSION
@@ -243,7 +248,7 @@ fn arch() -> &'static str {
     }
 }
 
-/// dist/studio-linux-<arch>.tar.gz: binary, desktop entry and content (and
+/// dist/zornov-linux-<arch>.tar.gz: binary, desktop entry and content (and
 /// its signed update archive, when there is an update key).
 fn package_linux() -> Result<String, String> {
     let exe = build_app_repro()?;
@@ -252,7 +257,7 @@ fn package_linux() -> Result<String, String> {
     pkg::portable_linux_from(&exe, content_core().as_deref(), &licenses::notices()?, &dist, true)
 }
 
-/// dist\studio-windows-<arch>.zip: studio.exe with the content beside it.
+/// dist\zornov-windows-<arch>.zip: zornov.exe with the content beside it.
 fn package_windows() -> Result<String, String> {
     let exe = build_app_repro()?;
     let dist = root().join("dist");
@@ -307,7 +312,7 @@ fn headers(check: bool) -> Result<String, String> {
     let rel = |p: &PathBuf| p.strip_prefix(root()).unwrap_or(p).display().to_string();
     if check {
         if missing.is_empty() {
-            Ok(format!("all {} Studio files have the header ({skipped} third-party files keep their own)", files.len() - skipped))
+            Ok(format!("all {} Zornov files have the header ({skipped} third-party files keep their own)", files.len() - skipped))
         } else {
             Err(format!("{} files lack the copyright header:\n{}", missing.len(), missing.iter().map(rel).collect::<Vec<_>>().join("\n")))
         }
@@ -383,6 +388,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_binary_xtask_looks_for_is_the_one_the_app_builds() {
+        let manifest = std::fs::read_to_string(root().join("app/Cargo.toml")).unwrap();
+        let bin = manifest.split("[[bin]]").nth(1).and_then(|b| b.lines().find_map(|l| l.trim().strip_prefix("name = "))).map(|n| n.trim().trim_matches('"').to_owned()).unwrap();
+        assert_eq!(app_exe_name().trim_end_matches(".exe"), bin);
+    }
+
+    #[test]
     fn vendored_files_are_not_claimed() {
         let dir = std::env::temp_dir().join(format!("xtask-hdr-{}", std::process::id()));
         let (ours_dir, theirs_dir) = (dir.join("ours/src"), dir.join("theirs/src"));
@@ -436,8 +448,7 @@ mod signing {
     }
 
     fn dir() -> PathBuf {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-        home.join("Library/Application Support/Studio/signing")
+        studio_update::data_dir().join("signing")
     }
 
     pub fn keychain() -> PathBuf {

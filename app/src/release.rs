@@ -232,9 +232,9 @@ fn crash_prompt() {
     let what = if reports.len() == 1 { "a crash report".to_owned() } else { format!("{} crash reports", reports.len()) };
     let answer = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Warning)
-        .set_title("Studio quit unexpectedly")
+        .set_title("Zornov quit unexpectedly")
         .set_description(crate::i18n::tf(format!(
-            "Studio saved {what} on this computer ({}). It has the version, your system and a technical trace, and no projects or files.\n\nSend it to {host}?",
+            "Zornov saved {what} on this computer ({}). It has the version, your system and a technical trace, and no projects or files.\n\nSend it to {host}?",
             studio_crash::scrub(&studio_crash::dir().display().to_string())
         )))
         .set_buttons(rfd::MessageButtons::YesNoCancelCustom("Send".into(), "Don't send".into(), "Not now".into()))

@@ -3,7 +3,7 @@ name = "studio-synth"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Local sound creation for Studio: a composition engine, foley and sound-effect models, animal voices and a singing voice, all synthesised in Rust with no key and no samples"
+description = "Local sound creation for Zornov: a composition engine, foley and sound-effect models, animal voices and a singing voice, all synthesised in Rust with no key and no samples"
 
 [dependencies]
 studio-sound = { path = "../sound" }

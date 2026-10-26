@@ -29,12 +29,12 @@ pub fn describe(tool: &str, payload: &(dyn std::any::Any + Send)) -> String {
     let msg = payload.downcast_ref::<&str>().map(|s| (*s).to_owned()).or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_else(|| "no message".into());
     let at = LAST.with(|l| l.borrow_mut().take()).filter(|a| !a.is_empty());
     let msg: String = msg.chars().take(400).collect();
-    format!("{tool} hit a bug in Studio and stopped: {msg}{}. The project is unchanged; this is not caused by the input, so report it.", at.map(|a| format!(" (at {a})")).unwrap_or_default())
+    format!("{tool} hit a bug in Zornov and stopped: {msg}{}. The project is unchanged; this is not caused by the input, so report it.", at.map(|a| format!(" (at {a})")).unwrap_or_default())
 }
 
 /// Whether an error is a caught panic.
 pub fn is_bug(e: &str) -> bool {
-    e.contains(" hit a bug in Studio and stopped: ")
+    e.contains(" hit a bug in Zornov and stopped: ")
 }
 
 /// Runs a tool call; a panic becomes an error that says what panicked.
@@ -53,7 +53,7 @@ mod tests {
             Ok(())
         });
         let e = r.unwrap_err();
-        assert!(e.starts_with("download hit a bug in Studio and stopped: ") && e.contains("char boundary") && e.contains("guard.rs"), "{e}");
+        assert!(e.starts_with("download hit a bug in Zornov and stopped: ") && e.contains("char boundary") && e.contains("guard.rs"), "{e}");
         assert_eq!(super::run("x", || Ok::<_, String>(3)), Ok(3));
         assert_eq!(super::run::<()>("x", || Err("plain".into())), Err("plain".into()));
     }

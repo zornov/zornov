@@ -520,7 +520,7 @@ impl MxfWriter {
         p.ts(0x3b02, &now).u16(0x3b05, 0x0103).u32(0x3b07, 1).batch(0x3b06, &[ids.ident.to_vec()]).raw(0x3b03, &ids.content).raw(0x3b09, &ul(OP_ATOM)).batch(0x3b0a, &[ul(ec).to_vec()]).batch(0x3b0b, &[]);
         sets.push(p.klv());
         let mut i = Set::new(SET_IDENT, &ids.ident);
-        i.raw(0x3c09, &uuid()).utf16(0x3c01, "Ashrox LLC").utf16(0x3c02, "Studio").raw(0x3c03, &[0, 1, 0, 0, 0, 0, 0, 0, 0, 0]).utf16(0x3c04, "Studio deliver 1.0").raw(0x3c05, &uuid()).ts(0x3c06, &now);
+        i.raw(0x3c09, &uuid()).utf16(0x3c01, "Ashrox LLC").utf16(0x3c02, "Zornov").raw(0x3c03, &[0, 1, 0, 0, 0, 0, 0, 0, 0, 0]).utf16(0x3c04, "Zornov deliver 1.0").raw(0x3c05, &uuid()).ts(0x3c06, &now);
         sets.push(i.klv());
         let mut c = Set::new(SET_CONTENT, &ids.content);
         c.batch(0x1901, &[ids.mat_pkg.to_vec(), ids.src_pkg.to_vec()]).batch(0x1902, &[ids.ecd.to_vec()]);

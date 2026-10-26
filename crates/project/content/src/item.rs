@@ -143,7 +143,7 @@ impl Kind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Licence {
-    /// Made for Studio (our own, generated under the owner's plan).
+    /// Made for Zornov (our own, generated under the owner's plan).
     Studio,
     CcBy4,
     /// ShareAlike: kept in its own clearly marked set.
@@ -161,7 +161,7 @@ impl Licence {
     /// Parses an SPDX identifier as used in `catalog.json`.
     pub fn parse(spdx: &str) -> Option<Licence> {
         Some(match spdx.trim() {
-            "Studio" | "studio" => Licence::Studio,
+            "Studio" | "studio" | "Zornov" | "zornov" => Licence::Studio,
             "CC-BY-4.0" => Licence::CcBy4,
             "CC-BY-SA-4.0" => Licence::CcBySa4,
             "CC0-1.0" => Licence::Cc0,
@@ -186,7 +186,7 @@ impl Licence {
 
     pub fn name(self) -> &'static str {
         match self {
-            Licence::Studio => "Made for Studio",
+            Licence::Studio => "Made for Zornov",
             Licence::CcBy4 => "Creative Commons Attribution 4.0 International",
             Licence::CcBySa4 => "Creative Commons Attribution-ShareAlike 4.0 International",
             Licence::Cc0 => "CC0 1.0 Universal (Public Domain Dedication)",
@@ -244,7 +244,7 @@ impl Source {
     }
 
     pub fn studio() -> Source {
-        Source::new("made", "Made for Studio", "", "")
+        Source::new("made", "Made for Zornov", "", "")
     }
 }
 
@@ -502,7 +502,7 @@ mod tests {
             file: "stickers/Things/Thing 01.png".into(),
             preview: None,
             licence: Licence::Studio,
-            attribution: "Made for Studio".into(),
+            attribution: "Made for Zornov".into(),
             source: Source::studio(),
             details: Details::default(),
         };

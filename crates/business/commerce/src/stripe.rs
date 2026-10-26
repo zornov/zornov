@@ -63,7 +63,7 @@ impl Stripe {
     pub fn test(key: &str, base: &str) -> Result<Stripe, String> {
         let key = key.trim();
         if !is_test_key(key) {
-            return Err("only Stripe test keys (sk_test_...) are accepted: Studio never takes real payments here".into());
+            return Err("only Stripe test keys (sk_test_...) are accepted: Zornov never takes real payments here".into());
         }
         Ok(Stripe { key: key.to_owned(), base: base.trim_end_matches('/').to_owned() })
     }
@@ -82,7 +82,7 @@ impl Stripe {
             return Err(format!("Stripe answered {status}: {msg}"));
         }
         if v.get("livemode").and_then(Value::as_bool) == Some(true) {
-            return Err("Stripe answered in live mode; Studio only uses test mode".into());
+            return Err("Stripe answered in live mode; Zornov only uses test mode".into());
         }
         Ok(v)
     }
@@ -108,7 +108,7 @@ impl Stripe {
         let body = form_encode(&form);
         let auth = self.auth();
         let v = Self::reply(studio_net::post(&format!("{}/v1/checkout/sessions", self.base), &[("Authorization", &auth), ("Content-Type", "application/x-www-form-urlencoded"), ("Idempotency-Key", reference)], body.as_bytes(), Duration::from_secs(30)))?;
-        serde_json::from_value(v).map_err(|e| format!("Stripe's session is not what Studio expected: {e}"))
+        serde_json::from_value(v).map_err(|e| format!("Stripe's session is not what Zornov expected: {e}"))
     }
 
     /// Reads a session back (to confirm payment without a webhook).
@@ -118,7 +118,7 @@ impl Stripe {
         }
         let auth = self.auth();
         let v = Self::reply(studio_net::get(&format!("{}/v1/checkout/sessions/{id}", self.base), &[("Authorization", &auth)], Duration::from_secs(30)))?;
-        serde_json::from_value(v).map_err(|e| format!("Stripe's session is not what Studio expected: {e}"))
+        serde_json::from_value(v).map_err(|e| format!("Stripe's session is not what Zornov expected: {e}"))
     }
 }
 
@@ -231,7 +231,7 @@ mod tests {
     fn a_session_in_stripes_test_mode() {
         let key = std::env::var("STUDIO_STRIPE_TEST_KEY").expect("STUDIO_STRIPE_TEST_KEY");
         let s = Stripe::test(&key, API).unwrap();
-        let item = Item { name: "Studio test item".into(), amount_minor: 500, currency: "usd".into(), quantity: 1 };
+        let item = Item { name: "Zornov test item".into(), amount_minor: 500, currency: "usd".into(), quantity: 1 };
         let reference = format!("studio-test-{}", studio_entitlements::now());
         let sess = s.checkout(&[item], &reference, None, "http://localhost:8787/billing/done?session_id={CHECKOUT_SESSION_ID}", "http://localhost:8787/billing/cancelled").unwrap();
         assert!(sess.id.starts_with("cs_test_"), "{}", sess.id);

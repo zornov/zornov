@@ -235,7 +235,7 @@ impl Session {
             }
             for e in &c.effects {
                 if studio_fx::effects::find(&e.kind).is_none() && !e.kind.starts_with("look") {
-                    warn("unknown_effect", Some(secs(c.start)), Some(c.id), format!("clip {} has an effect \"{}\" Studio does not know; it renders as nothing", c.id, e.kind), "remove it and apply one from catalogue effects");
+                    warn("unknown_effect", Some(secs(c.start)), Some(c.id), format!("clip {} has an effect \"{}\" Zornov does not know; it renders as nothing", c.id, e.kind), "remove it and apply one from catalogue effects");
                 }
             }
         }

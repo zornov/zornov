@@ -629,7 +629,7 @@ pub fn to_bytes(a: &Asset) -> Vec<u8> {
 
 pub fn from_bytes(b: &[u8]) -> Result<Asset, String> {
     if b.len() < 12 || &b[..8] != MAGIC {
-        return Err("not a Studio model file (.smodel)".into());
+        return Err("not a Zornov model file (.smodel)".into());
     }
     let mut r = Reader { b, at: 8 };
     let n = r.count(b.len())?;

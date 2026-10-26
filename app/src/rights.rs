@@ -40,7 +40,7 @@ const KINDS: &[Kind] = &[
     Kind { id: "cc-by-nd", name: "CC BY-ND (no derivatives)", commercial: true, attribution: true, derivatives: false, share_alike: false },
     Kind { id: "editorial", name: "Editorial use only", commercial: false, attribution: true, derivatives: true, share_alike: false },
     Kind { id: "rights-managed", name: "Rights managed", commercial: true, attribution: false, derivatives: true, share_alike: false },
-    Kind { id: "generated", name: "Made by Studio's generators", commercial: true, attribution: false, derivatives: true, share_alike: false },
+    Kind { id: "generated", name: "Made by Zornov's generators", commercial: true, attribution: false, derivatives: true, share_alike: false },
     Kind { id: "unknown", name: "Not recorded", commercial: true, attribution: false, derivatives: true, share_alike: false },
 ];
 

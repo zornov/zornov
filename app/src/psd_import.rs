@@ -161,7 +161,7 @@ pub fn extract(psd: &Path, dir: &Path) -> Result<Extracted, String> {
             notes.push(format!("\"{}\" has layer styles (shadows, strokes…): not drawn", l.name));
         }
         let blend_mode = blend(l.blend_key()).unwrap_or_else(|| {
-            notes.push(format!("\"{}\": blend mode {} has no match in Studio, so it is normal", l.name, l.blend_key().trim()));
+            notes.push(format!("\"{}\": blend mode {} has no match in Zornov, so it is normal", l.name, l.blend_key().trim()));
             "normal"
         });
         let px = match doc.layer_pixels(at.index, false) {

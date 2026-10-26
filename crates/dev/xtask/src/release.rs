@@ -254,7 +254,7 @@ fn codesign(cfg: &MacConfig, target: &Path, app: bool) -> Result<(), String> {
     let mut c = Command::new("/usr/bin/codesign");
     c.args(["--force", "--sign", &cfg.identity, if adhoc { "--timestamp=none" } else { "--timestamp" }]);
     if app {
-        c.args(["--options", "runtime", "--entitlements"]).arg(crate::root().join("packaging/macos/Studio.entitlements"));
+        c.args(["--options", "runtime", "--entitlements"]).arg(crate::root().join("packaging/macos/Zornov.entitlements"));
     }
     run("codesign", c.arg(target)).map(|_| ())
 }
@@ -337,9 +337,9 @@ pub fn release_mac(args: &[String]) -> Result<String, String> {
         Some(e) => e,
         None => crate::build_app_repro()?,
     };
-    let app = out.join("Studio.app");
+    let app = out.join("Zornov.app");
     let v = crate::assemble_app(&exe, crate::content_core().as_deref(), &notices, &app)?;
-    codesign(&cfg, &app.join("Contents/MacOS/studio"), true)?;
+    codesign(&cfg, &app.join("Contents/MacOS/zornov"), true)?;
     codesign(&cfg, &app, true)?;
     run("codesign verify", Command::new("/usr/bin/codesign").args(["--verify", "--deep", "--strict"]).arg(&app))?;
     let details = run("codesign details", Command::new("/usr/bin/codesign").args(["-dvv"]).arg(&app))?;
@@ -347,7 +347,7 @@ pub fn release_mac(args: &[String]) -> Result<String, String> {
         return Err("the signed app does not have the hardened runtime".into());
     }
     if let Some(n) = &cfg.notary {
-        let zip = out.join("Studio-notarize.zip");
+        let zip = out.join("Zornov-notarize.zip");
         run("ditto", Command::new("ditto").args(["-c", "-k", "--keepParent"]).arg(&app).arg(&zip))?;
         notarize(n, &zip)?;
         let _ = std::fs::remove_file(&zip);
@@ -356,18 +356,18 @@ pub fn release_mac(args: &[String]) -> Result<String, String> {
 
     // The update archive comes from the finished (stapled) app.
     let arch = std::env::consts::ARCH;
-    let update = release_dir().join(format!("Studio-{VERSION}-macos-{arch}.update.tar.gz"));
+    let update = release_dir().join(format!("Zornov-{VERSION}-macos-{arch}.update.tar.gz"));
     repro::update_archive(&app, &update, false)?;
     let signed = sign_update(&update, &format!("macos-{arch}")).map(|_| "update archive signed").unwrap_or("update archive NOT signed (no update key; run `cargo xtask update-key`)");
 
-    let dmg = release_dir().join(format!("Studio-{VERSION}-macos-{arch}.dmg"));
+    let dmg = release_dir().join(format!("Zornov-{VERSION}-macos-{arch}.dmg"));
     let stage = out.join("dmg");
     crate::fresh_dir(&stage)?;
-    run("ditto", Command::new("ditto").arg(&app).arg(stage.join("Studio.app")))?;
+    run("ditto", Command::new("ditto").arg(&app).arg(stage.join("Zornov.app")))?;
     #[cfg(unix)]
     std::os::unix::fs::symlink("/Applications", stage.join("Applications")).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&dmg);
-    run("hdiutil", Command::new("hdiutil").args(["create", "-volname", "Studio", "-srcfolder"]).arg(&stage).args(["-fs", "HFS+", "-format", "UDZO", "-ov"]).arg(&dmg))?;
+    run("hdiutil", Command::new("hdiutil").args(["create", "-volname", "Zornov", "-srcfolder"]).arg(&stage).args(["-fs", "HFS+", "-format", "UDZO", "-ov"]).arg(&dmg))?;
     let _ = std::fs::remove_dir_all(&stage);
     codesign(&cfg, &dmg, false)?;
     if let Some(n) = &cfg.notary {

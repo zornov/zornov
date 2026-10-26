@@ -3,7 +3,7 @@ name = "studio-vector"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shape layers for Studio: paths, booleans, trim paths, repeaters, path modifiers, gradient fills and strokes, dashes and morphing, drawn by Studio's vector rasterizer."
+description = "Shape layers for Zornov: paths, booleans, trim paths, repeaters, path modifiers, gradient fills and strokes, dashes and morphing, drawn by Zornov's vector rasterizer."
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

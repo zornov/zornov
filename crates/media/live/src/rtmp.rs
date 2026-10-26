@@ -162,7 +162,7 @@ impl RtmpClient {
         Amf::Obj(vec![
             ("app".into(), Amf::str(&u.app)),
             ("type".into(), Amf::str("nonprivate")),
-            ("flashVer".into(), Amf::str("FMLE/3.0 (compatible; Studio)")),
+            ("flashVer".into(), Amf::str("FMLE/3.0 (compatible; Zornov)")),
             ("tcUrl".into(), Amf::str(&u.tc_url())),
         ])
         .encode(&mut b);
@@ -212,7 +212,7 @@ impl RtmpClient {
             ("audiosamplerate".into(), Amf::Num(meta.sample_rate as f64)),
             ("audiosamplesize".into(), Amf::Num(16.0)),
             ("stereo".into(), Amf::Bool(true)),
-            ("encoder".into(), Amf::str("Studio")),
+            ("encoder".into(), Amf::str("Zornov")),
         ])
         .encode(&mut b);
         c.w.lock().map_err(|_| "poisoned")?.message(5, 0, 18, c.stream_id, &b).map_err(io)?;

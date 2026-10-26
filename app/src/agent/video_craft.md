@@ -1,14 +1,14 @@
 # Making videos people watch
 
 The craft rules of /brag (github.com/latent-spaces/brag, MIT, (c) 2026
-Shunit Haviv Hakimi), put in Studio's terms. Follow them whenever you make
+Shunit Haviv Hakimi), put in Zornov's terms. Follow them whenever you make
 or remake a video, not only launch videos; the user's own direction wins.
 
 **Know the craft first.** Before designing, read the craft book: `guide`
 with `topic: "craft"` (its contents), then the chapters you need: `layering`,
 `colour`, `light`, `shadows`, `typography`, `cuts`, `sound-design`,
 `flashes`, `overdoing`, `mistakes`… It is what a professional editor and
-motion designer knows, written for Studio's tools, with the mistakes AI
+motion designer knows, written for Zornov's tools, with the mistakes AI
 editors made here before.
 
 **Restraint over everything.** One focal point per frame; one or two

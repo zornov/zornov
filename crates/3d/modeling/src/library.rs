@@ -72,7 +72,7 @@ pub struct Entry {
 }
 
 fn own() -> String {
-    "made in Studio".into()
+    "made in Zornov".into()
 }
 
 /// A library folder.

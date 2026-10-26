@@ -36,15 +36,15 @@ character matching for Japanese and Chinese. With a region focused (`F6`),
 F1 opens that region's article.
 
 The AI editor reads the same articles through the **`howto`** tool
-(`studio agent howto "how do I split a clip"`), which returns the best
-articles as JSON; `guide` tells it to use `howto` for questions about Studio
+(`zornov agent howto "how do I split a clip"`), which returns the best
+articles as JSON; `guide` tells it to use `howto` for questions about Zornov
 itself. Add an article by adding a `Topic` in `help.rs` and the three
 messages in `en.ftl` (the tests tell you what is missing in each language).
 
 ## Workspaces
 
 `workspaces.rs` (the built-in six and the person's own saved layouts, kept in
-`<Studio>/Workspaces.json`). One click in the top bar (icons, the names are
+`<Zornov>/Workspaces.json`). One click in the top bar (icons, the names are
 tooltips; narrower windows and the person's own layouts are in the Layout
 menu) or `⌥1`–`⌥6` (Settings ▸ Shortcuts changes them):
 
@@ -64,7 +64,7 @@ adjustable. `workspaces::switch` also shows the scopes, opens the Inspector
 tab and tells a screen reader (the toast is what it hears);
 `workspaces::apply` only lays out the panels. A saved workspace keeps its
 tree in `dock`; the old size and open fields are still written (from the
-tree) for an older Studio, and a file without `dock` is read as the fixed
+tree) for an older Zornov, and a file without `dock` is read as the fixed
 layout those fields describe. The layout is remembered in `prefs.dock` (and
 `prefs.layout` from it), the name in `prefs.workspace`; an editor opens with
 the Library section of the workspace last used.
@@ -73,7 +73,7 @@ the Library section of the workspace last used.
 
 `dock.rs` is the layout: a tree of splits (side by side or stacked, each
 child sized in points, as a ratio of the split, or filling what is left) and
-tab stacks, any node collapsible. The default tree is the fixed layout Studio
+tab stacks, any node collapsible. The default tree is the fixed layout Zornov
 had before (a test checks it rect for rect at several window sizes, and the
 screenshots are pixel-identical). `editor/dock_ui.rs` draws it: a panel's
 header (or its tab, in a stack of two or more) is the handle; dragging shows

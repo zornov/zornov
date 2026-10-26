@@ -3,7 +3,7 @@ name = "studio-production"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio production office: script breakdowns, stripboard scheduling, call sheets, budgets and shot task tracking"
+description = "Zornov production office: script breakdowns, stripboard scheduling, call sheets, budgets and shot task tracking"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

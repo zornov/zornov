@@ -35,10 +35,10 @@ tools: search_media, generate, enhance, search, catalogue, import, download, cut
   `image`: a file, a media id, or `{"frame": 12.5}` for the program
   frame; it keeps a character or style. Only generate what was asked
   for. `{"list": true}` says what is available.
-- Video from words is not available yet. Make it move in Studio
+- Video from words is not available yet. Make it move in Zornov
   instead: `task: "animate"` makes a camera move through the picture's
   depth, or generate the pictures and move them (guide topic
-  `generated`). Music, sound effects and singing are made by Studio
+  `generated`). Music, sound effects and singing are made by Zornov
   itself and always work: `music` composes original music with cue points
   (skill `music-beat-sync` part Scoring), `sfx` makes foley and effects and `sing` sings
   (skill `sound-design` part Foley); the library (`catalogue`) is free and instant
@@ -84,7 +84,7 @@ tools: search_media, generate, enhance, search, catalogue, import, download, cut
 
 ## Reference: Generated scenes in motion
 
-What no file or library item has, Studio makes: `generate` with `make:
+What no file or library item has, Zornov makes: `generate` with `make:
 "picture"`, by Codex's own image generation (about a minute a picture). Video from words is not available yet, so the
 motion is made here, in the edit, and that is often better because it is
 editable.
@@ -168,7 +168,7 @@ again or varied.
 
 ## Reference: tool `generate`
 
-Make a picture from words with Codex's image generation: make: picture. Video from words is not available yet: make the pictures and move them (three_d, parallax, keyframes). Music, sound and singing are made by Studio itself, with nothing to set up: edit op music composes original music, edit op sfx makes foley and effects, edit op sing sings. From words, or from pictures: a file, a media id, or {"frame": seconds} for the program frame (restyle a still, the same product in a new shot); transparent: true makes the subject alone for layering in 3D. Saved in the project's Generated folder and added to the media bin; with to_timeline also laid on the main lane. list: true says what is available. Only for what the person asked to have made. With task it changes or animates what is there, by Codex (pictures) or this Mac (provider; auto picks the best here and says what Codex would add): animate (a still into a clip by a camera move through its depth: motion push_in, pan_left, orbit_left…), between (image to end_image: a morph), restyle (style_ref and/or prompt; pictures or a clip), relight (direction, colour), time_of_day (time), season (season), outpaint (left/right/top/bottom shares, wider, taller or aspect: fixes pans that run off a backdrop), inpaint (region [x,y,w,h] and prompt), upscale (scale or height). A clip goes back into that clip, framing kept (restore: clip puts the original back). look: a saved character or place (save_look with refs, words, seed; the story bible's cast and places count) keeps generations matching. again: a media id makes it again from its recipe, count for variations.
+Make a picture from words with Codex's image generation: make: picture. Video from words is not available yet: make the pictures and move them (three_d, parallax, keyframes). Music, sound and singing are made by Zornov itself, with nothing to set up: edit op music composes original music, edit op sfx makes foley and effects, edit op sing sings. From words, or from pictures: a file, a media id, or {"frame": seconds} for the program frame (restyle a still, the same product in a new shot); transparent: true makes the subject alone for layering in 3D. Saved in the project's Generated folder and added to the media bin; with to_timeline also laid on the main lane. list: true says what is available. Only for what the person asked to have made. With task it changes or animates what is there, by Codex (pictures) or this Mac (provider; auto picks the best here and says what Codex would add): animate (a still into a clip by a camera move through its depth: motion push_in, pan_left, orbit_left…), between (image to end_image: a morph), restyle (style_ref and/or prompt; pictures or a clip), relight (direction, colour), time_of_day (time), season (season), outpaint (left/right/top/bottom shares, wider, taller or aspect: fixes pans that run off a backdrop), inpaint (region [x,y,w,h] and prompt), upscale (scale or height). A clip goes back into that clip, framing kept (restore: clip puts the original back). look: a saved character or place (save_look with refs, words, seed; the story bible's cast and places count) keeps generations matching. again: a media id makes it again from its recipe, count for variations.
 
 Several pictures: `items: [{name, prompt, aspect, transparent, image}]` makes them all at the same time on Codex image workers (4 at once; `workers` up to 8, or the STUDIO_IMAGE_WORKERS setting). Plan every picture first and send one batch, never one by one. It returns a `job` at once; each finished picture lands in the media bin and is announced after your next tool calls (`pictures_ready`); `job: N` shows progress and every picture's state, `wait: true` waits for all, `cancel: true` stops pictures not started. A failed picture is retried once with a reworded request and reports its real reason.
 

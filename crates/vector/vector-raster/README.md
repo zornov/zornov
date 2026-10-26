@@ -1,6 +1,6 @@
 # studio-vector-raster
 
-Studio's vector rasterizer: a `Scene` of fills, strokes and layers in user
+Zornov's vector rasterizer: a `Scene` of fills, strokes and layers in user
 space, drawn at any size by the CPU (`render`, `render_f32`) or the GPU
 (`gpu::GpuRaster`, WGSL compute).
 

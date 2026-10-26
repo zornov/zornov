@@ -56,7 +56,7 @@ impl Entry {
     }
 
     pub fn json(&self, installed: Option<&Installed>) -> Value {
-        let mut v = json!({"id": self.id, "name": self.name, "version": self.version, "description": self.description, "author": self.author, "license": self.license, "provides": self.provides, "items": self.items, "from": if self.bundled() { "ships with Studio".to_owned() } else { self.url.clone() }});
+        let mut v = json!({"id": self.id, "name": self.name, "version": self.version, "description": self.description, "author": self.author, "license": self.license, "provides": self.provides, "items": self.items, "from": if self.bundled() { "ships with Zornov".to_owned() } else { self.url.clone() }});
         if let Some(p) = installed {
             v["installed"] = json!(p.manifest.version);
             v["enabled"] = json!(p.enabled);
@@ -191,7 +191,7 @@ pub fn install(host: &Host, id: &str) -> Result<Installed, String> {
     let e = entries.iter().find(|e| e.id == id).ok_or_else(|| format!("no plugin `{id}` in the catalogue; search it first"))?;
     if let Some(rest) = e.url.strip_prefix("bundled:") {
         let (_, bytes) = BUNDLED.iter().find(|(u, _)| u.strip_prefix("bundled:") == Some(rest)).ok_or("bundled plugin missing")?;
-        return host.install_bytes(bytes, "ships with Studio");
+        return host.install_bytes(bytes, "ships with Zornov");
     }
     let (status, body) = fetch(&e.url, 256 << 20).map_err(|err| format!("could not download {}: {err}", e.url))?;
     if status != 200 {

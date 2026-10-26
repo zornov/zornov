@@ -54,7 +54,7 @@ fn build() -> Vec<Scene> {
         Scene::new("title.clean-rise", "Clean Rise", Title, 5.0, 1.4, 0.8)
             .tags("minimal, sans, rise")
             .field("title", "Title", "Make something great")
-            .field("subtitle", "Subtitle", "A short film by Studio")
+            .field("subtitle", "Subtitle", "A short film by Zornov")
             .layer(Layer::text("title", "title", st("Inter", 700, 92.0, WHITE).with_shadow(Shadow::new(BLACK, 8.0, 0.0, 0.0).opacity(0.4)), centre(1500.0)).at(0.5, 0.47)
                 .reveal(rv(RevealKind::Rise, TextUnit::Word).overlap(0.7).distance(0.6), rv(RevealKind::Fade, TextUnit::Word).overlap(0.9)).reveal_timing(0.0, 1.0))
             .layer(Layer::line("rule", c("#8B6CFF"), 120.0, 4.0).at(0.5, 0.565).in_out(Property::Width, 0.0, 1.0, 0.6, Ease::Out).track(Property::Opacity, Phase::Intro, &[(0.0, 0.0, Ease::Linear), (0.3, 0.0, Ease::Linear), (0.6, 1.0, Ease::Out)]))
@@ -176,7 +176,7 @@ fn build() -> Vec<Scene> {
         Scene::new("lower.classic-bar", "Classic Bar", LowerThird, 6.0, 1.2, 0.7)
             .tags("name, role, bar, broadcast")
             .field("name", "Name", "Maya Chen")
-            .field("role", "Role", "Lead designer, Studio")
+            .field("role", "Role", "Lead designer, Zornov")
             .layer(Layer::rect("accent", c("#8B6CFF"), 12.0, 120.0, 0.0).at(0.08, 0.82).anchor(0.0, 0.5).in_out(Property::Height, 0.0, 1.0, 0.4, Ease::Out))
             .layer(Layer::rect("bar", c("#0F172AE0"), 620.0, 120.0, 0.0).at(0.08, 0.82).anchor(0.0, 0.5).track(Property::X, Phase::Intro, &[(0.0, 12.0, Ease::Linear)]).in_out(Property::Width, 0.0, 1.0, 0.5, Ease::Out))
             .layer(Layer::text("name", "name", st("Inter", 700, 44.0, WHITE), left(580.0)).at(0.08, 0.795).anchor(0.0, 0.5).track(Property::X, Phase::Intro, &[(0.0, 34.0, Ease::Linear)])
@@ -407,7 +407,7 @@ fn build() -> Vec<Scene> {
     v.push(
         Scene::new("end.credits", "Credits", EndCard, 8.0, 3.0, 1.0)
             .tags("credits, roll, lines")
-            .field("credits", "Credits", "Directed by Maya Chen\nCamera · Jordan Ali\nMusic · Sam Okafor\nEdited in Studio")
+            .field("credits", "Credits", "Directed by Maya Chen\nCamera · Jordan Ali\nMusic · Sam Okafor\nEdited in Zornov")
             .layer(Layer::text("credits", "credits", st("Inter", 500, 34.0, c("#E8E8EC")).letter_spacing(8.0).line_spacing(60.0).case(Case::Upper), centre(1400.0)).at(0.5, 0.5)
                 .reveal(rv(RevealKind::Rise, TextUnit::Line).overlap(0.5).distance(0.6), rv(RevealKind::Fade, TextUnit::Line).overlap(0.6)).reveal_timing(0.0, 2.6)),
     );

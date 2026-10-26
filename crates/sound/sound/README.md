@@ -1,6 +1,6 @@
 # studio-sound
 
-Mixing and audio processing for Studio, one layer above `studio-audio`'s
+Mixing and audio processing for Zornov, one layer above `studio-audio`'s
 device I/O. `render` uses it to mix a sequence for export; `app` uses the
 same graph for live monitoring, plus the meters, loudness, beat analysis,
 waveform caches and the voice-over recorder.

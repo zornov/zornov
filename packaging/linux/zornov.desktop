@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Zornov
+Comment=Free, open-source film studio: edit, animate, grade and deliver
+Exec=zornov
+Icon=zornov
+Terminal=false
+StartupWMClass=zornov
+Categories=AudioVideo;Video;AudioVideoEditing;

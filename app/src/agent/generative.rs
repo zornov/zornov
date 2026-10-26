@@ -540,7 +540,7 @@ impl Session {
             Value::String(s) if !s.chars().all(|c| c.is_ascii_digit()) => PathBuf::from(s),
             v => self.media_item(v)?.path.ok_or("that media has no file")?,
         };
-        let r = g::recipe(&file).ok_or_else(|| format!("{} has no recipe (only what Studio generated has one)", file.display()))?;
+        let r = g::recipe(&file).ok_or_else(|| format!("{} has no recipe (only what Zornov generated has one)", file.display()))?;
         let count = a.get("count").and_then(Value::as_u64).unwrap_or(1).clamp(1, 8);
         let vary = count > 1 || a.get("vary").and_then(Value::as_bool).unwrap_or(false);
         let mut args = if r["task"] == "make" { r["args"].clone() } else { recipe_args(&r) };

@@ -47,7 +47,7 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "4K master", sub: "H.264 · 2160p", format: Format::H264, size: Size::ShortSide(2160), quality: 90.0, available: true },
     Preset { name: "Vertical", sub: "H.264 · 1080 × 1920", format: Format::H264, size: Size::Fixed(1080, 1920), quality: 70.0, available: true },
     Preset { name: "GIF", sub: "Looping · 720p", format: Format::Gif, size: Size::ShortSide(720), quality: 50.0, available: true },
-    Preset { name: "Intermediate", sub: "Studio codec · CLV", format: Format::Clv, size: Size::Project, quality: 95.0, available: true },
+    Preset { name: "Intermediate", sub: "Zornov codec · CLV", format: Format::Clv, size: Size::Project, quality: 95.0, available: true },
     Preset { name: "PNG sequence", sub: "Lossless stills", format: Format::Png, size: Size::Project, quality: 100.0, available: true },
     Preset { name: "HEVC 10-bit", sub: "HEVC Main 10 · smooth gradients", format: Format::Hevc10, size: Size::ShortSide(2160), quality: 90.0, available: true },
     Preset { name: "Audio only", sub: "AAC · M4A", format: Format::M4a, size: Size::Project, quality: 80.0, available: true },

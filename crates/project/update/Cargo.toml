@@ -3,10 +3,11 @@ name = "studio-update"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Studio's updater in Rust: a signed feed (Ed25519), a background download and a swap on restart."
+description = "Zornov's updater in Rust: a signed feed (Ed25519), a background download and a swap on restart."
 
 [dependencies]
 studio-net = { path = "../net" }
+studio-paths = { path = "../paths" }
 ring = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

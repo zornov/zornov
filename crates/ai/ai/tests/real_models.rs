@@ -356,7 +356,7 @@ fn faces_and_pose() {
 #[ignore]
 fn whisper_long_audio_seeks_across_windows() {
     let Some(store) = store_with(ModelId::WhisperTiny) else { return };
-    let para = "Studio is a video editor that runs entirely on your own computer. It cuts, colours and captions your clips without sending anything to the internet. ";
+    let para = "Zornov is a video editor that runs entirely on your own computer. It cuts, colours and captions your clips without sending anything to the internet. ";
     let Some(audio) = speech(&para.repeat(6)) else { return };
     let dur = audio.len() as f64 / 16000.0;
     assert!(dur > 35.0, "need more than one 30 s window, got {dur}");
