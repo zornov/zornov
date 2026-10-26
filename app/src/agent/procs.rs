@@ -67,6 +67,14 @@ fn spawn_for(owner: u64, parent: u32, cmd: &mut Command) -> std::io::Result<Chil
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    // Zornov is a window program on Windows: without this, every console
+    // program it starts would open a console window of its own.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     let child = cmd.spawn()?;
     live().push((owner, child.id()));
     watch(parent, child.id());
@@ -259,7 +267,9 @@ pub fn kill_tree(pid: u32) {
     }
     #[cfg(not(unix))]
     {
-        let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).output();
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &pid.to_string()]).creation_flags(CREATE_NO_WINDOW).output();
     }
 }
 

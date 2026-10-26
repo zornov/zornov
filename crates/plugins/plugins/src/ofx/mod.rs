@@ -125,6 +125,13 @@ fn worker_command(bundle: &Path) -> Command {
     let program = std::env::var_os("STUDIO_OFX_WORKER").map(PathBuf::from).or_else(|| Some(exe.with_file_name("studio-ofx-worker")).filter(|p| p.is_file())).unwrap_or(exe);
     let mut c = Command::new(program);
     c.arg("ofx-worker").arg(bundle);
+    // `studio-ofx-worker` is a console program; the window must not get one.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
     c
 }
 

@@ -16,6 +16,12 @@
 //!
 //! `--shot` renders `--frames` frames (default 40), saves a screenshot of the
 //! window as PNG and exits.
+//!
+//! On Windows this is a window program, so a double click or the Start menu
+//! opens the editor with no console beside it; the terminal side runs through
+//! `zornov-cli.exe` (`src/bin/zornov-cli.rs`).
+
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
 mod agent;
 mod convert;
@@ -89,6 +95,31 @@ mod theme;
 mod thumbs;
 
 fn main() -> eframe::Result {
+    // Started by `zornov-cli.exe`: use its console for the prompt and the
+    // commands. Programs started from here must not inherit the request.
+    #[cfg(windows)]
+    if std::env::var_os("ZORNOV_CONSOLE").is_some() {
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        // SAFETY: first thing in main, before any other thread exists.
+        unsafe {
+            std::env::remove_var("ZORNOV_CONSOLE");
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+    // DirectX 12 with DXC when it is next to the program (build.rs puts it
+    // there): Vulkan crashes in some drivers (Intel UHD) and FXC, DirectX 12's
+    // own compiler, cannot compile every shader. WGPU_BACKEND or
+    // WGPU_DX12_COMPILER set by hand still win.
+    #[cfg(windows)]
+    if std::env::var_os("WGPU_BACKEND").is_none() && std::env::current_exe().is_ok_and(|e| e.with_file_name("dxcompiler.dll").is_file()) {
+        // SAFETY: still before any other thread exists.
+        unsafe {
+            std::env::set_var("WGPU_BACKEND", "dx12");
+            if std::env::var_os("WGPU_DX12_COMPILER").is_none() {
+                std::env::set_var("WGPU_DX12_COMPILER", "dxc");
+            }
+        }
+    }
     // `zornov ofx-worker BUNDLE`: hosts one OpenFX bundle for the editor.
     studio_plugins::ofx::worker_if_asked();
     // Folders kept under the old name (Studio) move to Zornov before

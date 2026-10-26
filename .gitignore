@@ -44,6 +44,13 @@ GEMINI.md
 .Spotlight-V100
 .Trashes
 
+# Windows clutter
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
 # Editor swap and backup files
 *.swp
 *.swo
@@ -100,6 +107,10 @@ junit.xml
 *.dmg
 *.pkg
 *.app/
+*.msi
+*.msix
+*.wixpdb
+*.wixobj
 *.zip
 *.tar.gz
 !/testdata/**
@@ -125,6 +136,10 @@ agent-notes.md
 *.ips
 *.sample.txt
 core
+*.dmp
+*.stackdump
+# Windows debug symbols (inside target/ already; these are strays)
+*.pdb
 
 # Python helper scripts (tools/vjepa)
 __pycache__/

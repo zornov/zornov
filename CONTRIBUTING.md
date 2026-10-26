@@ -48,7 +48,9 @@ docker run --rm -v "$PWD:/work" zornov-linux cargo check --target x86_64-pc-wind
 ```
 
 It compiles but does not run anything; running and testing Windows needs
-Windows itself.
+Windows itself. See [`docs/windows.md`](docs/windows.md) for building there,
+and for the two programs Windows ships (`zornov.exe` for the window,
+`zornov-cli.exe` for the terminal).
 
 ## Git hooks
 
