@@ -1091,8 +1091,8 @@ fn probe(path: &Path) -> (String, f64, u32, u32) {
 
 /// Where a file came from, as far as its place says.
 fn guess_source(path: &Path) -> String {
-    let s = path.display().to_string();
-    let studio = studio_paths::studio().display().to_string();
+    let s = path.display().to_string().replace('\\', "/");
+    let studio = studio_paths::studio().display().to_string().replace('\\', "/");
     if s.starts_with(&format!("{studio}/Made")) || s.contains("/generated/") || s.contains("/Generated/") {
         "generated".into()
     } else if s.starts_with(&format!("{studio}/Content")) || s.contains("/studio-content/") {

@@ -76,7 +76,7 @@ mod tests {
         assert!(matches!(after.speed, m::Speed::Constant(r) if (r - 1.0).abs() < 1e-9), "{:?}", after.speed);
         let m::ClipSource::Media(r) = &after.source else { panic!() };
         let mi = s.doc.model.media_item(r.media).unwrap();
-        assert!(mi.path.contains("Slow motion/"), "{}", mi.path);
+        assert!(mi.path.replace('\\', "/").contains("Slow motion/"), "{}", mi.path);
         // The same moments: new source time = (old − first) × 4.
         for (k, old) in shown_before.iter().enumerate() {
             let new = after.source_time_at(after.start + k as i64 * after.duration / 8);

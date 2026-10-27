@@ -626,7 +626,7 @@ mod tests {
         assert_eq!(call(&mut s, "assets", json!({"action": "missing"}))["missing"], 1);
         let fix = call(&mut s, "assets", json!({"action": "relink", "search": [dir.join("elsewhere").display().to_string()]}));
         assert_eq!(fix["relinked"], 1, "{fix}");
-        assert!(s.doc.model.media.iter().any(|m| m.path.ends_with("elsewhere/azure.png")));
+        assert!(s.doc.model.media.iter().any(|m| m.path.replace('\\', "/").ends_with("elsewhere/azure.png")));
         assert_eq!(call(&mut s, "assets", json!({"action": "missing"}))["missing"], 0);
         assert_eq!(call(&mut s, "assets", json!({"action": "bin", "name": "Picks"}))["assets"][0]["name"], "azure.png", "ratings follow the file");
         // Rights: an expired licence on something the timeline uses stops an export.

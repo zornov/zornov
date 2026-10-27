@@ -689,7 +689,7 @@ mod tests {
         assert_eq!(after.duration, before.duration);
         let m::ClipSource::Media(r) = &after.source else { panic!() };
         let mi = s.doc.model.media_item(r.media).unwrap();
-        assert!(mi.path.contains("Generated/"), "{}", mi.path);
+        assert!(mi.path.replace('\\', "/").contains("Generated/"), "{}", mi.path);
         let first_us = shown[0] - after.source_time_at(after.start);
         for (k, t) in shown.iter().enumerate() {
             let now = after.source_time_at(after.start + k as i64 * after.duration / 4);

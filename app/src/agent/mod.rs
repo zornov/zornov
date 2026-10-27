@@ -153,7 +153,7 @@ mod search_media;
 pub mod web;
 pub mod jobs;
 pub mod procs;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod crew_stop;
 pub mod generate;
 #[cfg(feature = "render")]

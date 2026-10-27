@@ -863,7 +863,7 @@ mod tests {
         for what in ["breakdown", "schedule", "budget", "pipeline", "progress"] {
             let e = prod(&mut s, json!({"do": "export", "what": what}));
             let path = e["written"].as_str().unwrap();
-            assert!(path.contains("/production/"), "{path}");
+            assert!(path.replace('\\', "/").contains("/production/"), "{path}");
             assert!(std::fs::read(path).unwrap().starts_with(b"%PDF"), "{what}");
         }
         let all = prod(&mut s, json!({"do": "export", "what": "all_call_sheets"}));
