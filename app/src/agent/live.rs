@@ -354,6 +354,7 @@ impl Live {
     /// Each frame: take finished results onto the document, start the next
     /// call.
     pub fn tick(&mut self, doc: &mut Doc, calls: &Receiver<ToolCall>) {
+        super::inproc::publish_if_wanted(&doc.model, rev(doc));
         while let Ok(c) = calls.try_recv() {
             if c.epoch < self.floor {
                 let _ = c.reply.send(Err("The user stopped this request. Do nothing more.".into()));

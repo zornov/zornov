@@ -505,7 +505,15 @@ pub fn main(args: &[String]) -> i32 {
         let _ = std::fs::write(out.join("results.json"), serde_json::to_string_pretty(&json!({"results": results})).unwrap_or_default());
     }
     let mean = if results.is_empty() { 0.0 } else { results.iter().filter_map(|r| r["score"].as_f64()).sum::<f64>() / results.len() as f64 };
-    let line = json!({"when": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()), "provider": provider, "model": model, "crew": crew_mode, "mean": mean, "tasks": results.iter().map(|r| json!({"task": r["task"], "score": r["score"], "seconds": r["seconds"], "friction": r["friction"]})).collect::<Vec<_>>()});
+    // How tight the loop was, over every task: what recording cost a call,
+    // how long a call took to reach the live tap, fix to retried call.
+    let avg = |k: &str| -> Value {
+        let v: Vec<f64> = results.iter().filter_map(|r| r["friction"]["speed"][k]["mean"].as_f64()).collect();
+        if v.is_empty() { Value::Null } else { json!((v.iter().sum::<f64>() / v.len() as f64 * 10.0).round() / 10.0) }
+    };
+    let speed = json!({"record_us_mean": avg("record_us"), "stream_queue_us_mean": avg("stream_queue_us"), "fix_to_retry_s_mean": avg("fix_to_retry_s")});
+    println!("loop: record {} µs a call, {} µs to the live tap, fix to retry {} s", speed["record_us_mean"], speed["stream_queue_us_mean"], speed["fix_to_retry_s_mean"]);
+    let line = json!({"when": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()), "provider": provider, "model": model, "crew": crew_mode, "mean": mean, "speed": speed, "tasks": results.iter().map(|r| json!({"task": r["task"], "score": r["score"], "seconds": r["seconds"], "friction": r["friction"]})).collect::<Vec<_>>()});
     let history = out.join("history.jsonl");
     let before = std::fs::read_to_string(&history).ok().and_then(|t| t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["crew"] == json!(crew_mode)).last());
     let _ = std::fs::write(out.join("results.json"), serde_json::to_string_pretty(&json!({"summary": line, "results": results})).unwrap_or_default());

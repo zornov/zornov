@@ -69,7 +69,13 @@ fn open_window(args: &[String], project: &Option<PathBuf>) -> Option<PathBuf> {
 pub fn mcp(args: &[String]) -> i32 {
     // A read-only tap on an open window's calls (observe.rs).
     if args.first().map(String::as_str) == Some("--observe") {
+        #[cfg(feature = "agent-dev")]
         return super::observe::main(&args[1..]);
+        #[cfg(not(feature = "agent-dev"))]
+        {
+            eprintln!("zornov mcp --observe: this build has no live tap (it is in development builds made with --features agent-dev)");
+            return 2;
+        }
     }
     super::trace::set_source(super::trace::Source::Stdio);
     // Claude Code driving the editor window: tools run there.

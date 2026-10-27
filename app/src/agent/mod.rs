@@ -140,7 +140,13 @@ pub mod eval;
 pub mod trace;
 pub mod trace_report;
 pub mod replay;
+#[cfg(feature = "agent-dev")]
 pub mod observe;
+#[cfg(feature = "agent-dev")]
+pub mod dev;
+mod hot;
+mod local_only;
+pub mod inproc;
 mod mcp_extras;
 mod readback;
 mod grounding;
@@ -609,10 +615,15 @@ impl Session {
     /// Runs a tool and, in project mode, saves when the project changed.
     pub fn run(&mut self, tool: &str, a: &Value) -> Result<Vec<Content>, String> {
         // The flight recorder (trace.rs): who called, what changed.
-        let mark = trace::Mark::new(self, a);
+        let mark = trace::Mark::new(self, tool, a);
         let a = mark.args();
         let started = std::time::Instant::now();
-        let r = if tool == trace::FEEDBACK { trace::feedback(a) } else { self.run_inner(tool, a) };
+        // hot.rs: tools swapped in from crates/dev/agent-hot (agent-dev builds; nothing otherwise).
+        let r = match hot::call(tool, a) {
+            Some(r) => r,
+            None if tool == trace::FEEDBACK => trace::feedback(a),
+            None => self.run_inner(tool, &hot::normalise(tool, a)),
+        };
         self.record(tool, a, &r, started.elapsed());
         mark.end(self, tool, &r);
         r

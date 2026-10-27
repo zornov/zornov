@@ -8,9 +8,16 @@
 //! The calls run on a copy of `--project` (a blank project without it),
 //! never the project itself, with the recorder off. For each call it says
 //! whether the outcome is the same: worked or failed, the error, whether
-//! the project changed, and the read-back of the clips. Calls that reach
-//! outside (downloads, generation, the web, exports, plugins) and calls
-//! whose arguments were redacted are skipped unless `--all`.
+//! the project changed, and the read-back of the clips.
+//!
+//! A trace is untrusted input (anyone could hand you one), so every call is
+//! checked before it runs: only tools on a short list that stay inside the
+//! project (edit, undo, the reads and looks), no op that reaches outside
+//! (voices, generation, scripts, plugins), arguments of a sane size, and
+//! every path inside the project copy (a path into the original project is
+//! moved into the copy; any other path, URL or `..` and the call is
+//! skipped). No shell, no external program, nothing from the network; a
+//! skipped call says why.
 //!
 //! `--emit-test` writes each call that failed in the recording as a
 //! fixture in `app/tests/agent_replays/`: the calls before it that changed
@@ -23,8 +30,14 @@ use super::{Content, Session};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
-/// Tools that reach outside the project or cost money; skipped unless `--all`.
-const OUTSIDE: &[&str] = &["download", "generate", "ai", "read", "search_media", "share", "team", "account", "plugins", "open", "new_project", "export", "deliver", "queue", "bundle", "cutdown", "capture", "enhance", "picture", "dub", "voices", "made"];
+/// The only tools a replay runs: they act on the project or read it.
+const ALLOWED: &[&str] = &["edit", "undo", "redo", "summary", "inspect", "media", "catalogue", "guide", "edit_schema", "check", "frame", "contact_sheet", "capabilities", "howto", "editorial", "canvas_layout", "scopes", "fonts"];
+/// Ops that reach outside the project (voices, generation, code), never replayed.
+const DENIED_OPS: &[&str] = &["narrate", "sing", "dub", "voice", "generate", "download", "plugin", "script", "shell", "run", "exec", "import_camera", "export_camera", "raw"];
+/// Keys whose strings are paths.
+const PATH_KEYS: &[&str] = &["path", "paths", "file", "files", "out", "dir", "folder", "image", "images", "end_image", "style_ref", "refs", "media", "audio", "video", "font", "lut", "camera_file"];
+/// Most arguments one replayed call may carry.
+const ARGS_MAX: usize = 256 << 10;
 
 /// The outcome of one call, as the trace keeps it.
 #[derive(Clone, Debug, PartialEq)]
@@ -37,7 +50,7 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    fn of_recorded(c: &Value) -> Self {
+    pub(crate) fn of_recorded(c: &Value) -> Self {
         Outcome {
             ok: c["ok"].as_bool().unwrap_or(false),
             error: c["error"].as_str().map(first_line),
@@ -47,7 +60,7 @@ impl Outcome {
         }
     }
 
-    fn of_run(r: &Result<Vec<Content>, String>, changed: bool) -> Self {
+    pub(crate) fn of_run(r: &Result<Vec<Content>, String>, changed: bool) -> Self {
         let reply = match r {
             Ok(parts) => parts.iter().find_map(|p| if let Content::Text(t) = p { Some(super::trace::excerpt(t)) } else { None }).unwrap_or(Value::Null),
             Err(_) => Value::Null,
@@ -100,19 +113,78 @@ fn strip_ids(v: &Value) -> Value {
     }
 }
 
-/// Why a recorded call is not run again, if it is not.
-fn skip_reason(c: &Value, all: bool) -> Option<String> {
-    let tool = c["tool"].as_str().unwrap_or("");
+/// Where the recorded project was, and its copy (paths move from one to the other).
+#[derive(Clone, Default)]
+pub struct Confine {
+    pub from: Option<PathBuf>,
+    pub to: Option<PathBuf>,
+}
+
+/// The call to run, checked: its tool and arguments with every path inside
+/// the copy; `Err` says why it is skipped.
+pub fn checked(c: &Value, confine: &Confine) -> Result<(String, Value), String> {
+    let tool = c["tool"].as_str().ok_or("no tool")?;
+    if tool.len() > 64 || !tool.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+        return Err("not a tool name".into());
+    }
     if tool == super::trace::FEEDBACK {
-        return Some("feedback (nothing to run)".into());
+        return Err("feedback (nothing to run)".into());
     }
-    if c["args"].to_string().contains("[redacted ") {
-        return Some("its arguments were redacted".into());
+    if !ALLOWED.contains(&tool) {
+        return Err(format!("{tool} is not replayed (only tools that stay inside the project are)"));
     }
-    if !all && OUTSIDE.contains(&tool) {
-        return Some(format!("{tool} reaches outside the project (--all runs it)"));
+    let mut args = c.get("args").cloned().unwrap_or_else(|| json!({}));
+    if !args.is_object() {
+        return Err("its arguments are not an object".into());
     }
-    None
+    let text = args.to_string();
+    if text.len() > ARGS_MAX {
+        return Err(format!("its arguments are {} bytes", text.len()));
+    }
+    if text.contains("[redacted") || args.get("_truncated_bytes").is_some() {
+        return Err("its arguments were redacted".into());
+    }
+    if let Some(op) = args["ops"].as_array().into_iter().flatten().filter_map(|o| o["op"].as_str()).find(|o| DENIED_OPS.contains(o)) {
+        return Err(format!("op {op} reaches outside the project"));
+    }
+    confine_paths(&mut args, None, confine)?;
+    Ok((tool.to_owned(), args))
+}
+
+/// Every path-like string moved into the copy, or an error.
+fn confine_paths(v: &mut Value, key: Option<&str>, c: &Confine) -> Result<(), String> {
+    match v {
+        Value::String(s) => {
+            let lower = s.to_lowercase();
+            if lower.starts_with("http:") || lower.starts_with("https:") || lower.starts_with("ftp:") || lower.starts_with("file:") {
+                return Err(format!("it names a link ({})", short(&json!(s))));
+            }
+            let pathy = key.is_some_and(|k| PATH_KEYS.contains(&k)) && (s.contains('/') || s.contains('\'));
+            let absolute = s.starts_with('/') || s.starts_with('~') || s.starts_with('\') || (s.len() > 2 && s.as_bytes()[1] == b':' && s.as_bytes()[0].is_ascii_alphabetic());
+            if !(pathy || absolute) {
+                return Ok(());
+            }
+            let p = std::path::Path::new(s.as_str());
+            if p.components().any(|x| matches!(x, std::path::Component::ParentDir)) {
+                return Err(format!("it names a path with .. ({s})"));
+            }
+            let moved = match (&c.from, &c.to) {
+                (Some(from), Some(to)) if p.is_absolute() => p.strip_prefix(from).ok().map(|rest| to.join(rest)),
+                (_, Some(to)) if p.is_relative() && !s.starts_with('~') => Some(to.join(p)),
+                _ => None,
+            };
+            match moved {
+                Some(m) => {
+                    *s = m.display().to_string();
+                    Ok(())
+                }
+                None => Err(format!("it names a path outside the project copy ({s})")),
+            }
+        }
+        Value::Array(a) => a.iter_mut().try_for_each(|x| confine_paths(x, key, c)),
+        Value::Object(o) => o.iter_mut().try_for_each(|(k, x)| confine_paths(x, Some(k.as_str()), c)),
+        _ => Ok(()),
+    }
 }
 
 /// A copy of a project folder to replay on (its traces left behind).
@@ -129,8 +201,13 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
         if p.file_name().is_some_and(|n| n == "agent-trace" || n == "agent-usage.jsonl") {
             continue;
         }
+        // Links are not followed: a copy holds the project's own files only.
+        let Ok(kind) = std::fs::symlink_metadata(&p).map(|m| m.file_type()) else { continue };
+        if kind.is_symlink() {
+            continue;
+        }
         let dest = to.join(e.file_name());
-        if p.is_dir() {
+        if kind.is_dir() {
             copy_dir(&p, &dest)?;
         } else {
             std::fs::copy(&p, &dest)?;
@@ -169,15 +246,18 @@ pub struct Step {
 }
 
 /// Replays `trace`'s calls `from..=to` (1-based) on `s`.
-pub fn replay(s: &mut Session, trace: &Trace, from: usize, to: usize, all: bool) -> Vec<Step> {
+pub fn replay(s: &mut Session, trace: &Trace, from: usize, to: usize, confine: &Confine) -> Vec<Step> {
     let mut steps = Vec::new();
     for (i, c) in trace.calls.iter().enumerate().skip(from.saturating_sub(1)).take(to + 1 - from.max(1)) {
-        let tool = c["tool"].as_str().unwrap_or("").to_owned();
-        if let Some(why) = skip_reason(c, all) {
-            steps.push(Step { call: i + 1, tool, skipped: Some(why), diff: Vec::new() });
-            continue;
-        }
-        let now = run_call(s, &tool, &c["args"]);
+        let tool: String = c["tool"].as_str().unwrap_or("?").chars().take(64).collect();
+        let (tool, args) = match checked(c, confine) {
+            Ok(x) => x,
+            Err(why) => {
+                steps.push(Step { call: i + 1, tool, skipped: Some(why), diff: Vec::new() });
+                continue;
+            }
+        };
+        let now = run_call(s, &tool, &args);
         let diff = Outcome::of_recorded(c).diff(&now);
         steps.push(Step { call: i + 1, tool, skipped: None, diff });
     }
@@ -198,12 +278,16 @@ pub fn fixture(trace: &Trace, n: usize) -> Value {
     let c = &trace.calls[n - 1];
     let setup: Vec<Value> = trace.calls[..n - 1]
         .iter()
-        .filter(|p| p["ok"] == json!(true) && p["rev_before"] != p["rev_after"] && skip_reason(p, false).is_none() && !matches!(p["tool"].as_str(), Some("undo" | "redo")))
-        .map(|p| json!({"tool": p["tool"], "args": p["args"]}))
+        .filter(|p| p["ok"] == json!(true) && p["rev_before"] != p["rev_after"] && !matches!(p["tool"].as_str(), Some("undo" | "redo")))
+        .filter_map(|p| checked(p, &Confine::default()).ok())
+        .map(|(tool, args)| json!({"tool": tool, "args": args}))
         .collect();
     let mut s = Session::default();
     let setup_ok = setup.iter().all(|p| run_call(&mut s, p["tool"].as_str().unwrap_or(""), &p["args"]).ok);
-    let now = run_call(&mut s, c["tool"].as_str().unwrap_or(""), &c["args"]);
+    let now = match checked(c, &Confine::default()) {
+        Ok((tool, args)) => run_call(&mut s, &tool, &args),
+        Err(why) => Outcome { ok: false, error: Some(format!("not replayable: {why}")), changed: false, read_back: Value::Null, unchanged: Value::Null },
+    };
     json!({
         "name": format!("{}-{}-{}", c["tool"].as_str().unwrap_or("call"), trace.name, n),
         "from": {"session": trace.name, "call": n, "source": c["source"]},
@@ -229,13 +313,19 @@ fn write_fixture(f: &Value) -> Result<PathBuf, String> {
 /// Runs a fixture; `Err` says how this build differs from what it expects.
 pub fn check_fixture(f: &Value) -> Result<(), String> {
     let mut s = Session::default();
+    // Fixtures are checked like traces: no paths, only the listed tools.
+    let none = Confine::default();
     for p in f["setup"].as_array().into_iter().flatten() {
-        let o = run_call(&mut s, p["tool"].as_str().unwrap_or(""), &p["args"]);
+        let (tool, args) = checked(p, &none)?;
+        let o = run_call(&mut s, &tool, &args);
         if !o.ok && f["setup_reproduced"] == json!(true) {
             return Err(format!("setup call {} failed: {}", p["tool"], o.error.unwrap_or_default()));
         }
     }
-    let now = run_call(&mut s, f["call"]["tool"].as_str().unwrap_or(""), &f["call"]["args"]);
+    let now = match checked(&f["call"], &none) {
+        Ok((tool, args)) => run_call(&mut s, &tool, &args),
+        Err(why) => Outcome { ok: false, error: Some(format!("not replayable: {why}")), changed: false, read_back: Value::Null, unchanged: Value::Null },
+    };
     let want_ok = f["expect"]["ok"].as_bool().unwrap_or(true);
     if now.ok != want_ok {
         return Err(format!("expected it to {}, it {}{}", if want_ok { "work" } else { "fail" }, if now.ok { "worked" } else { "failed: " }, now.error.unwrap_or_default()));
@@ -255,7 +345,7 @@ pub fn main(args: &[String]) -> i32 {
     let get = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let flagged = |i: usize| i > 0 && matches!(args[i - 1].as_str(), "--project" | "-p" | "--call" | "--upto" | "--session");
     let Some(path) = args.iter().enumerate().find(|(i, a)| !a.starts_with('-') && !flagged(*i)).map(|(_, a)| PathBuf::from(a)) else {
-        eprintln!("usage: zornov replay <trace.jsonl|dir> [--session NAME] [--project DIR] [--call N | --upto N] [--all] [--emit-test]");
+        eprintln!("usage: zornov replay <trace.jsonl|dir> [--session NAME] [--project DIR] [--call N | --upto N] [--emit-test]");
         return 2;
     };
     let traces = match load(&path) {
@@ -289,7 +379,8 @@ pub fn main(args: &[String]) -> i32 {
         }
     };
     println!("replaying {} calls {from}..{to} of {n} on {}", trace.name, copy.as_ref().map_or("a blank project".into(), |c| format!("a copy at {}", c.display())));
-    let steps = replay(&mut s, &trace, from, to, args.iter().any(|a| a == "--all"));
+    let confine = Confine { from: project.as_ref().and_then(|p| std::fs::canonicalize(p).ok()), to: copy.as_ref().and_then(|c| std::fs::canonicalize(c).ok()) };
+    let steps = replay(&mut s, &trace, from, to, &confine);
     let (mut same, mut differ, mut skipped) = (0, 0, 0);
     for st in &steps {
         match (&st.skipped, st.diff.is_empty()) {
@@ -314,7 +405,7 @@ pub fn main(args: &[String]) -> i32 {
     if args.iter().any(|a| a == "--emit-test") {
         for i in from..=to {
             let c = &trace.calls[i - 1];
-            if c["ok"] == json!(true) || skip_reason(c, false).is_some() {
+            if c["ok"] == json!(true) || checked(c, &Confine::default()).is_err() {
                 continue;
             }
             match write_fixture(&fixture(&trace, i)) {
@@ -350,16 +441,39 @@ mod tests {
     #[test]
     fn a_replayed_call_is_compared_with_the_recording() {
         let rec = json!({"tool": "edit", "args": {"ops": [{"op": "no_such_op"}]}, "ok": true, "rev_before": 0, "rev_after": 1});
-        let t = Trace { name: "t".into(), file: PathBuf::new(), calls: vec![rec, json!({"tool": "feedback", "args": {}, "ok": true})] };
+        let t = Trace { name: "t".into(), file: PathBuf::new(), calls: vec![rec, json!({"tool": "feedback", "args": {}, "ok": true})], events: Vec::new() };
         let mut s = Session::default();
-        let steps = replay(&mut s, &t, 1, 2, false);
+        let steps = replay(&mut s, &t, 1, 2, &Confine::default());
         assert!(steps[0].diff.iter().any(|d| d.contains("fails now")), "{:?}", steps[0].diff);
         assert!(steps[1].skipped.is_some());
     }
 
     #[test]
+    fn a_trace_cannot_reach_outside_the_copy() {
+        let to = std::env::temp_dir().join("zornov-replay-confine");
+        let c = Confine { from: Some(PathBuf::from("/home/me/film")), to: Some(to.clone()) };
+        let call = |tool: &str, args: Value| json!({"tool": tool, "args": args});
+        let (_, a) = checked(&call("edit", json!({"ops": [{"op": "place", "media": "/home/me/film/media/a.mp4"}]})), &c).unwrap();
+        assert_eq!(a["ops"][0]["media"], to.join("media/a.mp4").display().to_string(), "moved into the copy");
+        for (tool, args) in [
+            ("edit", json!({"ops": [{"op": "place", "media": "/etc/passwd"}]})),
+            ("edit", json!({"ops": [{"op": "place", "media": "media/../../x"}]})),
+            ("edit", json!({"ops": [{"op": "place", "media": "~/secret.mov"}]})),
+            ("edit", json!({"ops": [{"op": "place", "media": "https://example.com/a.mp4"}]})),
+            ("edit", json!({"ops": [{"op": "narrate", "text": "hi"}]})),
+            ("plugins", json!({"action": "create", "source": "fn main() {}"})),
+            ("automation", json!({})),
+            ("Edit; rm -rf /", json!({})),
+            ("edit", json!("not an object")),
+        ] {
+            assert!(checked(&call(tool, args.clone()), &c).is_err(), "{tool} {args} should be skipped");
+        }
+        assert!(checked(&call("edit", json!({"ops": [{"op": "text", "text": "1/2 price"}]})), &Confine::default()).is_ok(), "words with a slash are not paths");
+    }
+
+    #[test]
     fn a_fixture_keeps_what_this_build_does() {
-        let t = Trace { name: "s".into(), file: PathBuf::new(), calls: vec![json!({"tool": "edit", "args": {"ops": [{"op": "no_such_op"}]}, "ok": false, "error": "unknown op", "rev_before": 0, "rev_after": 0, "source": "stdio"})] };
+        let t = Trace { name: "s".into(), file: PathBuf::new(), calls: vec![json!({"tool": "edit", "args": {"ops": [{"op": "no_such_op"}]}, "ok": false, "error": "unknown op", "rev_before": 0, "rev_after": 0, "source": "stdio"})], events: Vec::new() };
         let f = fixture(&t, 1);
         assert_eq!(f["expect"]["ok"], false);
         check_fixture(&f).unwrap();

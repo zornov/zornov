@@ -33,12 +33,20 @@ const RETRY_WINDOW: usize = 3;
 /// How many calls after an edit an undo counts against it.
 const UNDO_WINDOW: usize = 3;
 
-/// One recorded session: its file and its calls in order.
+/// One recorded session: its file, its calls in order, and the lines that
+/// are not calls (hot swaps).
 pub struct Trace {
     pub name: String,
     pub file: PathBuf,
     pub calls: Vec<Value>,
+    pub events: Vec<Value>,
 }
+
+/// A trace is input from anywhere: files past this are not read,
+/// lines past this are skipped, and no more calls than this are kept.
+const FILE_MAX: u64 = 256 << 20;
+const LINE_MAX: usize = 1 << 20;
+const CALLS_MAX: usize = 200_000;
 
 /// The traces in `path`: one file, or every `.jsonl` under a folder.
 pub fn load(path: &Path) -> Result<Vec<Trace>, String> {
@@ -53,14 +61,21 @@ pub fn load(path: &Path) -> Result<Vec<Trace>, String> {
     }
     let mut out = Vec::new();
     for f in files {
+        let len = std::fs::symlink_metadata(&f).map_err(|e| format!("{}: {e}", f.display()))?.len();
+        if len > FILE_MAX {
+            eprintln!("{}: {} MB, more than a trace holds; skipped", f.display(), len >> 20);
+            continue;
+        }
         let text = std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?;
-        let mut calls: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v.get("tool").is_some() && v.get("ok").is_some()).collect();
-        if calls.is_empty() {
+        let lines: Vec<Value> = text.lines().filter(|l| l.len() <= LINE_MAX).filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(Value::is_object).take(CALLS_MAX).collect();
+        let (mut calls, events): (Vec<Value>, Vec<Value>) = lines.into_iter().partition(|v| v["tool"].is_string() && v["ok"].is_boolean());
+        let events: Vec<Value> = events.into_iter().filter(|v| v["event"].is_string()).collect();
+        if calls.is_empty() && events.is_empty() {
             continue;
         }
         calls.sort_by_key(|c| (c["at"].as_u64().unwrap_or(0), c["seq"].as_u64().unwrap_or(0)));
         let name = f.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        out.push(Trace { name, file: f, calls });
+        out.push(Trace { name, file: f, calls, events });
     }
     Ok(out)
 }
@@ -69,9 +84,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
-        if p.is_dir() {
+        // Links are not followed (no loops, no reading outside the folder given).
+        if e.file_type().is_ok_and(|t| t.is_dir()) {
             collect(&p, out);
-        } else if p.extension().is_some_and(|x| x == "jsonl") && !p.file_name().is_some_and(|n| n == "agent-usage.jsonl" || n == "history.jsonl") {
+        } else if p.extension().is_some_and(|x| x == "jsonl") && !p.file_name().is_some_and(|n| n == "agent-usage.jsonl" || n == "history.jsonl") && !std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
             out.push(p);
         }
     }
@@ -453,7 +469,26 @@ pub fn metrics(t: &Trace) -> Value {
         "feedback": count(Kind::Feedback),
         "reply_tokens": calls.iter().filter_map(|c| c["reply_tokens"].as_u64()).sum::<u64>(),
         "wall_seconds": (wall * 10.0).round() / 10.0,
+        "speed": speed(t),
     })
+}
+
+/// How tight the loop is: what recording cost each call (`record_us`), how
+/// long a call waited to reach the writer and so the live tap (`queue_us`),
+/// and how long a hot-swapped fix took from build to retried call.
+pub fn speed(t: &Trace) -> Value {
+    let stats = |mut v: Vec<f64>| -> Value {
+        if v.is_empty() {
+            return Value::Null;
+        }
+        v.sort_by(f64::total_cmp);
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        let p99 = v[((v.len() as f64 * 0.99).ceil() as usize).clamp(1, v.len()) - 1];
+        json!({"mean": (mean * 10.0).round() / 10.0, "p99": p99, "max": v[v.len() - 1]})
+    };
+    let field = |k: &str| t.calls.iter().filter_map(|c| c[k].as_f64()).collect::<Vec<_>>();
+    let fixes: Vec<f64> = t.events.iter().filter(|e| e["event"] == "swap").filter_map(|e| e["fix_to_retry_ms"].as_f64()).map(|ms| ms / 1000.0).collect();
+    json!({"record_us": stats(field("record_us")), "stream_queue_us": stats(field("queue_us")), "fix_to_retry_s": stats(fixes)})
 }
 
 // ------------------------------------------------------------ command
@@ -531,7 +566,17 @@ mod tests {
     }
 
     fn trace(calls: Vec<Value>) -> Trace {
-        Trace { name: "t".into(), file: PathBuf::new(), calls }
+        Trace { name: "t".into(), file: PathBuf::new(), calls, events: Vec::new() }
+    }
+
+    #[test]
+    fn speed_is_measured_from_the_lines() {
+        let mut t = trace(vec![call(1, "summary", json!({}), true, (0, 0), json!({"record_us": 4, "queue_us": 30})), call(2, "summary", json!({}), true, (0, 0), json!({"record_us": 8, "queue_us": 50}))]);
+        t.events.push(json!({"event": "swap", "fix_to_retry_ms": 4200.0}));
+        let s = speed(&t);
+        assert_eq!(s["record_us"]["mean"], 6.0);
+        assert_eq!(s["stream_queue_us"]["max"], 50.0);
+        assert_eq!(s["fix_to_retry_s"]["mean"], 4.2);
     }
 
     #[test]

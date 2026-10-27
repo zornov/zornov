@@ -7,7 +7,26 @@ friction in the records is found and ranked for you, any recorded call can
 be run again on the current build, and a coding agent in this repository can
 watch an agent inside the app as it works.
 
-All of it is local. Nothing is sent anywhere.
+All of it is local. Nothing is sent anywhere, and nothing listens on the
+network.
+
+| | release build | dev build (`cargo run`) | dev build with `--features agent-dev` |
+|---|---|---|---|
+| flight recorder | off, `zornov trace on` to opt in | on | on |
+| `zornov trace report`, `zornov replay` (on a copy) | yes | yes | yes |
+| `feedback` tool | yes | yes | yes |
+| live tap `zornov mcp --observe` | not built | not built | yes |
+| two-way `zornov dev ask / retry` | not built | not built | yes |
+| hot-swapped tools `zornov dev swap` | not built | not built | yes |
+
+`agent-dev` is a cargo feature that release builds never turn on, and a
+build with it in release mode does not compile (`compile_error!` in
+`app/src/agent/dev.rs`). In a build without it, the tap, the two-way channel
+and the hot-swap loader do not exist, so no setting can turn them on.
+
+```bash
+cargo run -p studio-app --features agent-dev
+```
 
 ## The flight recorder
 
@@ -23,17 +42,40 @@ Every tool call, from every source, is written down as one line of JSON:
 | `rev_before`, `rev_after` | the project's revision before and after |
 | `clips` | the clip ids it `added`, `removed` and `changed` |
 | `reply` | the parts of the answer the report and replay compare: notes, the read-back, `check`'s problems |
-| `module` | the Rust module that answered (`agent::quality`, `agent::mod (edit: set, animate)`) |
+| `module` | the Rust module that answered (`agent::quality`, `agent::mod (edit: set, animate)`, `zornov_agent_hot (hot-swapped)`) |
+| `seq` | the call's number in this process (`zornov dev retry` takes it) |
+| `record_us`, `queue_us` | what recording cost the call, and how long the line waited for the writer (and so the live tap) |
 
 Lines go to `.zornov/agent-trace/<session>.jsonl` in the project folder, or
 `agent-trace/` in Zornov's cache when there is no project. A session is one
 process (`<start time>-<pid>`); `zornov eval` starts one for each task.
 
-**Redaction.** Strings under keys such as `data`, `bytes`, `content`,
-`source`, `pixel`, `wgsl`, `token`, `api_key` and `password`, `data:` URLs,
-long base64-looking strings and any string over 4 000 bytes are replaced by
-`[redacted N bytes]`. Paths, ids, times and the words of titles stay, so a
-call can be replayed. Pictures in replies are counted, never kept.
+**Redaction.** These are replaced by `[redacted N bytes]`:
+- media and file contents: keys such as `data`, `bytes`, `content`, `source`,
+  `pixel` and `wgsl`, `data:` URLs, long base64-looking strings, and any
+  string over 4 000 bytes;
+- secrets: any key containing `secret`, `token`, `password`, `api_key`,
+  `authorization`, `cookie`, `credential` or `private_key`;
+- anything that looks like a key: `sk-…`, `ghp_…`, `xoxb-…`, `AKIA…`, JWTs
+  (`eyJ…`), `Bearer …`, `-----BEGIN …`, and long single words of letters
+  and digits.
+
+Errors and notes have the same words taken out, for example
+`Authorization: Bearer …` and `token=…`. Paths, ids, times and the words of
+titles stay, so a call can be replayed. Pictures in replies are counted,
+never kept. Arguments still over 64 KB after redaction are kept as their
+size.
+
+**Files.** Traces are `0600` in a `0700` folder on Unix, and owner-only on
+Windows. A file is rotated at 16 MB, with at most 8 kept per session and
+256 MB per folder, oldest first.
+
+**Cost.** The call hands its sizes, its arguments, the first text of the
+reply and a shared pointer to the view before and after to one writer
+thread over a channel. Building the line, redacting, comparing clips,
+writing and telling the taps all happen there, and writes are buffered and
+flushed when the writer is idle. With the recorder off and no tap, a call
+pays two atomic loads.
 
 **On or off.** On by default in dev builds (`cargo run`), off in release
 builds unless switched on:
@@ -55,7 +97,8 @@ itself, are recorded from `live.rs`.
 Agents also get a `feedback` tool: `expected`, `got`, and optionally `tool`,
 `kind` (`surprise`, `ignored_field`, `unclear_error`, `missing`, `docs`,
 `slow`, `intended`) and `finding`. It changes nothing and costs one short
-reply. It goes into the trace like any call, and the report lists it. An
+reply. Its text is capped at 2 000 bytes a field, and appending it to the
+trace is all it does. It goes into the trace like any call, and the report lists it. An
 agent that thinks a `check` finding is intended says so with
 `kind: "intended"`, and the report counts that finding as noise.
 
@@ -112,10 +155,23 @@ call differs, so it can gate a change.
 The calls run on a copy of `--project` in the temp folder, or on a blank
 project when no project is given, with the recorder off. Your project is
 never touched. For a faithful replay, give a copy of the project as it was
-when the session began (`versions` keeps snapshots). Calls that reach
-outside the project or cost money (download, generate, ai, read,
-search_media, share, export, deliver, plugins and similar) are skipped
-unless you pass `--all`, and so is any call whose arguments were redacted.
+when the session began (`versions` keeps snapshots).
+
+A trace is untrusted input: anyone could hand you one. Replay checks every
+call before it runs it:
+- only tools that stay inside the project run: edit, undo and redo, and the
+  reads and looks;
+- no op that reaches outside, such as voices, generation, scripts, plugins
+  or `raw`;
+- the arguments must be an object under 256 KB, and not redacted;
+- every path must be inside the copy. A path into the original project is
+  moved into the copy. A call with any other absolute path, `~`, `..` or a
+  URL is skipped and says why.
+
+Replay never runs a shell or an external program, and never fetches
+anything. The project copy does not follow symbolic links. The report and
+replay read at most 256 MB per file and 1 MB per line, and do not follow
+links when searching a folder. Fixtures are checked the same way.
 
 **`--emit-test`** writes every call that failed in the recording as a JSON
 fixture in `app/tests/agent_replays/`: the earlier calls that changed the
@@ -125,12 +181,12 @@ project (`expect`). The test `recorded_agent_calls_still_behave` in
 records current behaviour. When you fix the tool, change `expect` to what it
 should now do, and the test keeps it that way.
 
-## The live tap
+## The live tap (agent-dev)
 
 ```bash
 zornov mcp --observe --text          # the window opened last
 zornov mcp --observe --project my-project
-zornov mcp --observe /path/to/studio-agent-123.sock
+zornov mcp --observe "$TMPDIR/studio-agent-123/agent.sock"
 ```
 
 This follows an open window's calls as they happen, whatever makes them: the
@@ -140,13 +196,86 @@ it. `--text` prints one readable line per call instead, plus the error, or
 the expected and got of a `feedback` call. It works whether or not the
 recorder is writing to disk.
 
-It goes through the window's agent socket, which only your user can open
-(on Windows, the token file in your temp folder). After the first line,
+Lines are pushed the moment the writer builds them, with no polling. A
+call is on the observer's screen well under 100 ms after it ends, usually
+under 1 ms. `--text` shows that delay on each line (`+N ms`).
+
+It goes through the window's agent socket:
+- **Unix:** `$TMPDIR/studio-agent-PID/agent.sock`, in a `0700` folder, the
+  socket `0600`, and every connection is dropped unless the peer process is
+  your user (`SO_PEERCRED` on Linux, `getpeereid` on macOS).
+- **Windows:** 127.0.0.1 only, on a random port, with a 256-bit token from
+  the OS random generator, compared in constant time. The token file is
+  created with an owner-only ACL. After the first line,
 `{"observe": true}`, the window only writes to that connection and never
 reads it, so an observer cannot run a tool or change the project. A coding
 agent in this repository can run the command in the background (Claude
 Code's Monitor tool, or `| jq` in a terminal) and see what an agent inside
 the app is doing, then fix the module the trouble comes from.
+
+## Two-way contact and hot-swapped tools (agent-dev)
+
+A coding agent in this repository can do more than watch:
+
+```bash
+zornov dev ask "Use the colour op instead of grade; grade was renamed."
+zornov dev retry 41          # call 41 again, through the gate, and what differs
+zornov dev swap --retry 41   # rebuild crates/dev/agent-hot, load it, retry 41
+zornov dev status
+```
+
+- **`ask`** reaches the agent inside as a correction, the same path as a
+  person typing one in the panel, before its next call. It needs a panel
+  request to be running, and its text is capped at 2 000 characters.
+- **`retry N`** runs recent call N again (`seq` in the tap) as an ordinary
+  tool call through the window's gate. Pause, Stop, the step limit and
+  approvals all apply, and it is recorded with source `dev`. It then says
+  what differs from the first time. Only the window's last 256 calls can be
+  retried, from memory, never from a file. The agent inside does not wait:
+  the retry is one more call in the queue.
+- **`swap`** runs `cargo build -p zornov-agent-hot` in this checkout, which
+  takes seconds, because the crate is small and has no dependency on the
+  169k-line `app` crate. It sends the library's SHA-256 to the window, and
+  the window loads it and retries the call.
+
+All requests are rate-limited to five at once, then one a second.
+
+**What the window will load.** Only `target/debug/` of the checkout the
+running binary was built from. The path is fixed at build time and never
+taken from a request or a trace. The file must be yours and writable by you
+alone, inside the checkout with no link out of it, and match the SHA-256
+just built. The hashed bytes are written to a private copy, and that copy
+is what is loaded, so the file cannot change between check and load.
+
+A library speaks a small C ABI (version 1) and may only take over tools the
+app already lists, or reword the arguments before the app's own tool
+checks them. It never gets the project, so every change still goes through
+`edit` and its checks and undo. Old libraries stay loaded, so a call in
+flight finishes, and the newest answers.
+
+So far, `crates/dev/agent-hot` holds `feedback` and the argument aliases
+for `edit` ops (`txt` → `text`, `color` → `colour`). Those aliases fix the
+vocabulary gaps that `zornov trace report` finds in seconds. Each alias
+moves into `app/src/agent/args.rs` once it has proved itself. To move next:
+`edit_schema`'s op checks, `capabilities`, `howto`, and the op field tables
+in `args.rs`, which are pure data and functions. Tools that need the
+project (edit ops, `check`, `frame`) stay in `app`. Moving them needs a
+read-only view of the project in the ABI.
+
+## Agents inside the app
+
+`app/src/agent/inproc.rs` gives an agent running in the app the engine
+without the wire:
+- `Inside::call` goes through the same gate as every call, with no other way
+  in. Its `Reply` gives the JSON parsed once and the pictures as JPEG bytes
+  in memory, never base64.
+- `Inside::frame(t)` returns the picture at `t` seconds as bytes.
+- `Inside::project()` returns the project model itself, read-only (an `Arc`
+  the window shares when its revision moves, and only while an inside agent
+  reads it). It is refused after Stop. Changes still go through `edit`.
+
+The API brain and the crew still take JSON replies. Moving them onto
+`Inside` comes next.
 
 ## Connection speed
 
@@ -198,6 +327,13 @@ and adds a `friction` object to each task in `results.json` and each line of
 | `repeated_reads`, `feedback` | counts |
 | `reply_tokens` | what the replies cost |
 | `wall_seconds` | from the first call to the end of the last |
+
+| `speed.record_us` | mean, p99 and max of what recording cost a call |
+| `speed.stream_queue_us` | the same, for the wait to reach the writer and the live tap |
+| `speed.fix_to_retry_s` | from `zornov dev swap`: build, load and retried call |
+
+Each `history.jsonl` line also has a `speed` summary over all tasks
+(`record_us_mean`, `stream_queue_us_mean`, `fix_to_retry_s_mean`).
 
 Each run prints a friction line under the score, so a commit is measured on
 what agents go through as well as on the result. `zornov trace report

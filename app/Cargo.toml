@@ -25,6 +25,13 @@ render = ["dep:studio-render", "dep:studio-encode"]
 # app (no Account page, no `account` tool, nothing in the guide), and the
 # editor is the same for everyone. See docs/accounts-and-cloud.md.
 commerce = ["dep:studio-commerce", "dep:studio-entitlements", "studio-i18n/commerce"]
+# Developer power for watching and fixing agents in a running window: the
+# live tap (`zornov mcp --observe`), two-way contact with the agent inside
+# (`zornov dev ask|retry`) and hot-swapping tools built from this checkout
+# (`zornov dev swap`, crates/dev/agent-hot). Never in release builds: a
+# runtime setting is not enough, it is compiled out. See
+# docs/agent-observability.md.
+agent-dev = []
 
 [dependencies]
 studio-paths = { path = "../crates/project/paths" }
@@ -94,7 +101,7 @@ studio-plugins = { path = "../crates/plugins/plugins" }
 # Windows ships no SQLite, so the library index builds its own there
 # (with FTS5); macOS and Linux use the system's.
 libsqlite3-sys = { version = "0.39", features = ["bundled"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"

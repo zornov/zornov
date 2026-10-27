@@ -11,6 +11,12 @@
 //! that connection, so an observer cannot run a tool. A coding agent in the
 //! repository can watch what an agent inside the app is doing (Claude
 //! Code's Monitor tool on the command, or `| jq`).
+//!
+//! Lines are pushed the moment the recorder's writer builds them (no
+//! polling): a call is on the observer's screen well under 100 ms after it
+//! ends, usually under one. `--text` shows that delay per line.
+//!
+//! Only in `agent-dev` builds; release builds have no tap at all.
 
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -25,10 +31,10 @@ pub fn stream(mut out: Box<dyn Write + Send>) {
         return;
     }
     loop {
-        let line = match rx.recv_timeout(Duration::from_secs(15)) {
+        let line: std::sync::Arc<str> = match rx.recv_timeout(Duration::from_secs(15)) {
             Ok(l) => l,
             // A blank line now and then finds out whether the observer left.
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => String::new(),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => std::sync::Arc::from(""),
             Err(_) => return,
         };
         if writeln!(out, "{line}").and_then(|_| out.flush()).is_err() {
@@ -50,6 +56,11 @@ pub fn text_line(v: &Value) -> String {
         v["reply_tokens"].as_u64().unwrap_or(0),
         v["module"].as_str().unwrap_or(""),
     );
+    // From the call's end to this line on screen.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    if let Some(end) = v["at"].as_u64() {
+        l.push_str(&format!("  +{} ms", now.saturating_sub(end)));
+    }
     let (b, a) = (v["rev_before"].as_u64(), v["rev_after"].as_u64());
     if b != a {
         l.push_str(&format!("  rev {}→{}", b.unwrap_or(0), a.unwrap_or(0)));
@@ -100,6 +111,9 @@ pub fn follow(socket: &Path, each: &mut dyn FnMut(&Value) -> bool) -> Result<(),
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(t) else { continue };
+        if v.get("event").is_some() {
+            continue;
+        }
         if v.get("observing").is_some() {
             eprintln!("observing Zornov (pid {}){}", v["pid"], if v["recording"] == json!(false) { "; the recorder is off, so nothing is written to disk" } else { "" });
             continue;

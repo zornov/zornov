@@ -147,6 +147,14 @@ fn main() -> eframe::Result {
         Some("trace") => std::process::exit(agent::trace_report::main(&argv[1..])),
         // `zornov replay TRACE`: a recorded agent session again, on this build.
         Some("replay") => std::process::exit(agent::replay::main(&argv[1..])),
+        // `zornov dev ask|retry|swap`: talk to the agent inside a window (development builds).
+        #[cfg(feature = "agent-dev")]
+        Some("dev") => std::process::exit(agent::dev::main(&argv[1..])),
+        #[cfg(not(feature = "agent-dev"))]
+        Some("dev") => {
+            eprintln!("zornov dev: this build has no developer tools (they are in development builds made with --features agent-dev)");
+            std::process::exit(2)
+        }
         // `zornov node`: a render node other Studios on the network send pieces of a render to.
         #[cfg(feature = "render")]
         Some("node") => std::process::exit(deliver_run::node_main(&argv[1..])),

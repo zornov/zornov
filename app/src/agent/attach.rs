@@ -3,8 +3,9 @@
 
 //! Claude Code reaches the window through a local socket.
 //!
-//! The window listens on `$TMPDIR/studio-agent-PID.sock` (only this user
-//! can connect). On Windows, which has no Unix sockets here, that file holds
+//! The window listens on `$TMPDIR/studio-agent-PID/agent.sock`: the folder
+//! is 0700, the socket 0600, and a connection is dropped unless the process
+//! on the other end is this same user (peer credentials). On Windows, which has no Unix sockets here, that file holds
 //! a port on 127.0.0.1 and a random token instead: only someone who can read
 //! the file (this user) can connect. `zornov mcp --attach SOCKET` is the MCP server Claude Code
 //! starts, and it forwards each tool call there as one line of JSON
@@ -30,7 +31,17 @@ pub fn serve(gate: Arc<Gate>) -> std::io::Result<PathBuf> {
     // One per listener (a window may open another, and tests run side by side).
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let path = std::env::temp_dir().join(format!("studio-agent-{}{}.sock", std::process::id(), if n == 0 { String::new() } else { format!("-{n}") }));
+    let name = format!("studio-agent-{}{}", std::process::id(), if n == 0 { String::new() } else { format!("-{n}") });
+    // Unix: the socket sits in a folder only this user can enter, so there
+    // is no moment between bind and chmod when anyone else could connect.
+    #[cfg(unix)]
+    let path = {
+        let dir = std::env::temp_dir().join(&name);
+        super::local_only::private_dir(&dir)?;
+        dir.join("agent.sock")
+    };
+    #[cfg(not(unix))]
+    let path = std::env::temp_dir().join(format!("{name}.sock"));
     let _ = std::fs::remove_file(&path);
     listen(&path, gate)?;
     Ok(path)
@@ -44,6 +55,11 @@ fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     std::thread::Builder::new().name("studio-agent-socket".into()).spawn(move || {
         for stream in listener.incoming().map_while(Result::ok) {
+            // The socket file is 0600; the process on the other end must
+            // also be this user's.
+            if !super::local_only::same_user(&stream) {
+                continue;
+            }
             let gate = gate.clone();
             std::thread::spawn(move || {
                 if let Ok(out) = stream.try_clone() {
@@ -63,7 +79,8 @@ fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
     let token = token()?;
-    std::fs::OpenOptions::new().write(true).create_new(true).open(path)?.write_all(format!("{port} {token}\n").as_bytes())?;
+    // Only this user can read the file (and so the token).
+    super::local_only::create_new(path)?.write_all(format!("{port} {token}\n").as_bytes())?;
     std::thread::Builder::new().name("studio-agent-socket".into()).spawn(move || {
         for stream in listener.incoming().map_while(Result::ok) {
             let (gate, token) = (gate.clone(), token.clone());
@@ -125,15 +142,20 @@ pub(crate) fn connect(socket: &Path) -> std::io::Result<Link> {
 fn connection(reader: BufReader<Box<dyn Read + Send>>, mut out: Box<dyn Write + Send>, gate: &Gate) {
     let mut first = true;
     for line in reader.lines().map_while(Result::ok) {
-        if std::mem::take(&mut first) && !gate.in_turn() && !line.contains("\"observe\"") {
+        if std::mem::take(&mut first) && !gate.in_turn() && !line.contains("\"observe\"") && !line.contains("\"dev\"") {
             announce(gate);
         }
         let reply = match serde_json::from_str::<Value>(&line) {
             // The helper asks which tools this Studio has: its own list is
             // the truth, not the helper's.
             Ok(v) if v.get("list_tools").is_some() => json!({"tools": super::mcp::tools()}),
-            // `zornov mcp --observe`: this connection only listens from now on.
+            // `zornov mcp --observe` (agent-dev builds): this connection
+            // only listens from now on; nothing it sends is read again.
+            #[cfg(feature = "agent-dev")]
             Ok(v) if v.get("observe").is_some() => return super::observe::stream(out),
+            // `zornov dev ask|retry|swap` (agent-dev builds): through the gate.
+            #[cfg(feature = "agent-dev")]
+            Ok(v) if v.get("dev").is_some() => super::dev::handle(gate, &v["dev"]),
             Ok(v) => {
                 let name = v.get("name").and_then(Value::as_str).unwrap_or("");
                 let mut args = v.get("arguments").cloned().unwrap_or(json!({}));
@@ -229,6 +251,10 @@ pub fn register(socket: &Path, project: Option<&Path>) {
 pub fn unregister(socket: &Path) {
     let _ = std::fs::remove_file(note_path());
     let _ = std::fs::remove_file(socket);
+    #[cfg(unix)]
+    if let Some(dir) = socket.parent().filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with("studio-agent-"))) {
+        let _ = std::fs::remove_dir(dir);
+    }
 }
 
 /// The socket of an open window: the one with `project` open, or with no
