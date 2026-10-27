@@ -538,7 +538,7 @@ fn anime_face(mesh: &mut Mesh, rig: &mut crate::rig::Rig, frame: crate::face::He
         if on_eye[v] {
             let c = centre(if p[0] >= 0.0 { 1.0 } else { -1.0 });
             let d = crate::sub(p, c);
-            mesh.positions[v] = world(add(c, [d[0] * 1.2, d[1] * 1.28, d[2] * 1.12]));
+            mesh.positions[v] = world(add(c, [d[0] * 1.32, d[1] * 1.45, d[2] * 1.15]));
             continue;
         }
         // The nose: pressed back towards the face, most at its tip.
@@ -572,7 +572,7 @@ fn anime_face(mesh: &mut Mesh, rig: &mut crate::rig::Rig, frame: crate::face::He
     // The highlights: a bright fleck high on each eye, on its eye bone.
     let shine = mesh.materials.len() as u32;
     mesh.materials.push(Material { name: "Eye shine".into(), base_colour: [1.0, 1.0, 1.0, 1.0], emissive: [1.2, 1.2, 1.2], roughness: 0.2, ..Material::default() });
-    let re = 0.0525 * 1.2;
+    let re = 0.0525 * 1.32;
     for (side, sx) in [("L", 1.0f32), ("R", -1.0)] {
         let Some(bone) = rig.bone(&format!("eye.{side}")) else { continue };
         for (k, (dx, dy, r)) in [(-0.35f32, -0.42f32, 0.2f32), (0.3, 0.38, 0.1)].into_iter().enumerate() {
