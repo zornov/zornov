@@ -88,8 +88,13 @@ unsafe impl<T> std::marker::Sync for Sync<T> {}
 
 static mut HOST: *mut OfxHost = std::ptr::null_mut();
 
+/// A suite from the host. The host is set before any action, and a suite it
+/// does not have comes back null: either stops here rather than reading
+/// through a null pointer.
 unsafe fn suite<T>(name: &CStr, v: c_int) -> &'static T {
-    unsafe { &*((*HOST).fetch_suite)((*HOST).host, name.as_ptr(), v).cast::<T>() }
+    let host = unsafe { HOST.as_ref() }.expect("OpenFX host not set");
+    let s = unsafe { (host.fetch_suite)(host.host, name.as_ptr(), v) }.cast::<T>();
+    unsafe { s.as_ref() }.unwrap_or_else(|| panic!("the host has no {name:?} v{v}"))
 }
 
 unsafe fn props() -> &'static Props {
