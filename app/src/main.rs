@@ -99,11 +99,19 @@ fn main() -> eframe::Result {
     // commands. Programs started from here must not inherit the request.
     #[cfg(windows)]
     if std::env::var_os("ZORNOV_CONSOLE").is_some() {
-        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_DISK, FILE_TYPE_PIPE, GetFileType};
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle};
         // SAFETY: first thing in main, before any other thread exists.
         unsafe {
             std::env::remove_var("ZORNOV_CONSOLE");
+            // Pipes and files zornov-cli passed on (an MCP client's stdin
+            // and stdout, `> out.json`) stay where they point: attaching to
+            // the console must not swap them for it.
+            let kept: Vec<_> = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE].into_iter().map(|n| (n, GetStdHandle(n))).filter(|&(_, h)| matches!(GetFileType(h), FILE_TYPE_PIPE | FILE_TYPE_DISK)).collect();
             AttachConsole(ATTACH_PARENT_PROCESS);
+            for (n, h) in kept {
+                SetStdHandle(n, h);
+            }
         }
     }
     // DirectX 12 with DXC when it is next to the program (build.rs puts it

@@ -1,0 +1,19 @@
+{
+  "name": "zornov",
+  "displayName": "Zornov",
+  "description": "Edit video with Zornov: Claude makes, cuts, checks and exports Zornov projects with Zornov's own tools. Starts the Zornov you installed (zornov mcp), so zornov must be on your PATH.",
+  "author": {
+    "name": "Ashrox LLC and contributors",
+    "url": "https://github.com/zornov/zornov"
+  },
+  "homepage": "https://github.com/zornov/zornov/blob/main/docs/terminal.md#ai-assistants-mcp",
+  "repository": "https://github.com/zornov/zornov",
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["video", "video-editor", "mcp"],
+  "mcpServers": {
+    "zornov": {
+      "command": "zornov",
+      "args": ["mcp"]
+    }
+  }
+}

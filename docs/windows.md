@@ -89,7 +89,12 @@ zornov-cli app                &:: open the editor window on this project
 ```
 
 Programs that talk to Zornov over pipes, such as an MCP client running
-`zornov mcp`, can start either one.
+`zornov mcp`, can start either one. Through `zornov-cli.exe`, the pipes and
+files it was given (an MCP client's standard input and output, or
+`> out.json`) stay `zornov.exe`'s standard input and output after it
+attaches to the console. The Claude
+Desktop extension starts `C:\Program Files\Zornov\zornov-cli.exe`; see
+[Terminal and headless use](terminal.md#ai-assistants-mcp) for the others.
 
 Neither folder is added to `PATH`. To type `zornov-cli` from anywhere, add
 the install folder (or `target\release`) to your user `PATH`.

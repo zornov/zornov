@@ -14,6 +14,8 @@
 //! cargo xtask package-deb       dist/release/zornov_<ver>_<arch>.deb
 //! cargo xtask package-appimage  dist/release/Zornov-<ver>-<arch>.AppImage
 //! cargo xtask package-msi       dist/release/Zornov-<ver>-windows-<arch>.msi
+//! cargo xtask package-mcpb      dist/release/Zornov-<ver>.mcpb, the Claude
+//!                               Desktop extension
 //! cargo xtask update-key        the update signing key (made once)
 //! cargo xtask feed              dist/release/feed.json, signed
 //! cargo xtask headers [--check] the copyright header on every Studio file
@@ -32,6 +34,7 @@
 
 mod assets;
 mod licenses;
+mod mcpb;
 mod pkg;
 mod release;
 mod repro;
@@ -50,6 +53,7 @@ fn main() -> ExitCode {
         Some("package-deb") => pkg::package_deb(),
         Some("package-appimage") => pkg::package_appimage(),
         Some("package-msi") => pkg::package_msi(),
+        Some("package-mcpb") => mcpb::package_mcpb(),
         Some("update-key") => release::update_key_cmd(),
         Some("feed") => release::feed_cmd(&args[1..]),
         Some("library-pack") => release::library_pack_cmd(),
@@ -59,7 +63,7 @@ fn main() -> ExitCode {
         Some("headers") => headers(args.get(1).is_some_and(|a| a == "--check")),
         #[cfg(target_os = "macos")]
         Some("signing") => signing::identity().map(|s| format!("signing with \"{}\" ({}) from {}", signing::NAME, s.hash, signing::keychain().display())),
-        _ => Err("usage: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
+        _ => Err("usage: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
     };
     match r {
         Ok(out) => {

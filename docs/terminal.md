@@ -79,7 +79,84 @@ it happen.
 
 `zornov mcp` serves the same tools over the Model Context Protocol on
 standard input and output, so an AI assistant that speaks MCP can edit with
-Zornov. Add it to the assistant's MCP settings:
+Zornov. With `--project DIR` the assistant works in that project (an empty
+or new folder becomes a new project); without it, the assistant opens or
+starts one itself. If the project is open in a Zornov window, the assistant
+works in the window and you see each edit happen.
+
+Every setup below starts the Zornov you installed, so install Zornov first.
+Assistants that run `zornov` by name need it on their `PATH`:
+
+| System | Where Zornov is | To run it as `zornov` |
+|---|---|---|
+| macOS | `/Applications/Zornov.app/Contents/MacOS/zornov` | `sudo ln -sf /Applications/Zornov.app/Contents/MacOS/zornov /usr/local/bin/zornov` |
+| Linux | `/usr/bin/zornov` from the `.deb`; anywhere for the AppImage or the archive | Nothing to do for the `.deb`; otherwise give the full path |
+| Windows | `zornov-cli.exe` in `C:\Program Files\Zornov` (the MSI) or the unzipped folder | Add that folder to your user `PATH`, or give the full path to `zornov-cli.exe` |
+
+On Windows, point assistants at `zornov-cli.exe`, the console program: it
+starts `zornov.exe` with the assistant's pipes (see [Windows](windows.md)).
+`zornov.exe` itself also works over pipes, so a setup that runs `zornov` by
+name from `PATH` works too.
+
+### Claude Code
+
+Zornov's repository is a Claude Code plugin marketplace. In Claude Code:
+
+```text
+/plugin marketplace add zornov/zornov
+/plugin install zornov@zornov
+```
+
+Claude Code 2.1.275 and later also take one step,
+`/plugin install zornov --marketplace zornov/zornov`, and the same commands
+run in a shell as `claude plugin …`. The plugin runs `zornov mcp` with no
+project: ask Claude to open or start one, or open it in the Zornov window
+first. To give Claude one project instead, skip the plugin and add the server
+yourself:
+
+```bash
+claude mcp add zornov -- zornov mcp --project /path/to/my-video
+```
+
+### Claude Desktop
+
+Download `Zornov.mcpb`, the Claude Desktop extension, from the
+[latest release](https://github.com/zornov/zornov/releases/latest/download/Zornov.mcpb)
+and open it: Claude Desktop installs it and asks for the project folder. The
+extension holds no copy of Zornov; it starts the one installed in the usual
+place, `/Applications/Zornov.app` on macOS or `C:\Program Files\Zornov` (the
+MSI) on Windows. For Zornov anywhere else, add it to Claude Desktop's
+`claude_desktop_config.json` (*Settings > Developer > Edit Config*) as for
+[other assistants](#other-mcp-clients), with the full path.
+
+`cargo xtask package-mcpb` makes the extension, as
+`dist/release/Zornov-<version>.mcpb`, from `packaging/mcpb/manifest.json`.
+
+### Codex
+
+Codex keeps MCP servers in `~/.codex/config.toml`, shared by the Codex CLI,
+the IDE extension and the ChatGPT desktop app. Add Zornov from a terminal:
+
+```bash
+codex mcp add zornov -- zornov mcp --project /path/to/my-video
+```
+
+or write the entry yourself:
+
+```toml
+[mcp_servers.zornov]
+command = "zornov"
+args = ["mcp", "--project", "/path/to/my-video"]
+```
+
+On Windows, `command = 'C:\Program Files\Zornov\zornov-cli.exe'` (single
+quotes keep the backslashes). Leave `--project` out of `args` to let Codex
+open or start the project itself.
+
+### Other MCP clients
+
+Any client that starts a local (stdio) server takes the same command. Most
+read a JSON entry like this one:
 
 ```json
 {
@@ -89,7 +166,8 @@ Zornov. Add it to the assistant's MCP settings:
 }
 ```
 
-If that project is open in a window, the assistant works in the window.
+On Windows, `"command": "C:\\Program Files\\Zornov\\zornov-cli.exe"`.
+
 Which AI provider you use, and what it is sent, is up to you and that
 provider; see [AI crew](ai-crew.md).
 

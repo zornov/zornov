@@ -12,6 +12,7 @@ token, and none of them is committed.
 | `cargo xtask package-deb` | `dist/release/zornov_<ver>_<arch>.deb` |
 | `cargo xtask package-appimage` | `dist/release/Zornov-<ver>-<arch>.AppImage` (needs `appimagetool`) |
 | `cargo xtask package-linux` | `dist/zornov-linux-<arch>.tar.gz` (portable) + signed update archive |
+| `cargo xtask package-mcpb` | `dist/release/Zornov-<ver>.mcpb`, the Claude Desktop extension (manifest and icon only; it starts the installed Zornov) |
 | `cargo xtask update-key` | the Ed25519 update signing key, once |
 | `cargo xtask feed` | `dist/release/feed.json`, the signed update feed |
 | `cargo xtask licenses` | `dist/THIRD-PARTY-LICENSES.txt`, the licences of every crate built in |
@@ -152,16 +153,18 @@ A release:
 1. On the Mac: `cargo xtask release-mac` makes the signed, notarized DMG, its
    update archive and its feed entry (`dist/release/entries/macos-*.json`).
 2. Push the version tag (`vX.Y.Z`). `.github/workflows/release.yml` builds
-   Windows (zip + MSI) and Linux (tar.gz, `.deb`, AppImage) and attaches them,
+   Windows (zip + MSI), Linux (tar.gz, `.deb`, AppImage) and the Claude
+   Desktop extension (`.mcpb`, in the Linux job) and attaches them,
    with their feed entries, to the run. (A manual run can also build macOS on
    a hosted Mac, if the macOS secrets below exist; it is off by default.)
 3. Put the run's `entries/*.json` next to the Mac's in `dist/release/entries/`,
    run `cargo xtask feed` on the Mac, and attach `feed.json`, the DMG and every
    package to the GitHub release.
 4. Also attach the fixed-name copies (`Zornov-mac.dmg`, `Zornov-windows.msi`,
-   `Zornov-linux.AppImage`, `Zornov-linux.deb`). zornov.com's download
-   buttons link to `releases/latest/download/<that name>`, so they start the
-   download straight away and keep working for every new version.
+   `Zornov-linux.AppImage`, `Zornov-linux.deb`, `Zornov.mcpb`). zornov.com's
+   download buttons and [Terminal and headless use](terminal.md#claude-desktop)
+   link to `releases/latest/download/<that name>`, so they start the download
+   straight away and keep working for every new version.
 
 Secrets the release workflow reads:
 

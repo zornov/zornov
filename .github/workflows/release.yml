@@ -144,10 +144,15 @@ jobs:
           cargo xtask package-linux
           cargo xtask package-deb
           cargo xtask package-appimage
+      # The Claude Desktop extension: one file for every system, so it is
+      # made here once. It starts the Zornov the person installed.
+      - name: Claude Desktop extension
+        run: cargo xtask package-mcpb
       - name: Fixed download names (Linux)
         run: |
           cp dist/release/Zornov-*.AppImage dist/release/Zornov-linux.AppImage
           cp dist/release/zornov_*.deb dist/release/Zornov-linux.deb
+          cp dist/release/Zornov-*.mcpb dist/release/Zornov.mcpb
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zornov-linux
@@ -155,6 +160,7 @@ jobs:
             dist/*.tar.gz
             dist/release/*.deb
             dist/release/*.AppImage
+            dist/release/*.mcpb
             dist/release/*.update.tar.gz
             dist/release/entries/*.json
 
