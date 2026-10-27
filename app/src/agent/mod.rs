@@ -2680,6 +2680,40 @@ impl Session {
                     Some(_) => return Err("times is a list of seconds, e.g. [0.5, 2, 4.25]".into()),
                     None => None,
                 };
+                // Variants: each set of ops tried, seen at one moment, then
+                // taken back; all of them side by side on one sheet.
+                if let Some(vars) = a.get("variants") {
+                    let vars = vars.as_array().filter(|v| !v.is_empty() && v.len() <= 16).ok_or("variants is a list of 1 to 16 variants, each a list of ops (or {\"name\", \"ops\"}), e.g. [[{\"op\": \"set\", \"clip\": 3, \"opacity\": 40}], [{\"op\": \"set\", \"clip\": 3, \"opacity\": 80}]]")?;
+                    let dur = self.doc.project.duration();
+                    let t = f(a, "t").map(micros).or_else(|| asked.as_ref().and_then(|t| t.first()).map(|t| micros(*t))).unwrap_or(dur / 2).clamp(0, (dur - 1).max(0));
+                    let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
+                    let w = w.clamp(256, 3840) as u32;
+                    let cols = render::sheet_columns(vars.len());
+                    let tile_w = ((w - 4 * (cols as u32 - 1)) / cols as u32).max(32);
+                    let (mut tiles, mut names) = (Vec::new(), Vec::new());
+                    for (i, var) in vars.iter().enumerate() {
+                        let ops: Vec<Value> = match var {
+                            Value::Array(o) => o.clone(),
+                            Value::Object(o) if o.contains_key("ops") => o["ops"].as_array().cloned().unwrap_or_default(),
+                            o @ Value::Object(_) => vec![o.clone()],
+                            _ => return Err(format!("variant {}: a list of ops, or {{\"name\", \"ops\"}}", i + 1)),
+                        };
+                        self.doc.begin_batch("Variant");
+                        let mut made: Result<(), String> = Ok(());
+                        for o in &ops {
+                            if let Err(e) = self.op(&args::unwrap_op(o)) {
+                                made = Err(e);
+                                break;
+                            }
+                        }
+                        let img = made.and_then(|()| self.frames.rgba(&self.doc, t, tile_w));
+                        self.doc.rollback_batch();
+                        tiles.push(img.map_err(|e| format!("variant {}: {e}. Nothing was changed", i + 1))?);
+                        names.push(var.get("name").and_then(Value::as_str).map_or_else(|| format!("{}", i + 1), str::to_owned));
+                    }
+                    let sheet = render::tiled(&tiles, cols, tile_w);
+                    return Ok(vec![Content::Jpeg(studio_content::jpeg::encode(&sheet, q)), Content::Text(json!({"variants": names, "t": secs(t), "columns": cols, "note": "each variant was tried and taken back: nothing was changed; apply the one you like with edit"}).to_string())]);
+                }
                 if let Some(mv) = a.get("media") {
                     let mi = self.media_item(mv)?;
                     let len = secs(mi.dur);
