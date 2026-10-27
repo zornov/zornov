@@ -224,12 +224,10 @@ impl RtmpClient {
     }
 
     fn next_cmd(&mut self, what: &str) -> Result<Vec<Amf>, String> {
-        loop {
-            match self.rx.recv_timeout(Duration::from_secs(10)) {
-                Ok(Event::Command(c)) => return Ok(c),
-                Ok(Event::Closed(why)) => return Err(format!("{what}: {why}")),
-                Err(_) => return Err(format!("{what}: the server did not answer")),
-            }
+        match self.rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Event::Command(c)) => Ok(c),
+            Ok(Event::Closed(why)) => Err(format!("{what}: {why}")),
+            Err(_) => Err(format!("{what}: the server did not answer")),
         }
     }
 

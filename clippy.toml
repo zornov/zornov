@@ -1,0 +1,5 @@
+# Crates that forbid unwrap, expect and panic (the pixel engine and its
+# parts) forbid them in the code they ship; tests may still use them.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

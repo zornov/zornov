@@ -2095,7 +2095,7 @@ fn scarf(f: &Fit, spec: &Spec, g: &mut Garment) -> Result<(), String> {
                 let yy = y + 0.02 * h + len * v;
                 let taper = if tie { 0.45 + 0.9 * (v * 3.0).min(1.0) * (1.0 - 0.1 * v) } else { 1.0 };
                 let x = x0 + (u - 0.5) * wtail * taper;
-                [x, yy, front_z(yy) - 0.016 * h - 0.003 * h * (u * 6.28).sin()]
+                [x, yy, front_z(yy) - 0.016 * h - 0.003 * h * (u * std::f32::consts::TAU).sin()]
             },
             |_| [0.0, 0.0, -1.0],
         );

@@ -591,7 +591,7 @@ pub fn scene(seed: u32, t: f32, w: usize, h: usize) -> ColorImage {
             let base = 0.55 + 0.12 * kf;
             let amp = 0.06 + 0.05 * hash(seed * 3 + k);
             let freq = 3.0 + 4.0 * hash(seed * 5 + k * 11);
-            let phase = hash(seed * 19 + k) * 6.28 + t * (0.6 + kf * 0.9) * 3.0;
+            let phase = hash(seed * 19 + k) * std::f32::consts::TAU + t * (0.6 + kf * 0.9) * 3.0;
             (c, base, amp, freq, phase)
         })
         .collect();

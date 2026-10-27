@@ -123,6 +123,8 @@ fn add_head_details(r: &mut Rig, pr: &Proportions, h: f32, cz: f32) {
     jaw.roll = std::f32::consts::PI;
     r.bones.push(jaw);
     let jaw_i = r.bones.len() - 1;
+    // Heights in metres; 0.318 only looks like 1/π.
+    #[allow(clippy::approx_constant)]
     let tp = [[0.0, 0.318, -0.19], [0.0, 0.317, -0.245], [0.0, 0.315, -0.3], [0.0, 0.312, -0.345]];
     let mut parent = jaw_i;
     for k in 0..3 {

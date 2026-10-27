@@ -254,7 +254,7 @@ pub fn build_env(s: &Sky, look_exposure: f32) -> EnvData {
             }
         }
     }
-    let a = [std::f32::consts::PI, 2.094_395, 2.094_395, 2.094_395, 0.785_398, 0.785_398, 0.785_398, 0.785_398, 0.785_398];
+    let a = [std::f32::consts::PI, 2.094_395, 2.094_395, 2.094_395, std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_4];
     for k in 0..9 {
         for ch in 0..3 {
             sh[k][ch] *= a[k] / std::f32::consts::PI;

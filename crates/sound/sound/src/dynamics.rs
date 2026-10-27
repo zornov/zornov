@@ -721,7 +721,7 @@ mod tests {
         // 0.707 but a true peak of 1.0.
         let rate = 48_000;
         let x: Vec<f32> = (0..4800).map(|i| (std::f32::consts::TAU * 12_000.0 * i as f32 / rate as f32 + std::f32::consts::FRAC_PI_4).sin()).collect();
-        assert!((peak(&x) - 0.7071).abs() < 1e-3);
+        assert!((peak(&x) - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
         let mut tp = TruePeak::new();
         let tp_peak = tp.scan(&x, &x);
         assert!((tp_peak - 1.0).abs() < 0.03, "{tp_peak}");

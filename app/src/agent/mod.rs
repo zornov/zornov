@@ -1803,7 +1803,7 @@ impl Session {
         let started = self.ai.start(&self.doc, a, clips).map_err(|e| e.0)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1800);
         loop {
-            for r in self.ai.poll(&mut self.doc) {
+            if let Some(r) = self.ai.poll(&mut self.doc).into_iter().next() {
                 return match r {
                     Ok(o) => Ok(json!({"ok": true, "started": started, "message": o.message, "changed": self.changes(&before), "revision": self.doc.history.revision()})),
                     Err(e) => Err(e.0),

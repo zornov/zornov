@@ -178,9 +178,11 @@ pub fn build(mesh: &mut Mesh, head: &mut std::ops::Range<usize>, frame: HeadFram
     gums.indices.extend(g2.indices.iter().map(|i| i + base));
     kit.gums = push(mesh, &gums, gums_m);
     // The tongue: a flattened tube from the throat to the tip, resting on the lower teeth.
+    #[allow(clippy::approx_constant)] // heights in metres, not 1/π
     let path: Vec<V3> = (0..9).map(|i| { let t = i as f32 / 8.0; w([0.0, 0.318 - 0.006 * t, -0.19 - 0.115 * t]) }).collect();
     let radii: Vec<f32> = (0..9).map(|i| s * (0.03 - 0.012 * (i as f32 / 8.0).powi(2))).collect();
     let mut tongue = loft::tube(&path, &radii, 10);
+    #[allow(clippy::approx_constant)] // the same height in metres
     let cy = w([0.0, 0.318, 0.0])[1];
     loft::deform(&mut tongue, |p| [o[0] + (p[0] - o[0]) * 1.2, cy + (p[1] - cy) * 0.42, p[2]]);
     kit.tongue = push(mesh, &tongue, tongue_m);

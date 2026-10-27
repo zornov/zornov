@@ -331,6 +331,7 @@ fn flame_at(u: f32, v: f32, time: f32, seed: f32, tongues: f32) -> (V, f32) {
         let wj = if n > 1.5 { 1.25 / n.sqrt() } else { 1.0 };
         let vv = v / hj;
         if vv > -0.02 && vv < 1.1 {
+            #[allow(clippy::approx_constant)] // the shader's own literal, kept so the two paths agree
             let phase = seed * 6.283 + j * 2.1;
             let sway = (time * (4.3 + 1.7 * j) + vv * 3.1 + phase).sin() * 0.16 * vv.max(0.0).powf(1.4) * wj + (noise3([vv * 2.5 + seed, time * 2.4 + j * 7.0, j]) - 0.5) * 0.34 * vv.max(0.0);
             let uu = (u - o - sway) / wj;
@@ -639,6 +640,7 @@ fn weather_ray(c: &Ctx, wi: usize, d: V, t_surf: f32, x: usize, y: usize) -> (V,
             let r3 = u01(hash(hh ^ 0x3456_789a));
             let r4 = u01(hash(hh ^ 0x4567_89ab));
             let tm = c.time;
+            #[allow(clippy::approx_constant)] // the shader's own literal, kept so the two paths agree
             let pos = [
                 (cx as f32 + fract(r1 + vel[0] * tm / cell)) * cell + flutter * (6.2832 * (hz * tm + r4)).sin(),
                 (cy as f32 + fract(r2 + vel[1] * tm / cell)) * cell,
@@ -670,6 +672,7 @@ fn weather_ray(c: &Ctx, wi: usize, d: V, t_surf: f32, x: usize, y: usize) -> (V,
             let tr = (-c.fog_tau(d, th)).exp();
             let fade = (1.0 - smooth(0.7 * maxd, maxd, th)) * smooth(0.4 * c.metre, 2.0 * c.metre, th);
             let lit = if mode > 0.5 && mode < 1.5 {
+                #[allow(clippy::approx_constant)] // the shader's own literal, kept so the two paths agree
                 let tw = 0.65 + 0.35 * (6.2832 * (tm * (1.5 + 2.0 * r4) + r1 * 9.0)).sin();
                 mul(mulv(tint, [1.0; 3]), bright * tw)
             } else {

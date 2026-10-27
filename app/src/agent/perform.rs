@@ -1254,7 +1254,7 @@ mod tests {
         let mut keys = Vec::new();
         for i in 0..=48 {
             let t = i as f64 * 0.125;
-            let a = 28.0 * (t * 6.28 / 1.1).sin();
+            let a = 28.0 * (t * std::f64::consts::TAU / 1.1).sin();
             keys.push(json!({"t": t, "bones": {"thigh.L": [a, 0, 0], "thigh.R": [-a, 0, 0], "shin.L": [0, 0, 0]}}));
         }
         s.edit(&[json!({"op": "pose", "clip": id, "keys": keys}), json!({"op": "animate", "clip": id, "property": "position_z", "keys": [[0, 0], [6, -520]], "ease": "linear"})], "hand", false).unwrap();

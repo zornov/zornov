@@ -492,7 +492,7 @@ mod tests {
         let mk = |i: i64, pts_slot: i64, sync: bool| Sample { offset: i as u64 * 10, size: 10, dts: base + i * 3000, pts: base + 6000 + pts_slot * 3000, dur: 3000, sync };
         let video = track(b"vide", 90_000, crate::mp4w::avc1_entry_for_tests(), &vstore, vec![mk(0, 0, true), mk(1, 3, false), mk(2, 1, false), mk(3, 2, false)]);
         // Sound begins half a second after the first picture and hides 1024 priming samples.
-        let asamples: Vec<Sample> = (0..3).map(|i| Sample { offset: i as u64 * 10, size: 10, dts: 24_000 + 45_000 * 0 + i * 1024, pts: 24_000 + i * 1024, dur: 1024, sync: true }).collect();
+        let asamples: Vec<Sample> = (0..3).map(|i| Sample { offset: i as u64 * 10, size: 10, dts: 24_000 + i * 1024, pts: 24_000 + i * 1024, dur: 1024, sync: true }).collect();
         let mut audio = track(b"soun", 48_000, mp4a_entry(&[0x11, 0x90], 2, 48000), &astore, asamples);
         audio.edit_offset = 24_000 + 1024;
         let out = dir.join("o.mp4");

@@ -139,7 +139,7 @@ mod tests {
             assert!(s.inradius() > 0.1);
         }
         // Square corners at the diagonals, sides at 1/sqrt 2.
-        assert!((Shape::Square.radius(0.0) - 0.7071).abs() < 1e-3);
+        assert!((Shape::Square.radius(0.0) - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
         assert!((Shape::Square.radius(PI / 4.0) - 1.0).abs() < 1e-3);
         // Star point straight up (negative y).
         assert!((Shape::Star.radius(-PI / 2.0) - 1.0).abs() < 1e-3);

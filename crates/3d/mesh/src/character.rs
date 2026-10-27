@@ -375,6 +375,8 @@ pub fn character(height: f32, b: &Build) -> Mesh {
                 rig.bones[i].deform = true;
             }
         }
+        // Heights in metres; 0.318 only looks like 1/π.
+        #[allow(clippy::approx_constant)]
         let tp = [[0.0, 0.318, -0.19], [0.0, 0.317, -0.245], [0.0, 0.315, -0.3], [0.0, 0.312, -0.345]];
         let tongue0 = rig.bone("tongue.0").unwrap_or(0);
         for k in 0..3 {

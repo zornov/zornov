@@ -138,14 +138,17 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build the image
         run: docker build -t zornov-linux docker
-      - name: Test, check the test data, package
+      - name: Lint, test, check the test data, package
+        # Clippy fails on its errors only; its warnings are being fixed over
+        # time and do not fail the build. clippy.toml allows unwrap, expect
+        # and panic in tests.
         run: |
           mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache/home -e CARGO_TARGET_DIR=/work/target \
             -v "$PWD:/work" \
             -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
             -v "$HOME/.cargo/git:/usr/local/cargo/git" \
-            zornov-linux sh -c 'cargo test --release --workspace && cargo xtask assets-check && cargo xtask package-linux'
+            zornov-linux sh -c 'cargo clippy --workspace --all-targets && cargo test --release --workspace && cargo xtask assets-check && cargo xtask package-linux'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zornov-Linux

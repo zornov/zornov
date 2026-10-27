@@ -102,7 +102,7 @@ pub fn apply(mesh: &mut Mesh, rig: &mut Rig, species: &str, fur: Option<[u8; 3]>
             |u, v| {
                 // Across (-1..1) and along (0 base, 1 tip), widest low down.
                 let a = (u - 0.5) * 2.0;
-                let width = ew * s * 0.5 * (1.0 - v).powf(0.7) * (0.3 + 0.7 * (v * 3.14).sin().max(0.2));
+                let width = ew * s * 0.5 * (1.0 - v).powf(0.7) * (0.3 + 0.7 * (v * std::f32::consts::PI).sin().max(0.2));
                 let along = eh * s * v;
                 let out = (tilt.to_radians().sin() * along + droop * 0.3 * s * v * v) * sx;
                 let up = -(tilt.to_radians().cos() * along) * (1.0 - 0.8 * droop * v);
