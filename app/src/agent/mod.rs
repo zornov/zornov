@@ -961,6 +961,29 @@ impl Session {
         None
     }
 
+    /// A flat (2D) title put between 3D layers: it splits the 3D scene in
+    /// two, so the layers above it lose the depth order, light and shadows
+    /// of those below and the frame comes out broken. Refused, with the
+    /// two ways that work.
+    fn text_inside_3d(&self, fresh: &[u32]) -> Option<String> {
+        let seq = self.doc.model.active();
+        let index = |l: m::LaneId| seq.lanes.iter().position(|x| x.id == l).unwrap_or(usize::MAX);
+        for &id in fresh {
+            let Some(c) = seq.clip(m::ClipId(id as u64)) else { continue };
+            if c.transform.three_d || !matches!(&c.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Text) {
+                continue;
+            }
+            let at = index(c.lane);
+            let spatial = |o: &&m::Clip| o.enabled && o.start < c.end() && o.end() > c.start && !o.is_camera_or_light() && (o.transform.three_d || matches!(&o.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Model));
+            let above = seq.clips.iter().filter(spatial).any(|o| index(o.lane) < at);
+            let below = seq.clips.iter().filter(spatial).any(|o| index(o.lane) > at);
+            if above && below {
+                return Some(format!("text clip {id} is a flat 2D title on a lane between 3D layers, which splits the 3D scene and breaks the render. Put it on a lane above every 3D layer (lane \"top\") to overlay it, or make it part of the scene with text_3d (lettering with depth, lit by the scene)"));
+            }
+        }
+        None
+    }
+
     pub fn edit(&mut self, ops: &[Value], label: &str, dry_run: bool) -> Result<Value, String> {
         // Repeats written out first, so "$1" and "$last" count every clip.
         let ops = &repeat::expand(ops).map_err(|e| format!("{e}. Nothing was changed."))?;
@@ -1032,6 +1055,11 @@ impl Session {
                     let fresh: Vec<u32> = fresh.iter().map(|c| c.id).collect();
                     if let Some(w) = self.too_many_lights(&fresh) {
                         n.push_str(&format!("; warning: {w}"));
+                    }
+                    if let Some(e) = self.text_inside_3d(&fresh) {
+                        self.doc.rollback_batch();
+                        let name = op.get("op").and_then(Value::as_str).unwrap_or("?");
+                        return Err(format!("op {} ({name}) failed: {e}. Nothing was changed.", i + 1));
                     }
                     notes.push(n);
                     made.extend(fresh);
