@@ -795,6 +795,8 @@ fn finish(f: &Fit, spec: &Spec, g: &mut Garment) {
     if g.mesh.uvs.len() != g.mesh.positions.len() {
         g.mesh.uvs.resize(g.mesh.positions.len(), [0.0; 2]);
     }
+    // Patterns laid on flat panels, not smeared where the projection turns.
+    panel_uvs(g);
     // Buttons, buckles, the ends of a band: small holes are capped.
     crate::seal::close_holes(&mut g.mesh, 0.04 * f.h, |_| true);
     // A sheet still open (a brim, a cape) gets an inside of its own.
@@ -946,7 +948,7 @@ fn cloth(f: &Fit, spec: &Spec, g_name: &str, default_material: &str, default_col
         .or_else(|| fabric::material(default_material, Some(colour), spec.colour2, spec.pattern, 128))
         .unwrap_or_default();
     m.name = g_name.to_string();
-    (m, fabric::tile_px(&name, f.h))
+    (m, fabric::repeat_px(&name, spec.pattern, f.h))
 }
 
 /// A plain material for trim.
@@ -2489,6 +2491,105 @@ pub fn attach(body: &mut Mesh, g: &Garment) -> Result<std::ops::Range<usize>, St
         tuck_hair(body);
     }
     Ok(n0..body.positions.len())
+}
+
+/// The axis a normal mostly faces along (0 x, 1 y, 2 z).
+fn main_axis(n: V3) -> usize {
+    let a = n.map(f32::abs);
+    if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 }
+}
+
+fn project(p: V3, axis: usize) -> [f32; 2] {
+    match axis {
+        0 => [p[2], p[1]],
+        1 => [p[0], p[2]],
+        _ => [p[0], p[1]],
+    }
+}
+
+/// Texture coordinates for a garment cut as panels, the way cloth is: each
+/// triangle is projected along the axis its face looks along (smoothed so
+/// panels are whole, not speckled), and a vertex where two panels meet is
+/// split so each panel keeps its own coordinates. A per-vertex projection
+/// smears a pattern across every triangle that straddles a turn; panels
+/// meet at a clean seam instead. The scale is the one the garment was
+/// given (by [`Fit::uvs`]).
+fn panel_uvs(g: &mut Garment) {
+    let m = &mut g.mesh;
+    let n = m.positions.len();
+    if n == 0 || m.uvs.len() != n || !m.materials.iter().any(|x| x.texture.is_some()) {
+        return;
+    }
+    // The scale the coordinates already have.
+    let mut ks: Vec<f32> = (0..n)
+        .filter_map(|v| {
+            let q = project(m.positions[v], main_axis(m.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0])));
+            let (lq, lu) = ((q[0] * q[0] + q[1] * q[1]).sqrt(), (m.uvs[v][0].powi(2) + m.uvs[v][1].powi(2)).sqrt());
+            (lq > 1.0 && lu > 1e-6).then_some(lu / lq)
+        })
+        .collect();
+    if ks.len() < 8 {
+        return;
+    }
+    ks.sort_by(f32::total_cmp);
+    let k = ks[ks.len() / 2];
+    // Each triangle's panel, then smoothed: a triangle takes the panel most
+    // of its neighbours have.
+    let tris = m.triangles();
+    let mut axis: Vec<usize> = (0..tris).map(|t| main_axis(m.face_normal(t))).collect();
+    let (ids, unique) = m.position_ids();
+    let mut at: Vec<Vec<u32>> = vec![Vec::new(); unique.len()];
+    for t in 0..tris {
+        for v in m.tri(t) {
+            at[ids[v] as usize].push(t as u32);
+        }
+    }
+    for _ in 0..3 {
+        let prev = axis.clone();
+        for t in 0..tris {
+            let mut votes = [0usize; 3];
+            for v in m.tri(t) {
+                for &o in &at[ids[v] as usize] {
+                    votes[prev[o as usize]] += 1;
+                }
+            }
+            let best = (0..3).max_by_key(|&a| votes[a]).unwrap_or(prev[t]);
+            if votes[best] > votes[prev[t]] * 3 / 2 {
+                axis[t] = best;
+            }
+        }
+    }
+    // Split corners shared by panels.
+    let mut copy: std::collections::HashMap<(usize, usize), u32> = Default::default();
+    let mut owner: Vec<Option<usize>> = vec![None; n];
+    for t in 0..tris {
+        for c in 0..3 {
+            let v = m.indices[3 * t + c] as usize;
+            let a = axis[t];
+            let idx = match owner[v] {
+                None => {
+                    owner[v] = Some(a);
+                    v as u32
+                }
+                Some(o) if o == a => v as u32,
+                Some(_) => *copy.entry((v, a)).or_insert_with(|| {
+                    m.positions.push(m.positions[v]);
+                    m.normals.push(m.normals.get(v).copied().unwrap_or([0.0; 3]));
+                    m.uvs.push([0.0; 2]);
+                    g.joints.push(g.joints.get(v).copied().unwrap_or([0; 4]));
+                    g.weights.push(g.weights.get(v).copied().unwrap_or([1.0, 0.0, 0.0, 0.0]));
+                    (m.positions.len() - 1) as u32
+                }),
+            };
+            m.indices[3 * t + c] = idx;
+        }
+    }
+    for t in 0..tris {
+        for v in m.tri(t) {
+            let q = project(m.positions[v], axis[t]);
+            m.uvs[v] = [q[0] * k, q[1] * k];
+        }
+    }
 }
 
 /// Draws the skin in by `by` px wherever the garment just put on (the
