@@ -1402,6 +1402,10 @@ impl Session {
                 // A light's colour too: with intensity in the same op, it
                 // was taken as a title colour and dropped.
                 let drawn = self.model_clip(id).is_some_and(|mc| matches!(&mc.source, studio_model::ClipSource::Generator(g) if matches!(g.kind, studio_model::GeneratorKind::Solid | studio_model::GeneratorKind::Shape | studio_model::GeneratorKind::Light)));
+                // Opacity is percent; a fraction like 0.5 meant half, not 0.5%.
+                if let Some(o) = f(op, "opacity").filter(|o| *o > 0.0 && *o < 1.0) {
+                    return Err(format!("opacity is 0 to 100 (percent), so {o} would be almost invisible; for {}% write {}", (o * 100.0).round(), (o * 100.0).round()));
+                }
                 if op.get("text").is_some() && self.clip(id)?.kind != ClipKind::Title {
                     return Err(format!("clip {id} is not a title, so \"text\" has nothing to change; for a vector drawing's words use the vector tool's text ops, for a 3D title text_3d"));
                 }
