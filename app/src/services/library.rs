@@ -776,8 +776,10 @@ mod tests {
             assert_eq!(panel.categories()[0], "All", "{panel:?}");
             let all = search(&doc, panel, 0, "");
             // Assets and Audio list the content library, which a checkout
-            // without it (CI) does not have.
-            if all.is_empty() && matches!(panel, Panel::Assets | Panel::Audio) && crate::content::get().is_none() {
+            // without it (CI) does not have. (`content::get()` is not the
+            // test: a model another test keeps makes a library of models
+            // alone, with no sounds.)
+            if all.is_empty() && matches!(panel, Panel::Assets | Panel::Audio) && crate::content::find_dir().is_none() {
                 continue;
             }
             assert!(!all.is_empty(), "{panel:?} is empty");
