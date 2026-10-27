@@ -80,7 +80,7 @@ fn known(op: &str, field: &str) -> Option<(&'static str, &'static str, &'static 
         "speed" => ("number", "times", "above 0 (1 = normal)", "playback speed"),
         "colour" | "side_colour" | "accent" | "fill" | "stroke" | "skin" | "top" | "trousers" | "shoes" | "hair" | "fur" | "emissive" => ("string", "#rrggbb or a basic name", "", "a colour"),
         "metallic" | "roughness" | "transmission" | "subsurface" | "wetness" => ("number", "", "0 to 1", "surface finish"),
-        "intensity" | "strength" | "amount" => ("number", "", "see the op's guide topic", "how strong"),
+        "intensity" | "strength" | "amount" => ("number", "", "", "how strong"),
         "ease" => ("string", "", "linear, smooth, ease_in, ease_out, ease_in_out (in, out, in_out also), back.out, bounce, elastic, snap, …", "how the motion speeds up and slows down"),
         "keys" => ("array", "", "[[t, value], …] or [{t, v, ease}]; t from the clip's start unless timeline: true", "keyframes"),
         "name" => ("string", "", "", "a name for what is made"),
@@ -98,6 +98,8 @@ fn known(op: &str, field: &str) -> Option<(&'static str, &'static str, &'static 
         "region" => ("object", "px", "{sphere: {at, radius}} or a box", "where it applies"),
         "steps" => ("array", "", "[{\"do\": …}, …]", "steps run in order"),
         "ops" => ("array", "", "", "ops run in order"),
+        "say" => ("string", "", "", "the words spoken"),
+        "voice" => ("string", "", "a voice name (`voices` lists them)", "who speaks"),
         _ => return None,
     })
 }
@@ -115,12 +117,69 @@ pub fn field(op: &str, name: &str) -> Value {
             }
             v
         }
-        // Guessed from the name: a switch, a list or a number.
+        // Guessed from the name (a switch, a list, or anything), with the
+        // sentence the guides say about it when there is one.
         None => {
-            let ty = if ["enabled", "invert", "live", "mirror", "visible", "shadows", "relative", "timeline"].contains(&name) { "boolean" } else if name.ends_with('s') && !name.ends_with("ss") { "array or value" } else { "see the op's guide topic" };
-            json!({"type": ty, "means": format!("guide {{topic: \"{op}\"}} explains it")})
+            let ty = if ["enabled", "invert", "live", "mirror", "visible", "shadows", "relative", "timeline"].contains(&name) { "boolean" } else if name.ends_with('s') && !name.ends_with("ss") { "array or value" } else { "any" };
+            let means = said(op, name).unwrap_or_else(|| "not described in the guides yet; a wrong value is refused with what it takes".to_owned());
+            json!({"type": ty, "means": means})
         }
     }
+}
+
+/// What the guides and skills say about `op`: paragraphs that call it
+/// first, then table rows and sentences that name it as an op.
+pub fn paragraphs(op: &str) -> Vec<&'static str> {
+    let call = format!("\"op\": \"{op}\"");
+    let row = format!("| `{op}`");
+    let named = [format!("`{op}` op"), format!("op `{op}`"), format!("**`{op}`**")];
+    let all: Vec<&'static str> = sources().into_iter().chain(super::skills::texts().iter().copied()).flat_map(|t| t.split("\n\n")).collect();
+    let mut out: Vec<&'static str> = all.iter().copied().filter(|p| p.contains(&call) && !p.trim_start().starts_with('|')).collect();
+    for p in &all {
+        if p.trim_start().starts_with('|') {
+            out.extend(p.lines().filter(|l| l.starts_with(&row)));
+        } else if !p.contains(&call) && named.iter().any(|n| p.contains(n.as_str())) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The sentence the guides say about `op`'s field `name`, if any: a
+/// table row's bracketed note first, else a sentence naming both.
+fn said(op: &str, name: &str) -> Option<String> {
+    let (tick, key) = (format!("`{name}`"), format!("\"{name}\":"));
+    let paras = paragraphs(op);
+    for p in paras.iter().filter_map(|p| p.strip_prefix('|')) {
+        // Only a bracketed note right after the name says something.
+        let fields = p.split(" | ").nth(1).unwrap_or("");
+        let Some(i) = fields.find(&tick) else { continue };
+        let Some(rest) = fields[i + tick.len()..].strip_prefix(" (") else { continue };
+        let mut depth = 1;
+        let end = rest.char_indices().find(|&(_, c)| {
+            depth += match c {
+                '(' => 1,
+                ')' => -1,
+                _ => 0,
+            };
+            depth == 0
+        });
+        if let Some((e, _)) = end {
+            return Some(rest[..e].trim().to_owned());
+        }
+    }
+    let (call, named) = (format!("\"op\": \"{op}\""), format!("`{op}`"));
+    for p in paras.iter().filter(|p| !p.starts_with('|')) {
+        let flat = p.replace("\n- ", ". ").replace("\n* ", ". ");
+        for sentence in flat.split(". ") {
+            if (sentence.contains(&tick) || sentence.contains(&key)) && (sentence.contains(&call) || sentence.contains(&named)) {
+                let s: String = sentence.split_whitespace().collect::<Vec<_>>().join(" ");
+                let s = s.trim_start_matches(['-', '*', ' ']).to_owned();
+                return Some(if s.chars().count() > 240 { s.chars().take(237).collect::<String>() + "..." } else { s });
+            }
+        }
+    }
+    None
 }
 
 /// The guides an example is looked for in, in order.

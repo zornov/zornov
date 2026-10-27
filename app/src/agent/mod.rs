@@ -266,17 +266,12 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
 /// paragraph that shows it, at most four), then every field with its
 /// type, units and range.
 fn op_topic(op: &str) -> String {
-    let needle = format!("\"op\": \"{op}\"");
     let mut out = format!("## The `{op}` op\n\n");
     let mut seen = 0;
-    for text in [GUIDE, TOOL_REFERENCE, GUIDE_CHARACTER, craft_book::BOOK] {
-        for para in text.split("\n\n") {
-            if seen < 4 && para.contains(&needle) {
-                out.push_str(para.trim());
-                out.push_str("\n\n");
-                seen += 1;
-            }
-        }
+    for para in field_docs::paragraphs(op).into_iter().take(4) {
+        out.push_str(para.trim());
+        out.push_str("\n\n");
+        seen += 1;
     }
     if seen == 0 {
         out.push_str("The guides have no worked example of this op yet; its fields are below.\n\n");
