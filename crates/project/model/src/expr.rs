@@ -180,6 +180,34 @@ const FUNCS: &[(&str, usize, usize)] = &[
     ("loop_in", 0, 2),
     ("inertia", 0, 3),
     ("prop", 2, 4),
+    // Shape maths (see `formula`).
+    ("sinh", 1, 1),
+    ("cosh", 1, 1),
+    ("tanh", 1, 1),
+    ("cbrt", 1, 1),
+    ("length", 1, 8),
+    ("mix", 3, 3),
+    ("smin", 3, 3),
+    ("smax", 3, 3),
+    ("noise2", 2, 3),
+    ("noise3", 3, 4),
+    ("fbm", 3, 5),
+    ("voronoi", 2, 3),
+    ("voronoi_edge", 2, 3),
+    ("sphere", 4, 4),
+    ("box", 6, 6),
+    ("torus", 5, 5),
+    ("cylinder", 5, 5),
+    ("gyroid", 3, 3),
+    ("schwarz_p", 3, 3),
+    ("schwarz_d", 3, 3),
+    ("neovius", 3, 3),
+    ("lidinoid", 3, 3),
+    ("mandelbulb", 3, 5),
+    ("mandelbox", 3, 5),
+    ("menger", 3, 4),
+    ("sierpinski", 3, 4),
+    ("superformula", 5, 7),
 ];
 
 /// Common (JavaScript-style) spellings, lower-cased.
@@ -576,7 +604,8 @@ impl Parser {
             }
             Some(Tok::Name(raw)) => {
                 self.at += 1;
-                let n = alias(&raw).to_owned();
+                // A name given (`v` of a surface) is itself, not an alias.
+                let n = if self.names.contains(&raw) { raw } else { alias(&raw).to_owned() };
                 if self.eat("(") {
                     let args = self.args(&n)?;
                     let Some(&(_, lo, hi)) = FUNCS.iter().find(|f| f.0 == n) else {
@@ -670,14 +699,6 @@ fn check_words(n: &str, args: &[Expr]) -> Result<(), String> {
     Ok(())
 }
 
-/// Fraction of the way from `a` to `b` that `x` is, held to 0..1.
-fn unit(x: f64, a: f64, b: f64) -> f64 {
-    if (b - a).abs() < 1e-12 {
-        return if x >= b { 1.0 } else { 0.0 };
-    }
-    ((x - a) / (b - a)).clamp(0.0, 1.0)
-}
-
 struct Eval<'a> {
     cx: &'a dyn Context,
     scope: Vec<(&'a str, f64)>,
@@ -767,7 +788,6 @@ impl<'a> Eval<'a> {
     }
 
     fn call(&mut self, f: &str, args: &'a [Expr]) -> f64 {
-        let b = |x: bool| if x { 1.0 } else { 0.0 };
         match f {
             "if" => {
                 return if self.ev(&args[0]) != 0.0 { self.ev(&args[1]) } else { self.ev(&args[2]) };
@@ -786,75 +806,10 @@ impl<'a> Eval<'a> {
             _ => {}
         }
         let a: Vec<f64> = args.iter().map(|e| self.ev(e)).collect();
+        if let Some(g) = super::formula::lookup(f) {
+            return g(&a);
+        }
         match (f, a.as_slice()) {
-            ("sin", [x]) => x.sin(),
-            ("cos", [x]) => x.cos(),
-            ("tan", [x]) => x.tan(),
-            ("asin", [x]) => x.clamp(-1.0, 1.0).asin(),
-            ("acos", [x]) => x.clamp(-1.0, 1.0).acos(),
-            ("atan", [x]) => x.atan(),
-            ("atan2", [y, x]) => y.atan2(*x),
-            ("abs", [x]) => x.abs(),
-            ("sqrt", [x]) => x.sqrt(),
-            ("exp", [x]) => x.exp(),
-            ("ln", [x]) => x.ln(),
-            ("log10", [x]) => x.log10(),
-            ("floor", [x]) => x.floor(),
-            ("ceil", [x]) => x.ceil(),
-            ("round", [x]) => x.round(),
-            ("fract", [x]) => x - x.floor(),
-            ("degrees", [x]) => x.to_degrees(),
-            ("radians", [x]) => x.to_radians(),
-            ("sign", [x]) => {
-                if *x > 0.0 {
-                    1.0
-                } else if *x < 0.0 {
-                    -1.0
-                } else {
-                    0.0
-                }
-            }
-            ("noise", [x]) => super::noise(*x, 0),
-            ("noise", [x, s]) => super::noise(*x, *s as u32),
-            ("random", [x]) => rand01(*x),
-            ("random", [x, hi]) => rand01(*x) * hi,
-            ("random", [x, lo, hi]) => lo + rand01(*x) * (hi - lo),
-            ("min", xs) => xs.iter().copied().fold(f64::INFINITY, f64::min),
-            ("max", xs) => xs.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-            ("pow", [x, y]) => x.powf(*y),
-            ("mod", [x, y]) => x.rem_euclid(*y),
-            ("hypot", [x, y]) => x.hypot(*y),
-            ("step", [edge, x]) => b(x >= edge),
-            ("posterize", [x, n]) => {
-                if *n <= 0.0 {
-                    *x
-                } else {
-                    (x * n).floor() / n
-                }
-            }
-            ("clamp", [x, lo, hi]) => x.max(*lo).min(*hi),
-            ("lerp", [x, y, u]) => x + (y - x) * u,
-            ("smoothstep", [e0, e1, x]) => {
-                let u = unit(*x, *e0, *e1);
-                u * u * (3.0 - 2.0 * u)
-            }
-            ("linear" | "ease" | "ease_in" | "ease_out", xs) => {
-                let (u, v1, v2) = match xs {
-                    [x, v1, v2] => (x.clamp(0.0, 1.0), *v1, *v2),
-                    [x, a, b2, v1, v2] => (unit(*x, *a, *b2), *v1, *v2),
-                    // Four numbers: from 0..1 like the three-number form,
-                    // with the third and fourth the range.
-                    [x, _, v1, v2] => (x.clamp(0.0, 1.0), *v1, *v2),
-                    _ => return 0.0,
-                };
-                let k = match f {
-                    "ease" => u * u * u * (u * (u * 6.0 - 15.0) + 10.0),
-                    "ease_in" => u * u * u,
-                    "ease_out" => 1.0 - (1.0 - u).powi(3),
-                    _ => u,
-                };
-                v1 + (v2 - v1) * k
-            }
             ("wiggle", xs) => {
                 let (freq, amp) = (xs[0], xs[1]);
                 let oct = xs.get(2).map_or(1, |o| o.round().clamp(1.0, 8.0) as u32);
@@ -939,11 +894,6 @@ impl<'a> Eval<'a> {
             (_, false) => self.at(t1 - local),
         }
     }
-}
-
-/// 0..1, the same for the same x.
-fn rand01(x: f64) -> f64 {
-    (super::grad((x * 1000.0).round() as i64, 99) + 1.0) * 0.5
 }
 
 impl Expr {

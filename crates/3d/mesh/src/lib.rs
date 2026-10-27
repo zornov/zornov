@@ -18,6 +18,9 @@
 //!   UV projection; [`csg`]: booleans; [`decimate`]: fewer triangles.
 //! - [`sdf`]: blended shapes melted into one surface (organic forms),
 //!   and an anatomical head to start from.
+//! - [`math`]: shapes from formulas: implicit solids and lattices,
+//!   fractals, parametric surfaces, tubes, height fields, space warps,
+//!   L-systems and phyllotaxis.
 //! - [`region`]: picking part of a model in words a person or an AI can
 //!   say ("the faces looking up", "inside this sphere").
 
@@ -38,6 +41,7 @@ pub mod group;
 pub mod import;
 pub mod io;
 pub mod loft;
+pub mod math;
 pub mod mocap;
 pub mod motion;
 pub mod perform;

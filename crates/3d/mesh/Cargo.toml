@@ -8,4 +8,5 @@ description = "3D models for Zornov: meshes, primitives, glTF/OBJ/STL import and
 [dependencies]
 studio-media = { path = "../../media/media" }
 studio-rig = { path = "../rig" }
+studio-model = { path = "../../project/model" }
 gltf = { version = "1.4", default-features = false, features = ["utils", "names", "extras", "KHR_materials_transmission", "KHR_materials_ior"] }

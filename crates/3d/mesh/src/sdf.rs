@@ -8,6 +8,10 @@
 //! from the field, so the surface is smooth where parts meet. Organic
 //! forms (heads, bodies, creatures, soft products) come out whole and
 //! seamless, ready for sculpting.
+//!
+//! A part can also be any distance field ([`Shape::Field`] with a
+//! [`FieldFn`]): a formula, a minimal surface, a fractal (see
+//! [`crate::math`]), blending and carving like the rest.
 
 use crate::{Group, Material, Mesh, V3, add, dot, length, normalise, scale, sub};
 
@@ -29,6 +33,31 @@ pub enum Shape {
     /// A box `size` across cut on the diagonal from its bottom at −x to its
     /// top at +x: a ramp, a wedge, a doorstop, a roof.
     Wedge,
+    /// Any field filling the box `size` across: the part's `field`.
+    Field,
+}
+
+/// A distance field a part can be: worked out in the part's own space
+/// (pixels from its centre, before its turn), the part `size` px across.
+/// Negative inside; near the surface about the distance in pixels.
+pub trait FieldFn: Send + Sync {
+    fn distance(&self, q: V3, size: V3) -> f32;
+}
+
+/// A shared [`FieldFn`] on a part: parts holding the same one are equal.
+#[derive(Clone)]
+pub struct FieldRef(pub std::sync::Arc<dyn FieldFn>);
+
+impl PartialEq for FieldRef {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for FieldRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FieldRef")
+    }
 }
 
 impl Shape {
@@ -73,11 +102,18 @@ pub struct Part {
     /// Index into the materials; the surface takes the material of the
     /// part it is nearest.
     pub material: u32,
+    /// What a [`Shape::Field`] part is.
+    pub field: Option<FieldRef>,
 }
 
 impl Part {
     pub fn new(shape: Shape, at: V3, size: V3) -> Part {
-        Part { shape, at, size, turn: [0.0; 3], a: [0.0; 3], b: [0.0; 3], round: 0.0, join: Join::Add, blend: 0.0, material: 0 }
+        Part { shape, at, size, turn: [0.0; 3], a: [0.0; 3], b: [0.0; 3], round: 0.0, join: Join::Add, blend: 0.0, material: 0, field: None }
+    }
+
+    /// A part that is the field `f`, filling the box `size` px across.
+    pub fn field(f: std::sync::Arc<dyn FieldFn>, at: V3, size: V3) -> Part {
+        Part { field: Some(FieldRef(f)), ..Part::new(Shape::Field, at, size) }
     }
 }
 
@@ -151,6 +187,7 @@ fn shape_distance(pp: &Prepared, w: V3) -> f32 {
             let n = normalise([p.size[1], -p.size[0], 0.0]);
             boxd.max(-dot(n, [q[0], q[1], 0.0]))
         }
+        Shape::Field => p.field.as_ref().map_or(f32::INFINITY, |f| f.0.distance(q, p.size)),
     }
 }
 
@@ -186,7 +223,7 @@ fn round_cone(p: V3, a: V3, b: V3, r1: f32, r2: f32) -> f32 {
 /// fine enough to keep.
 pub fn thinnest(p: &Part) -> f32 {
     match p.shape {
-        Shape::Ellipsoid | Shape::Box | Shape::Wedge => p.size[0].min(p.size[1]).min(p.size[2]),
+        Shape::Ellipsoid | Shape::Box | Shape::Wedge | Shape::Field => p.size[0].min(p.size[1]).min(p.size[2]),
         Shape::Capsule => p.size[0],
         Shape::Cone => p.size[0].min(p.size[1]),
         Shape::Cylinder => p.size[0].min(p.size[1]),
@@ -220,6 +257,30 @@ fn field(parts: &[Prepared], w: V3, near: f32) -> (f32, u32) {
 /// Builds the surface of the parts. `cell` is the grid step in pixels
 /// (smaller is finer and slower; about a hundredth of the size is good).
 pub fn build(parts: &[Part], materials: Vec<Material>, cell: f32) -> Mesh {
+    build_counted(parts, materials, cell).0
+}
+
+/// The most grid points along a side: a finer `cell` is made coarser.
+pub const MAX_GRID: f32 = 400.0;
+
+/// What a build cost: the grid it sampled and how many times it worked out
+/// the field (each sample works out every part once).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Cost {
+    pub grid: [usize; 3],
+    pub samples: u64,
+    pub cell: f32,
+}
+
+/// The parts' field as a function of a point, for following the surface
+/// (projecting points onto it, say).
+pub fn sampler(parts: &[Part]) -> impl Fn(V3) -> f32 + Sync + use<> {
+    let prepared: Vec<Prepared> = parts.iter().map(prepare).collect();
+    move |w| field(&prepared, w, 0.0).0
+}
+
+/// [`build`], saying what it cost.
+pub fn build_counted(parts: &[Part], materials: Vec<Material>, cell: f32) -> (Mesh, Cost) {
     let prepared: Vec<Prepared> = parts.iter().map(prepare).collect();
     // Bounds of what is added, with room for the blends.
     let mut lo = [f32::INFINITY; 3];
@@ -228,6 +289,8 @@ pub fn build(parts: &[Part], materials: Vec<Material>, cell: f32) -> Mesh {
         let reach = match p.shape {
             Shape::Capsule => length(p.a).max(length(p.b)) + p.size[0],
             Shape::Cone => length(p.a).max(length(p.b)) + p.size[0].max(p.size[1]),
+            // A box's corner, however it is turned.
+            Shape::Field => length(p.size) * 0.67,
             _ => p.size[0].max(p.size[1]).max(p.size[2]),
         } * 0.75
             + p.blend;
@@ -237,9 +300,9 @@ pub fn build(parts: &[Part], materials: Vec<Material>, cell: f32) -> Mesh {
         }
     }
     if !lo[0].is_finite() {
-        return Mesh::default();
+        return (Mesh::default(), Cost::default());
     }
-    let cell = cell.max((hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]) / 400.0).max(0.05);
+    let cell = cell.max((hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]) / MAX_GRID).max(0.05);
     let n: [usize; 3] = std::array::from_fn(|i| (((hi[i] - lo[i]) / cell).ceil() as usize + 2).max(2));
     let origin = [lo[0] - cell, lo[1] - cell, lo[2] - cell];
     let at = |x: usize, y: usize, z: usize| [origin[0] + x as f32 * cell, origin[1] + y as f32 * cell, origin[2] + z as f32 * cell];
@@ -350,6 +413,7 @@ pub fn build(parts: &[Part], materials: Vec<Material>, cell: f32) -> Mesh {
     };
     mesh.normals = mesh.positions.iter().map(|p| grad(*p)).collect();
     let vmat: Vec<u32> = mesh.positions.iter().map(|p| field(&prepared, *p, cell * 0.75).1).collect();
+    let cost = Cost { grid: n, samples: (n[0] * n[1] * n[2]) as u64 + mesh.positions.len() as u64 * 7, cell };
     for q in quads {
         // Split along the shorter diagonal.
         let d02 = length(sub(mesh.positions[q[0] as usize], mesh.positions[q[2] as usize]));
@@ -381,7 +445,7 @@ pub fn build(parts: &[Part], materials: Vec<Material>, cell: f32) -> Mesh {
     mesh.regroup(&mats);
     let _ = Group { start: 0, count: 0, material: 0 };
     let _ = crate::ops::project_uvs(&mut mesh, "sphere");
-    mesh
+    (mesh, cost)
 }
 
 /// An anatomical human head (and neck), `size` px from the chin to the

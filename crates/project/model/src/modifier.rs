@@ -314,6 +314,11 @@ fn fractal(x: f64, octaves: u32, seed: u32) -> f64 {
 #[path = "expr.rs"]
 pub mod expr;
 
+/// The expression language compiled for shapes: fast, allocation-free
+/// evaluation of pure formulas over x, y, z, u, v.
+#[path = "formula.rs"]
+pub mod formula;
+
 #[cfg(test)]
 mod tests {
     use super::*;
