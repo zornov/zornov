@@ -17,7 +17,9 @@
 //! and shift that best carry the pins' rest points to their positions,
 //! weighted by 1 / distance². Distances are measured through the mesh
 //! (Dijkstra over its edges), so an arm moves without dragging the body
-//! next to it, as an outline-aware puppet does. Starch pins
+//! next to it, as an outline-aware puppet does. A drawing made of separate
+//! shapes needs no single cut-out: a shape no pin lies on is bound whole to
+//! the pin (or bone) nearest it and moves rigidly with it. Starch pins
 //! blend the vertices around them towards the rigid motion at the pin
 //! (stiff areas); bend pins turn and scale the picture around them by
 //! their share of the weight; overlap pins decide which part of a fold is
@@ -781,9 +783,24 @@ fn mesh_field(topo: &Topo, grid: &Grid, points: &[[f32; 2]]) -> Vec<f32> {
             }
         }
     }
+    // A separate shape no point lies on (a drawing made of loose pieces: a
+    // hand, a hat, an eye) is bound whole to the nearest point: every
+    // vertex of it takes the shape's own nearest distance, so it moves
+    // rigidly with the pin or bone nearest it instead of stretching.
+    let mut piece: std::collections::BTreeMap<u32, f32> = Default::default();
+    for (k, dk) in d.iter().enumerate() {
+        let c = topo.comp[topo.node_of[k]];
+        if !dk.is_finite() && !reached.contains(&c) {
+            let e = points.iter().map(|p| dist(topo.pos[k], *p)).fold(f32::INFINITY, f32::min);
+            let slot = piece.entry(c).or_insert(f32::INFINITY);
+            *slot = slot.min(e);
+        }
+    }
     for (k, dk) in d.iter_mut().enumerate() {
-        if !dk.is_finite() && !reached.contains(&topo.comp[topo.node_of[k]]) {
-            *dk = points.iter().map(|p| dist(topo.pos[k], *p)).fold(f32::INFINITY, f32::min);
+        if !dk.is_finite()
+            && let Some(&e) = piece.get(&topo.comp[topo.node_of[k]])
+        {
+            *dk = e;
         }
     }
     d

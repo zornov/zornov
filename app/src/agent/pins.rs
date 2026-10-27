@@ -4,12 +4,16 @@
 //! Puppet pins, pinned masks and corner pins for agents: the same
 //! geometry the canvas's pin tool uses (`editor::pins`).
 //!
-//! Points are canvas pixels from the centre (y down), like `x` and `y`
-//! everywhere else, read through the layer's placement at the moment
-//! `at` (seconds on the timeline; default the clip's start), so a pin
-//! lands on the part of the picture that shows there. A name (`top_left`,
-//! `centre`…) is a point of the layer's box; `{"u": 0.3, "v": 0.6}` is a
-//! point of the layer in its own 0..1 coordinates.
+//! A puppet pin's `[x, y]` is in the drawing's own pixels by default (its
+//! top-left corner 0, 0, the way the picture was drawn), or canvas pixels
+//! from the centre (y down) with `"space": "canvas"`, read through the
+//! layer's placement at the moment `at` (seconds on the timeline; default
+//! the clip's start), so a pin lands on the part of the picture that
+//! shows there. Without `space`, a point that falls outside the drawing is
+//! taken as canvas pixels, and the report says so. Other points (masks,
+//! corner pins, `by`) are canvas pixels. A name (`top_left`, `centre`…) is
+//! a point of the layer's box; `{"u": 0.3, "v": 0.6}` is a point of the
+//! layer in its own 0..1 coordinates.
 //!
 //! * `puppet`: `pins` places pins; `pin` with `to` / `by` / `rotate` /
 //!   `scale` / `amount` / `extent` changes one; `pin` with `keys`
@@ -45,6 +49,27 @@ fn kind_of(v: Option<&Value>) -> Result<m::PinKind, String> {
         Some("starch" | "stiff" | "stiffen") => Ok(m::PinKind::Starch),
         Some("overlap" | "front" | "in_front") => Ok(m::PinKind::Overlap),
         Some(other) => Err(format!("pin kind \"{other}\": position (holds and moves its point), bend (turns and scales around it), starch (stiffens around it), overlap (brings that part in front)")),
+    }
+}
+
+/// What a pin's `[x, y]` is measured in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PinSpace {
+    /// The drawing's own pixels, said outright.
+    Drawing,
+    /// Canvas pixels from the centre.
+    Canvas,
+    /// Not said: the drawing's pixels, or the canvas's for a point outside
+    /// the drawing.
+    Either,
+}
+
+fn space_of(op: &Value) -> Result<PinSpace, String> {
+    match op.get("space").and_then(Value::as_str).map(str::to_lowercase).as_deref() {
+        None => Ok(PinSpace::Either),
+        Some("drawing" | "picture" | "image" | "art" | "source" | "local" | "layer") => Ok(PinSpace::Drawing),
+        Some("canvas" | "screen" | "frame" | "comp") => Ok(PinSpace::Canvas),
+        Some(other) => Err(format!("space \"{other}\": drawing (the picture's own pixels, top-left 0, 0; the default) or canvas (pixels from the canvas centre)")),
     }
 }
 
@@ -180,6 +205,26 @@ impl Session {
         }
     }
 
+    /// A puppet pin's point in layer coordinates: `[x, y]` (or `{"x", "y"}`)
+    /// in the drawing's own pixels or the canvas's, as `space` says (see
+    /// the module notes); names and `{"u", "v"}` as [`Session::layer_point`].
+    /// The flag says the point was taken as canvas pixels for want of a
+    /// `space`.
+    fn pin_point(map: &LayerMap, spec: &Value, space: PinSpace) -> Result<(m::Vec2, bool), String> {
+        let xy = match spec {
+            Value::Array(a) if a.len() == 2 => Some((a[0].as_f64().ok_or("[x, y] are numbers")?, a[1].as_f64().ok_or("[x, y] are numbers")?)),
+            Value::Object(o) if o.contains_key("x") && o.contains_key("y") && !o.contains_key("u") => Some((o["x"].as_f64().unwrap_or(0.0), o["y"].as_f64().unwrap_or(0.0))),
+            _ => None,
+        };
+        let Some((x, y)) = xy.filter(|_| space != PinSpace::Canvas) else { return Self::layer_point(map, spec, false).map(|p| (p, false)) };
+        let size = map.drawing_size();
+        let inside = x >= -0.5 && y >= -0.5 && x <= size.x as f64 + 0.5 && y <= size.y as f64 + 0.5;
+        if space == PinSpace::Either && !inside {
+            return Self::layer_point(map, spec, false).map(|p| (p, true));
+        }
+        Ok((map.drawing(x as f32, y as f32), false))
+    }
+
     /// Canvas pixels moved by `by` from where `p` (layer coordinates)
     /// shows.
     pub(super) fn moved_by(map: &LayerMap, p: m::Vec2, by: [f64; 2], flat: bool) -> Result<m::Vec2, String> {
@@ -246,6 +291,13 @@ impl Session {
         let frame = (SEC as f64 / (self.doc.project.fps as f64).max(1.0)) as view::Time;
         let map = self.layer_map(id, at)?;
         let local = at - vc.start;
+        // Puppet pins read `[x, y]` in the drawing's pixels; mask pins, as
+        // the mask's points, in canvas pixels.
+        let space = match owner {
+            Owner::Puppet => space_of(op)?,
+            Owner::Mask(_) => PinSpace::Canvas,
+        };
+        let mut as_canvas = 0usize;
         if let Some(r) = op.get("remove") {
             let all = r.as_str() == Some("all");
             let targets: Vec<u32> = if all {
@@ -279,7 +331,8 @@ impl Session {
                     }
                     other => (other.clone(), String::new(), m::PinKind::Position),
                 };
-                let at_layer = Self::layer_point(&map, &spec, false)?;
+                let (at_layer, fell_back) = Self::pin_point(&map, &spec, space)?;
+                as_canvas += fell_back as usize;
                 let pins = owner.pins_mut(mc).ok_or("that mask is gone")?;
                 let pid = pins.iter().map(|q| q.id).max().map_or(1, |x| x + 1);
                 let mut pin = m::Pin::new(pid, kind, at_layer);
@@ -297,7 +350,12 @@ impl Session {
                 }
                 pins.push(pin);
             }
-            said.push(format!("placed {} pin(s)", list.len()));
+            said.push(format!("placed {} pin(s){}", list.len(), match (owner, space) {
+                (Owner::Mask(_), _) => "",
+                (_, PinSpace::Canvas) => " (canvas pixels)",
+                _ if as_canvas > 0 => " (in the drawing's pixels; points outside the drawing were read as canvas pixels: say \"space\": \"drawing\" or \"canvas\")",
+                _ => " (in the drawing's own pixels; \"space\": \"canvas\" for canvas pixels)",
+            }));
         }
         if let Some(which) = op.get("pin") {
             let pid = Self::find_pin(&owner.pins(mc), which)?;
@@ -316,7 +374,7 @@ impl Session {
                     }
                     let kmap = self.layer_map(id, vc.start + t)?;
                     let place = match (&k.to, k.by) {
-                        (Some(to), _) => Some(Self::layer_point(&kmap, to, false)?),
+                        (Some(to), _) => Some(Self::pin_point(&kmap, to, space)?.0),
                         (None, Some(by)) => Some(Self::moved_by(&kmap, pin.rest, by, false)?),
                         _ => None,
                     };
@@ -346,7 +404,7 @@ impl Session {
             }
             let mut set = |mc: &mut m::Clip, key: &str, v: m::Value| xform_put(mc, &format!("{prefix}{key}"), v, local, frame);
             if let Some(to) = op.get("to") {
-                set(mc, "position", m::Value::Point(Self::layer_point(&map, to, false)?));
+                set(mc, "position", m::Value::Point(Self::pin_point(&map, to, space)?.0));
                 said.push(format!("pin {pid} moved to {to}"));
             } else if let Some(by) = op.get("by").and_then(pair) {
                 let cur = match now(mc, "position", local) {
@@ -507,6 +565,12 @@ impl Session {
             talk::refollow(&before_acts, &mut mc);
             if let Some(dx) = f(&op, "travel") {
                 travel = Some((from, dur, dx));
+            } else if let Some(pace) = acts.iter().find_map(|a| rig::planted_pace(a, speed)) {
+                // The pace at which the planted foot stays still on the ground.
+                let map = self.layer_map(id, at)?;
+                let tall = (map.canvas(m::Vec2::new(0.5, 1.0)).y - map.canvas(m::Vec2::new(0.5, 0.0)).y).abs() as f64;
+                let dx = (pace * tall * dur).round();
+                said.push(format!("the legs step in place: add \"travel\": {} (px over the window, the sign the way it faces) and the planted foot stays still on the ground", if right != mc.transform.flip_x { dx } else { -dx }));
             }
         }
         let len = secs(vc.dur);

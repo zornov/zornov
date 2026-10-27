@@ -121,7 +121,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "mask" => &["clip", "shape", "mask", "remove", "invert", "params", "region", "t", "feather", "expand", "backdrop"],
         "particles" => &["preset", "at", "duration", "region", "t", "lane", "behind", "params"],
         "living" => &["recipes", "recipe", "backdrop", "at", "t", "duration", "ramp", "front"],
-        "puppet" => &["clip", "at", "pins", "pin", "to", "by", "rotate", "scale", "amount", "extent", "name", "keys", "ease", "timeline", "remove", "density", "expansion", "enabled", "rig", "facing", "act", "from", "duration", "speed", "travel", "voice", "blink", "look_at", "face", "parts", "foley", "cuts", "auto_cut", "intensity", "emotion", "lead", "offset", "extras"],
+        "puppet" => &["clip", "at", "space", "pins", "pin", "to", "by", "rotate", "scale", "amount", "extent", "name", "keys", "ease", "timeline", "remove", "density", "expansion", "enabled", "rig", "facing", "act", "from", "duration", "speed", "travel", "voice", "blink", "look_at", "face", "parts", "foley", "cuts", "auto_cut", "intensity", "emotion", "lead", "offset", "extras"],
         "lip_sync" => &["clip", "audio", "from", "duration", "intensity", "emotion", "lead", "offset", "extras", "check", "parts", "face", "look_at", "blink"],
         "mask_puppet" => &["clip", "mask", "at", "pins", "pin", "point", "to", "by", "rotate", "scale", "amount", "extent", "name", "keys", "ease", "timeline", "remove"],
         "skeleton" => &["clip", "at", "build", "kind", "facing", "bones", "bone", "min", "max", "depth", "deform", "rename", "parent", "remove", "enabled", "falloff", "act", "from", "duration", "speed", "travel", "cuts", "auto_cut"],
