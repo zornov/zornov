@@ -1,16 +1,21 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Hair, beards, moustaches and brows as real geometry on a figure: strands
-//! grown by [`crate::groom`] from the scalp (or the jaw, the lip, the brow)
-//! of the body, drawn as hair cards, in a hair material of their own,
+//! Hair, beards, moustaches and brows as real geometry on a figure. Scalp
+//! hair is sculpted by default ([`crate::hairdo`]: one closed mass with
+//! locks, the way animated films model it); with `strands` it is grown by
+//! [`crate::groom`] from the scalp (as beards, moustaches and brows always
+//! are, from the jaw, the lip, the brow), drawn as hair cards, combed and
+//! clumped so it reads as hair and not fuzz, in a hair material of its own,
 //! skinned to the head (the ends of long hair give a little to the neck and
 //! shoulders so it follows when the head turns), kept out of the head and
 //! body, and removable by name like any other thing worn.
 //!
-//! Styles: `short`, `buzz`, `crew`, `bob`, `long`, `wavy`, `curly`, `afro`,
-//! `ponytail`, `bun`, `bald` (nothing); facial hair `beard`, `goatee`,
-//! `stubble`, `moustache`, `brows`.
+//! Styles: `short`, `buzz`, `crew`, `pixie`, `bob`, `long`, `wavy`,
+//! `curly`, `afro`, `ponytail`, `bun`, `spiky`, `twintails`, `bangs`,
+//! `bald` (nothing); facial hair `beard`, `goatee`, `stubble`, `moustache`,
+//! `brows`. Under a hat the hair is pressed down below the hat line
+//! ([`studio_mesh::wear::tuck_hair`]).
 
 use crate::groom::{self, Groom, Step};
 use studio_mesh::bvh::Bvh;
@@ -18,7 +23,7 @@ use studio_mesh::wear::{self, Garment};
 use studio_mesh::{Mesh, V3, add, dot, length, normalise, scale, sub};
 
 /// What can be grown, for the error that lists it.
-pub const STYLES: &str = "hair: short, buzz, crew, bob, long, wavy, curly, afro, ponytail, bun, bald; facial hair: beard, goatee, stubble, moustache, brows";
+pub const STYLES: &str = "hair: short, buzz, crew, pixie, bob, long, wavy, curly, afro, ponytail, bun, spiky, twintails, bangs, bald (sculpted; \"strands\": true grows strands for short, buzz, crew, bob, long, wavy, curly, afro, ponytail, bun); facial hair: beard, goatee, stubble, moustache, brows";
 
 /// Whether `kind` is something this module grows.
 pub fn is_hair(kind: &str) -> bool {
@@ -40,11 +45,23 @@ pub struct HairSpec {
     /// Length against the style's usual (1).
     pub length: f32,
     pub name: Option<String>,
+    /// Scalp hair grown as strands (hair cards) instead of sculpted.
+    pub strands: bool,
+    /// Hard, deep locks and a flat finish (anime and toon figures).
+    pub anime: bool,
 }
 
 impl Default for HairSpec {
     fn default() -> HairSpec {
-        HairSpec { kind: "hair".into(), style: String::new(), colour: None, melanin: 0.6, redness: 0.1, seed: 1, density: 1.0, length: 1.0, name: None }
+        HairSpec { kind: "hair".into(), style: String::new(), colour: None, melanin: 0.6, redness: 0.1, seed: 1, density: 1.0, length: 1.0, name: None, strands: false, anime: false }
+    }
+}
+
+/// The hair's colour in linear RGB: given, or from its pigment.
+fn colour_of(spec: &HairSpec) -> V3 {
+    match spec.colour {
+        Some(c) => [studio_mesh::srgb_to_linear(c[0]), studio_mesh::srgb_to_linear(c[1]), studio_mesh::srgb_to_linear(c[2])],
+        None => groom::hair_colour(spec.melanin, spec.redness),
     }
 }
 
@@ -68,6 +85,21 @@ pub fn fit(body: &Mesh, spec: &HairSpec) -> Result<Garment, String> {
         if s.is_empty() { match kind { "hair" => "short".to_string(), "beard" => lc(&spec.kind), other => other.to_string() } } else { s }
     };
     let style = if style == "hair" || style == "wig" { "short".to_string() } else { style };
+    if kind == "hair" && matches!(style.as_str(), "bald" | "none") {
+        return Err("bald: nothing to grow (take hair off with \"remove\": \"Hair\")".into());
+    }
+    // Scalp hair is sculpted unless strands are asked for (or the style is
+    // one only strands make).
+    if kind == "hair" && (!spec.strands || matches!(style.as_str(), "pixie" | "spiky" | "twintails" | "bangs")) && crate::hairdo::knows(&style) {
+        let name = spec.name.clone().unwrap_or_else(|| "Hair".to_string());
+        let st = crate::hairdo::Style { style: style.clone(), colour: colour_of(spec), length: spec.length, anime: spec.anime, seed: spec.seed as u32 };
+        let (m, joints, weights) = crate::hairdo::sculpt(body, &sc, &st, &name)?;
+        let mut g = Garment::new(&name, "hair");
+        let mat = g.material(m.materials[0].clone());
+        g.push(&m, joints, weights, mat);
+        g.notes.push(format!("sculpted {style} hair, a closed solid{}", if spec.anime { " with hard anime locks" } else { "" }));
+        return Ok(g);
+    }
     let s = sc.frame.size;
     let o = sc.frame.origin;
     let (faces, mut groom) = match (kind, style.as_str()) {
@@ -117,6 +149,23 @@ pub fn fit(body: &Mesh, spec: &HairSpec) -> Result<Garment, String> {
         groom.redness = spec.redness;
     }
     groom.seed = spec.seed;
+    // Tamed: strands lie in clumps and keep their line instead of standing
+    // out as fuzz.
+    for step in &mut groom.steps {
+        match step {
+            Step::Frizz { amount } => *amount *= 0.3,
+            Step::Clump { amount, .. } => *amount = amount.max(0.6),
+            Step::Lift { amount } => *amount *= 0.5,
+            Step::Noise { amount, .. } => *amount *= 0.5,
+            Step::Curl { radius, turns, random } => {
+                *radius *= 0.8;
+                *turns *= 0.8;
+                *random *= 0.5;
+            }
+            _ => {}
+        }
+    }
+    groom.length_random = groom.length_random.min(0.12);
     let surface = wear::scalp_mesh(body);
     let area: f32 = faces.iter().map(|&t| {
         let c = surface.tri(t);
@@ -200,7 +249,8 @@ pub fn fit(body: &Mesh, spec: &HairSpec) -> Result<Garment, String> {
         m
     };
     let name = spec.name.clone().unwrap_or_else(|| match kind { "hair" => "Hair".to_string(), "beard" => "Beard".to_string(), "moustache" => "Moustache".to_string(), _ => "Brows".to_string() });
-    ribbons.materials[0].name = name.clone();
+    // Cards are single sheets by nature (a check for holes leaves them out).
+    ribbons.materials[0].name = format!("{name} cards");
     // A bun: a ball of hair at the back of the head.
     let mut g = Garment::new(&name, kind);
     let mat = g.material(ribbons.materials[0].clone());
@@ -210,6 +260,7 @@ pub fn fit(body: &Mesh, spec: &HairSpec) -> Result<Garment, String> {
         let mut cap_mat = ribbons.materials[0].clone();
         cap_mat.texture = None;
         cap_mat.base_colour = [rc[0] * 0.75, rc[1] * 0.75, rc[2] * 0.75, 1.0];
+        cap_mat.name = format!("{name} scalp cards");
         let cm = g.material(cap_mat);
         let n = cap.positions.len();
         g.push(&cap, vec![[sc.head_bone as u16, 0, 0, 0]; n], vec![[1.0, 0.0, 0.0, 0.0]; n], cm);

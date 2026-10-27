@@ -12,7 +12,8 @@
 //! frame (masculine to feminine), age (a toddler to the old), height
 //! proportions (legs, arms, neck, hands, feet) and style (true to life to
 //! cartoon). It is born in plain clothes (a top, trousers, shoes) or bare
-//! (`dressed: false`) to be dressed with the wardrobe (`crate::wear`).
+//! (`dressed: false`) to be dressed with the wardrobe (`crate::wear`), and
+//! is closed: every rim of its surface but the eyelids' is capped.
 
 use crate::autorig::{self, Arms};
 use crate::proportions::Proportions;
@@ -489,6 +490,10 @@ pub fn character(height: f32, b: &Build) -> Mesh {
         let _ = crate::species::apply(&mut mesh, &mut rig, sp, b.fur, frame);
     }
     mesh.rig = Some(std::sync::Arc::new(rig));
+    // A closed solid: the head's seam into the neck, the ends of the lips and
+    // any other open rim are capped (the lids, lashes and corneas are sheets
+    // by nature and stay as they are).
+    crate::seal::close_holes(&mut mesh, 0.3 * height, |n| !matches!(n, "Eye white" | "Iris" | "Pupil"));
     if b.dressed {
         dress_plain(&mut mesh, b);
     }

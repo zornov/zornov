@@ -138,7 +138,10 @@ fn is_character(shape: &str) -> bool {
 /// shouldered, full hipped; or masculine, feminine), `build` (slim … heavy or a number),
 /// `shoulders`, `hips`, `legs`, `arms`, `neck`, `hands`, `head_size`, `face`,
 /// `dressed` (false: bare, to be dressed with `wear`), the colours `skin`,
-/// `top`, `trousers`, `shoes`, `hair` (the brows), `detail`.
+/// `top`, `trousers`, `shoes`, `detail`. A figure is born with sculpted hair
+/// that is its own, not the outfit's (`dressed: false` keeps it): `hair` is
+/// its colour (and the brows'), a style word, `false` for none, or
+/// `{"style", "colour", "strands", "length"}`; `hairstyle` picks the style.
 fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
     use studio_mesh::character::Build;
     let shape = op.get("shape").and_then(Value::as_str).unwrap_or("");
@@ -157,10 +160,38 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
     if let Some(c) = srgb("skin")?.or(srgb("colour")?) {
         b.skin = c;
     }
-    for (k, slot) in [("top", &mut b.top), ("trousers", &mut b.trousers), ("shoes", &mut b.shoes), ("hair", &mut b.hair)] {
+    for (k, slot) in [("top", &mut b.top), ("trousers", &mut b.trousers), ("shoes", &mut b.shoes)] {
         if let Some(c) = srgb(k)? {
             *slot = c;
         }
+    }
+    // Hair: a colour, a style, false, or both in an object.
+    let mut hair_style = ["hairstyle", "hair_style"].iter().find_map(|k| op.get(*k).and_then(Value::as_str)).map(str::to_string);
+    let mut hair_strands = false;
+    let mut hair_length = 1.0f32;
+    let mut hair_on = true;
+    let hair_colour = |w: &str| super::craft::colour(w).map(|c| [c.r(), c.g(), c.b()]);
+    match op.get("hair") {
+        Some(Value::Bool(on)) => hair_on = *on,
+        Some(Value::String(w)) => match hair_colour(w.as_str()) {
+            Some(c) => b.hair = c,
+            None if studio_modeling::hairdo::knows(w) || matches!(w.as_str(), "bald" | "none") => hair_style = Some(w.clone()),
+            None => return Err(format!("hair \"{w}\": a colour (#rrggbb or a name), a style ({}), or false", studio_modeling::hairdo::STYLES)),
+        },
+        Some(Value::Object(o)) => {
+            if let Some(w) = o.get("colour").or_else(|| o.get("color")).and_then(Value::as_str) {
+                b.hair = hair_colour(w).ok_or_else(|| format!("hair colour \"{w}\" is not #rrggbb or a basic name"))?;
+            }
+            if let Some(w) = o.get("style").and_then(Value::as_str) {
+                hair_style = Some(w.to_string());
+            }
+            hair_strands = o.get("strands").and_then(Value::as_bool).unwrap_or(false);
+            hair_length = o.get("length").and_then(Value::as_f64).map_or(1.0, |x| x as f32);
+        }
+        _ => {}
+    }
+    if matches!(hair_style.as_deref(), Some("bald" | "none")) {
+        hair_on = false;
     }
     match op.get("build") {
         Some(Value::String(w)) => {
@@ -233,7 +264,30 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
         Some(v) => b.figure = v.as_f64().unwrap_or(0.0) as f32,
         None => {}
     }
-    Ok(studio_mesh::character::character(size.max(20.0), &b))
+    let mut mesh = studio_mesh::character::character(size.max(20.0), &b);
+    if hair_on && b.face && b.species.is_none() {
+        let style = hair_style.unwrap_or_else(|| default_hairstyle(&b).to_string());
+        let spec = studio_modeling::hair::HairSpec { style, colour: Some(b.hair), strands: hair_strands, length: hair_length, anime: b.style >= 0.99, ..Default::default() };
+        match studio_modeling::hair::fit(&mesh, &spec) {
+            Ok(g) => {
+                studio_mesh::wear::attach(&mut mesh, &g)?;
+            }
+            Err(e) if op.get("hair").is_some() || op.get("hairstyle").is_some() => return Err(format!("hair: {e}")),
+            Err(_) => {}
+        }
+    }
+    Ok(mesh)
+}
+
+/// The hair a figure is born with when none is named.
+fn default_hairstyle(b: &studio_mesh::character::Build) -> &'static str {
+    if b.age > 0.0 && b.age < 3.0 {
+        "buzz"
+    } else if b.figure > 0.3 {
+        "long"
+    } else {
+        "short"
+    }
 }
 
 /// Material fields of an op or step; `named`: its "name" names the

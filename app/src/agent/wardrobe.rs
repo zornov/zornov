@@ -123,6 +123,9 @@ fn hair_spec_of(item: &Value, kind: &str) -> Result<studio_modeling::hair::HairS
     h.density = num(item, "density").unwrap_or(1.0);
     h.length = num(item, "length").unwrap_or(1.0);
     h.name = item.get("name").and_then(Value::as_str).map(str::to_string);
+    h.strands = item.get("strands").and_then(Value::as_bool).unwrap_or(false)
+        || matches!(item.get("mode").or_else(|| item.get("as")).and_then(Value::as_str), Some("strands" | "cards" | "groom" | "groomed"));
+    h.anime = item.get("anime").and_then(Value::as_bool).unwrap_or(false) || matches!(item.get("look").and_then(Value::as_str), Some("anime" | "toon" | "cel"));
     Ok(h)
 }
 
@@ -167,8 +170,10 @@ impl Session {
             Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
             _ => Vec::new(),
         };
+        // Hair, beards and brows belong to the figure, not the outfit:
+        // undressing keeps them (take them off by name).
         if op.get("undress").and_then(Value::as_bool) == Some(true) {
-            off.extend(wear::worn(&mesh));
+            off.extend(wear::worn(&mesh).into_iter().filter(|n| !wear::is_hair_material(n) && !studio_modeling::hair::is_hair(n.split_whitespace().next().unwrap_or(""))));
         }
         for name in &off {
             match wear::remove(&mut mesh, name) {
@@ -195,7 +200,8 @@ impl Session {
                     let _ = wear::remove(&mut mesh, &g.name);
                 }
                 wear::attach(&mut mesh, &g)?;
-                said.push(format!("{} ({}): {} triangles{}", g.name, g.kind, g.mesh.triangles(), g.notes.first().map(|n| format!("; {n}")).unwrap_or_default()));
+                let tucked = wear::tuck_hair(&mut mesh);
+                said.push(format!("{} ({}): {} triangles{}{}", g.name, g.kind, g.mesh.triangles(), g.notes.first().map(|n| format!("; {n}")).unwrap_or_default(), if tucked > 0 { "; pressed down under the hat" } else { "" }));
                 continue;
             }
             let spec = spec_of(item).map_err(|e| format!("item {}: {e}", i + 1))?;
@@ -206,7 +212,10 @@ impl Session {
                     let _ = wear::remove(&mut mesh, &g.name);
                 }
                 let range = wear::attach(&mut mesh, &g)?;
-                let mut line = format!("{} ({}): {} triangles", g.name, g.kind, g.mesh.triangles());
+                let mut line = format!("{} ({}): {} triangles, closed", g.name, g.kind, g.mesh.triangles());
+                if g.kind == "hat" && wear::worn(&mesh).iter().any(|n| wear::is_hair_material(n)) {
+                    line.push_str("; the hair is pressed down under it");
+                }
                 for n in &g.notes {
                     line.push_str(&format!("; {n}"));
                 }

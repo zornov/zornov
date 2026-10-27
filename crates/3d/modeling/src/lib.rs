@@ -29,6 +29,7 @@ pub mod formats;
 pub mod gen3d;
 pub mod groom;
 pub mod hair;
+pub mod hairdo;
 pub mod kits;
 pub mod library;
 pub mod material;
