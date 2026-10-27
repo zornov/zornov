@@ -5,7 +5,8 @@
 //!
 //! - [`rest_on_support`]: a model put in a scene comes down onto what is
 //!   under it (a table, the floor, a shelf, the terrain) and up out of what
-//!   it sinks into, keeping its turn.
+//!   it sinks into, keeping its turn; one put inside or through something
+//!   stays where it is.
 //! - [`settle`]: models dropped for real until they stop (a chair that
 //!   tips onto its legs, a pile that slumps), placed where they ended up.
 //! - [`check`]: what in a still scene would not stay as it is: floating
@@ -40,48 +41,8 @@ fn as_body(scene: &mut Scene, c: &m::Clip, t: m::Micros) -> Option<(usize, Aabb)
 /// How far a body can move along `down` before it touches something, and
 /// how deep it is in something now (both metres); None when nothing is
 /// under it within `reach`.
-fn gap_below(scene: &mut Scene, body: usize, down: V3, reach: f32) -> (Option<f32>, f32) {
-    let mut moved = 0.0f32;
-    let start = scene.world.bodies[body].pose;
-    let mut overlap = 0.0f32;
-    for round in 0..12 {
-        let contacts = scene.world.contacts_of(body, (reach - moved).max(0.0) + 0.001);
-        let mut step = f32::INFINITY;
-        let mut deepest = 0.0f32;
-        for (_, mf) in &contacts {
-            let along = dot(mf.normal, down);
-            if along < 0.25 {
-                // Touching beside or above: only counts as overlap.
-                for p in &mf.points {
-                    deepest = deepest.max(-p.sep);
-                }
-                continue;
-            }
-            for p in &mf.points {
-                deepest = deepest.max(-p.sep);
-                step = step.min(p.sep / along);
-            }
-        }
-        if round == 0 {
-            overlap = deepest;
-        }
-        if !step.is_finite() {
-            scene.world.bodies[body].pose = start;
-            return (if moved > 0.0 { Some(moved) } else { None }, overlap);
-        }
-        if step.abs() < 1e-4 {
-            break;
-        }
-        moved += step;
-        if moved > reach {
-            scene.world.bodies[body].pose = start;
-            return (None, overlap);
-        }
-        let b = &mut scene.world.bodies[body];
-        b.pose.p = mad(b.pose.p, down, step);
-    }
-    scene.world.bodies[body].pose = start;
-    (Some(moved), overlap)
+fn gap_below(scene: &Scene, body: usize, down: V3, reach: f32) -> (Option<f32>, f32) {
+    (scene.world.sweep(body, down, reach), scene.world.overlap(body, f32::INFINITY))
 }
 
 /// Where a clip should be to rest on what is under it at `t`: its new
@@ -105,12 +66,20 @@ pub fn rest_on_support(project: &m::Project, seq: m::SequenceId, clip: u64, t: m
     let ppm = scene.ppm;
     let height = (bounds.hi[1] - bounds.lo[1]).max(1.0) / ppm;
     let down = normalise_or(scene.world.gravity, [0.0, 1.0, 0.0]);
-    // Lift it out of anything it is sunk into first (up to its height).
-    let lift = height * 1.05;
-    scene.world.bodies[body].pose.p = mad(scene.world.bodies[body].pose.p, down, -lift);
+    // Sunk into something as deep as the check would call it sunk: lifted
+    // out first (up to its height). Still in something up there, it was
+    // put inside or through a thing, not on it, and stays where put.
+    let tol = (height * ppm * 0.02).max(1.5) / ppm;
+    let mut lift = 0.0;
+    if scene.world.overlap(body, tol) > tol {
+        lift = height * 1.05;
+        scene.world.bodies[body].pose.p = mad(scene.world.bodies[body].pose.p, down, -lift);
+        if scene.world.overlap(body, tol) > tol {
+            return None;
+        }
+    }
     // It looks as far below as the check does for a floating thing: up to three heights.
-    let (gap, _) = gap_below(&mut scene, body, down, lift + height * 3.0);
-    let gap = gap?;
+    let gap = scene.world.sweep(body, down, lift + height * 3.0)?;
     let drop = gap - lift;
     // Already resting (within a hair): nothing to do.
     if drop.abs() * ppm < 0.75 {
@@ -179,7 +148,7 @@ pub fn check(project: &m::Project, seq: m::SequenceId, t: m::Micros) -> Vec<Find
         let Some((body, bounds)) = as_body(&mut scene, c, t) else { continue };
         let height = (bounds.hi[1] - bounds.lo[1]).max(1.0);
         let down = normalise_or(scene.world.gravity, [0.0, 1.0, 0.0]);
-        let (gap, overlap) = gap_below(&mut scene, body, down, height * 3.0 / ppm);
+        let (gap, overlap) = gap_below(&scene, body, down, height * 3.0 / ppm);
         let tol = (height * 0.02).max(1.5);
         if overlap * ppm > tol.max(height * 0.05) {
             out.push(Finding { clip: it.clip, name: it.name.clone(), kind: "sunk", amount: overlap * ppm, under: None });
