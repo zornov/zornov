@@ -444,7 +444,6 @@ pub fn convert_value(v: &Value) -> Param {
     }
 }
 
-/// Converts a model parameter map.
 /// Toon shading a model clip asks for: `shading` "toon" (also "cel",
 /// "anime", "flat"), with `toon_bands` (2 or 3), `shadow_colour`,
 /// `toon_threshold`, `rim`, `rim_colour`, `highlights`, `outline` (canvas
@@ -469,6 +468,7 @@ fn toon_of(params: &Params) -> Option<crate::mesh_render::Toon> {
     })
 }
 
+/// Converts a model parameter map.
 pub fn convert_params(m: &studio_model::ParamMap) -> Params {
     m.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
 }

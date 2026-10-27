@@ -11,7 +11,9 @@
 //! Any figure comes from [`Build`]: build (weight, shoulders, hips),
 //! frame (masculine to feminine), age (a toddler to the old), height
 //! proportions (legs, arms, neck, hands, feet) and style (true to life to
-//! cartoon). It is born in plain clothes (a top, trousers, shoes) or bare
+//! cartoon), or the anime look (`anime`: a bigger head, long legs, big eyes
+//! with a large iris and highlights, a small nose and mouth, flat colour).
+//! It is born in plain clothes (a top, trousers, shoes) or bare
 //! (`dressed: false`) to be dressed with the wardrobe (`crate::wear`), and
 //! is closed: every rim of its surface but the eyelids' is capped.
 
@@ -62,6 +64,10 @@ pub struct Build {
     pub species: Option<String>,
     /// Fur colour for a species (else the species' own).
     pub fur: Option<[u8; 3]>,
+    /// The anime look: big eyes with a large iris and highlights, a small
+    /// nose and mouth, flat-coloured materials (proportions come from the
+    /// `anime` preset: bigger head, longer legs).
+    pub anime: bool,
 }
 
 impl Default for Build {
@@ -88,6 +94,7 @@ impl Default for Build {
             dressed: true,
             species: None,
             fur: None,
+            anime: false,
         }
     }
 }
@@ -120,11 +127,13 @@ impl Build {
             "toon" | "cartoon" | "cartoony" => Build { style: 1.0, ..d },
             "chibi" | "mascot" => Build { style: 1.0, head: 1.45, legs: 0.85, ..d },
             "stylised" | "stylized" | "stylish" => Build { style: 0.5, ..d },
+            "anime" | "manga" => Build { anime: true, style: 0.55, head: 1.14, legs: 1.12, neck: 1.05, hands: 0.92, weight: 0.92, ..d },
+            "anime_chibi" | "chibi_anime" => Build { anime: true, style: 1.0, head: 1.5, legs: 0.85, ..d },
             _ => return None,
         })
     }
 
-    pub const PRESETS: &'static str = "baby, toddler, child, teen, adult, elder, slim, athletic, heavy, heroic, realistic, stylised, toon, chibi";
+    pub const PRESETS: &'static str = "baby, toddler, child, teen, adult, elder, slim, athletic, heavy, heroic, realistic, stylised, toon, chibi, anime, anime_chibi";
 }
 
 fn lin(c: [u8; 3]) -> [f32; 4] {
@@ -486,6 +495,9 @@ pub fn character(height: f32, b: &Build) -> Mesh {
             }
         }
     }
+    if let (true, Some(frame)) = (b.anime, face_frame) {
+        anime_face(&mut mesh, &mut rig, frame);
+    }
     if let (Some(sp), Some(frame)) = (&b.species, face_frame) {
         let _ = crate::species::apply(&mut mesh, &mut rig, sp, b.fur, frame);
     }
@@ -498,6 +510,101 @@ pub fn character(height: f32, b: &Build) -> Mesh {
         dress_plain(&mut mesh, b);
     }
     mesh
+}
+
+/// The anime face on a head base at `frame`: each eye (ball, iris, lids,
+/// lashes, cornea) a fifth larger round its centre, the iris and pupil
+/// grown to fill most of what shows, a highlight on each eye riding its eye
+/// bone, the nose pressed flatter, the mouth narrower; every material
+/// flat-coloured (no skin glow, no texture) for toon shading.
+fn anime_face(mesh: &mut Mesh, rig: &mut crate::rig::Rig, frame: crate::face::HeadFrame) {
+    let (o, s) = (frame.origin, frame.size);
+    let local = |p: V3| scale(crate::sub(p, o), 1.0 / s);
+    let world = |p: V3| add(o, scale(p, s));
+    let named = |m: &Mesh, n: &str| m.materials.iter().position(|x| x.name == n).map(|i| i as u32);
+    let eye_parts: Vec<u32> = ["Eye white", "Iris", "Pupil", "Cornea", "Upper lid", "Lower lid", "Lashes"].iter().filter_map(|n| named(mesh, n)).collect();
+    let mats = mesh.tri_materials();
+    let mut on_eye = vec![false; mesh.positions.len()];
+    for t in 0..mesh.triangles() {
+        if eye_parts.contains(&mats[t]) {
+            for v in mesh.tri(t) {
+                on_eye[v] = true;
+            }
+        }
+    }
+    let centre = |sx: f32| [0.12 * sx, 0.0, -0.305];
+    for v in 0..mesh.positions.len() {
+        let p = local(mesh.positions[v]);
+        if on_eye[v] {
+            let c = centre(if p[0] >= 0.0 { 1.0 } else { -1.0 });
+            let d = crate::sub(p, c);
+            mesh.positions[v] = world(add(c, [d[0] * 1.2, d[1] * 1.28, d[2] * 1.12]));
+            continue;
+        }
+        // The nose: pressed back towards the face, most at its tip.
+        if p[0].abs() < 0.11 && p[1] > -0.06 && p[1] < 0.24 && p[2] < -0.36 {
+            let k = 0.55 * (1.0 - (p[0].abs() / 0.11)).clamp(0.0, 1.0);
+            mesh.positions[v] = world([p[0], p[1], p[2] + (-0.36 - p[2]) * k]);
+            continue;
+        }
+        // The mouth: narrower round its middle.
+        if p[0].abs() < 0.14 && p[1] > 0.24 && p[1] < 0.34 && p[2] < -0.25 {
+            let k = 1.0 - 0.22 * (1.0 - (p[0].abs() / 0.14)).clamp(0.0, 1.0).sqrt();
+            mesh.positions[v] = world([p[0] * k, p[1], p[2]]);
+        }
+    }
+    // A big iris and pupil: what of the eyeball faces forward.
+    if let (Some(white), Some(iris), Some(pupil)) = (named(mesh, "Eye white"), named(mesh, "Iris"), named(mesh, "Pupil")) {
+        let mut mats = mesh.tri_materials();
+        for t in 0..mesh.triangles() {
+            if ![white, iris, pupil].contains(&mats[t]) {
+                continue;
+            }
+            let p = local(mesh.centroid(t));
+            let c = centre(if p[0] >= 0.0 { 1.0 } else { -1.0 });
+            let d = crate::normalise(crate::sub(p, c));
+            // Taller than wide, as anime eyes are drawn.
+            let a = ((d[0] / 0.62).powi(2) + (d[1] / 0.8).powi(2)).sqrt();
+            mats[t] = if d[2] > -0.2 { mats[t] } else if a < 0.24 { pupil } else if a < 0.62 { iris } else { white };
+        }
+        mesh.regroup(&mats);
+    }
+    // The highlights: a bright fleck high on each eye, on its eye bone.
+    let shine = mesh.materials.len() as u32;
+    mesh.materials.push(Material { name: "Eye shine".into(), base_colour: [1.0, 1.0, 1.0, 1.0], emissive: [1.2, 1.2, 1.2], roughness: 0.2, ..Material::default() });
+    let re = 0.0525 * 1.2;
+    for (side, sx) in [("L", 1.0f32), ("R", -1.0)] {
+        let Some(bone) = rig.bone(&format!("eye.{side}")) else { continue };
+        for (k, (dx, dy, r)) in [(-0.35f32, -0.42f32, 0.2f32), (0.3, 0.38, 0.1)].into_iter().enumerate() {
+            let c = centre(sx);
+            let dir = crate::normalise([dx * sx, dy, -1.0]);
+            let at = world(add(c, scale(dir, re * (1.07 + 0.01 * k as f32))));
+            let mut fleck = crate::prim::uv_sphere(r * re * s, 10, 6);
+            for q in &mut fleck.positions {
+                q[2] *= 0.35;
+                *q = add(*q, at);
+            }
+            let mut mats = mesh.tri_materials();
+            mats.extend(std::iter::repeat_n(shine, fleck.triangles()));
+            let base = mesh.positions.len() as u32;
+            mesh.positions.extend_from_slice(&fleck.positions);
+            mesh.normals.extend_from_slice(&fleck.normals);
+            mesh.uvs.extend(std::iter::repeat_n([0.0f32; 2], fleck.positions.len()));
+            mesh.indices.extend(fleck.indices.iter().map(|i| i + base));
+            rig.joints.extend(std::iter::repeat_n([bone as u16, 0, 0, 0], fleck.positions.len()));
+            rig.weights.extend(std::iter::repeat_n([1.0f32, 0.0, 0.0, 0.0], fleck.positions.len()));
+            mesh.regroup(&mats);
+        }
+    }
+    // Flat colour.
+    for m in &mut mesh.materials {
+        m.subsurface = 0.0;
+        m.texture = None;
+        if m.name != "Cornea" && m.name != "Eye shine" {
+            m.roughness = m.roughness.max(0.6);
+        }
+    }
+    crate::ops::smooth_normals_in_place(mesh);
 }
 
 /// The plain clothes a figure is born in: a T-shirt, trousers and shoes, each
