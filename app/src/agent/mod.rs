@@ -137,6 +137,11 @@ mod variety;
 mod shelf;
 mod keep;
 pub mod eval;
+pub mod trace;
+pub mod trace_report;
+pub mod replay;
+pub mod observe;
+mod mcp_extras;
 mod readback;
 mod grounding;
 pub mod mcp;
@@ -603,9 +608,13 @@ impl Session {
 
     /// Runs a tool and, in project mode, saves when the project changed.
     pub fn run(&mut self, tool: &str, a: &Value) -> Result<Vec<Content>, String> {
+        // The flight recorder (trace.rs): who called, what changed.
+        let mark = trace::Mark::new(self, a);
+        let a = mark.args();
         let started = std::time::Instant::now();
-        let r = self.run_inner(tool, a);
+        let r = if tool == trace::FEEDBACK { trace::feedback(a) } else { self.run_inner(tool, a) };
         self.record(tool, a, &r, started.elapsed());
+        mark.end(self, tool, &r);
         r
     }
 

@@ -143,6 +143,10 @@ fn main() -> eframe::Result {
         Some("agent") => std::process::exit(agent::cli::agent(&argv[1..])),
         // `zornov eval`: the AI editor on scored jobs, headless.
         Some("eval") => std::process::exit(agent::eval::main(&argv[1..])),
+        // `zornov trace report|on|off`: what agents ran into (the flight recorder).
+        Some("trace") => std::process::exit(agent::trace_report::main(&argv[1..])),
+        // `zornov replay TRACE`: a recorded agent session again, on this build.
+        Some("replay") => std::process::exit(agent::replay::main(&argv[1..])),
         // `zornov node`: a render node other Studios on the network send pieces of a render to.
         #[cfg(feature = "render")]
         Some("node") => std::process::exit(deliver_run::node_main(&argv[1..])),

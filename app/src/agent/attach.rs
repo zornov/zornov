@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// One connection to a window: what it says, and where to write.
-type Link = (BufReader<Box<dyn Read + Send>>, Box<dyn Write + Send>);
+pub(crate) type Link = (BufReader<Box<dyn Read + Send>>, Box<dyn Write + Send>);
 
 /// Listens for proxies; each call goes through `gate`.
 pub fn serve(gate: Arc<Gate>) -> std::io::Result<PathBuf> {
@@ -104,14 +104,14 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 
 /// Connects to the window listening at `socket`.
 #[cfg(unix)]
-fn connect(socket: &Path) -> std::io::Result<Link> {
+pub(crate) fn connect(socket: &Path) -> std::io::Result<Link> {
     let stream = std::os::unix::net::UnixStream::connect(socket)?;
     let out = stream.try_clone()?;
     Ok((BufReader::new(Box::new(stream)), Box::new(out)))
 }
 
 #[cfg(windows)]
-fn connect(socket: &Path) -> std::io::Result<Link> {
+pub(crate) fn connect(socket: &Path) -> std::io::Result<Link> {
     let text = std::fs::read_to_string(socket)?;
     let mut it = text.split_whitespace();
     let port: u16 = it.next().and_then(|p| p.parse().ok()).ok_or_else(|| std::io::Error::other("no port in the window's file"))?;
@@ -125,16 +125,19 @@ fn connect(socket: &Path) -> std::io::Result<Link> {
 fn connection(reader: BufReader<Box<dyn Read + Send>>, mut out: Box<dyn Write + Send>, gate: &Gate) {
     let mut first = true;
     for line in reader.lines().map_while(Result::ok) {
-        if std::mem::take(&mut first) && !gate.in_turn() {
+        if std::mem::take(&mut first) && !gate.in_turn() && !line.contains("\"observe\"") {
             announce(gate);
         }
         let reply = match serde_json::from_str::<Value>(&line) {
             // The helper asks which tools this Studio has: its own list is
             // the truth, not the helper's.
             Ok(v) if v.get("list_tools").is_some() => json!({"tools": super::mcp::tools()}),
+            // `zornov mcp --observe`: this connection only listens from now on.
+            Ok(v) if v.get("observe").is_some() => return super::observe::stream(out),
             Ok(v) => {
                 let name = v.get("name").and_then(Value::as_str).unwrap_or("");
-                let args = v.get("arguments").cloned().unwrap_or(json!({}));
+                let mut args = v.get("arguments").cloned().unwrap_or(json!({}));
+                super::trace::tag_socket_call(&mut args, gate.in_turn());
                 let role = v.get("role").and_then(Value::as_str).and_then(super::crew::Role::parse);
                 super::mcp::result_of(gate.call_as(role, name, &args))
             }
