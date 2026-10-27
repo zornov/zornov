@@ -13,7 +13,7 @@ fn aliases(name: &str) -> &'static [(&'static str, &'static str)] {
     match name {
         "frame" => &[("at", "t"), ("time", "t"), ("seconds", "t")],
         "chart" => &[("color", "colour"), ("type", "kind"), ("values", "data"), ("rows", "data")],
-        "shape" | "text_3d" => &[("color", "colour"), ("shapes", "items"), ("string", "text")],
+        "shape" | "text_3d" => &[("color", "colour"), ("shapes", "items"), ("string", "text"), ("kind", "type"), ("shape", "type")],
         "template" => &[("name_or_id", "id"), ("values", "controls"), ("fields", "controls")],
         "see" => &[("at", "t"), ("time", "t"), ("seconds", "t"), ("clip", "clips")],
         "contact_sheet" => &[("at", "times"), ("moments", "times"), ("from", "start"), ("to", "end"), ("frames", "count")],
@@ -82,7 +82,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "place" => &["media", "at", "lane", "source_in", "source_out", "duration", "speed", "fit", "x", "y", "volume", "muted", "name"],
         // Motion graphics: listed so their fields are checked and shown by
         // edit_schema like every other op's (they were missing from both).
-        "shape" => &["items", "preset", "inputs", "add", "patch", "replace", "lottie", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "opacity", "rotation", "size", "width", "extrude", "side_colour", "colour", "accent", "stroke_width", "path", "speed", "name"],
+        "shape" => &["items", "preset", "type", "height", "roundness", "points", "radius", "inner", "stroke", "inputs", "add", "patch", "replace", "lottie", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "opacity", "rotation", "size", "width", "extrude", "side_colour", "colour", "accent", "stroke_width", "path", "speed", "name"],
         "text_3d" => &["text", "runs", "font", "size", "weight", "italic", "kerning", "letter_spacing", "depth", "bevel", "extrude", "colour", "side_colour", "accent", "opacity", "stroke_width", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "rotation", "name"],
         "expression" => &["clip", "property", "expr", "driver", "remove"],
         "time_remap" => &["clip", "expr", "keys", "speed", "remove"],

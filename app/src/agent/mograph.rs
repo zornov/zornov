@@ -98,10 +98,32 @@ fn doc_of(op: &Value) -> Result<(Value, Vec<(String, m::Value)>), String> {
         }
         d
     } else {
-        match op.get("items") {
-            Some(Value::Array(a)) => json!({"items": a}),
-            Some(_) => return Err("shape \"items\" is a list of shape items".into()),
-            None => return Err("shape needs \"items\" (shapes, operators and paint, in order) or \"preset\"".into()),
+        match (op.get("items"), op.get("type").and_then(Value::as_str)) {
+            (Some(Value::Array(a)), _) => json!({"items": a}),
+            (Some(_), _) => return Err("shape \"items\" is a list of shape items".into()),
+            // One plain shape, as the craft book reads ("type": "rect",
+            // "width", "height", "roundness", "colour", "stroke"): made
+            // into its items rather than refused.
+            (None, Some(t)) if matches!(t, "rect" | "rectangle" | "ellipse" | "circle" | "polygon" | "star") => {
+                let (w, h) = (f(op, "width").or_else(|| f(op, "size")).unwrap_or(200.0), f(op, "height").or_else(|| f(op, "size")).unwrap_or(200.0));
+                let mut shape = json!({"type": t, "size": [w, h]});
+                if let Some(r) = f(op, "roundness") {
+                    // 0..1 of the shorter side, as card takes it.
+                    shape["roundness"] = json!(if r <= 1.0 { r * w.min(h) / 2.0 } else { r });
+                }
+                for k in ["points", "radius", "inner"] {
+                    if let Some(v) = op.get(k) {
+                        shape[k] = v.clone();
+                    }
+                }
+                let mut items = vec![shape, json!({"type": "fill", "colour": op.get("colour").cloned().unwrap_or(json!("#ffffff"))})];
+                if let Some(c) = op.get("stroke") {
+                    items.push(json!({"type": "stroke", "colour": c, "width": f(op, "stroke_width").unwrap_or(4.0)}));
+                }
+                json!({"items": items})
+            }
+            (None, Some(t)) => return Err(format!("shape \"type\" \"{t}\": rect, ellipse, circle, polygon or star for one plain shape; anything more is \"items\" (shapes, operators and paint, in order) or a \"preset\"")),
+            (None, None) => return Err("shape needs \"items\" (shapes, operators and paint, in order), \"preset\", or \"type\" (rect, ellipse, polygon, star) with width, height, colour for one plain shape".into()),
         }
     };
     normalise_colours(&mut doc);

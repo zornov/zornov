@@ -115,10 +115,16 @@ anything that sweeps across everything (a flash, a light leak).
 
 ## Shapes and boxes
 
-- `card` with `width`/`height` is a box; `shape`: rectangle, ellipse,
-  polygon (`sides`), star, arrow, line; `roundness` 0-1 (0.1-0.2 is the
-  modern look; 1 is a pill); `stroke` + `stroke_width` (pixels) for an
-  outline.
+- `card` with `width`/`height` is a box, and its `shape` field picks
+  rectangle, ellipse, polygon (`sides`), star, arrow or line; `roundness`
+  0-1 (0.1-0.2 is the modern look; 1 is a pill); `stroke` +
+  `stroke_width` (pixels) for an outline:
+  `{"op": "card", "shape": "rectangle", "width": 600, "height": 160, "roundness": 0.15, "colour": "#1b1f2a"}`.
+- The `shape` op draws vector layers: one plain shape with `type` (rect,
+  ellipse, polygon, star), `width`, `height`, `roundness`, `colour`,
+  `stroke`; anything more with `items` (shapes, operators and paint in
+  order) or a `preset` (skill `titles-typography` has the item list):
+  `{"op": "shape", "type": "rect", "width": 400, "height": 120, "roundness": 0.2, "colour": "#ff3366", "at": 1}`.
 - Boxes behind text: padding of at least the text height on each side;
   a soft shadow or a 1-2 px lighter outline separates a box from its
   background.
