@@ -621,7 +621,7 @@ pub const OPS: &[(&str, &str)] = &[
     ("ellipse", "cx, cy, rx, ry (or rect)"),
     ("circle", "cx, cy, r"),
     ("polygon", "cx, cy, r, sides, rotation (degrees)"),
-    ("triangle", "cx, cy, r, rotation (degrees; 0 points up): a polygon with three sides"),
+    ("triangle", "cx, cy, r (or size, the across), rotation (degrees; 0 points up): a polygon with three sides"),
     ("star", "cx, cy, r, inner, points, rotation"),
     ("spiral", "cx, cy, r, decay (%), segments, clockwise"),
     ("arc", "from, to, slope (-100..100), closed"),
@@ -830,12 +830,12 @@ pub fn apply(doc: &mut Document, v: &Value, ctx: &Context) -> R {
                 o.remove("rotation");
                 o.remove("rotate");
             }
-            let r = f(v, "r").or_else(|| f(v, "radius")).unwrap_or(50.0);
+            let r = f(v, "r").or_else(|| f(v, "radius")).or_else(|| f(v, "size").map(|d| d / 2.0)).unwrap_or(50.0);
             add_node(doc, &plain, NodeKind::Shape { shape: LiveShape::Polygon { center: Point::new(fd(v, "cx", 0.0), fd(v, "cy", 0.0)), radius: r, sides: sides as u32, rotation } }, default_paint())
         }
         "star" => {
             let c = Point::new(fd(v, "cx", 0.0), fd(v, "cy", 0.0));
-            let r = fd(v, "r", 50.0);
+            let r = f(v, "r").or_else(|| f(v, "radius")).or_else(|| f(v, "size").map(|d| d / 2.0)).unwrap_or(50.0);
             let n = fd(v, "points", 5.0) as u32;
             let shape = match f(v, "inner") {
                 Some(i) => LiveShape::Star { center: c, radius: r, inner: i, points: n, rotation: fd(v, "rotation", 0.0) },
