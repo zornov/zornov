@@ -142,3 +142,115 @@ fn math_showcase() {
     std::fs::write(out.join("timings.txt"), &table).unwrap();
     std::fs::write(out.join("log.txt"), &d.log).unwrap();
 }
+
+/// A short film of shapes from mathematics, made the way an agent makes
+/// it (the MCP server, op by op), 1920 × 1080, about 28 s: lattices,
+/// surfaces, a fractal drawn from its formula, growth and warps, shapes
+/// that move with t, to composed music. `MATH_FILM_OUT` is where it goes;
+/// `MATH_FILM_EXPORT=1` exports it (and quality-checks the file), else it
+/// stops after the key frames and the contact sheet.
+#[test]
+#[ignore]
+fn math_film() {
+    let out = std::env::var_os("MATH_FILM_OUT").map(std::path::PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("zornov-math-film"));
+    std::fs::create_dir_all(&out).unwrap();
+    let mut d = Driver { s: Session::new(services::project::new_custom("Math shapes", 1920, 1080, 30.0)), n: 0, out: out.clone(), log: String::new() };
+    super::mcp::handle(&mut d.s, &json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "film", "version": "1"}}})).unwrap();
+    let end = 28.0;
+    let spin = |speed: f64, phase: f64| json!({"op": "animate", "clip": "$last", "property": "rotation_y", "formula": format!("{speed} * t + {phase}")});
+    let sway = |deg: f64| json!({"op": "animate", "clip": "$last", "property": "rotation_x", "formula": format!("{deg} * sin(t * tau / 5)")});
+    let caption = |text: &str, at: f64, dur: f64| json!({"op": "text", "text": text, "at": at + 0.4, "duration": dur - 0.8, "x": 0, "y": 430, "size": 40, "colour": "#d9dde6"});
+    let camera = |at: f64, dur: f64, mv: Value| json!({"op": "camera", "new": true, "at": at, "duration": dur, "focal_length": 45, "move": mv});
+
+    d.call("edit", json!({"ops": [
+        {"op": "card", "colour": "#0b0e15", "gradient": ["#1d2740", "#05060a"], "radial": true, "at": 0, "duration": end},
+        {"op": "lighting", "preset": "three_point", "at": 0, "duration": end},
+    ]}), "ground");
+
+    // 0 - 4.5: the title, a rose growing petals and epicycles drawing a heart.
+    let (a, b) = (0.0, 4.5);
+    d.call("edit", json!({"ops": [
+        {"op": "shape", "name": "Rose", "items": [{"type": "curve", "preset": "rose", "n": {"keys": [[0, 2, "hold"], [0.9, 3, "hold"], [1.8, 4, "hold"], [2.7, 5, "hold"], [3.6, 7, "hold"]]}, "d": 1, "size": 420}, {"type": "stroke", "colour": "#ffd166", "width": 3}], "at": a, "duration": b - a, "x": -520, "y": 90},
+        {"op": "shape", "name": "Epicycles", "items": [{"type": "curve", "fourier": {"of": "heart", "terms": 14, "period": 4.4}, "size": 420}, {"type": "stroke", "colour": "#e0e6f0", "width": 2.5}], "at": a, "duration": b - a, "x": 520, "y": 90},
+        {"op": "text", "text": "Shapes from mathematics", "at": 0.3, "duration": 4.0, "x": 0, "y": -330, "size": 84, "colour": "white"},
+        {"op": "text", "text": "every form here is a formula", "at": 1.2, "duration": 3.1, "x": 0, "y": -240, "size": 40, "colour": "#aeb6c8"},
+    ]}), "title");
+
+    // 4.5 - 9.5: a gyroid lattice, meshed.
+    let (a, b) = (4.5, 9.5);
+    d.call("edit", json!({"ops": [
+        {"op": "model", "name": "Gyroid", "math": {"preset": "gyroid", "cells": 2.5, "thickness": 0.26}, "size": 600, "detail": 4, "position": [0, -40, 0], "colour": "#e3b34f", "metallic": 0.6, "roughness": 0.3, "at": a, "duration": b - a},
+        spin(22.0, 20.0), sway(10.0),
+        camera(a, b - a, json!({"type": "dolly", "by": 260})),
+        caption("gyroid: sin x cos y + sin y cos z + sin z cos x = 0", a, b - a),
+    ]}), "gyroid");
+
+    // 9.5 - 14.5: parametric surfaces.
+    let (a, b) = (9.5, 14.5);
+    d.call("edit", json!({"ops": [
+        {"op": "model", "name": "Swirl torus", "math": "swirl_torus", "size": 480, "detail": 4, "position": [0, -60, 0], "colour": "#3a86ff", "roughness": 0.3, "at": a, "duration": b - a},
+        spin(30.0, 0.0), sway(18.0),
+        {"op": "model", "name": "Mobius strip", "math": {"preset": "mobius", "width": 0.45}, "size": 360, "detail": 4, "position": [-560, -20, 80], "colour": "#ff7b6b", "roughness": 0.4, "at": a, "duration": b - a},
+        spin(-26.0, 30.0), sway(25.0),
+        {"op": "model", "name": "Seashell", "math": {"preset": "seashell", "turns": 3}, "size": 330, "detail": 4, "position": [560, -20, 80], "colour": "#f2e3c6", "roughness": 0.45, "at": a, "duration": b - a},
+        spin(24.0, 0.0),
+        camera(a, b - a, json!({"type": "orbit", "by": 24})),
+        caption("parametric surfaces: (u, v) to (x, y, z)", a, b - a),
+    ]}), "surfaces");
+
+    // 14.5 - 19.5: a Mandelbulb drawn straight from its formula, the camera going close.
+    let (a, b) = (14.5, 19.5);
+    d.call("edit", json!({"ops": [
+        {"op": "model", "name": "Mandelbulb", "math": {"preset": "mandelbulb", "power": 8, "iterations": 12}, "render": "direct", "size": 700, "position": [0, -30, 0], "colour": "#c9ced9", "roughness": 0.45, "at": a, "duration": b - a},
+        spin(12.0, 30.0),
+        camera(a, b - a, json!({"type": "dolly", "by": 520})),
+        caption("Mandelbulb, sphere traced from its formula: no mesh", a, b - a),
+    ]}), "mandelbulb");
+
+    // 19.5 - 23.5: growth and warps.
+    let (a, b) = (19.5, 23.5);
+    d.call("edit", json!({"ops": [
+        {"op": "model", "name": "Tree", "math": {"lsystem": "tree", "iterations": 6}, "size": 560, "position": [-520, -20, 0], "colour": "#6e4b30", "at": a, "duration": b - a},
+        spin(18.0, 0.0),
+        {"op": "model", "name": "Pine cone", "math": {"phyllotaxis": "cone", "count": 420, "seed_colour": "#8a5a32"}, "size": 340, "detail": 3, "position": [0, -10, 0], "at": a, "duration": b - a},
+        spin(-30.0, 0.0),
+        {"op": "model", "name": "Twisted column", "shape": "cube", "size": [90, 440, 90], "detail": 2, "position": [520, -20, 0], "colour": "#9ad0ec", "roughness": 0.25, "at": a, "duration": b - a},
+        {"op": "mesh", "clip": "$last", "steps": [{"do": "twist", "degrees": 300}, {"do": "taper", "from": 0.55, "to": 1.15}, {"do": "bend", "degrees": 28}]},
+        spin(20.0, 0.0),
+        camera(a, b - a, json!({"type": "truck", "by": -160})),
+        caption("growth and warps: L-system, golden angle, twist and bend", a, b - a),
+    ]}), "growth");
+
+    // 23.5 - 28: shapes that move with t, and a comet on a Lissajous path.
+    let (a, b) = (23.5, end);
+    d.call("edit", json!({"ops": [
+        {"op": "model", "name": "Rippling sphere", "math": {"preset": "ripple_sphere", "waves": 7, "amount": 0.07, "speed": 3}, "size": 400, "detail": 4, "position": [0, -60, 0], "colour": "#b388ff", "roughness": 0.3, "at": a, "duration": b - a},
+        spin(16.0, 0.0),
+        {"op": "model", "name": "Lorenz trail", "math": {"attractor": "lorenz", "radius": 0.07}, "size": 900, "position": [0, -60, 300], "colour": "#2a1c12", "emissive": "#ff8c42", "emissive_strength": 1.4, "at": a, "duration": b - a},
+        spin(10.0, 0.0),
+        {"op": "model", "name": "Comet", "shape": "sphere", "size": 30, "detail": 2, "colour": "#ffffff", "emissive": "#ffe6a8", "emissive_strength": 5, "position": [0, -60, -260], "at": a, "duration": b - a},
+        {"op": "animate", "clip": "$last", "property": "position", "curve": {"preset": "lissajous", "a": 3, "b": 2, "size": 1100}},
+        camera(a, b - a, json!({"type": "pedestal", "by": 90})),
+        caption("shapes that move with t", a, 2.4),
+        {"op": "text", "text": "Zornov: every form is a formula", "at": 26.0, "duration": 2.0, "x": 0, "y": 430, "size": 48, "colour": "white"},
+    ]}), "motion");
+
+    d.call("edit", json!({"ops": [
+        {"op": "music", "describe": "ambient electronic, warm pads, a slow glassy arpeggio, hopeful", "bpm": 96, "duration": end, "cues": [{"at": 4.5, "kind": "hit"}, {"at": 9.5, "kind": "hit"}, {"at": 14.5, "kind": "swell"}, {"at": 19.5, "kind": "hit"}, {"at": 23.5, "kind": "resolve"}]},
+    ]}), "music");
+
+    for (k, t) in [2.5, 7.0, 12.0, 17.0, 21.5, 25.5].into_iter().enumerate() {
+        d.call("frame", json!({"t": t, "detail": "full"}), &format!("key{k}"));
+    }
+    d.call("contact_sheet", json!({"start": 0.2, "end": end - 0.2, "count": 12, "detail": "full"}), "sheet");
+    let project = out.join("Math shapes");
+    d.call("save", json!({"path": project.display().to_string()}), "save");
+    std::fs::write(out.join("log.txt"), &d.log).unwrap();
+    if std::env::var_os("MATH_FILM_EXPORT").is_some() {
+        d.call("check", json!({}), "check");
+        let mp4 = out.join("math-shapes.mp4");
+        d.call("export", json!({"path": mp4.display().to_string(), "preset": "Social 1080p"}), "export");
+        d.call("qc", json!({"path": mp4.display().to_string(), "spec": "youtube"}), "qc");
+        std::fs::write(out.join("log.txt"), &d.log).unwrap();
+    }
+}
