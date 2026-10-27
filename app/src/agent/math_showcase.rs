@@ -163,7 +163,7 @@ fn math_film() {
     let camera = |at: f64, dur: f64, mv: Value| json!({"op": "camera", "new": true, "at": at, "duration": dur, "focal_length": 45, "move": mv});
 
     d.call("edit", json!({"ops": [
-        {"op": "card", "colour": "#0b0e15", "gradient": ["#1d2740", "#05060a"], "radial": true, "at": 0, "duration": end},
+        {"op": "card", "colour": "#10141e", "gradient": ["#25314f", "#121725"], "radial": true, "at": 0, "duration": end},
         {"op": "lighting", "preset": "three_point", "at": 0, "duration": end},
     ]}), "ground");
 
@@ -188,13 +188,13 @@ fn math_film() {
     // 9.5 - 14.5: parametric surfaces.
     let (a, b) = (9.5, 14.5);
     d.call("edit", json!({"ops": [
-        {"op": "model", "name": "Swirl torus", "math": "swirl_torus", "size": 480, "detail": 4, "position": [0, -60, 0], "colour": "#3a86ff", "roughness": 0.3, "at": a, "duration": b - a},
-        spin(30.0, 0.0), sway(18.0),
-        {"op": "model", "name": "Mobius strip", "math": {"preset": "mobius", "width": 0.45}, "size": 360, "detail": 4, "position": [-560, -20, 80], "colour": "#ff7b6b", "roughness": 0.4, "at": a, "duration": b - a},
-        spin(-26.0, 30.0), sway(25.0),
-        {"op": "model", "name": "Seashell", "math": {"preset": "seashell", "turns": 3}, "size": 330, "detail": 4, "position": [560, -20, 80], "colour": "#f2e3c6", "roughness": 0.45, "at": a, "duration": b - a},
-        spin(24.0, 0.0),
-        camera(a, b - a, json!({"type": "orbit", "by": 24})),
+        {"op": "model", "name": "Swirl torus", "math": "swirl_torus", "size": 600, "detail": 4, "position": [0, -60, 0], "colour": "#3a86ff", "roughness": 0.3, "at": a, "duration": b - a},
+        spin(55.0, 0.0), sway(22.0),
+        {"op": "model", "name": "Mobius strip", "math": {"preset": "mobius", "width": 0.45}, "size": 440, "detail": 4, "position": [-560, -20, 80], "colour": "#ff7b6b", "roughness": 0.4, "at": a, "duration": b - a},
+        spin(-50.0, 30.0), sway(30.0),
+        {"op": "model", "name": "Seashell", "math": {"preset": "seashell", "turns": 3}, "size": 400, "detail": 4, "position": [560, -20, 80], "colour": "#f2e3c6", "roughness": 0.45, "at": a, "duration": b - a},
+        spin(48.0, 0.0),
+        camera(a, b - a, json!({"type": "orbit", "by": 30, "ease": "linear"})),
         caption("parametric surfaces: (u, v) to (x, y, z)", a, b - a),
     ]}), "surfaces");
 
@@ -210,14 +210,14 @@ fn math_film() {
     // 19.5 - 23.5: growth and warps.
     let (a, b) = (19.5, 23.5);
     d.call("edit", json!({"ops": [
-        {"op": "model", "name": "Tree", "math": {"lsystem": "tree", "iterations": 6}, "size": 560, "position": [-520, -20, 0], "colour": "#6e4b30", "at": a, "duration": b - a},
-        spin(18.0, 0.0),
-        {"op": "model", "name": "Pine cone", "math": {"phyllotaxis": "cone", "count": 420, "seed_colour": "#8a5a32"}, "size": 340, "detail": 3, "position": [0, -10, 0], "at": a, "duration": b - a},
-        spin(-30.0, 0.0),
-        {"op": "model", "name": "Twisted column", "shape": "cube", "size": [90, 440, 90], "detail": 2, "position": [520, -20, 0], "colour": "#9ad0ec", "roughness": 0.25, "at": a, "duration": b - a},
+        {"op": "model", "name": "Tree", "math": {"lsystem": "tree", "iterations": 6}, "size": 640, "position": [-520, -20, 0], "colour": "#6e4b30", "at": a, "duration": b - a},
+        spin(40.0, 0.0),
+        {"op": "model", "name": "Pine cone", "math": {"phyllotaxis": "cone", "count": 420, "seed_colour": "#8a5a32"}, "size": 420, "detail": 3, "position": [0, -10, 0], "at": a, "duration": b - a},
+        spin(-55.0, 0.0),
+        {"op": "model", "name": "Twisted column", "shape": "cube", "size": [110, 520, 110], "detail": 2, "position": [520, -20, 0], "colour": "#9ad0ec", "roughness": 0.25, "at": a, "duration": b - a},
         {"op": "mesh", "clip": "$last", "steps": [{"do": "twist", "degrees": 300}, {"do": "taper", "from": 0.55, "to": 1.15}, {"do": "bend", "degrees": 28}]},
-        spin(20.0, 0.0),
-        camera(a, b - a, json!({"type": "truck", "by": -160})),
+        spin(50.0, 0.0),
+        camera(a, b - a, json!({"type": "truck", "by": -220, "ease": "linear"})),
         caption("growth and warps: L-system, golden angle, twist and bend", a, b - a),
     ]}), "growth");
 
@@ -237,6 +237,8 @@ fn math_film() {
 
     d.call("edit", json!({"ops": [
         {"op": "music", "describe": "ambient electronic, warm pads, a slow glassy arpeggio, hopeful", "bpm": 96, "duration": end, "cues": [{"at": 4.5, "kind": "hit"}, {"at": 9.5, "kind": "hit"}, {"at": 14.5, "kind": "swell"}, {"at": 19.5, "kind": "hit"}, {"at": 23.5, "kind": "resolve"}]},
+        // To YouTube's -14 LUFS: the music came in at about -16.
+        {"op": "set", "clip": "$last", "volume": 0},
     ]}), "music");
 
     for (k, t) in [2.5, 7.0, 12.0, 17.0, 21.5, 25.5].into_iter().enumerate() {
