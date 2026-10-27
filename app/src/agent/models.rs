@@ -997,10 +997,19 @@ impl Session {
                     }
                     format!("{n} faces got material {}", mesh.materials.len() - 1)
                 } else {
-                    let which: Vec<usize> = match s.get("index").and_then(Value::as_u64) {
+                    let index = s.get("index").or_else(|| s.get("slot")).and_then(Value::as_u64);
+                    let which: Vec<usize> = match index {
                         Some(i) => vec![i as usize],
                         None => (0..mesh.materials.len()).collect(),
                     };
+                    // A name belongs to one slot: given for every slot it
+                    // turned 49 parts into "door knob", and `check` then
+                    // found the parts missing.
+                    let rename = s.get("name").is_some() && which.len() == 1;
+                    let mut note = String::new();
+                    if s.get("name").is_some() && !rename {
+                        note = format!(" (name not applied: it names one slot, so give \"index\" too; slots: {})", mesh.materials.iter().enumerate().map(|(i, m)| format!("{i} {}", if m.name.is_empty() { "unnamed" } else { &m.name })).collect::<Vec<_>>().join(", "));
+                    }
                     for i in which {
                         if let Some(m) = mesh.materials.get_mut(i) {
                             if s.get("colour").is_some() {
@@ -1027,12 +1036,12 @@ impl Session {
                             if s.get("ior").is_some() {
                                 m.ior = mat.ior;
                             }
-                            if s.get("name").is_some() {
+                            if rename {
                                 m.name = mat.name.clone();
                             }
                         }
                     }
-                    "material changed".into()
+                    format!("material changed{note}")
                 }
             }
             "texture" => {
