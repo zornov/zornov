@@ -128,7 +128,7 @@ impl ViewScene {
     }
 
     fn solid_override() -> MaterialOverride {
-        MaterialOverride { base_colour: Some([0.62, 0.62, 0.62, 1.0]), metallic: Some(0.0), roughness: Some(0.55), emissive: Some([0.0; 3]), opacity: None, subsurface: Some(0.0), wetness: None, emissive_strength: None }
+        MaterialOverride { base_colour: Some([0.62, 0.62, 0.62, 1.0]), metallic: Some(0.0), roughness: Some(0.55), emissive: Some([0.0; 3]), opacity: None, subsurface: Some(0.0), wetness: None, emissive_strength: None, toon: None }
     }
 
     /// Whether a clip is a 2D picture layer (what becomes a card).

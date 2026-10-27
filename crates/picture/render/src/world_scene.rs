@@ -48,11 +48,14 @@ pub struct WorldDesc {
     /// (weather, wet reflections, tone map, grade). The world keeps its own
     /// sun, sky and lamps.
     pub carrier: Option<crate::atmosphere::Atmos>,
+    /// Toon (cel) shading for the whole world: hard bands and a rim on
+    /// the GPU; with ink outlines too when it is drawn on the CPU.
+    pub toon: Option<crate::mesh_render::Toon>,
 }
 
 impl PartialEq for WorldDesc {
     fn eq(&self, o: &WorldDesc) -> bool {
-        Arc::ptr_eq(&self.world, &o.world) && self.camera == o.camera && self.time.to_bits() == o.time.to_bits() && self.time_of_day.map(f32::to_bits) == o.time_of_day.map(f32::to_bits) && self.metres_per_px.to_bits() == o.metres_per_px.to_bits() && self.quality == o.quality && self.carrier == o.carrier
+        Arc::ptr_eq(&self.world, &o.world) && self.camera == o.camera && self.time.to_bits() == o.time.to_bits() && self.time_of_day.map(f32::to_bits) == o.time_of_day.map(f32::to_bits) && self.metres_per_px.to_bits() == o.metres_per_px.to_bits() && self.quality == o.quality && self.carrier == o.carrier && self.toon == o.toon
     }
 }
 
@@ -128,6 +131,7 @@ pub fn render(desc: &WorldDesc, canvas: &Canvas, target: (u32, u32)) -> Frame {
         o.quality = desc.quality;
         o.time = desc.time;
         o.sky_time = desc.time_of_day;
+        o.toon = desc.toon.map_or(0, |t| t.bands.max(2));
         if let Some(a) = &desc.carrier {
             (o.fog, o.look) = shared_with_realtime(a, &desc.world.look);
         }
@@ -139,7 +143,12 @@ pub fn render(desc: &WorldDesc, canvas: &Canvas, target: (u32, u32)) -> Frame {
         }
     }
     // Path tracing, or no GPU: the world as triangles through the CPU.
-    let mesh = to_mesh_desc(desc, canvas, &camera, 3_000_000);
+    let mut mesh = to_mesh_desc(desc, canvas, &camera, 3_000_000);
+    if let Some(t) = desc.toon {
+        for i in &mut mesh.instances {
+            i.overrides.toon = Some(t);
+        }
+    }
     crate::mesh_render::render(&mesh, canvas, (tw, th))
 }
 
