@@ -1089,6 +1089,21 @@ impl Session {
         None
     }
 
+    /// Sound laid to a character's old motion (footsteps from `foley`, named
+    /// "foley <clip> …") after the motion was driven again: the steps no
+    /// longer land on the feet.
+    fn foley_after_motion(&self, op: &Value) -> Option<String> {
+        let name = op.get("op").and_then(Value::as_str)?;
+        let moves = matches!(name, "act" | "walk" | "mocap" | "retarget" | "throw") || (name == "puppet" && op.get("act").is_some()) || (name == "skeleton" && op.get("act").is_some());
+        if !moves {
+            return None;
+        }
+        let id = op.get("clip").and_then(Value::as_u64)?;
+        let prefix = format!("foley {id} ");
+        let synced: Vec<String> = self.doc.project.clips.iter().filter(|c| c.kind == ClipKind::Audio && c.name.starts_with(&prefix)).map(|c| c.id.to_string()).collect();
+        (!synced.is_empty()).then(|| format!("sound clip(s) {} were laid to clip {id}'s earlier motion and may now be out of step; lay them again with foley {{\"clip\": {id}}} (it replaces them)", synced.join(", ")))
+    }
+
     /// A flat (2D) title put between 3D layers: it splits the 3D scene in
     /// two, so the layers above it lose the depth order, light and shadows
     /// of those below and the frame comes out broken. Refused, with the
@@ -1182,6 +1197,9 @@ impl Session {
                     fresh.sort_by_key(|c| c.id);
                     let fresh: Vec<u32> = fresh.iter().map(|c| c.id).collect();
                     if let Some(w) = self.too_many_lights(&fresh) {
+                        n.push_str(&format!("; warning: {w}"));
+                    }
+                    if let Some(w) = self.foley_after_motion(op) {
                         n.push_str(&format!("; warning: {w}"));
                     }
                     if let Some(e) = self.text_inside_3d(&fresh) {
