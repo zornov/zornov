@@ -292,7 +292,11 @@ fn flatten(prefix: &str, v: &Value, out: &mut BTreeMap<String, String>) {
 }
 
 /// Fields an op names that say which clip and when, not what to change.
-const PLACE: &[&str] = &["op", "clip", "clips", "id", "ids", "parent", "left", "right", "at", "start", "duration", "dur", "lane", "name", "media", "item", "panel", "ref", "select", "t", "to", "from", "track", "index"];
+const PLACE: &[&str] = &["op", "clip", "clips", "id", "ids", "parent", "left", "right", "at", "start", "duration", "dur", "lane", "name", "media", "item", "panel", "ref", "select", "t", "to", "from", "track", "index", "property", "keys"];
+
+/// What every read-back line says, whatever the op set: a line with only
+/// these says where the clip is, not what it is, so it cannot show a drop.
+const IDENTITY: &[&str] = &["clip", "name", "lane", "start", "dur", "effects", "masks", "on_timeline"];
 
 /// For each op whose clip is read back: the fields it sent that the
 /// read-back never mentions (by name or a word of it).
@@ -307,11 +311,14 @@ fn absent_fields(c: &Value) -> Vec<(String, (Value, Vec<String>))> {
             Value::Array(a) => a.iter().filter_map(Value::as_u64).collect(),
             _ => Vec::new(),
         };
-        let lines: Vec<String> = clips.iter().filter(|l| l["clip"].as_u64().is_some_and(|id| ids.contains(&id))).map(|l| l.to_string().to_lowercase()).collect();
-        if lines.is_empty() {
+        let lines: Vec<&Value> = clips.iter().filter(|l| l["clip"].as_u64().is_some_and(|id| ids.contains(&id))).collect();
+        // Nothing but where the clip is (`set` and `animate` read back so):
+        // a field missing from that proves nothing.
+        if !lines.iter().any(|l| l.as_object().is_some_and(|o| o.keys().any(|k| !IDENTITY.contains(&k.as_str())))) {
             continue;
         }
-        let text = lines.join(" ");
+        // The notes count too ("changed clip 38 (width)").
+        let text = format!("{} {} {}", lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(" "), c["reply"]["notes"], c["reply"]["changed"]).to_lowercase();
         let missing: Vec<String> = op
             .as_object()
             .into_iter()

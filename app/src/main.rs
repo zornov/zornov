@@ -138,9 +138,9 @@ fn main() -> eframe::Result {
     // `zornov mcp`: the agent server on stdin / stdout, no window.
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match argv.first().map(String::as_str) {
-        Some("mcp") => std::process::exit(agent::cli::mcp(&argv[1..])),
+        Some("mcp") => agent::trace::exit(agent::cli::mcp(&argv[1..])),
         // `zornov agent TOOL JSON`: one call from a shell or script.
-        Some("agent") => std::process::exit(agent::cli::agent(&argv[1..])),
+        Some("agent") => agent::trace::exit(agent::cli::agent(&argv[1..])),
         // `zornov eval`: the AI editor on scored jobs, headless.
         Some("eval") => std::process::exit(agent::eval::main(&argv[1..])),
         // `zornov trace report|on|off`: what agents ran into (the flight recorder).
@@ -165,7 +165,7 @@ fn main() -> eframe::Result {
     }
     // `zornov` in a terminal: the prompt, `zornov new`, `zornov see`…
     if let Some(code) = agent::shell::main(&argv) {
-        std::process::exit(code);
+        agent::trace::exit(code);
     }
     // Programs a previous Studio left behind (it was killed or crashed).
     agent::procs::reap_orphans();

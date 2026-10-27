@@ -44,6 +44,12 @@ pub struct Link {
 /// Serves MCP on stdin / stdout until stdin closes.
 pub fn serve_stdio(mut session: Session) {
     let mut link = Link { frame_paths: std::env::var("ZORNOV_FRAMES").is_ok_and(|v| v.trim() == "paths"), ..Default::default() };
+    // agent-dev builds: a listen-only socket for `zornov mcp --observe`.
+    #[cfg(feature = "agent-dev")]
+    match super::attach::serve_tap() {
+        Ok(p) => eprintln!("zornov mcp: live tap at {} (zornov mcp --observe {} --text)", p.display(), p.display()),
+        Err(e) => eprintln!("zornov mcp: no live tap: {e}"),
+    }
     let stdin = std::io::stdin();
     let out = std::cell::RefCell::new(std::io::stdout().lock());
     let mut send = |v: &Value| {
@@ -163,6 +169,9 @@ fn export_with_progress(session: &mut Session, args: &Value, token: &Value, noti
     // A Lottie export, or anything else that answered at once.
     let Some(id) = first["export"].as_u64() else { return Ok(started) };
     let begun = std::time::Instant::now();
+    // Sent when the export moves on, or every ten seconds so the client
+    // knows it is alive; never backwards (MCP wants progress to grow).
+    let (mut sent, mut sent_at) = (-1.0_f64, begun);
     loop {
         std::thread::sleep(Duration::from_millis(750));
         // Straight to the tool: the polls are not calls the agent made.
@@ -178,12 +187,17 @@ fn export_with_progress(session: &mut Session, args: &Value, token: &Value, noti
         if st["cancelled"] == json!(true) {
             return Err("export was cancelled".into());
         }
-        let p = (st["progress"].as_f64().unwrap_or(0.0) * 100.0).clamp(0.0, 100.0);
+        let p = ((st["progress"].as_f64().unwrap_or(0.0) * 100.0).clamp(0.0, 100.0) * 10.0).round() / 10.0;
+        if p < sent + 0.5 && sent_at.elapsed() < Duration::from_secs(10) {
+            continue;
+        }
+        let p = p.max(sent);
+        (sent, sent_at) = (p, std::time::Instant::now());
         let message = match st["eta_secs"].as_f64() {
             Some(eta) if eta.is_finite() && eta > 0.0 => format!("exporting, about {:.0} s left", eta),
             _ => "exporting".to_owned(),
         };
-        notify(&json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": (p * 10.0).round() / 10.0, "total": 100, "message": message}}));
+        notify(&json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": p, "total": 100, "message": message}}));
     }
 }
 

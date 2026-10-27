@@ -159,8 +159,8 @@ fn confine_paths(v: &mut Value, key: Option<&str>, c: &Confine) -> Result<(), St
             if lower.starts_with("http:") || lower.starts_with("https:") || lower.starts_with("ftp:") || lower.starts_with("file:") {
                 return Err(format!("it names a link ({})", short(&json!(s))));
             }
-            let pathy = key.is_some_and(|k| PATH_KEYS.contains(&k)) && (s.contains('/') || s.contains('\'));
-            let absolute = s.starts_with('/') || s.starts_with('~') || s.starts_with('\') || (s.len() > 2 && s.as_bytes()[1] == b':' && s.as_bytes()[0].is_ascii_alphabetic());
+            let pathy = key.is_some_and(|k| PATH_KEYS.contains(&k)) && (s.contains('/') || s.contains('\\'));
+            let absolute = s.starts_with('/') || s.starts_with('~') || s.starts_with('\\') || (s.len() > 2 && s.as_bytes()[1] == b':' && s.as_bytes()[0].is_ascii_alphabetic());
             if !(pathy || absolute) {
                 return Ok(());
             }
@@ -311,6 +311,7 @@ fn write_fixture(f: &Value) -> Result<PathBuf, String> {
 }
 
 /// Runs a fixture; `Err` says how this build differs from what it expects.
+#[cfg(test)]
 pub fn check_fixture(f: &Value) -> Result<(), String> {
     let mut s = Session::default();
     // Fixtures are checked like traces: no paths, only the listed tools.

@@ -196,6 +196,12 @@ it. `--text` prints one readable line per call instead, plus the error, or
 the expected and got of a `feedback` call. It works whether or not the
 recorder is writing to disk.
 
+A headless `zornov mcp --project DIR` on stdio has no window, so in
+agent-dev builds it opens a listen-only socket of its own,
+`$TMPDIR/studio-tap-PID/agent.sock`, and names it on stderr (`live tap
+at …`). That socket answers nothing but `{"observe": true}`: any other
+first line closes the connection.
+
 Lines are pushed the moment the writer builds them, with no polling. A
 call is on the observer's screen well under 100 ms after it ends, usually
 under 1 ms. `--text` shows that delay on each line (`+N ms`).

@@ -383,9 +383,10 @@ enum Msg {
     Flush(Sender<()>),
 }
 
+static WRITER: OnceLock<Sender<Msg>> = OnceLock::new();
+
 fn writer() -> &'static Sender<Msg> {
-    static TX: OnceLock<Sender<Msg>> = OnceLock::new();
-    TX.get_or_init(|| {
+    WRITER.get_or_init(|| {
         let (tx, rx) = mpsc::channel::<Msg>();
         let _ = std::thread::Builder::new().name("zornov-agent-trace".into()).spawn(move || {
             let mut files = Files::default();
@@ -437,10 +438,20 @@ fn writer() -> &'static Sender<Msg> {
 
 /// Waits (up to two seconds) until every line handed over is on disk.
 pub fn flush() {
+    // Nothing was recorded, so there is nothing to write (and no writer to start).
+    let Some(w) = WRITER.get() else { return };
     let (tx, rx) = mpsc::channel();
-    if writer().send(Msg::Flush(tx)).is_ok() {
+    if w.send(Msg::Flush(tx)).is_ok() {
         let _ = rx.recv_timeout(Duration::from_secs(2));
     }
+}
+
+/// Ends the process once what was recorded is on disk: the writer thread
+/// does not outlive `exit`, and a short `zornov mcp` or `zornov agent`
+/// session would otherwise leave an empty file.
+pub fn exit(code: i32) -> ! {
+    flush();
+    std::process::exit(code)
 }
 
 /// A line that is not a call (a hot swap, a timing), in the session's file.
@@ -945,9 +956,6 @@ pub fn module_of(tool: &str, ops: &[&str]) -> String {
         let lists: [(&'static str, Vec<Value>); 5] = [("care", super::care::tools()), ("search_media", super::search_media::tools()), ("crew", super::crew::tools()), ("skills", super::skills::tools()), ("sound_dept", super::sound_dept::tools())];
         lists.into_iter().flat_map(|(m, ts)| ts.into_iter().filter_map(move |t| Some((t["name"].as_str()?.to_owned(), m)))).collect()
     });
-    if let Some((_, m)) = own.iter().find(|(t, _)| t == tool) {
-        return format!("agent::{m}");
-    }
     #[cfg(feature = "agent-dev")]
     if super::hot::serves(tool) {
         return "zornov_agent_hot (hot-swapped)".into();
@@ -999,7 +1007,9 @@ pub fn module_of(tool: &str, ops: &[&str]) -> String {
         "compare_cameras" => "shots",
         "queue" | "qc" | "deliver" | "bundle" | "cutdown" => "deliver_tools",
         "undo" | "redo" | "open" | "save" | "new_project" => "mod (document)",
-        _ => "mod",
+        // A module that lists a tool may only hold its schema (`crew` lists
+        // `capabilities`), so the names above come first.
+        _ => own.iter().find(|(t, _)| t == tool).map_or("mod", |(_, m)| *m),
     };
     format!("agent::{m}")
 }

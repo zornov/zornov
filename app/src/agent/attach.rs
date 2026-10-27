@@ -26,12 +26,36 @@ use std::sync::Arc;
 /// One connection to a window: what it says, and where to write.
 pub(crate) type Link = (BufReader<Box<dyn Read + Send>>, Box<dyn Write + Send>);
 
+/// What a listener does with each connection that got in.
+type Handler = Arc<dyn Fn(BufReader<Box<dyn Read + Send>>, Box<dyn Write + Send>) + Send + Sync>;
+
 /// Listens for proxies; each call goes through `gate`.
 pub fn serve(gate: Arc<Gate>) -> std::io::Result<PathBuf> {
+    bind("studio-agent", Arc::new(move |r, out| connection(r, out, &gate)))
+}
+
+/// `zornov mcp` on stdio has no window, so no agent socket: in agent-dev
+/// builds it opens this one for `zornov mcp --observe SOCKET`. It is the
+/// same private socket, but it only listens: a connection whose first line
+/// is not `{"observe": true}` is closed, and nothing else is read.
+#[cfg(feature = "agent-dev")]
+pub fn serve_tap() -> std::io::Result<PathBuf> {
+    bind(
+        "studio-tap",
+        Arc::new(|mut r, out| {
+            let mut first = String::new();
+            if r.read_line(&mut first).is_ok() && serde_json::from_str::<Value>(&first).is_ok_and(|v| v.get("observe").is_some()) {
+                super::observe::stream(out);
+            }
+        }),
+    )
+}
+
+fn bind(prefix: &str, handler: Handler) -> std::io::Result<PathBuf> {
     // One per listener (a window may open another, and tests run side by side).
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let name = format!("studio-agent-{}{}", std::process::id(), if n == 0 { String::new() } else { format!("-{n}") });
+    let name = format!("{prefix}-{}{}", std::process::id(), if n == 0 { String::new() } else { format!("-{n}") });
     // Unix: the socket sits in a folder only this user can enter, so there
     // is no moment between bind and chmod when anyone else could connect.
     #[cfg(unix)]
@@ -43,12 +67,12 @@ pub fn serve(gate: Arc<Gate>) -> std::io::Result<PathBuf> {
     #[cfg(not(unix))]
     let path = std::env::temp_dir().join(format!("{name}.sock"));
     let _ = std::fs::remove_file(&path);
-    listen(&path, gate)?;
+    listen(&path, handler)?;
     Ok(path)
 }
 
 #[cfg(unix)]
-fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
+fn listen(path: &Path, handler: Handler) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     let listener = UnixListener::bind(path)?;
@@ -60,10 +84,10 @@ fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
             if !super::local_only::same_user(&stream) {
                 continue;
             }
-            let gate = gate.clone();
+            let handler = handler.clone();
             std::thread::spawn(move || {
                 if let Ok(out) = stream.try_clone() {
-                    connection(BufReader::new(Box::new(stream)), Box::new(out), &gate);
+                    handler(BufReader::new(Box::new(stream)), Box::new(out));
                 }
             });
         }
@@ -74,7 +98,7 @@ fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
 /// Windows: 127.0.0.1 on a free port; the first line of each connection
 /// must be the token in the file at `path` (in this user's temp folder).
 #[cfg(windows)]
-fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
+fn listen(path: &Path, handler: Handler) -> std::io::Result<()> {
     use std::net::TcpListener;
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
@@ -83,7 +107,7 @@ fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
     super::local_only::create_new(path)?.write_all(format!("{port} {token}\n").as_bytes())?;
     std::thread::Builder::new().name("studio-agent-socket".into()).spawn(move || {
         for stream in listener.incoming().map_while(Result::ok) {
-            let (gate, token) = (gate.clone(), token.clone());
+            let (handler, token) = (handler.clone(), token.clone());
             std::thread::spawn(move || {
                 // The token must come first, and soon.
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
@@ -94,7 +118,7 @@ fn listen(path: &Path, gate: Arc<Gate>) -> std::io::Result<()> {
                     return;
                 }
                 let _ = out.set_read_timeout(None);
-                connection(r, Box::new(out), &gate);
+                handler(r, Box::new(out));
             });
         }
     })?;
