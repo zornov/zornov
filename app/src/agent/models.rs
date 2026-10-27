@@ -179,7 +179,7 @@ pub(super) fn shading_params(op: &Value, default_toon: bool) -> Result<Vec<(Stri
         Some(v) => out.push(("outline".into(), m::Value::Scalar(v.as_f64().ok_or("outline is the ink line width in px (0 or false for none)")?.clamp(0.0, 40.0)))),
     }
     for k in ["outline_colour", "shadow_colour", "rim_colour"] {
-        if let Some(v) = get(k).or_else(|| get(&k.replace("colour", "color"))) {
+        if let Some(v) = get(k).or_else(|| get(k.replace("colour", "color").as_str())) {
             out.push((k.to_string(), colour(v, k)?));
         }
     }

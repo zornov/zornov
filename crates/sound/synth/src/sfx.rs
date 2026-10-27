@@ -898,7 +898,7 @@ fn mk_hooves(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
     let mut k = 0usize;
     while t < dur - 0.1 {
         let hz = match surf {
-            Surface::Stone | Surface::Tile | Surface::Metal => rng.range(900.0, 1500.0),
+            Surface::Stone | Surface::Tile | Surface::Metal | Surface::WetStone => rng.range(900.0, 1500.0),
             _ => rng.range(300.0, 600.0),
         };
         let hit = struck(hz, &[(1.0, 1.0, 0.025), (2.7, 0.4, 0.012)], 1.0, 0.12);

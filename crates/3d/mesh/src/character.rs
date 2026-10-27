@@ -522,7 +522,7 @@ fn anime_face(mesh: &mut Mesh, rig: &mut crate::rig::Rig, frame: crate::face::He
     let local = |p: V3| scale(crate::sub(p, o), 1.0 / s);
     let world = |p: V3| add(o, scale(p, s));
     let named = |m: &Mesh, n: &str| m.materials.iter().position(|x| x.name == n).map(|i| i as u32);
-    let eye_parts: Vec<u32> = ["Eye white", "Iris", "Pupil", "Cornea", "Upper lid", "Lower lid", "Lashes"].iter().filter_map(|n| named(mesh, n)).collect();
+    let eye_parts: Vec<u32> = ["Eye white", "Iris", "Pupil", "Cornea", "Upper lid", "Lower lid", "Lashes"].iter().filter_map(|n| named(&*mesh, *n)).collect();
     let mats = mesh.tri_materials();
     let mut on_eye = vec![false; mesh.positions.len()];
     for t in 0..mesh.triangles() {
@@ -554,7 +554,7 @@ fn anime_face(mesh: &mut Mesh, rig: &mut crate::rig::Rig, frame: crate::face::He
         }
     }
     // A big iris and pupil: what of the eyeball faces forward.
-    if let (Some(white), Some(iris), Some(pupil)) = (named(mesh, "Eye white"), named(mesh, "Iris"), named(mesh, "Pupil")) {
+    if let (Some(white), Some(iris), Some(pupil)) = (named(&*mesh, "Eye white"), named(&*mesh, "Iris"), named(&*mesh, "Pupil")) {
         let mut mats = mesh.tri_materials();
         for t in 0..mesh.triangles() {
             if ![white, iris, pupil].contains(&mats[t]) {
