@@ -214,8 +214,9 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
             b.style = match w.to_lowercase().as_str() {
                 "realistic" | "real" | "lifelike" => 0.0,
                 "stylised" | "stylized" | "stylish" => 0.5,
-                "toon" | "cartoon" | "cartoony" | "chibi" => 1.0,
-                other => other.parse::<f32>().map_err(|_| format!("style \"{other}\": realistic, stylised, toon, or a number 0 to 1"))?,
+                // No anime look of its own yet: the toon one, said in the reply.
+                "toon" | "cartoon" | "cartoony" | "chibi" | "anime" | "manga" | "cel" => 1.0,
+                other => other.parse::<f32>().map_err(|_| format!("style \"{other}\": realistic, stylised, toon (anime and cartoon mean toon), or a number 0 to 1"))?,
             }
         }
         Some(v) => b.style = v.as_f64().unwrap_or(0.0) as f32,
@@ -224,9 +225,9 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
     match op.get("figure") {
         Some(Value::String(w)) => {
             b.figure = match w.to_lowercase().as_str() {
-                "masculine" | "male" | "broad" | "square" => -0.8,
+                "masculine" | "male" | "man" | "boy" | "broad" | "square" => -0.8,
                 "neutral" | "androgynous" => 0.0,
-                "feminine" | "female" | "curvy" => 0.8,
+                "feminine" | "female" | "woman" | "girl" | "curvy" => 0.8,
                 other => other.parse::<f32>().map_err(|_| format!("figure \"{other}\": masculine, neutral, feminine, or a number -1 to 1"))?,
             }
         }
@@ -580,13 +581,21 @@ impl Session {
             }
             None if op.get("parts").is_some() => (blended(op)?, op.get("name").and_then(Value::as_str).unwrap_or("Model").to_owned(), Vec::new()),
             None => {
+                // No shape used to make a sphere and say ok.
+                if op.get("shape").and_then(Value::as_str).is_none() {
+                    return Err(format!("model needs \"shape\" ({}, head, or a character: person, child, toon, …), \"file\" (a model file) or \"parts\"", studio_mesh::prim::NAMES.join(", ")));
+                }
                 let m = primitive(op, if is_character(op.get("shape").and_then(Value::as_str).unwrap_or("")) { short * 0.75 } else { short * 0.4 })?;
                 let shape = op.get("shape").and_then(Value::as_str).unwrap_or("sphere");
                 let mut n = shape.to_owned();
                 if let Some(c) = n.get_mut(0..1) {
                     c.make_ascii_uppercase();
                 }
-                (m, n, Vec::new())
+                let mut notes = Vec::new();
+                if is_character(shape) && op.get("style").and_then(Value::as_str).is_some_and(|w| matches!(w.to_lowercase().as_str(), "anime" | "manga" | "cel")) {
+                    notes.push("there is no anime look yet, so this is the toon style (big head, simple shapes)".to_owned());
+                }
+                (m, n, notes)
             }
         };
         let shape_name = op.get("shape").and_then(Value::as_str).unwrap_or("");
