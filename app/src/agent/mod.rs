@@ -2506,7 +2506,18 @@ impl Session {
                 }
                 if a.get("wait").and_then(Value::as_bool).unwrap_or(true) {
                     let started = std::time::Instant::now();
-                    return match job.wait() {
+                    // MCP clients drop a request after about a minute; a long
+                    // render answers before that with a job to poll.
+                    let limit = std::time::Duration::from_secs_f64(f(a, "wait_seconds").unwrap_or(45.0).clamp(1.0, 600.0));
+                    let Some(event) = job.wait_for(limit) else {
+                        let id = self.next_export;
+                        self.next_export += 1;
+                        let progress = job.fraction();
+                        let eta = job.eta_secs();
+                        self.exports.push((id, job));
+                        return text(json!({"export": id, "still_rendering": true, "progress": progress, "eta_secs": eta, "path": path.display().to_string(), "rights": rights, "next": format!("the render goes on in the background; call export_status {{\"export\": {id}}} until it says done")}));
+                    };
+                    return match event {
                         services::export::Event::Finished { path } => {
                             let secs_taken = (started.elapsed().as_secs_f64() * 10.0).round() / 10.0;
                             let (s, e) = range.unwrap_or((0, self.doc.project.duration()));

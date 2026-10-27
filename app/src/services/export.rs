@@ -184,6 +184,21 @@ impl ExportJob {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
+
+    /// Like [`wait`](Self::wait), but gives up after `limit`: `None` while
+    /// the render is still going (it carries on; poll it).
+    pub fn wait_for(&mut self, limit: std::time::Duration) -> Option<Event> {
+        let until = Instant::now() + limit;
+        loop {
+            if let Some(e) = self.poll().into_iter().find(|e| !matches!(e, Event::Progress { .. })) {
+                return Some(e);
+            }
+            if Instant::now() >= until {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
 }
 
 /// Show a file in the Finder.
