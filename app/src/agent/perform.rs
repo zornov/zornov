@@ -335,6 +335,7 @@ impl Session {
         let face_word = op.get("face").and_then(Value::as_str).map(|w| w.trim().to_lowercase());
         let face_named: Option<f32> = match face_word.as_deref() {
             None => None,
+            Some(w) if w.parse::<f32>().is_ok() => None,
             Some("right" | "east") => Some(90f32.to_radians()),
             Some("left" | "west") => Some((-90f32).to_radians()),
             // 0 faces -z, toward the default camera (which sits in front, at -z).
@@ -394,7 +395,7 @@ impl Session {
                     let last = waypoints.last().map_or(start, |w| [w.x, w.z]);
                     self.ground_point(fv, mc, at).map(|p| (p[0] - last[0]).atan2(-(p[1] - last[1])))
                 }
-                Value::String(_) => face_named,
+                v @ Value::String(_) => face_named.or_else(|| num(v).map(f32::to_radians)),
                 v => num(v).map(f32::to_radians),
             }
         } else {
