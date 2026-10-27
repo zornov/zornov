@@ -1276,7 +1276,12 @@ impl Session {
                 let mut extra: serde_json::Map<String, Value> = extra.into_iter().filter(|(k, _)| k != "backing" && k != "clips" && !craft::TEXT_MOTION_FIELDS.contains(&k.as_str())).collect();
                 // A colour card or drawn box takes its colour as a property
                 // (so it can be keyed too), not as a title's text colour.
-                let drawn = self.model_clip(id).is_some_and(|mc| matches!(&mc.source, studio_model::ClipSource::Generator(g) if matches!(g.kind, studio_model::GeneratorKind::Solid | studio_model::GeneratorKind::Shape)));
+                // A light's colour too: with intensity in the same op, it
+                // was taken as a title colour and dropped.
+                let drawn = self.model_clip(id).is_some_and(|mc| matches!(&mc.source, studio_model::ClipSource::Generator(g) if matches!(g.kind, studio_model::GeneratorKind::Solid | studio_model::GeneratorKind::Shape | studio_model::GeneratorKind::Light)));
+                if op.get("text").is_some() && self.clip(id)?.kind != ClipKind::Title {
+                    return Err(format!("clip {id} is not a title, so \"text\" has nothing to change; for a vector drawing's words use the vector tool's text ops, for a 3D title text_3d"));
+                }
                 if drawn {
                     if let Some(v) = op.get("colour").or_else(|| op.get("color")) {
                         extra.insert("colour".into(), v.clone());

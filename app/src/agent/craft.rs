@@ -405,6 +405,14 @@ impl Session {
             }
         }
         keys.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Opacity is 0 to 100 here; keys all within 0..1 are almost always
+        // meant as fractions (and stagger passed them on as 1% and 0%).
+        if name == "opacity" && !relative {
+            let vals: Vec<f64> = keys.iter().filter_map(|k| k.1.as_f64()).collect();
+            if vals.len() == keys.len() && vals.iter().all(|v| (0.0..=1.0).contains(v)) && vals.iter().any(|v| *v > 0.0) {
+                return Err(format!("opacity runs 0 to 100 (percent), and these keys are all between 0 and 1 ({}): multiply by 100, e.g. [[0, 0], [0.5, 100]]", vals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")));
+            }
+        }
         for (t, _, _) in &keys {
             if *t < -1e-6 || *t > secs(c.dur) + 1e-3 {
                 return Err(format!("key time {:.3}s is outside the clip (0..{:.2}s from its start{})", t + offset, secs(c.dur), if offset > 0.0 { format!("; on the timeline {:.2}..{:.2}s", secs(c.start), secs(c.end())) } else { String::new() }));
