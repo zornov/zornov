@@ -746,6 +746,12 @@ pub fn group(doc: &mut Document, ids: &[NodeId]) -> Result<NodeId, String> {
     let top = *ids.last().ok_or("nothing to group")?;
     let parent = doc.parent_of(top);
     let index = doc.siblings_mut(top).map(|(_, i)| i).unwrap_or(0);
+    // The group takes the top member's place in the stack as it is once
+    // the members are out: counted before they are removed, the index
+    // was too high by the members below it, and the group rose above
+    // things it had sat under (labels went behind their own boxes).
+    let below = ids.iter().filter(|id| **id != top && doc.parent_of(**id) == parent && doc.siblings_mut(**id).is_some_and(|(_, i)| i < index)).count();
+    let index = index - below;
     let parent_m = parent.and_then(|p| doc.world_transform(p)).unwrap_or(Affine::IDENTITY);
     let mut kids = Vec::new();
     for id in &ids {
