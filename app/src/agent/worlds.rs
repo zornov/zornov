@@ -403,16 +403,26 @@ impl Session {
         }
         let keys = vp::record_path(&mut self.doc, camera, &samples)?;
         // The world shows as long as the shot.
-        self.extend_world_clip(start + (path.duration() as f64 * 1e6) as view::Time)?;
+        self.extend_world_clip(start, start + (path.duration() as f64 * 1e6) as view::Time)?;
         said.push(format!("walked {:.1} m in {:.1} s ({} camera keys on clip {camera}, smoothed, from {:.1} s){}", dist, path.duration(), keys, start as f64 / 1e6, if reached { "" } else { "; the route was cut short" }));
         Ok(said.join("; "))
     }
 
-    /// Lengthens the world layer to cover `to`, if it is shorter.
-    fn extend_world_clip(&mut self, to: view::Time) -> Result<(), String> {
-        let ids: Vec<u64> = self.doc.model.sequences.iter().flat_map(|q| q.clips.iter()).filter(|c| world_file_of(c).is_some()).map(|c| c.id.0).collect();
-        for id in ids {
+    /// Lengthens the world layers showing at `from` to cover `to`, if they
+    /// are shorter, never past the next clip on their lane: lengthening
+    /// every world clip ran one into the next on the same lane, and every
+    /// later `camera`, `walk` and `stand` failed with an overlap.
+    fn extend_world_clip(&mut self, from: view::Time, to: view::Time) -> Result<(), String> {
+        let seq = self.doc.model.active();
+        let ids: Vec<(u64, view::Time)> = seq
+            .clips
+            .iter()
+            .filter(|c| world_file_of(c).is_some() && c.start <= from && c.end() > from)
+            .map(|c| (c.id.0, seq.clips.iter().filter(|o| o.lane == c.lane && o.id != c.id && o.start >= c.end()).map(|o| o.start).min().unwrap_or(view::Time::MAX)))
+            .collect();
+        for (id, next) in ids {
             let Some(mut c) = self.model_clip(id as u32) else { continue };
+            let to = to.min(next);
             if c.start + c.duration < to {
                 c.duration = to - c.start;
                 let seq = self.doc.seq();
