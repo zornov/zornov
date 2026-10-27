@@ -17,6 +17,9 @@ review/
 *.mobileprovision
 update-key.hex
 keychain-password
+# Snyk's local analysis cache. Its account token lives in the home folder,
+# never here; a .snyk policy file, if one is made, is meant to be committed.
+.dccache
 # Local agent and editor state
 .claude/
 .idea/
