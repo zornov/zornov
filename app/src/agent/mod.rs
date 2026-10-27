@@ -978,7 +978,7 @@ impl Session {
             let above = seq.clips.iter().filter(spatial).any(|o| index(o.lane) < at);
             let below = seq.clips.iter().filter(spatial).any(|o| index(o.lane) > at);
             if above && below {
-                return Some(format!("text clip {id} is a flat 2D title on a lane between 3D layers, which splits the 3D scene and breaks the render. Put it on a lane above every 3D layer (lane \"top\") to overlay it, or make it part of the scene with text_3d (lettering with depth, lit by the scene)"));
+                return Some(format!("text clip {id} is a flat 2D title on a lane between 3D layers, which splits the 3D scene and breaks the render. Put it on a lane above every 3D layer to overlay it, or make it part of the scene with text_3d (lettering with depth, lit by the scene)"));
             }
         }
         None
