@@ -417,6 +417,62 @@ fn new_clip_end(film_end: view::Time, at: view::Time) -> view::Time {
     if film_end >= at + SEC { film_end } else { at + NEW_SHOT }
 }
 
+/// `inspect` narrowed to what was asked: `what` (sections such as
+/// transform, keyframes, effects, on_screen, layout, pose; a name or a
+/// list) and/or `property` (every field of that name, at any depth, by
+/// its path). Everything came back regardless, which buried the answer.
+fn inspect_filter(v: Value, a: &Value) -> Result<Value, String> {
+    let words = |k: &str| -> Vec<String> {
+        match a.get(k) {
+            Some(Value::String(s)) => s.split(',').map(|w| w.trim().to_lowercase()).filter(|w| !w.is_empty()).collect(),
+            Some(Value::Array(l)) => l.iter().filter_map(Value::as_str).map(|w| w.trim().to_lowercase()).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let (what, props) = (words("what"), words("property"));
+    if what.is_empty() && props.is_empty() {
+        return Ok(v);
+    }
+    let Value::Object(all) = v else { return Ok(v) };
+    let sections: Vec<String> = all.keys().cloned().collect();
+    let mut out = serde_json::Map::new();
+    for k in ["id", "clip", "name", "kind"] {
+        if let Some(x) = all.get(k) {
+            out.insert(k.into(), x.clone());
+        }
+    }
+    for w in &what {
+        let hits: Vec<&String> = sections.iter().filter(|k| k.to_lowercase() == *w || k.to_lowercase().contains(w.as_str())).collect();
+        if hits.is_empty() {
+            return Err(format!("inspect has no section \"{w}\"; this clip has: {}", sections.join(", ")));
+        }
+        for k in hits {
+            out.insert(k.clone(), all[k].clone());
+        }
+    }
+    if !props.is_empty() {
+        fn walk(v: &Value, path: &str, props: &[String], found: &mut serde_json::Map<String, Value>) {
+            if let Value::Object(o) = v {
+                for (k, x) in o {
+                    let p = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+                    let lk = k.to_lowercase();
+                    if props.iter().any(|w| lk == *w || lk.ends_with(&format!(".{w}")) || p.to_lowercase().ends_with(w.as_str())) {
+                        found.insert(p.clone(), x.clone());
+                    }
+                    walk(x, &p, props, found);
+                }
+            }
+        }
+        let mut found = serde_json::Map::new();
+        walk(&Value::Object(all.clone()), "", &props, &mut found);
+        if found.is_empty() {
+            return Err(format!("no field named {} on this clip; sections: {} (inspect without property shows them all)", props.join(", "), sections.join(", ")));
+        }
+        out.insert("matches".into(), Value::Object(found));
+    }
+    Ok(Value::Object(out))
+}
+
 /// A number field. A number written as a string ("0.5", " 12 ") counts:
 /// models often quote their numbers, and the meaning is not in doubt. So
 /// does a switch for a strength (`fire: true`, `glow: true`): 1, or 0.
@@ -2039,7 +2095,7 @@ impl Session {
                 if let Some(tr) = self.tracking_said(id) {
                     v["tracking"] = tr;
                 }
-                text(v)
+                text(inspect_filter(v, a)?)
             }
             "pick" => text(self.pick(a)?),
             "canvas_layout" => Ok(vec![Content::Text(self.layout_tool(a)?)]),
