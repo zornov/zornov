@@ -47,6 +47,17 @@ pub fn studio() -> PathBuf {
     videos().join("Studio")
 }
 
+/// The library of things made and kept (models, moves, designs, sounds):
+/// `<studio>/Made`, the one place every part of the app saves to and reads
+/// from. A `Made` folder some builds left under `<videos>/Zornov` is moved in
+/// on first use.
+pub fn made() -> PathBuf {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    let dir = studio().join("Made");
+    ONCE.call_once(|| move_folder(&videos().join("Zornov").join("Made"), &dir));
+    dir
+}
+
 /// Disposable caches.
 pub fn cache() -> PathBuf {
     migrate_legacy();

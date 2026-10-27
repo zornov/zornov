@@ -92,7 +92,7 @@ pub fn root() -> PathBuf {
     }
     #[cfg(not(test))]
     {
-        studio_paths::studio().join("Made").join("Models")
+        studio_paths::made().join("Models")
     }
 }
 
