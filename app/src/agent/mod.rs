@@ -73,6 +73,7 @@ mod anim3d;
 mod wardrobe;
 mod perform;
 mod schema;
+mod field_docs;
 mod sim3d;
 #[cfg(feature = "render")]
 mod world3d;

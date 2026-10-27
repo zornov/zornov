@@ -12,6 +12,9 @@ use serde_json::{Map, Value};
 fn aliases(name: &str) -> &'static [(&'static str, &'static str)] {
     match name {
         "frame" => &[("at", "t"), ("time", "t"), ("seconds", "t")],
+        "chart" => &[("color", "colour"), ("type", "kind"), ("values", "data"), ("rows", "data")],
+        "shape" | "text_3d" => &[("color", "colour"), ("shapes", "items"), ("string", "text")],
+        "template" => &[("name_or_id", "id"), ("values", "controls"), ("fields", "controls")],
         "see" => &[("at", "t"), ("time", "t"), ("seconds", "t"), ("clip", "clips")],
         "contact_sheet" => &[("at", "times"), ("moments", "times"), ("from", "start"), ("to", "end"), ("frames", "count")],
         "graph" => &[("id", "clip"), ("prop", "property"), ("count", "samples")],
@@ -77,6 +80,15 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
     }
     Some(match op {
         "place" => &["media", "at", "lane", "source_in", "source_out", "duration", "speed", "fit", "x", "y", "volume", "muted", "name"],
+        // Motion graphics: listed so their fields are checked and shown by
+        // edit_schema like every other op's (they were missing from both).
+        "shape" => &["items", "preset", "inputs", "add", "patch", "replace", "lottie", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "opacity", "rotation", "size", "width", "extrude", "side_colour", "colour", "accent", "stroke_width", "path", "speed", "name"],
+        "text_3d" => &["text", "runs", "font", "size", "weight", "italic", "kerning", "letter_spacing", "depth", "bevel", "extrude", "colour", "side_colour", "accent", "opacity", "stroke_width", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "rotation", "name"],
+        "expression" => &["clip", "property", "expr", "driver", "remove"],
+        "time_remap" => &["clip", "expr", "keys", "speed", "remove"],
+        "template" => &["id", "template", "controls", "list", "search", "category", "clip", "at", "duration", "lane", "x", "y", "name"],
+        "chart" => &["kind", "data", "title", "colour", "text", "prefix", "suffix", "decimals", "hole", "total_label", "route", "at", "duration", "x", "y", "name"],
+        "morph" => &["clip", "to", "object", "mask", "at", "duration", "ease"],
         "split" => &["at", "clips"],
         "trim" => &["clip", "start", "end", "ripple"],
         "delete" => &["clips", "ripple"],
@@ -224,7 +236,7 @@ fn is_property(k: &str) -> bool {
     k.contains('.') || matches!(k, "z" | "rotation_x" | "rotation_y" | "rotation_z" | "orientation_x" | "orientation_y" | "orientation_z" | "scale_z" | "anchor_z" | "focal_length" | "fov" | "focus_distance" | "aperture" | "blur_level" | "poi_x" | "poi_y" | "poi_z" | "intensity" | "cone_angle" | "cone_feather" | "radius" | "falloff" | "shadow_darkness" | "scale_x" | "scale_y" | "anchor_x" | "anchor_y" | "crop_left" | "crop_right" | "crop_top" | "crop_bottom" | "blend" | "reversed" | "enabled" | "visible" | "flip" | "flip_x" | "flip_y" | "mirror" | "look_strength" | "look_amount" | "width" | "height" | "fill" | "roundness" | "metallic" | "roughness" | "emissive" | "smooth" | "subsurface" | "emissive_strength" | "wetness" | "glow" | "flare" | "beam" | "source_size" | "flicker" | "flicker_speed")
 }
 
-fn closest<'a>(want: &str, among: &[&'a str]) -> Option<&'a str> {
+pub fn closest<'a>(want: &str, among: &[&'a str]) -> Option<&'a str> {
     let d = |a: &str, b: &str| {
         let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
         let mut row: Vec<usize> = (0..=b.len()).collect();
