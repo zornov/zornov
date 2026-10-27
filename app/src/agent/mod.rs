@@ -2486,6 +2486,18 @@ impl Session {
             }
             #[cfg(feature = "render")]
             "contact_sheet" => {
+                // Exact moments, when given (they were ignored for an even spread).
+                let asked: Option<Vec<f64>> = match a.get("times") {
+                    Some(Value::Array(v)) => {
+                        let t: Vec<f64> = v.iter().filter_map(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.trim().parse().ok()))).filter(|t: &f64| t.is_finite() && *t >= 0.0).collect();
+                        if t.is_empty() || t.len() != v.len() {
+                            return Err("times is a list of seconds, e.g. [0.5, 2, 4.25]".into());
+                        }
+                        Some(t.into_iter().take(48).collect())
+                    }
+                    Some(_) => return Err("times is a list of seconds, e.g. [0.5, 2, 4.25]".into()),
+                    None => None,
+                };
                 if let Some(mv) = a.get("media") {
                     let mi = self.media_item(mv)?;
                     let len = secs(mi.dur);
@@ -2494,10 +2506,13 @@ impl Session {
                     let n = a.get("count").and_then(Value::as_u64).unwrap_or(12).clamp(1, 48) as usize;
                     let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
                     let w = w.clamp(256, 3840) as u32;
-                    let cols = render::sheet_columns(n);
-                    let tile_w = ((w - 4 * (cols as u32 - 1)) / cols as u32).max(32);
                     let last = (end - 0.05).max(start);
-                    let times: Vec<f64> = (0..n).map(|i| if n == 1 { start } else { start + (last - start) * i as f64 / (n - 1) as f64 }).map(|t| (t * 1000.0).round() / 1000.0).collect();
+                    let times: Vec<f64> = match &asked {
+                        Some(t) => t.iter().map(|t| t.min(last)).collect(),
+                        None => (0..n).map(|i| if n == 1 { start } else { start + (last - start) * i as f64 / (n - 1) as f64 }).map(|t| (t * 1000.0).round() / 1000.0).collect(),
+                    };
+                    let cols = render::sheet_columns(times.len());
+                    let tile_w = ((w - 4 * (cols as u32 - 1)) / cols as u32).max(32);
                     let tiles = render::media_frames(&mi, &times, tile_w)?;
                     let sheet = render::tiled(&tiles, cols, tile_w);
                     return Ok(vec![Content::Jpeg(studio_content::jpeg::encode(&sheet, q)), Content::Text(json!({"media": mi.name, "times": times, "columns": cols, "note": "times are seconds into the file (use them as source_in / source_out with place)"}).to_string())]);
@@ -2508,8 +2523,11 @@ impl Session {
                 let n = a.get("count").and_then(Value::as_u64).unwrap_or(12).clamp(1, 48) as usize;
                 let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
                 let w = w.clamp(256, 3840) as u32;
-                let (jpeg, times) = self.frames.sheet(&self.doc, micros(start), micros(end), n, w, q)?;
-                Ok(vec![Content::Jpeg(jpeg), Content::Text(json!({"times": times, "columns": render::sheet_columns(n)}).to_string())])
+                let (jpeg, times) = match &asked {
+                    Some(t) => self.frames.sheet_at(&self.doc, &t.iter().map(|t| micros(t.min(dur))).collect::<Vec<_>>(), w, q)?,
+                    None => self.frames.sheet(&self.doc, micros(start), micros(end), n, w, q)?,
+                };
+                Ok(vec![Content::Jpeg(jpeg), Content::Text(json!({"times": times, "columns": render::sheet_columns(times.len())}).to_string())])
             }
             #[cfg(feature = "render")]
             "export" => {

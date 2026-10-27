@@ -12,6 +12,8 @@ use serde_json::{Map, Value};
 fn aliases(name: &str) -> &'static [(&'static str, &'static str)] {
     match name {
         "frame" => &[("at", "t"), ("time", "t"), ("seconds", "t")],
+        "see" => &[("at", "t"), ("time", "t"), ("seconds", "t"), ("clip", "clips")],
+        "contact_sheet" => &[("at", "times"), ("moments", "times"), ("from", "start"), ("to", "end"), ("frames", "count")],
         "graph" => &[("id", "clip"), ("prop", "property"), ("count", "samples")],
         "scopes" => &[("at", "t"), ("time", "t"), ("seconds", "t"), ("with", "compare"), ("against", "compare")],
         "import" => &[("path", "paths"), ("files", "paths")],
