@@ -133,6 +133,19 @@ pub fn speak(text: &str, voice: Option<&str>, words_per_minute: Option<f32>) -> 
 }
 
 pub fn speak_with(s: &VoiceSettings, text: &str, voice: Option<&str>, words_per_minute: Option<f32>) -> Result<Line, String> {
+    match speak_chosen(s, text, voice, words_per_minute) {
+        // A hosted voice that cannot speak (no key, no credit, offline):
+        // the Mac's voices say the line, and the reply says so, rather than
+        // the film losing its narration.
+        Err(e) if s.provider != Provider::Mac && s.mac_voice_allowed() => {
+            let sp = studio_hw::speech::speak(text, None, Some(words_per_minute.unwrap_or(175.0))).map_err(|mac| format!("{e}; the Mac voices could not speak it either: {mac}"))?;
+            Ok(Line { samples: sp.samples, rate: sp.rate, by: format!("Mac voice, because {} was unavailable ({e})", s.provider.name()) })
+        }
+        r => r,
+    }
+}
+
+fn speak_chosen(s: &VoiceSettings, text: &str, voice: Option<&str>, words_per_minute: Option<f32>) -> Result<Line, String> {
     // A Mac voice asked for by name never slips past the choice.
     let mac_id = voice.is_some_and(|v| v.starts_with("com.apple."));
     if mac_id && s.provider != Provider::Mac {
