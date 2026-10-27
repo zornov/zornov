@@ -2688,7 +2688,7 @@ impl Session {
                 if let Some(vars) = a.get("variants") {
                     let vars = vars.as_array().filter(|v| !v.is_empty() && v.len() <= 16).ok_or("variants is a list of 1 to 16 variants, each a list of ops (or {\"name\", \"ops\"}), e.g. [[{\"op\": \"set\", \"clip\": 3, \"opacity\": 40}], [{\"op\": \"set\", \"clip\": 3, \"opacity\": 80}]]")?;
                     let dur = self.doc.project.duration();
-                    let t = f(a, "t").map(micros).or_else(|| asked.as_ref().and_then(|t| t.first()).map(|t| micros(*t))).unwrap_or(dur / 2).clamp(0, (dur - 1).max(0));
+                    let t = asked.as_ref().and_then(|t| t.first()).map(|t| micros(*t)).unwrap_or(dur / 2).clamp(0, (dur - 1).max(0));
                     let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
                     let w = w.clamp(256, 3840) as u32;
                     let cols = render::sheet_columns(vars.len());
@@ -2780,7 +2780,7 @@ impl Session {
                     let started = std::time::Instant::now();
                     // MCP clients drop a request after about a minute; a long
                     // render answers before that with a job to poll.
-                    let limit = std::time::Duration::from_secs_f64(f(a, "wait_seconds").unwrap_or(45.0).clamp(1.0, 600.0));
+                    let limit = std::time::Duration::from_secs_f64(45.0);
                     let Some(event) = job.wait_for(limit) else {
                         let id = self.next_export;
                         self.next_export += 1;

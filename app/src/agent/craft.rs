@@ -1203,7 +1203,7 @@ mod tests {
         let r = s.edit(&[json!({"op": "apply", "item": "gaussian blur", "clips": {"lane": "main", "from": 0, "to": 10}})], "x", false).unwrap();
         assert!(r["changed"]["changed"].as_array().unwrap().len() >= 2, "{r}");
         let e = s.edit(&[json!({"op": "set", "clip": "$3", "opacity": 1})], "x", false).unwrap_err();
-        assert!(e.contains("only 0 clip"), "{e}");
+        assert!(e.contains("only 0 were made"), "{e}");
     }
 
     #[test]
