@@ -893,9 +893,10 @@ pub fn curve(name: &str) -> Option<(m::Interp, Option<m::Handle>, Option<m::Hand
         "smooth" | "auto" => (m::Interp::Auto, None, None, None),
         "linear" | "none" => (m::Interp::Linear, None, None, None),
         "hold" | "step" => (m::Interp::Hold, None, None, None),
-        "ease" | "ease_in_out" => (m::Interp::Ease, h(0.42, 0.0), h(0.42, 0.0), None),
-        "ease_in" => (m::Interp::Ease, h(0.42, 0.0), h(0.0, 0.0), None),
-        "ease_out" => (m::Interp::Ease, h(0.0, 0.0), h(0.42, 0.0), None),
+        // The short names (as the shape keys and CSS write them) too.
+        "ease" | "ease_in_out" | "in_out" | "inout" | "ease-in-out" | "easeinout" => (m::Interp::Ease, h(0.42, 0.0), h(0.42, 0.0), None),
+        "ease_in" | "in" | "ease-in" | "easein" => (m::Interp::Ease, h(0.42, 0.0), h(0.0, 0.0), None),
+        "ease_out" | "out" | "ease-out" | "easeout" => (m::Interp::Ease, h(0.0, 0.0), h(0.42, 0.0), None),
         // Past the target, then settles back.
         "overshoot" => (m::Interp::Ease, h(0.34, 1.56), h(0.36, 0.0), None),
         // Pulls back first, then goes.
