@@ -40,7 +40,10 @@ pub fn is_edit(op: &Value, steps: &[Value]) -> bool {
     }
     steps.iter().any(|s| {
         let d = s.get("do").and_then(Value::as_str).unwrap_or("");
-        s.get("select").is_some() || EXTRA.contains(&d) || (tools::find(d).is_some() && !super::models::STEPS.contains(&d))
+        // A smart (patterned) material is baked here, unwrapping a model
+        // with no texture layout; the plain material step ignored it and
+        // still said "material changed".
+        s.get("select").is_some() || EXTRA.contains(&d) || (tools::find(d).is_some() && !super::models::STEPS.contains(&d)) || (d == "material" && s.get("smart").is_some())
     })
 }
 
