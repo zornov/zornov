@@ -74,6 +74,7 @@ mod wardrobe;
 mod perform;
 mod schema;
 mod field_docs;
+mod accept;
 mod sim3d;
 #[cfg(feature = "render")]
 mod world3d;
@@ -403,6 +404,9 @@ pub struct Session {
     analysis: analyse::Analysis,
     /// Project mode: the folder every change is saved to.
     pub home: Option<PathBuf>,
+    /// Findings accepted as intended, when there is no project folder to
+    /// keep them in (see accept.rs).
+    accepted: Vec<Value>,
     /// Notes when there is no project folder yet.
     notes: Option<String>,
     /// The production office when there is no project folder yet.
@@ -690,6 +694,7 @@ impl Session {
             frames: render::Frames::default(),
             analysis: analyse::Analysis::default(),
             home: None,
+            accepted: Vec::new(),
             notes: None,
             production: None,
             look_memo: None,
@@ -2094,6 +2099,7 @@ impl Session {
                 if let Some(b) = a.get("brief").and_then(Value::as_str).filter(|b| !b.trim().is_empty()) {
                     self.brief = Some(b.to_owned());
                 }
+                let added = self.take_accepts(a)?;
                 let frames = a.get("frames").and_then(Value::as_bool).unwrap_or(true);
                 let mut v = self.quality(frames);
                 // With fix: Studio mends what it can, then looks again.
@@ -2107,13 +2113,31 @@ impl Session {
                     }
                     v["fixed"] = json!(fixed);
                 }
+                // What was accepted as intended is listed apart, not as a problem.
+                if self.apply_accepted(&mut v, "problems") {
+                    v["ok"] = json!(v["problems"].as_array().is_none_or(|p| p.is_empty()));
+                }
+                if let Some(x) = added {
+                    v["accept_list"] = x;
+                }
                 text(v)
             }
             "review" => {
                 if let Some(b) = a.get("brief").and_then(Value::as_str).filter(|b| !b.trim().is_empty()) {
                     self.brief = Some(b.to_owned());
                 }
-                let v = self.review(a);
+                self.take_accepts(a)?;
+                let mut v = self.review(a);
+                // Notes accepted as intended no longer block the film.
+                if self.apply_accepted(&mut v, "notes") {
+                    let notes = v["notes"].as_array().cloned().unwrap_or_default();
+                    let open3d = notes.iter().filter(|n| n["kind"].as_str().is_some_and(|k| k.starts_with("3d_"))).count();
+                    v["three_d"]["open"] = json!(open3d);
+                    v["ok"] = json!(notes.is_empty());
+                    if notes.is_empty() {
+                        v["verdict"] = json!(format!("nothing open: the rest ({}) was accepted as intended (check accept)", v["accepted"].as_array().map_or(0, Vec::len)));
+                    }
+                }
                 let passed = v["ok"] == true;
                 let mut parts = text(v)?;
                 // The last look before delivering is at full detail: a
