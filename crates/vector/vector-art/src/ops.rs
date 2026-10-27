@@ -209,6 +209,17 @@ fn gradient_common(g: Gradient, spec: &Value) -> Gradient {
 
 /// A paint from any of the accepted forms.
 pub fn paint(v: &Value) -> Result<Paint, String> {
+    // The obvious flat forms: {"type": "radial", "center", "radius",
+    // "stops"} (also "type": "gradient", "kind": "radial" with a centre)
+    // read as {"radial": {…}}; the full form keeps c0, r0, c1, r1.
+    let short = match (s(v, "type"), s(v, "kind")) {
+        (Some(k @ ("linear" | "radial" | "conic")), _) => Some(k),
+        (Some("gradient"), Some(k @ ("linear" | "radial" | "conic"))) if v.get("c0").is_none() && v.get("c1").is_none() && (v.get("center").is_some() || v.get("centre").is_some() || v.get("from").is_some()) => Some(k),
+        _ => None,
+    };
+    if let Some(k) = short {
+        return paint(&json!({ k: v }));
+    }
     if let Some(l) = v.get("linear") {
         let g = Gradient::linear(pt(l, "from").ok_or("linear needs \"from\"")?, pt(l, "to").ok_or("linear needs \"to\"")?, stops(need(l, "stops")?)?);
         return Ok(Paint::gradient(gradient_common(g, l)));
