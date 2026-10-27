@@ -938,10 +938,16 @@ impl Session {
         }
     }
 
-    /// Puts a math model's recipe and way of drawing on clip `id`.
-    pub(super) fn keep_math(&mut self, id: u32, recipe: &field::Recipe, direct: bool) -> Result<String, String> {
+    /// Marks clip `id` as made from a `kind` of math, and keeps an implicit
+    /// one's recipe and way of drawing.
+    pub(super) fn keep_math(&mut self, id: u32, kind: &str, recipe: Option<&field::Recipe>, direct: bool) -> Result<String, String> {
         let mut mc = self.model_clip(id).ok_or("that clip is gone")?;
-        Self::set_math_render(&mut mc, Some(recipe), direct);
+        if let m::ClipSource::Generator(g) = &mut mc.source {
+            g.params.insert("math_kind".into(), m::Value::Text(kind.into()));
+        }
+        if recipe.is_some() {
+            Self::set_math_render(&mut mc, recipe, direct);
+        }
         let seq = self.doc.seq();
         let ok = self.doc.apply("Math shape", m::Edit::SetClip { seq, clip: Box::new(mc) });
         self.check(ok, "")?;

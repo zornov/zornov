@@ -28,7 +28,14 @@ struct Driver {
 
 impl Driver {
     /// One `tools/call`; its text, with any pictures saved as `tag_k.jpg`.
-    fn call(&mut self, name: &str, args: Value, tag: &str) -> (String, f64) {
+    fn call(&mut self, name: &str, mut args: Value, tag: &str) -> (String, f64) {
+        // A gallery floats: its models stay where they are put instead of
+        // coming to rest on what is under them.
+        for op in args.get_mut("ops").and_then(Value::as_array_mut).into_iter().flatten() {
+            if op["op"] == "model" && op.get("rest").is_none() {
+                op["rest"] = json!(false);
+            }
+        }
         self.n += 1;
         let msg = json!({"jsonrpc": "2.0", "id": self.n, "method": "tools/call", "params": {"name": name, "arguments": args}});
         let t0 = Instant::now();
@@ -76,9 +83,9 @@ fn math_showcase() {
     let tilt = json!({"op": "animate", "clip": "$last", "property": "rotation_x", "formula": "15 * sin(t * tau / 6)"});
     d.call("edit", json!({"ops": [{"op": "card", "colour": "#0d1017", "gradient": ["#1c2537", "#07080c"], "radial": true, "at": 0, "duration": 12}]}), "backdrop");
     let gallery = [
-        json!({"op": "model", "name": "Gyroid lattice", "math": {"preset": "gyroid", "cells": 2.5, "thickness": 0.28}, "size": 230, "detail": 4, "position": [-400, -150, 0], "colour": "#e0b44c", "metallic": 1, "roughness": 0.28, "duration": g}),
+        json!({"op": "model", "name": "Gyroid lattice", "math": {"preset": "gyroid", "cells": 2.5, "thickness": 0.28}, "size": 230, "detail": 4, "position": [-400, -150, 0], "colour": "#e0b44c", "metallic": 0.5, "roughness": 0.35, "duration": g}),
         json!({"op": "model", "name": "Swirl torus", "math": "swirl_torus", "size": 250, "detail": 4, "position": [0, -150, 0], "colour": "#3a86ff", "roughness": 0.35, "duration": g}),
-        json!({"op": "model", "name": "Mandelbulb", "math": {"preset": "mandelbulb", "power": 8}, "size": 240, "detail": 4, "position": [400, -150, 0], "colour": "#c2c8d6", "roughness": 0.5, "duration": g}),
+        json!({"op": "model", "name": "Mandelbulb", "math": {"preset": "mandelbulb", "power": 8}, "render": "direct", "size": 240, "position": [400, -150, 0], "colour": "#c2c8d6", "roughness": 0.5, "duration": g}),
         json!({"op": "model", "name": "Lattice sphere", "math": {"preset": "sphere", "cut": "fract(u * 18) < 0.55 || fract(v * 10) < 0.5", "thickness": 4}, "size": 220, "detail": 4, "position": [-400, 170, 0], "colour": "#ff6b6b", "roughness": 0.4, "duration": g}),
         json!({"op": "model", "name": "Torus knot", "math": {"preset": "torus_knot", "p": 3, "q": 7, "radius": 0.11}, "size": 240, "detail": 4, "position": [0, 170, 0], "colour": "#2ec4b6", "metallic": 0.6, "roughness": 0.25, "duration": g}),
         json!({"op": "model", "name": "Rippling sphere", "math": {"preset": "ripple_sphere", "waves": 7, "amount": 0.07, "speed": 3}, "size": 220, "detail": 3, "position": [400, 170, 0], "colour": "#b388ff", "roughness": 0.3, "duration": g}),
@@ -105,8 +112,8 @@ fn math_showcase() {
         cost.push((name, tris, t_mesh, t_direct));
     }
     d.call("edit", json!({"ops": [
-        {"op": "text", "text": "mesh: surface nets, detail 5", "at": g, "duration": 4, "x": -240, "y": -320, "size": 26, "colour": "white"},
-        {"op": "text", "text": "direct: sphere traced from the formula", "at": g, "duration": 4, "x": 240, "y": -320, "size": 26, "colour": "white"},
+        {"op": "text", "text": "mesh: surface nets, detail 5", "at": g, "duration": 4, "x": -240, "y": -320, "size": 40, "colour": "white"},
+        {"op": "text", "text": "direct: sphere traced from the formula", "at": g, "duration": 4, "x": 240, "y": -320, "size": 40, "colour": "white"},
     ]}), "labels");
     // 10..11 s the mesh alone, 11..12 s the traced one alone: what a frame of each costs.
     let lone = json!({"preset": "mandelbulb", "power": 8, "iterations": 10});

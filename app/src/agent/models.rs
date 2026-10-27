@@ -621,7 +621,15 @@ impl Session {
                 let fit = super::math_shapes::fit_of(op, short * 0.4)?;
                 let detail = op.get("detail").and_then(Value::as_u64).unwrap_or(4).clamp(1, 6) as usize;
                 // Drawn directly, the mesh is only a stand-in: a coarse one.
-                let made = super::math_shapes::make(&op["math"], fit, if direct { detail.min(2) } else { detail })?;
+                let mut made = super::math_shapes::make(&op["math"], fit, if direct { detail.min(2) } else { detail })?;
+                if made.mesh.triangles() > MAX_TRIANGLES {
+                    // Too fine to keep: simplified (a lower detail is faster).
+                    let had = made.mesh.triangles();
+                    studio_mesh::decimate::decimate(&mut made.mesh, MAX_TRIANGLES);
+                    made.said["notes"] = json!([format!("{had} triangles simplified to {} (the most a model keeps); a lower detail, or render: direct, keeps it lighter", made.mesh.triangles())]);
+                    // Its vertices are not the bake's any more.
+                    made.moving = None;
+                }
                 if direct && made.recipe.is_none() {
                     return Err("render: direct draws implicit solids and fractals (a distance field, sphere traced); parametric surfaces, tubes, height fields and growth are drawn as their meshes".into());
                 }
@@ -684,11 +692,9 @@ impl Session {
         }
         let mut said = self.place_model(op, &mesh, what, notes)?;
         if let Some(m) = math_said {
-            said.push_str(&format!("; math: {m}"));
-        }
-        if let Some(r) = &recipe {
             let id = self.doc.project.clips.iter().map(|c| c.id).max().unwrap_or(0) as u32;
-            let how = self.keep_math(id, r, direct)?;
+            let how = self.keep_math(id, m["kind"].as_str().unwrap_or("math"), recipe.as_ref(), direct)?;
+            said.push_str(&format!("; math: {m}"));
             if direct {
                 said.push_str(&format!("; {how}"));
             }
