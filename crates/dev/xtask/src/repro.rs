@@ -134,7 +134,8 @@ pub fn civil(t: u64) -> (u16, u8, u8, u8, u8, u8) {
     (y as u16, m as u8, d as u8, (rem / 3600) as u8, (rem % 3600 / 60) as u8, (rem % 60) as u8)
 }
 
-/// A `.zip` of `items` under `prefix/`, with every date the epoch.
+/// A `.zip` of `items` under `prefix/` (at the top for ""), with every date
+/// the epoch.
 pub fn zip(out: &Path, prefix: &str, items: &[Item], made: &[Made]) -> Result<(), String> {
     let (y, mo, d, h, mi, s) = civil(epoch());
     let when = zip::DateTime::from_date_and_time(y, mo, d, h, mi, s).map_err(|_| "bad zip date".to_owned())?;
@@ -146,7 +147,8 @@ pub fn zip(out: &Path, prefix: &str, items: &[Item], made: &[Made]) -> Result<()
     all.sort_by(|a, b| a.0.cmp(&b.0));
     for (rel, data, exec) in all {
         let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).last_modified_time(when).unix_permissions(if exec { 0o755 } else { 0o644 });
-        z.start_file(format!("{prefix}/{rel}"), opts).map_err(|e| e.to_string())?;
+        let name = if prefix.is_empty() { rel } else { format!("{prefix}/{rel}") };
+        z.start_file(name, opts).map_err(|e| e.to_string())?;
         z.write_all(&data).map_err(|e| e.to_string())?;
     }
     z.finish().map(|_| ()).map_err(|e| e.to_string())

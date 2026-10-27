@@ -1,0 +1,50 @@
+{
+  "manifest_version": "0.3",
+  "name": "zornov",
+  "display_name": "Zornov",
+  "version": "0.0.0",
+  "description": "Edit video with Zornov: Claude makes, cuts, checks and exports a Zornov project with Zornov's own tools.",
+  "long_description": "This extension starts the Zornov installed on this computer; it does not contain a copy of it. Install Zornov first, from https://github.com/zornov/zornov/releases, in its usual place: Zornov.app in Applications on macOS, the MSI on Windows, or zornov on PATH on Linux. Then choose the project folder Claude works in. If that project is open in a Zornov window, Claude works in the window and you see each edit as it happens.",
+  "author": {
+    "name": "Ashrox LLC and contributors",
+    "url": "https://github.com/zornov/zornov"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zornov/zornov"
+  },
+  "homepage": "https://github.com/zornov/zornov",
+  "documentation": "https://github.com/zornov/zornov/blob/main/docs/terminal.md#ai-assistants-mcp",
+  "support": "https://github.com/zornov/zornov/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "entry_point": "zornov",
+    "mcp_config": {
+      "command": "zornov",
+      "args": ["mcp", "--project", "${user_config.project}"],
+      "platform_overrides": {
+        "darwin": {
+          "command": "/Applications/Zornov.app/Contents/MacOS/zornov"
+        },
+        "win32": {
+          "command": "C:\\Program Files\\Zornov\\zornov-cli"
+        }
+      }
+    }
+  },
+  "tools_generated": true,
+  "keywords": ["video", "video editor", "editing", "export"],
+  "license": "AGPL-3.0-or-later",
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"]
+  },
+  "user_config": {
+    "project": {
+      "type": "directory",
+      "title": "Project folder",
+      "description": "The Zornov project Claude works in. An empty folder becomes a new project.",
+      "required": true
+    }
+  }
+}
