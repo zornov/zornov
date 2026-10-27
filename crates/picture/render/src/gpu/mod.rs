@@ -316,8 +316,15 @@ fn layout(device: &wgpu::Device, label: &str, bindings: &[Binding]) -> wgpu::Pip
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some(label), bind_group_layouts: &[Some(&group)], immediate_size: 0 })
 }
 
+/// The name a shader module goes to the compiler under. DirectX 12 hands it
+/// to DXC as the source's file name, and a name like `comp:grade` reads as a
+/// drive and a path: DXC goes to the disk for it and fails ("error reading").
+fn module_name(label: &str) -> String {
+    label.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
+}
+
 fn pipeline(device: &wgpu::Device, label: &str, source: &str, entry: &str, bindings: &[Binding]) -> wgpu::ComputePipeline {
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(source.into()) });
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(&module_name(label)), source: wgpu::ShaderSource::Wgsl(source.into()) });
     let layout = layout(device, label, bindings);
     device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some(label),
@@ -1797,6 +1804,13 @@ impl FrameRenderer for GpuCompositor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shader_modules_have_names_dxc_can_take_as_files() {
+        assert_eq!(module_name("comp:grade"), "comp_grade");
+        assert_eq!(module_name("transition:dip-to-black"), "transition_dip_to_black");
+        assert_eq!(module_name("output8"), "output8");
+    }
 
     #[test]
     fn uniform_sizes_match_wgsl() {
