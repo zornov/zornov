@@ -247,6 +247,11 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
             if let Some(r) = skills::for_topic(other, part, full) {
                 return r;
             }
+            // Every op is a topic too (`guide {topic: "act"}` failed).
+            let op = other.strip_prefix("op:").unwrap_or(other).trim();
+            if args::op_fields(op).is_some() && craft_book::topic(other).is_none() {
+                return Ok(op_topic(op));
+            }
             return craft_book::topic(other).or_else(|| section_by_heading(other)).ok_or_else(|| format!("no guide topic \"{other}\"; topics: senses, model, clips, properties, motion, ops, context, habits, shell, all; the craft book: craft (all of it), {}; how to do a kind of work: the skills ({}), `skill {{name}}`", craft_book::names(), skills::names()));
         }
     };
@@ -254,6 +259,39 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
     let rest = &GUIDE[start + heading.len()..];
     let end = rest.find("\n## ").map_or(GUIDE.len(), |i| start + heading.len() + i);
     Ok(GUIDE[start..end].trim().to_owned())
+}
+
+/// An op as a guide topic: what the guides say where they use it (each
+/// paragraph that shows it, at most four), then every field with its
+/// type, units and range.
+fn op_topic(op: &str) -> String {
+    let needle = format!("\"op\": \"{op}\"");
+    let mut out = format!("## The `{op}` op\n\n");
+    let mut seen = 0;
+    for text in [GUIDE, TOOL_REFERENCE, GUIDE_CHARACTER, craft_book::BOOK] {
+        for para in text.split("\n\n") {
+            if seen < 4 && para.contains(&needle) {
+                out.push_str(para.trim());
+                out.push_str("\n\n");
+                seen += 1;
+            }
+        }
+    }
+    if seen == 0 {
+        out.push_str("The guides have no worked example of this op yet; its fields are below.\n\n");
+    }
+    let fields = args::op_fields(op).unwrap_or(&[]);
+    out.push_str("Fields (type, units, range, meaning):\n");
+    let doc = field_docs::op_doc(op, fields);
+    if let Some(map) = doc["fields"].as_object() {
+        for (k, v) in map {
+            out.push_str(&format!("- {k}: {}\n", v));
+        }
+    }
+    if let Some(e) = doc.get("example") {
+        out.push_str(&format!("\nExample: {e}\n"));
+    }
+    out
 }
 
 /// The `## ` sections of the guide: (heading line, whole section).
