@@ -680,9 +680,13 @@ impl Session {
             }
         }
         if let Some(dir) = home {
-            // `open` / `new_project` replace the session; stay bound.
+            // `open` / `new_project` replace the session; stay bound. After
+            // `open` the session works in the opened project's folder, so
+            // what it writes (vector documents, renders) lands there.
             let switched = matches!(tool, "open" | "new_project");
-            if !switched || tool == "new_project" {
+            if tool == "open" && r.is_ok() {
+                self.home = self.doc.folder.as_ref().map(|f| f.root().to_path_buf());
+            } else if !switched || tool == "new_project" {
                 self.home = Some(dir.clone());
             }
             let changed = (self.doc.history.revision(), self.doc.project.media.len()) != before || tool == "new_project";
