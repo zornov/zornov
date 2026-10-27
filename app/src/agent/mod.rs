@@ -944,6 +944,23 @@ impl Session {
 
     /// Applies `ops` as one undo step (all or nothing) and reports what
     /// changed. `dry_run` checks the plan and leaves the project as it was.
+    /// A light just added that the renderer will not draw: it lights a
+    /// scene with at most eight lights at once and leaves the rest out
+    /// without a word, so the warning comes at the op that adds the ninth.
+    fn too_many_lights(&self, fresh: &[u32]) -> Option<String> {
+        const MAX_LIGHTS: usize = 8;
+        let seq = self.doc.model.active();
+        let is_light = |c: &m::Clip| c.enabled && matches!(&c.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Light);
+        for &id in fresh {
+            let Some(c) = seq.clip(m::ClipId(id as u64)).filter(|c| is_light(c)) else { continue };
+            let with: Vec<u64> = seq.clips.iter().filter(|o| is_light(o) && o.start < c.end() && o.end() > c.start).map(|o| o.id.0).collect();
+            if with.len() > MAX_LIGHTS {
+                return Some(format!("{} lights now overlap in time with light {id} ({}), and a scene draws at most {MAX_LIGHTS}; the extra ones will not light anything. Delete or shorten some, or turn ambient fill into one light", with.len(), with.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")));
+            }
+        }
+        None
+    }
+
     pub fn edit(&mut self, ops: &[Value], label: &str, dry_run: bool) -> Result<Value, String> {
         // Repeats written out first, so "$1" and "$last" count every clip.
         let ops = &repeat::expand(ops).map_err(|e| format!("{e}. Nothing was changed."))?;
@@ -1009,11 +1026,15 @@ impl Session {
                 self.op(op)
             };
             match r {
-                Ok(n) => {
-                    notes.push(n);
+                Ok(mut n) => {
                     let mut fresh: Vec<&view::Clip> = self.doc.project.clips.iter().filter(|c| !ids_before.contains(&c.id)).collect();
                     fresh.sort_by_key(|c| c.id);
-                    made.extend(fresh.iter().map(|c| c.id));
+                    let fresh: Vec<u32> = fresh.iter().map(|c| c.id).collect();
+                    if let Some(w) = self.too_many_lights(&fresh) {
+                        n.push_str(&format!("; warning: {w}"));
+                    }
+                    notes.push(n);
+                    made.extend(fresh);
                 }
                 Err(e) => {
                     self.doc.rollback_batch();
