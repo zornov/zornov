@@ -175,6 +175,7 @@ impl Session {
         }
         if let Some(Value::Object(ps)) = op.get("params") {
             for (k, v) in ps {
+                let k = &super::effect_param_name(&e.kind, k)?;
                 let path = format!("effect.{}.{k}", e.id.0);
                 let prop = super::props::Prop { name: k.clone(), paths: vec![path.clone()], conv: super::props::Conv::Raw };
                 let cur = super::props::value_or_default(&mc, &path);

@@ -456,6 +456,32 @@ fn new_clip_end(film_end: view::Time, at: view::Time) -> view::Time {
     if film_end >= at + SEC { film_end } else { at + NEW_SHOT }
 }
 
+/// An effect setting's real name: the obvious other names map (`blur` is
+/// a blur's `radius`, `strength` its `amount`), and a name the effect
+/// does not have is refused with the ones it does, instead of being stored
+/// where nothing reads it.
+fn effect_param_name(kind: &str, k: &str) -> Result<String, String> {
+    let Some(def) = studio_fx::effects::find(kind) else { return Ok(k.to_owned()) };
+    let has = |n: &str| def.params.iter().any(|p| p.id == n);
+    if has(k) {
+        return Ok(k.to_owned());
+    }
+    let alias: &[&str] = match k {
+        "blur" | "size" | "radius_px" => &["radius", "amount", "size"],
+        "strength" | "intensity" | "amount" => &["amount", "intensity", "strength", "mix"],
+        "angle" | "rotation" => &["angle", "rotation"],
+        "colour" | "color" => &["colour", "color"],
+        "centre" | "center" => &["center", "centre"],
+        _ => &[],
+    };
+    if let Some(a) = alias.iter().find(|a| has(a)) {
+        return Ok((*a).to_owned());
+    }
+    let names: Vec<&str> = def.params.iter().map(|p| p.id).collect();
+    let hint = args::closest(k, &names).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
+    Err(format!("{kind} has no setting \"{k}\"{hint}; it has: {}", names.join(", ")))
+}
+
 /// `inspect` narrowed to what was asked: `what` (sections such as
 /// transform, keyframes, effects, on_screen, layout, pose; a name or a
 /// list) and/or `property` (every field of that name, at any depth, by
@@ -1516,7 +1542,13 @@ impl Session {
                 }
                 if let Some(Value::Object(params)) = op.get("params") {
                     let cl = clips.clone();
-                    let params: Vec<(String, f32)> = params.iter().filter_map(|(k, v)| v.as_f64().map(|x| (k.clone(), x as f32))).collect();
+                    // Names as the effect calls them (blur: radius).
+                    let kind = clips.first().and_then(|c| self.model_clip(*c)).and_then(|mc| mc.effects.last().map(|e| e.kind.clone())).unwrap_or_default();
+                    let mut named = Vec::new();
+                    for (k, v) in params {
+                        named.push((effect_param_name(&kind, k)?, v.clone()));
+                    }
+                    let params: Vec<(String, f32)> = named.iter().filter_map(|(k, v)| v.as_f64().map(|x| (k.clone(), x as f32))).collect();
                     self.doc.edit("Effect settings", |p| {
                         for c in p.clips.iter_mut().filter(|c| cl.contains(&c.id)) {
                             if let Some(e) = c.effects.last_mut() {
@@ -1796,6 +1828,15 @@ impl Session {
             "music" => self.music(op),
             "transition" => self.transition(op),
             "lane" => self.lane(op),
+            // `effect` with an item from the catalogue adds it, as `apply` does.
+            "effect" if op.get("item").is_some() && op.get("effect").is_none() => {
+                let mut o = op.clone();
+                o["op"] = json!("apply");
+                if let Some(c) = o.as_object_mut().and_then(|m| m.remove("clip")) {
+                    o["clips"] = if c.is_array() { c } else { json!([c]) };
+                }
+                self.op(&o)
+            }
             "effect" => self.effect(op),
             "card" => self.card(op),
             "sfx" => self.sfx(op),
