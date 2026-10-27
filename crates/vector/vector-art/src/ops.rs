@@ -296,7 +296,7 @@ fn stroke_item(v: &Value, op: &Value) -> Result<Stroke, String> {
     if let Some(d) = spec.get("dashes").or_else(|| op.get("dashes")).and_then(Value::as_array) {
         st.style.dashes = d.iter().filter_map(Value::as_f64).collect();
     }
-    if let Some(o) = f(spec, "dash_offset") {
+    if let Some(o) = f(spec, "dash_offset").or_else(|| f(op, "dash_offset")) {
         st.style.dash_offset = o;
     }
     if let Some(a) = s(spec, "align").or_else(|| s(op, "stroke_align")) {
@@ -632,7 +632,7 @@ pub const OPS: &[(&str, &str)] = &[
     ("fonts", "the font families available"),
     ("image", "file, x, y, w, h (placed, linked or embed: true)"),
     ("trace", "id (an image object) or file, preset (6 colors, 16 colors, black and white logo, line art, high fidelity photo, flat logo, …), rect"),
-    ("style", "ids, fill, stroke, stroke_width, join, cap, dashes, profile, opacity, blend: sets the top fill/stroke"),
+    ("style", "ids, fill, stroke, stroke_width, join, cap, dashes, dash_offset, profile, opacity, blend: sets the top fill/stroke"),
     ("appearance", "id, appearance {items: [{type: fill|stroke, …}], effects: [...]} replaces the stack"),
     ("add_fill", "id, fill (paint or {paint, opacity, blend}): adds a fill on top"),
     ("add_stroke", "id, stroke, width, …: adds a stroke on top"),
@@ -1798,6 +1798,9 @@ fn restyle(n: &mut Node, v: &Value) -> Result<(), String> {
                 }
                 if let Some(d) = v.get("dashes").and_then(Value::as_array) {
                     st.style.dashes = d.iter().filter_map(Value::as_f64).collect();
+                }
+                if let Some(o) = f(v, "dash_offset") {
+                    st.style.dash_offset = o;
                 }
                 if let Some(p) = v.get("profile") {
                     st.style.profile = profile(p)?;
