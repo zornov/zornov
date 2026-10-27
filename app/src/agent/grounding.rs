@@ -170,7 +170,10 @@ impl Session {
             let buried: Vec<&(m::Micros, Footing)> = feet.iter().filter(|(_, f)| f.gap > OFF * f.height).collect();
             let floating: Vec<&(m::Micros, Footing)> = feet.iter().filter(|(_, f)| -f.gap > OVER * f.height).collect();
             let name = |i: u32| self.doc.project.clip(i).map(|c| c.name.clone()).unwrap_or_default();
-            let (kind, list, fix) = if buried.len() * 2 >= feet.len() {
+            // Sitting in water, or a building, post, tree or rock set into
+            // the ground, is meant: not "buried".
+            let meant = feet.first().is_some_and(|(_, f)| sunk_on_purpose(&name(id), &name(f.on)));
+            let (kind, list, fix) = if buried.len() * 2 >= feet.len() && !meant {
                 ("3d_buried", buried, "raise it so its lowest point meets the surface (the y given), or walk it with act `ground: \"scene\"` so its feet follow what it stands on")
             } else if floating.len() * 5 >= feet.len() * 4 {
                 ("3d_floating", floating, "lower it onto the surface (the y given), or say in the notes why it hovers (3d-ok: floating)")
@@ -182,6 +185,18 @@ impl Session {
         }
         out
     }
+}
+
+
+/// Whether a model sunk into what it stands on is meant to be: anything in
+/// water floats partly under, and a structure or plant is set into the
+/// ground it grows from.
+fn sunk_on_purpose(model: &str, surface: &str) -> bool {
+    let words = |s: &str| s.to_lowercase().split(|c: char| !c.is_alphanumeric()).map(str::to_owned).collect::<Vec<_>>();
+    let (m, s) = (words(model), words(surface));
+    let any = |ws: &[String], list: &[&str]| ws.iter().any(|w| list.iter().any(|l| w == l || w.strip_suffix('s') == Some(l)));
+    any(&s, &["sea", "ocean", "water", "lake", "river", "pond", "wave", "harbour", "harbor"])
+        || (any(&s, &["terrain", "ground", "land", "island", "hill", "beach", "sand", "rock", "cliff", "grass", "snow", "floor"]) && any(&m, &["lighthouse", "house", "tower", "building", "post", "pole", "pillar", "column", "fence", "tree", "rock", "boulder", "stone", "pier", "jetty", "dock", "wall", "castle", "ruin", "mast", "sign", "lamp", "streetlight"]))
 }
 
 #[cfg(test)]

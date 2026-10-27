@@ -139,8 +139,9 @@ fn slab(mesh: &Mesh) -> Option<(f32, f32)> {
     Some((share, fill.min(1.0)))
 }
 
-/// Names of things that are flat, or open, by nature.
-const FLAT_THINGS: &[&str] = &["card", "paper", "poster", "sign", "screen", "flag", "banner", "plane", "sheet", "page", "leaf", "coin", "ticket", "label", "photo", "picture", "painting", "mat", "rug", "carpet", "tile", "panel", "board", "plank", "door", "book", "phone", "tablet", "letter", "envelope", "note", "sticker", "decal", "billboard", "backdrop", "cloth", "curtain", "cape", "towel", "napkin", "plate", "tray", "lid", "shelf", "window", "glass", "mirror", "frame", "wall", "floor", "ground", "terrain", "road", "water", "ocean", "sea", "pond", "grass", "shadow", "halo", "ring", "disc", "disk"];
+/// Names of things that are flat, or open, by nature (3D lettering is
+/// extruded on purpose: "3D text: …" is what text_3d names its clips).
+const FLAT_THINGS: &[&str] = &["card", "paper", "poster", "sign", "screen", "flag", "banner", "plane", "sheet", "page", "leaf", "coin", "ticket", "label", "photo", "picture", "painting", "mat", "rug", "carpet", "tile", "panel", "board", "plank", "door", "book", "phone", "tablet", "letter", "envelope", "note", "sticker", "decal", "billboard", "backdrop", "cloth", "curtain", "cape", "towel", "napkin", "plate", "tray", "lid", "shelf", "window", "glass", "mirror", "frame", "wall", "floor", "ground", "terrain", "road", "water", "ocean", "sea", "pond", "grass", "shadow", "halo", "ring", "disc", "disk", "text", "title", "word", "words", "letter", "letters", "lettering", "logo", "caption", "headline", "type"];
 
 fn says(name: &str, words: &[&str]) -> bool {
     let n = name.to_ascii_lowercase();

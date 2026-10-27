@@ -511,7 +511,7 @@ impl Session {
         let at = micros(f(op, "at").unwrap_or(0.0));
         let dur = micros(f(op, "duration").unwrap_or(3.0)).max(SEC / 30);
         let ex = json!({"depth": f(op, "depth").unwrap_or(size_px * 0.3), "bevel": f(op, "bevel").unwrap_or(size_px * 0.025)});
-        let name = op.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("3D {}", text.chars().take(20).collect::<String>()));
+        let name = op.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("3D text: {}", text.chars().take(20).collect::<String>()));
         self.solid_model(op, &ex, &contours, at, dur, &name)
     }
 

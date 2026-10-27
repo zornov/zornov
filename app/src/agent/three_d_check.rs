@@ -419,12 +419,18 @@ pub fn judge(heroes: &[Hero], env: &Env, words: &Words) -> Vec<Problem> {
 
         // Parts the brief and the plan name.
         let subject = subject_words(&h.name);
-        // Sentences about it, and the "It opens..." that follow them.
+        // Ground, water, sky and lettering have no parts to miss: "door" in
+        // the brief was asked of the sea, "camera" of a title.
+        let own_words = tokens(&h.name);
+        let scenery = SCENERY.iter().any(|w| own_words.contains(&stem(w)));
+        // Sentences about it, and the "It opens..." that follow them. A
+        // sentence that names no model is about this one only when it is
+        // the only one.
         let mut relevant: Vec<&String> = Vec::new();
         let mut carry = false;
-        for s in &sents {
+        for s in sents.iter().filter(|_| !scenery) {
             let t = tokens(s);
-            let about = if subject.is_empty() { t.iter().any(|w| w == "3d" || w == "model") } else { subject.iter().any(|w| t.contains(w)) };
+            let about = if subject.is_empty() { heroes.len() == 1 && t.iter().any(|w| w == "3d" || w == "model") } else { subject.iter().any(|w| t.contains(w)) };
             let low = s.to_lowercase();
             let pronoun = ["it ", "its ", "they ", "this ", "when it "].iter().any(|p| low.starts_with(p));
             let names_a_part = t.iter().any(|w| vocab::known_anywhere(w).is_some());
@@ -436,7 +442,7 @@ pub fn judge(heroes: &[Hero], env: &Env, words: &Words) -> Vec<Problem> {
             }
         }
         // With one hero, a plan's own parts list is about it.
-        if heroes.len() == 1 {
+        if heroes.len() == 1 && !scenery {
             for s in &sents {
                 let low = s.to_lowercase();
                 if (low.starts_with("parts") || low.starts_with("components") || low.starts_with("pieces") || low.contains("parts:")) && !relevant.contains(&s) {
@@ -472,7 +478,7 @@ pub fn judge(heroes: &[Hero], env: &Env, words: &Words) -> Vec<Problem> {
         }
         // A part named in the clip's own name, other than the clip being that part.
         let own = tokens(&h.name);
-        let is_part_clip = own.last().is_some_and(|w| vocab::lookup(w, &domains).is_some());
+        let is_part_clip = own.last().is_some_and(|w| vocab::lookup(w, &domains).is_some()) || scenery;
         if !is_part_clip {
             for w in &own {
                 if vocab::lookup(w, &domains).is_some() && !named.contains(w) {
@@ -636,6 +642,9 @@ pub fn judge(heroes: &[Hero], env: &Env, words: &Words) -> Vec<Problem> {
     out.sort_by(|x, y| x.at.total_cmp(&y.at));
     out
 }
+
+/// Model names that are scenery or lettering, not objects with parts.
+const SCENERY: &[&str] = &["sea", "ocean", "water", "lake", "river", "wave", "waves", "terrain", "ground", "floor", "land", "landscape", "island", "sky", "cloud", "clouds", "fog", "mountain", "mountains", "hill", "hills", "grass", "sand", "beach", "title", "text", "word", "words", "letters", "lettering", "caption", "logo", "scatter", "world"];
 
 /// Words for the parts of a body.
 const BODY_PARTS: &[&str] = &["head", "torso", "chest", "arm", "forearm", "leg", "hand", "foot", "feet", "shoulder", "neck", "hip", "knee", "elbow", "thigh", "shin", "pelvis", "calf", "finger", "belly"];
