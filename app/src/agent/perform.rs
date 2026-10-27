@@ -320,7 +320,28 @@ impl Session {
         let style = style_of(op)?;
         let g = gait::gait(&gait_name, &body, &style)?;
         let ell = check::leg_unit(rig, &body, k);
-        let pace = f(op, "pace").or_else(|| f(op, "speed")).unwrap_or(1.0).clamp(0.1, 6.0) as f32;
+        // `speed` (or `pace`) multiplies the gait's own pace; it was clamped
+        // without a word, so 53 and 145 both walked at 6×.
+        let pace_in = f(op, "pace").or_else(|| f(op, "speed")).unwrap_or(1.0);
+        if !(0.1..=6.0).contains(&pace_in) {
+            return Err(format!("speed {pace_in} is out of range: for a walk it multiplies the gait's own pace (0.1 to 6, 1 = normal). For a set pace give speed_px_s (world px per second), or give duration (seconds for the whole route)"));
+        }
+        let pace = pace_in as f32;
+        let speed_px_s = f(op, "speed_px_s").map(|v| v as f32);
+        if speed_px_s.is_some_and(|v| v <= 0.0) {
+            return Err("speed_px_s is world px per second, above 0".into());
+        }
+        // `face` as a word: right, left, toward the camera, away.
+        let face_word = op.get("face").and_then(Value::as_str).map(|w| w.trim().to_lowercase());
+        let face_named: Option<f32> = match face_word.as_deref() {
+            None => None,
+            Some("right" | "east") => Some(90f32.to_radians()),
+            Some("left" | "west") => Some((-90f32).to_radians()),
+            // 0 faces -z, toward the default camera (which sits in front, at -z).
+            Some("camera" | "front" | "toward camera" | "towards camera" | "forward" | "south") => Some(0.0),
+            Some("away" | "back" | "backward" | "north") => Some(180f32.to_radians()),
+            Some(w) => return Err(format!("face \"{w}\": give degrees (0 = toward the camera, 90 = right, 180 = away, -90 = left), a word (right, left, camera, away) or {{\"clip\": id}} to face a thing")),
+        };
         // Where it goes.
         let clip_secs = mc.duration as f64 / 1e6;
         let mut waypoints: Vec<Waypoint> = Vec::new();
@@ -353,11 +374,16 @@ impl Session {
         } else if let Some(d) = f(op, "distance") {
             let d = d as f32;
             waypoints.push(wp([start[0] + facing_dir[0] * d, start[1] + facing_dir[1] * d], true, 0.0, None));
-        } else if op.get("face").is_none() && op.get("turn").is_none() {
-            // Just a gait: along the way it faces, for `duration` (or the rest of the clip).
+        } else if (op.get("face").is_none() || (motion.is_some() && motion.as_deref() != Some("turn"))) && op.get("turn").is_none() {
+            // Just a gait: along the way it faces (or the way `face` names),
+            // for `duration` (or the rest of the clip).
             let dur = f(op, "duration").unwrap_or((clip_secs - at).min(30.0)).max(0.5) as f32;
-            let d = g.speed * ell * pace * dur * 0.85;
-            waypoints.push(wp([start[0] + facing_dir[0] * d, start[1] + facing_dir[1] * d], true, 0.0, None));
+            let d = speed_px_s.unwrap_or(g.speed * ell * pace) * dur * 0.85;
+            let dir = match face_named.or_else(|| op.get("face").and_then(num).map(f32::to_radians)) {
+                Some(h) => [h.sin(), -h.cos()],
+                None => facing_dir,
+            };
+            waypoints.push(wp([start[0] + dir[0] * d, start[1] + dir[1] * d], true, 0.0, None));
         } else {
             waypoints.push(wp(start, true, 0.0, None));
         }
@@ -368,6 +394,7 @@ impl Session {
                     let last = waypoints.last().map_or(start, |w| [w.x, w.z]);
                     self.ground_point(fv, mc, at).map(|p| (p[0] - last[0]).atan2(-(p[1] - last[1])))
                 }
+                Value::String(_) => face_named,
                 v => num(v).map(f32::to_radians),
             }
         } else {
@@ -389,11 +416,17 @@ impl Session {
             start,
             heading: heading0,
             waypoints,
-            speed: Some(g.speed * ell * pace),
-            duration: f(op, "duration").filter(|_| op.get("route").is_some() || op.get("to").is_some() || op.get("by").is_some()).map(|d| d as f32),
+            // A duration sets the speed (the plan finds it); otherwise the
+            // speed asked for, or the gait's own times `speed`.
+            duration: f(op, "duration").filter(|_| op.get("route").is_some() || op.get("to").is_some() || op.get("by").is_some() || op.get("distance").is_some()).map(|d| d as f32),
+            speed: None,
             hold: f(op, "hold").unwrap_or(0.4).clamp(0.0, 10.0) as f32,
             lead: f(op, "lead").unwrap_or(0.2).clamp(0.0, 10.0) as f32,
         };
+        let mut plan = plan;
+        if plan.duration.is_none() {
+            plan.speed = Some(speed_px_s.unwrap_or(g.speed * ell * pace));
+        }
         let walk = gait::walk(rig, &body, &g, k, &plan, fps, &*ground)?;
         // Bake: one action for the bones from the clip's start to the end of the walk.
         let mut r = (**rig).clone();
