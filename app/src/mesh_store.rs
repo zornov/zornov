@@ -35,9 +35,52 @@ pub fn save(doc: &Doc, mesh: &Mesh) -> Result<String, String> {
         if let Some(d) = path.parent() {
             std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
         }
+        crate::safety::room_for(&path, bytes.len() as u64)?;
         std::fs::write(&path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Removes model files in the project's `Models` folder that nothing
+/// refers to any more: not the project, its saved versions, nor its undo
+/// history (in memory or kept on disk). Every change to a model writes a
+/// new content-named file, so a long session of `act` calls left gigabytes
+/// of superseded `.smesh` files behind. Files younger than a minute stay
+/// (one may be written and not yet pointed at). Returns bytes freed.
+pub fn prune(root: &std::path::Path, history: &str) -> u64 {
+    let models = root.join("Models");
+    let Ok(entries) = std::fs::read_dir(&models) else { return 0 };
+    let mut refs = String::from(history);
+    let mut read = |p: &std::path::Path| {
+        if let Ok(t) = std::fs::read_to_string(p) {
+            refs.push_str(&t);
+        }
+    };
+    for d in [root.to_path_buf(), root.join("versions"), root.join(".cache"), root.join("cache")] {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.extension().is_some_and(|x| x == "json" || x == "jsonl") {
+                read(&p);
+            }
+        }
+    }
+    let mut freed = 0;
+    let now = std::time::SystemTime::now();
+    for e in entries.flatten() {
+        let p = e.path();
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else { continue };
+        if !(name.ends_with(".smesh") || name.ends_with(".smodel")) || refs.contains(name) {
+            continue;
+        }
+        let Ok(md) = e.metadata() else { continue };
+        if md.modified().ok().and_then(|t| now.duration_since(t).ok()).is_none_or(|age| age.as_secs() < 60) {
+            continue;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            freed += md.len();
+        }
+    }
+    freed
 }
 
 /// The model file a clip shows, if it is a model clip.
