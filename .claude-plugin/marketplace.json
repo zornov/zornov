@@ -1,0 +1,16 @@
+{
+  "name": "zornov",
+  "description": "Zornov, the open video editor, for Claude Code",
+  "owner": {
+    "name": "Ashrox LLC",
+    "url": "https://github.com/zornov/zornov"
+  },
+  "plugins": [
+    {
+      "name": "zornov",
+      "source": "./packaging/claude-code",
+      "description": "Edit video with Zornov: Claude makes, cuts, checks and exports Zornov projects with Zornov's own tools",
+      "category": "media"
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 # fixtures, test data) with its size and SHA-256. `cargo xtask assets-check`
 # fails on any asset not listed here; after adding or changing one on
 # purpose, run `cargo xtask assets-lock` and commit this file with it.
+81c48ee5ce19d010c27df6aaba51622b0a7cf757afef1ed317cc3500ae052d03 432 .claude-plugin/marketplace.json
 6f85ad76a82822433d89fe2aeac8e6d5a8cd06833c54118299376a4fe07b2b57 761 .devcontainer/devcontainer.json
 30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad 4399 app/assets/fonts/JetBrainsMono-LICENSE.txt
 a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f 273900 app/assets/fonts/JetBrainsMono-Regular.ttf
@@ -805,6 +806,7 @@ f278d28e9b4a9201e766f62c92a5419de783ade3b69ce5ccae940e4ba680118f 100267 packagin
 b2d52fd94df1df307cfb6f5643f5b2de84447265ee2b63f162e16e22b1c27f7b 237128 packaging/brand/zornov-macos-1024.png
 cd0b78cbaaf4434958a511fe9a843861fd4d66c1b888b4b6d9c0a9ed9555b5b6 620641 packaging/brand/zornov.icns
 00fbf64c2465ff4582562a91a2ed95f7311a63e8ca0fee34a38b14308ab74989 381038 packaging/brand/zornov.ico
+b4691824216d6b2d49a644338eb9860d6c9ffae0d188a6ee4526d478098ecc4a 683 packaging/claude-code/.claude-plugin/plugin.json
 f7ca93eca352d1071949b1ac8a80698cb9b6f2b9affbdfc3d3b18e3a69f5dac5 107865 plugins/dist/duotone.wasm
 03441669d089becd9a80bfef82bb5afa36fe99d066720ba9508ed599559027b9 136709 plugins/dist/toolkit.wasm
 f91aeeaf6944486e7ac6967c6dcd1e7fb38f1f3bc1e3e1f690d3734857e45294 529200 testdata/audio/joint_vbr.f32
