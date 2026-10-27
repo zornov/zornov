@@ -145,6 +145,12 @@ impl Session {
         // Things that meet.
         for p in lay.pairs(0.05) {
             let (a, b) = (&lay.items[p.above], &lay.items[p.below]);
+            // A title over the panel Zornov put behind it is the point of
+            // the panel, not a title drawn over something.
+            let backing = |x: &super::Item, of: &super::Item| x.name == format!("backing for {}", of.id) || (x.name.to_lowercase().contains("backing") && of.role == Role::Text);
+            if backing(a, b) || backing(b, a) {
+                continue;
+            }
             let texts = [a.role == Role::Text, b.role == Role::Text];
             match (texts[0], texts[1]) {
                 (false, false) if p.share >= 0.35 => say("layout_overlap", b.id, format!("{} covers {:.0}% of {} at {at:.1}s by what is drawn: one hides the other", name(p.above), p.share * 100.0, name(p.below)), &name(p.below)),
