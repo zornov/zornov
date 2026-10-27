@@ -54,6 +54,7 @@ impl Scene {
             casts_shadows: true,
             accepts_shadows: true,
             motion: None,
+            direct: None,
         });
         id
     }

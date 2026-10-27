@@ -69,6 +69,9 @@ pub struct MeshInstance {
     /// Where the model is when the shutter closes (motion blur in path
     /// traced renders).
     pub motion: Option<Arc<Motion>>,
+    /// Drawn from its formula instead of its triangles (see
+    /// [`crate::direct`]); the mesh is then its stand-in for shadows.
+    pub direct: Option<Arc<crate::direct::Traced>>,
 }
 
 /// A model layer as it is a moment later: its posed mesh and placement
@@ -94,6 +97,11 @@ impl PartialEq for MeshInstance {
             && match (&self.motion, &o.motion) {
                 (None, None) => true,
                 (Some(a), Some(b)) => a.key == b.key && a.world == b.world,
+                _ => false,
+            }
+            && match (&self.direct, &o.direct) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.key == b.key && a.t == b.t && a.size == b.size,
                 _ => false,
             }
     }
@@ -741,8 +749,42 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
         })
         .collect();
     let view = View { position: camera.position, axes: camera.axes, zoom: camera.zoom * k, centre: [w as f32 * 0.5, h as f32 * 0.5], ortho: false };
-    let tris = raster_tris(&placed, &meshes, &view, |_| true);
+    // Shapes drawn from their formula are traced, not rasterised.
+    let tris = raster_tris(&placed, &meshes, &view, |i| desc.instances[i].direct.is_none());
     let hits = rasterise(&tris, w, h, true);
+    let lens = crate::direct::Lens { position: view.position, axes: view.axes, zoom: view.zoom, centre: view.centre };
+    let traced: Vec<(usize, [usize; 4], Vec<[f32; 4]>)> = desc
+        .instances
+        .iter()
+        .enumerate()
+        .filter_map(|(i, inst)| {
+            let d = inst.direct.as_ref()?;
+            let rect = crate::direct::screen_rect(d, &inst.world, &lens, w, h)?;
+            let limit: Vec<f32> = (rect[1]..rect[3]).flat_map(|y| (rect[0]..rect[2]).map(move |x| (y, x))).map(|(y, x)| hits[y * w + x].depth).collect();
+            Some((i, rect, crate::direct::trace(d, &inst.world, &lens, rect, &limit)))
+        })
+        .collect();
+    // The nearest traced surface at a pixel: (instance, normal, distance along the ray).
+    let traced_at = |gi: usize| -> Option<(usize, [f32; 4])> {
+        let (x, y) = (gi % w, gi / w);
+        traced
+            .iter()
+            .filter(|(_, r, _)| x >= r[0] && x < r[2] && y >= r[1] && y < r[3])
+            .filter_map(|(k, r, o)| {
+                let v = o[(y - r[1]) * (r[2] - r[0]) + (x - r[0])];
+                v[3].is_finite().then_some((*k, v))
+            })
+            .min_by(|a, b| a.1[3].total_cmp(&b.1[3]))
+    };
+    let mut depth_px: Vec<f32> = hits.iter().map(|h| h.depth).collect();
+    if !traced.is_empty() {
+        for (gi, d) in depth_px.iter_mut().enumerate() {
+            if let Some((_, v)) = traced_at(gi) {
+                let dir = pixel_dir(&view, (gi % w) as f32 + 0.5, (gi / w) as f32 + 0.5);
+                *d = v[3] * dot(view.axes[2], dir);
+            }
+        }
+    }
     let casters: Vec<bool> = desc.instances.iter().map(|i| i.casts_shadows).collect();
     let bounds = world_bounds(desc).unwrap_or(([0.0; 3], [0.0; 3]));
     let maps: Vec<Option<ShadowMap>> = lights
@@ -772,7 +814,8 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                     let start = c * rows_per * w;
                     for (i, px) in out.iter_mut().enumerate() {
                         let hit = hits[start + i];
-                        if hit.tri == u32::MAX {
+                        let tr = if traced.is_empty() { None } else { traced_at(start + i) };
+                        if hit.tri == u32::MAX && tr.is_none() {
                             // The sky behind, when it shows.
                             if let Some(sk) = sky.filter(|sk| sk.background) {
                                 let gi = start + i;
@@ -785,6 +828,14 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                             }
                             continue;
                         }
+                        // A traced surface: where its ray met it, its field's normal, its first material.
+                        let (pl, p, n, surf, mut base, textured) = if let Some((k, v)) = tr {
+                            let gi = start + i;
+                            let d = pixel_dir(&view, (gi % w) as f32 + 0.5, (gi / w) as f32 + 0.5);
+                            let pl = &placed[k];
+                            let surf = &pl.surfaces[0];
+                            (pl, add(camera.position, scale(d, v[3])), [v[0], v[1], v[2]], surf, surf.base, None)
+                        } else {
                         let rt = &tris[hit.tri as usize];
                         let pl = &placed[rt.inst as usize];
                         let mesh = meshes[rt.inst as usize];
@@ -797,8 +848,9 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                         let smooth_n = normalise(mix(&|v| pl.world_n.get(v).copied().unwrap_or(face)));
                         let n = if smooth_n == [0.0; 3] { face } else { normalise(add(scale(face, 1.0 - pl.smooth), scale(smooth_n, pl.smooth))) };
                         let surf = &pl.surfaces[(pl.tri_surface.get(rt.tri as usize).copied().unwrap_or(0) as usize).min(pl.surfaces.len() - 1)];
-                        let mut base = surf.base;
-                        if let Some(t) = &surf.texture {
+                        (pl, p, n, surf, surf.base, Some((mesh, corners, bary)))
+                        };
+                        if let (Some(t), Some((mesh, corners, bary))) = (&surf.texture, textured) {
                             let uv0 = mesh.uvs.get(corners[0]).copied().unwrap_or([0.0; 2]);
                             let uv1 = mesh.uvs.get(corners[1]).copied().unwrap_or([0.0; 2]);
                             let uv2 = mesh.uvs.get(corners[2]).copied().unwrap_or([0.0; 2]);
@@ -848,10 +900,9 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
     drop(chunks);
     // Smoke and fire in front of what was drawn.
     if desc.instances.iter().any(|i| i.mesh.volume.is_some()) {
-        let depth: Vec<f32> = hits.iter().map(|h| h.depth).collect();
-        draw_volumes(desc, &view, &lights, sky.as_ref(), irradiance.as_ref(), &depth, &mut big, w, h);
+        draw_volumes(desc, &view, &lights, sky.as_ref(), irradiance.as_ref(), &depth_px, &mut big, w, h);
     }
-    let depth_big: Vec<f32> = hits.iter().map(|h| h.depth).collect();
+    let depth_big: Vec<f32> = depth_px;
     let (mut out, depth, surf) = if ss == 1 {
         (Frame { width: tw, height: th, pixels: big }, depth_big, sbig)
     } else {
@@ -1093,6 +1144,7 @@ mod tests {
             casts_shadows: true,
             accepts_shadows: true,
             motion: None,
+            direct: None,
         }
     }
 

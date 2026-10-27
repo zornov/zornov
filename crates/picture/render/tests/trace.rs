@@ -24,6 +24,7 @@ fn instance(id: u64, mesh: Mesh, at: [f32; 3]) -> MeshInstance {
         casts_shadows: true,
         accepts_shadows: true,
         motion: None,
+        direct: None,
     }
 }
 

@@ -25,6 +25,12 @@ use serde_json::{Map, Value};
 use studio_model::modifier::formula::Program;
 
 type P = [f64; 2];
+/// Polylines, each with whether it closes.
+type Polys = Vec<(Vec<P>, bool)>;
+/// An implicit preset: name, what it is, its settings, f(x, y).
+type ImplicitPreset = (&'static str, &'static str, &'static [(&'static str, f64)], &'static str);
+/// An L-system preset: name, what it is, axiom, rules, angle, iterations, the symbols that draw.
+type LsysPreset = (&'static str, &'static str, &'static str, &'static [(char, &'static str)], f64, usize, &'static str);
 
 /// The most points one curve may have.
 pub const MAX_SAMPLES: usize = 20_000;
@@ -63,7 +69,7 @@ pub struct Preset {
 /// The curve presets.
 pub const PRESETS: &[Preset] = &[
     Preset { name: "rose", about: "a rose r = cos(k theta), k = n / d petals' worth", params: &[("n", 5.0), ("d", 1.0)], formula: "cos(n / d * theta)", polar: true, u: ["0", "2 * pi * d"], closed: true },
-    Preset { name: "lissajous", about: "a Lissajous figure: x = sin(a u + delta), y = sin(b u)", params: &[("a", 3.0), ("b", 2.0), ("delta", 1.5708)], formula: "[sin(a * u + delta), sin(b * u)]", polar: false, u: ["0", "tau"], closed: true },
+    Preset { name: "lissajous", about: "a Lissajous figure: x = sin(a u + delta), y = sin(b u)", params: &[("a", 3.0), ("b", 2.0), ("delta", std::f64::consts::FRAC_PI_2)], formula: "[sin(a * u + delta), sin(b * u)]", polar: false, u: ["0", "tau"], closed: true },
     Preset { name: "heart", about: "the classic heart curve", params: &[], formula: "[16 * sin(u)^3 / 17, (13 * cos(u) - 5 * cos(2 * u) - 2 * cos(3 * u) - cos(4 * u)) / 17]", polar: false, u: ["0", "tau"], closed: true },
     Preset { name: "spiral", about: "Archimedes' spiral, `turns` turns", params: &[("turns", 4.0)], formula: "theta / (2 * pi * turns)", polar: true, u: ["0", "2 * pi * turns"], closed: false },
     Preset { name: "log_spiral", about: "the logarithmic (growth) spiral of shells and galaxies", params: &[("growth", 0.18), ("turns", 4.0)], formula: "exp(growth * (theta - 2 * pi * turns))", polar: true, u: ["0", "2 * pi * turns"], closed: false },
@@ -81,7 +87,7 @@ pub const PRESETS: &[Preset] = &[
 ];
 
 /// The implicit presets: f(x, y) = 0.
-pub const IMPLICIT: &[(&str, &str, &[(&str, f64)], &str)] = &[
+pub const IMPLICIT: &[ImplicitPreset] = &[
     ("cassini", "Cassini's ovals: one loop, a figure of eight, or two eggs as a passes b", &[("a", 0.7), ("b", 0.72)], "(x^2 + y^2)^2 - 2 * a^2 * (x^2 - y^2) - (b^4 - a^4)"),
     ("folium", "Descartes' folium", &[("a", 0.6)], "x^3 + y^3 - 3 * a * x * y"),
     ("devil", "the devil's curve", &[("a", 0.8), ("b", 0.9)], "y^2 * (y^2 - a^2) - x^2 * (x^2 - b^2)"),
@@ -90,7 +96,7 @@ pub const IMPLICIT: &[(&str, &str, &[(&str, f64)], &str)] = &[
 
 /// The L-system presets: axiom, rules, angle, iterations, and the symbols
 /// that draw.
-pub const LSYSTEMS: &[(&str, &str, &str, &[(char, &str)], f64, usize, &str)] = &[
+pub const LSYSTEMS: &[LsysPreset] = &[
     ("koch", "Koch's snowflake", "F--F--F", &[('F', "F+F--F+F")], 60.0, 4, "F"),
     ("dragon", "the Heighway dragon", "FX", &[('X', "X+YF+"), ('Y', "-FX-Y")], 90.0, 11, "F"),
     ("hilbert", "Hilbert's space-filling curve", "A", &[('A', "+BF-AFA-FB+"), ('B', "-AF+BFB-FA+")], 90.0, 5, "F"),
@@ -138,7 +144,7 @@ pub fn make(o: &Map<String, Value>, t: f64, num: &dyn Fn(&str, f64) -> f64) -> R
     let samples = (num("samples", 720.0).round().max(8.0) as usize).min(MAX_SAMPLES);
     let mut evals = 0u64;
     let mut used = samples;
-    let (lines, px, frame): (Vec<(Vec<P>, bool)>, bool, Option<Vec<P>>) = if let Some(f) = o.get("fourier") {
+    let (lines, px, frame): (Polys, bool, Option<Vec<P>>) = if let Some(f) = o.get("fourier") {
         let (lines, frame, px, n) = fourier(f, t, num)?;
         evals += n;
         (lines, px, Some(frame))
@@ -258,7 +264,7 @@ fn bounds(p: &[P]) -> (P, P) {
 
 /// f(x, y) = 0 by marching squares over `bounds` (half side, or
 /// `[[x0, y0], [x1, y1]]`), `resolution` cells along the longer side.
-fn implicit(src: &str, o: &Map<String, Value>, t: f64, num: &dyn Fn(&str, f64) -> f64) -> Result<(Vec<(Vec<P>, bool)>, u64, usize), String> {
+fn implicit(src: &str, o: &Map<String, Value>, t: f64, num: &dyn Fn(&str, f64) -> f64) -> Result<(Polys, u64, usize), String> {
     let f = compile("implicit", src, &["x", "y", "t", "r"])?;
     let (lo, hi) = match o.get("bounds") {
         Some(Value::Array(a)) if a.len() == 2 && a[0].is_array() => {
@@ -293,7 +299,8 @@ fn implicit(src: &str, o: &Map<String, Value>, t: f64, num: &dyn Fn(&str, f64) -
         let (pa, pb) = (at(a.0, a.1), at(b.0, b.1));
         [pa[0] + (pb[0] - pa[0]) * s, pa[1] + (pb[1] - pa[1]) * s]
     };
-    let mut segs: Vec<((usize, usize, u8), (usize, usize, u8))> = Vec::new();
+    type Edge = (usize, usize, u8);
+    let mut segs: Vec<(Edge, Edge)> = Vec::new();
     for j in 0..ny - 1 {
         for i in 0..nx - 1 {
             let c = [val(i, j), val(i + 1, j), val(i + 1, j + 1), val(i, j + 1)];
@@ -370,7 +377,7 @@ fn implicit(src: &str, o: &Map<String, Value>, t: f64, num: &dyn Fn(&str, f64) -
 
 /// An L-system's lines: `{"axiom", "rules": {"F": "F+F", "X": ["…", "…"]},
 /// "iterations", "angle", "draw"}` or `{"preset": name}` with changes.
-fn lsystem(spec: &Value, num: &dyn Fn(&str, f64) -> f64) -> Result<Vec<(Vec<P>, bool)>, String> {
+fn lsystem(spec: &Value, num: &dyn Fn(&str, f64) -> f64) -> Result<Polys, String> {
     let o = spec.as_object().ok_or("lsystem is {\"axiom\", \"rules\", \"iterations\", \"angle\"} or {\"preset\": name}")?;
     let preset = o.get("preset").and_then(Value::as_str).map(|n| LSYSTEMS.iter().find(|p| p.0 == n).ok_or_else(|| format!("L-system preset \"{n}\": {}", LSYSTEMS.iter().map(|p| p.0).collect::<Vec<_>>().join(", ")))).transpose()?;
     let axiom = o.get("axiom").and_then(Value::as_str).or(preset.map(|p| p.2)).ok_or("an lsystem needs \"axiom\" (or a \"preset\")")?;
@@ -389,7 +396,7 @@ fn lsystem(spec: &Value, num: &dyn Fn(&str, f64) -> f64) -> Result<Vec<(Vec<P>, 
             rules.push((c, choices));
         }
     }
-    let it = o.get("iterations").and_then(Value::as_f64).map_or(preset.map_or(4.0, |p| p.5 as f64), |v| v).clamp(0.0, 16.0) as usize;
+    let it = o.get("iterations").and_then(Value::as_f64).unwrap_or(preset.map_or(4.0, |p| p.5 as f64)).clamp(0.0, 16.0) as usize;
     let angle = o.get("angle").and_then(Value::as_f64).unwrap_or_else(|| num("angle", preset.map_or(25.0, |p| p.4)));
     let draw = o.get("draw").and_then(Value::as_str).unwrap_or(preset.map_or("FG", |p| p.6)).to_owned();
     let mut s = axiom.to_owned();
@@ -509,7 +516,7 @@ pub fn fourier_at(c: &[(i64, [f64; 2])], s: f64) -> P {
 /// Fourier epicycles: `{"of": points | "<svg path>" | preset name | {curve}, "terms",
 /// "epicycles", "period", "trace"}`. Returns the lines, the whole outline
 /// (to fit by), whether it is in pixels, and the evaluations.
-fn fourier(spec: &Value, t: f64, num: &dyn Fn(&str, f64) -> f64) -> Result<(Vec<(Vec<P>, bool)>, Vec<P>, bool, u64), String> {
+fn fourier(spec: &Value, t: f64, num: &dyn Fn(&str, f64) -> f64) -> Result<(Polys, Vec<P>, bool, u64), String> {
     let o = spec.as_object().ok_or("fourier is {\"of\": an outline, \"terms\": 20, \"epicycles\": true, \"period\": 4}")?;
     let of = o.get("of").ok_or("fourier needs \"of\": a list of points [[x, y], …] (px), an SVG path (\"M 0 0 L …\"), a curve preset name, or a curve {…}")?;
     let mut evals = 0;

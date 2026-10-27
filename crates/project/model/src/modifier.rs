@@ -319,6 +319,10 @@ pub mod expr;
 #[path = "formula.rs"]
 pub mod formula;
 
+/// Shape formulas as WGSL, drawn by the GPU with no mesh.
+#[path = "formula_wgsl.rs"]
+pub mod formula_wgsl;
+
 #[cfg(test)]
 mod tests {
     use super::*;

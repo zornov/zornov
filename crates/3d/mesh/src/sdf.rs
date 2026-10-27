@@ -294,15 +294,24 @@ pub fn build_counted(parts: &[Part], materials: Vec<Material>, cell: f32) -> (Me
             _ => p.size[0].max(p.size[1]).max(p.size[2]),
         } * 0.75
             + p.blend;
+        // A field not turned fills its own box and no more.
+        let half: V3 = if p.shape == Shape::Field && p.turn == [0.0; 3] { std::array::from_fn(|i| p.size[i] * 0.5 + p.blend) } else { [reach; 3] };
         for i in 0..3 {
-            lo[i] = lo[i].min(p.at[i] - reach);
-            hi[i] = hi[i].max(p.at[i] + reach);
+            lo[i] = lo[i].min(p.at[i] - half[i]);
+            hi[i] = hi[i].max(p.at[i] + half[i]);
         }
     }
     if !lo[0].is_finite() {
         return (Mesh::default(), Cost::default());
     }
     let cell = cell.max((hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]) / MAX_GRID).max(0.05);
+    // A field cut flat by its box needs a cell of room past the cut.
+    if parts.iter().any(|p| p.shape == Shape::Field) {
+        for i in 0..3 {
+            lo[i] -= cell;
+            hi[i] += cell;
+        }
+    }
     let n: [usize; 3] = std::array::from_fn(|i| (((hi[i] - lo[i]) / cell).ceil() as usize + 2).max(2));
     let origin = [lo[0] - cell, lo[1] - cell, lo[2] - cell];
     let at = |x: usize, y: usize, z: usize| [origin[0] + x as f32 * cell, origin[1] + y as f32 * cell, origin[2] + z as f32 * cell];

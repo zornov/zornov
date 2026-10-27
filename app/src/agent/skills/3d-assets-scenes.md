@@ -1,7 +1,7 @@
 ---
 name: 3d-assets-scenes
 use: Use when the film needs real 3D: models, assets, scenes, cameras, lights, renders.
-topics: 3d, three-d, models, model, mesh, meshes, modeling, modelling, 3d-models, asset, assets-3d, sculpting, sculpt, character-3d, face, faces, head, anatomy, rigging-3d, 3d-animation, animation-3d, simulation-3d, cloth, hair, fur, smoke, fire, particles-3d, destruction, shatter, water, ocean, soft-body, worlds, world, environment, sky, terrain, landscape, path-tracing, render, rendering, passes, hdri, space, camera, cameras, lights, lighting, parallax, perspective, lens, 3d-workspace, viewport, hero-objects, critic, character, characters, environments, heads, lenses, lip-sync, mocap, motion-capture, particles, poses, posing, rigging, rigs, visemes, walk, walk-cycle, wardrobe, clothes, clothing, outfit, props-in-hand, hair-3d
+topics: 3d, three-d, models, model, mesh, meshes, modeling, modelling, 3d-models, asset, assets-3d, sculpting, sculpt, character-3d, face, faces, head, anatomy, rigging-3d, 3d-animation, animation-3d, simulation-3d, cloth, hair, fur, smoke, fire, particles-3d, destruction, shatter, water, ocean, soft-body, worlds, world, environment, sky, terrain, landscape, path-tracing, render, rendering, passes, hdri, space, camera, cameras, lights, lighting, parallax, perspective, lens, 3d-workspace, viewport, hero-objects, critic, character, characters, environments, heads, lenses, lip-sync, mocap, motion-capture, particles, poses, posing, rigging, rigs, visemes, walk, walk-cycle, wardrobe, clothes, clothing, outfit, props-in-hand, hair-3d, math, maths, mathematics, math-shapes, formula-shapes, implicit, implicit-surface, sdf, gyroid, tpms, lattice, lattices, minimal-surface, parametric, parametric-surface, fractal, fractals, mandelbulb, menger, knot, knots, torus-knot, seashell, mobius, klein, height-field, heightfield, l-system, lsystem, phyllotaxis, golden-angle, attractor, lorenz, epicycles, fourier, superformula, warp, deform, twist, bend, taper, spirograph, rose-curve, lissajous
 tools: search_media, model, mesh, asset, build_place, combine, uncombine, generate, three_d, camera, light, lighting, parallax, shot, rig, pose, act, simulate, world, render3d, previs, compare_cameras, animatic, viewport, frame, contact_sheet, check, review, notes, animate, body, settle, wear, hold
 ---
 **Search before modelling.** Look for CC0 models, textures and skies first: `search_media {query, kind: "3d" | "texture" | "hdri"}` (Poly Haven), then fetch what fits and change it with `mesh`. Model from scratch only when nothing fits. Photos found with `search_media {kind: image}` (a real side view and front view) are the references for `generate {task: "model3d", images}` or for building by hand. Say what was found and what was modelled or made.
@@ -61,9 +61,18 @@ clay is pushed together: each part melts into the ones before it over
 `from` / `to` / `radius`, and their own `colour`, `roughness`,
 `metallic`, `subsurface`. A torso is a few ellipsoids blended 40 px; a
 limb a capsule; a mug a cylinder with a smaller one subtracted and a
-torus handle; a creature's eye socket a subtracted ellipsoid. Then
-sculpt the result with `mesh`. `model` with `clip`
+torus handle; a creature's eye socket a subtracted ellipsoid. A part
+can also be a formula (`math`: an implicit solid or preset such as
+`gyroid`, `blob`, `mandelbulb`) that melts, carves or cuts like the
+rest. Then sculpt the result with `mesh`. `model` with `clip`
 and `export` writes .glb or .obj.
+
+**Shapes from mathematics** (`model` with `math`): lattices and minimal
+surfaces, formula solids, fractals, parametric surfaces (shells, Möbius
+strips, Klein bottles, vases) with thickness and cut-out patterns,
+knotted tubes, height fields, L-system plants, phyllotaxis and
+attractor trails, presets or formulas of your own; shapes that move with
+`t` are baked to play. `skill {"name": "3d-assets-scenes", "part": "math shapes"}` has every field and preset.
 
 `mesh` changes a model's shape and surface: `{"op": "mesh", "clip": 5,
 "steps": [{"do": …}, …]}` (one undo step), or one step's fields at the
@@ -82,6 +91,9 @@ camera is at negative z). The result lists the box (`box_min`,
 | `symmetrize` | `keep` (right, left) | mirrors one half onto the other |
 | `extrude` | `region`, `distance` px | pushes faces out with new sides (limbs, a nose from a box) |
 | `displace` | `amount` px, `size` px, `octaves`, `seed`, `region` | noise in and out: rock, bark, skin texture at small sizes |
+| `twist` / `bend` / `taper` | `axis` (x, y up-down, z), `degrees` (twist, bend), `toward` (bend), `from` / `to` (taper scales), `refine` | space warps of the whole model; triangles, materials and rig kept; a coarse model is split first (part `math shapes`) |
+| `warp` | `math` (`"[dx, dy, dz]"`, formula space, the half size as 1) or `amount` + `size` + `seed` (noise) | every point moved by a formula or by smooth noise through the form |
+| `repeat` | `count` (`[x, y, z]`, or with `around: true` / `radius` copies round `axis`), `spacing` | copies in a grid or a ring |
 | `move` | `by`, `turn` `[x, y, z]` deg, `scale`, `pivot`, `region` | moves part (or all) of the model |
 | `add` | `shape`, `size`, `detail`, `at`, `turn`, material fields | another shape into the same model (eyes, buttons, handles) |
 | `boolean` | `mode` (union, subtract, intersect), `with` (a shape `{"shape", "size", "at"}` or a model clip) | cuts and joins (a hole, a socket, a bevelled edge) |
@@ -711,3 +723,70 @@ a location.
 ## Reference: tool `viewport`
 
 The 3D workspace, used as a person uses it (the Player shows it too): `get` reads the editor's eye (position, target, yaw, pitch, distance, lens, orthographic), what it looks through, shading, saved views, and every object in the world (models, 3D layers, 2D layers as cards, cameras, lights) with where it sits and where it shows on screen (x, y as fractions of the view). Move the eye: `orbit` (yaw, pitch; about: selection with clips, or cursor), `pan` (x, y canvas pixels), `dolly` (factor; < 1 goes closer; x, y fractions to zoom towards), `fly` / `walk` (forward, right, up pixels), `look` (yaw, pitch from where it stands), `set` (target, yaw, pitch, distance, lens, orthographic; or position + look_at), `view` (axis: front, back, left, right, top, bottom, perspective, orthographic, camera), `frame` (clips, or everything). Cameras: `look_through` (camera, or the active one), `editor`, `camera_to_view` (camera; the camera then sees the eye's view, keyed if animated), `view_from_camera`, `lock_camera` (on: navigating moves the camera), `record_path` (camera, keys: [{t, position, look_at} | {t, view: saved name} | {t, target, yaw, pitch, distance}], keyed every other frame). Views: `bookmark` / `go` / `forget` (name). Objects: `pick` / `select` (x, y fractions of the view, or clips), `move` (clips, by [x, y, z] px; space world, view or local), `rotate` (clips, by [x, y, z] degrees), `scale` (clips, by factor or [x, y, z]); pivot median, individual or cursor; snap. `hide` / `unhide` / `lock` / `unlock` (clips, viewport only), `cursor` (at [x, y, z]), `shading` (mode: solid, material, rendered, wireframe, xray), `spread` (px between 2D layers in depth), `options` (cards, grid, overlays, frame, quad, snap, snap_step, snap_angle, tool, orient, pivot, floor_y, speed), `on` / `off`. `picture`: the view as a JPEG with grid, frustums, lights and outlines (or picture: true with any action). Units: canvas pixels from the centre, y down (negative y is up), z away.
+
+## Reference: math shapes
+
+**What it is.** Mathematics as a way to make form and motion, written in Studio's formula language (the one `modifier` and `driver` use: `+ - * / ^ %`, `c ? a : b`, `name = …;` bindings, `sin cos atan2 sqrt abs min max clamp smoothstep mix fract mod noise`…, plus the shape functions below). Formulas are safe: no loops, capped sizes and iterations; every reply says how many evaluations it made, the grid it sampled and whether the solid is closed.
+
+**How**
+1. Pick the kind of mathematics that makes the form (table in Reference): a solid by a formula (`implicit`), a surface by u and v (`parametric`), a tube along a curve (`tube`), ground (`height`), growth (`lsystem`, `phyllotaxis`), a trail (`attractor`), a fractal (an implicit preset). Start from a preset and change its settings by name; write a formula of your own when no preset fits.
+2. `model {"math": …, "size": px, "detail": 1-6}`: a real 3D model, closed where it can be (lattices are cut to their box; open sheets get a thin shell), with normals and texture coordinates. Colour and finish as for any model (`colour`, `metallic`, `roughness`, `emissive`…).
+3. To melt a formula into clay, carve with it or cut by it, give a blended part `math` (implicit kinds only): `model {"parts": [{"shape": "ellipsoid", "size": 220}, {"math": {"preset": "gyroid", "cells": 3, "solid": 1}, "size": 240, "intersect": true}]}`.
+4. Warp any model (made by math or not, rigged or not): `mesh` steps `twist`, `bend`, `taper`, `warp` (noise, or a formula offset), `repeat` (a grid, or round an axis). A coarse model is split first so it bends smoothly.
+5. Motion: a shape whose formula reads `t` (or that `morph`s to another) is baked to a frame cache over the clip and plays; `animate {"curve": …}` moves a clip along a curve (2D, or 3D with `z` or an `attractor`), `orient: true` turns it along the way; `animate {"formula": "…"}` keys any number by a formula of t.
+6. Flat curves: a shape layer item `{"type": "curve", …}` (roses, spirographs, L-systems, Fourier epicycles), stroked or filled like any shape; its settings animate and its formulas see `t`, so it morphs as it plays.
+7. Light it (`lighting`, or `light` with shadows), move the camera, then look: `contact_sheet` or `see` from two or three angles; `check` before export.
+
+**Checks**
+- The reply's `closed` is true for solids; `evals` and `grid` are under the caps; `notes` say when a cap lowered the resolution or the frame rate of a bake.
+- A lattice reads at the size it is seen: 2 to 4 `cells` across for a hero object, more for a texture of holes.
+- Look at a moving shape at three times (`contact_sheet` with `times`).
+
+**Mistakes**
+- A formula that is positive everywhere in its domain has no surface ("no surface" error): check the sign (solid where it is 0 or less) and `bounds`.
+- `v` and `u` are the surface parameters; in curves `u` is the parameter and `theta` the polar angle; `t` is always time.
+- Formula space is the mathematician's: x right, y away, z up (Studio's y is down). Warp steps take the model's own axes (`axis: "y"` is up-down).
+- An implicit shape that moves keeps its triangles and follows the surface; one that splits in two or merges as `t` runs stretches instead.
+
+**Meshed or drawn directly.** An implicit solid or fractal is meshed by default (`render: "mesh"`: surface nets at `detail`, closed, with normals and texture coordinates: what materials, rigs, physics, booleans, mesh steps and exports need). `render: "direct"` instead draws it straight from its formula: each pixel's ray is sphere traced through the field on the GPU (the CPU without one), so a Mandelbulb or a gyroid keeps exact detail however close the camera comes, and a formula that reads `t` moves live with no bake. It is lit, shadowed, fogged and depth-sorted with the other models. What it cannot do: it is not triangles, so physics, rigs, collisions, booleans, mesh steps, exports and path-traced renders use its stand-in, a coarse mesh made with it (which also casts its shadows); it takes no texture. Switch a model either way with `mesh {"do": "render", "mode": "direct" | "mesh", "detail"}` (back to mesh remeshes it from the formula). Parametric surfaces, tubes, height fields and growth are always meshes; flat `curve` items are always live paths, worked out as they are drawn.
+
+**Fields and presets**
+
+**`math` on `model`** (also on a blended part, and on `mesh {"do": "add", "math", "size", "at"}`): a preset name, or an object with one of these fields naming its kind. Every other number in it is a setting, bound by name in front of the formula (`{"implicit": "sphere(x, y, z, rad) + 0.1 * noise3(x * 5, y * 5, z * 5)", "rad": 0.7}`); `"t": 2` evaluates at a time; `"bake": false` keeps a moving shape still.
+
+| kind | fields | |
+|---|---|---|
+| `implicit` | (with `render` direct or mesh on the model op) formula of `x y z t r` (or a list, worked through by `weight`), `bounds` (half side of the domain, or `[x, y, z]`; default 1), `clip` (`box` or `ball`: what it is cut to), `weight` (a formula of t for a list), `morph` `{"to": …, "over": [t0, t1]}` | solid where the formula ≤ 0; `size` spans the domain |
+| `parametric` | `"[x, y, z]"` of `u v t` (or three formulas, or `{"x","y","z"}`), `u`, `v` (ranges, numbers or formulas: `[0, "tau"]`), `coords` (`cartesian`, `cylindrical`: r, theta, z; `spherical`: r, theta, phi), `resolution` (n or `[nu, nv]`), `thickness` (px; 0 a bare sheet), `cut` (holes where it is true; `u`, `v` 0..1 over the surface, also `x y z`, raw `pu pv`, `t`), `morph` | seams and poles weld shut |
+| `tube` | `"[x, y, z]"` of `u t`, `u`, `radius` (curve units, or a formula of u), `sides`, `resolution` | closed curves close, open ones are capped |
+| `height` | formula of `x y t r`, giving the height up; `bounds` (half side, or `[x, y]`), `resolution`, `depth` (px of block under the lowest point) | a closed block of ground |
+| `lsystem` | preset name or `{"axiom", "rules": {"F": "F[+F]F[-F]F"}}`; `iterations`, `angle`, `width`, `taper`, `shrink`, `droop`, `seed`, `sides`, `leaves`, `leaf_colour` | turtle: `F G` draw, `f` move, `+ -` turn, `& ^` pitch, `\ /` roll, `[ ]` branch, `!` thin, `L` leaf |
+| `phyllotaxis` | `disc` (sunflower), `ball`, `cone` (pinecone), `dome` (cactus); `count`, `angle` (137.508, the golden angle), `seed_size`, `core`, `seed_colour`, `core_colour` | |
+| `attractor` | preset name or `{"dx", "dy", "dz"}` (formulas of x y z t); `start`, `dt`, `steps`, `skip`, `radius`, `sides`, `every` | Runge–Kutta, capped at 200 000 steps |
+
+Presets (settings in brackets): implicit `gyroid`, `schwarz_p`, `diamond`, `neovius`, `lidinoid` [cells, thickness, solid: 0 a sheet, 1 one network], `strut_lattice` [cells, width], `foam` [cells, width, seed], `blob` [radius, amount, frequency, speed, seed], `rock`, `ripple_sphere` [waves, amount, speed], `metaballs` [size, speed, threshold], `superquadric` [p], `heart`; fractals `mandelbulb` [power, iterations], `mandelbox` [scale, iterations], `menger` [iterations 1-7], `sierpinski` [iterations]. Parametric `torus` [major, minor], `sphere`, `swirl_torus` (r = 3 + sin u + cos v, theta = 2u, z = sin v + 2 cos u) [a, turns], `mobius` [width, twists], `klein`, `seashell` [turns], `nautilus` [turns, growth, open], `horn`, `vase` [waves, bulge, tall], `dini`, `enneper`, `helicoid`, `catenoid` [c, span], `supershape` [m, n1, n2, n3, m2, k1, k2, k3], `boy`. Tubes `torus_knot` [p, q, major, minor], `trefoil`, `figure_eight_knot`, `lissajous_knot`, `helix`, `spiral`. Heights `waves`, `ripples`, `dunes`, `terrain`, `saddle`, `egg_crate`, `sinc`. L-systems `tree`, `bush`, `plant`, `fern`, `weed`, `pine`. Attractors `lorenz`, `rossler`, `aizawa`, `thomas`, `halvorsen`, `chen`.
+
+Shape functions in formulas: `sphere(x,y,z,r)`, `box(x,y,z,a,b,c)` (half sides), `torus(x,y,z,R,r)`, `cylinder(x,y,z,r,h)`, `length(…)`, `smin(a,b,k)`, `smax(a,b,k)` (smooth union / intersection; `max(a, -b)` subtracts), `gyroid`, `schwarz_p`, `schwarz_d`, `neovius`, `lidinoid` of (x, y, z), `noise2`, `noise3`, `fbm(x,y,z,octaves,seed)`, `voronoi(x,y[,z])`, `voronoi_edge(…)`, `mandelbulb(x,y,z,power,iters)`, `mandelbox`, `menger`, `sierpinski` (iterations capped at 30), `superformula(angle,m,n1,n2,n3)`, `sinh cosh tanh cbrt mix`. Domain tricks are formulas too: repeat with `x = mod(x + 0.5, 1) - 0.5;` in front, twist with `a = z * 2; x2 = x * cos(a) - y * sin(a); …`.
+
+Examples:
+
+    {"op": "model", "math": {"preset": "gyroid", "cells": 3, "thickness": 0.25}, "size": 320, "colour": "#d8b25a", "metallic": 1, "roughness": 0.3}
+    {"op": "model", "math": {"preset": "swirl_torus"}, "size": 300, "colour": "#3b82f6"}
+    {"op": "model", "math": {"preset": "sphere", "cut": "fract(u * 16) < 0.55 || fract(v * 10) < 0.5", "thickness": 3}, "size": 260}
+    {"op": "model", "math": {"implicit": "sphere(x, y, z, 0.6 + 0.08 * sin(6 * atan2(y, x) + 3 * t))", "bounds": 1}, "duration": 4}
+    {"op": "model", "math": {"preset": "mandelbulb", "power": 8, "iterations": 12}, "size": 400, "detail": 5}
+    {"op": "model", "math": {"lsystem": "tree", "iterations": 6, "angle": 24}, "size": 500, "colour": "#6b4a2f"}
+    {"op": "model", "math": {"phyllotaxis": "cone", "count": 400}, "size": 220}
+    {"op": "model", "math": {"preset": "torus", "morph": {"to": "klein", "over": [0, 3]}}, "duration": 4}
+    {"op": "mesh", "clip": 5, "steps": [{"do": "twist", "axis": "y", "degrees": 180}, {"do": "taper", "from": 1, "to": 0.5}, {"do": "bend", "degrees": 40, "toward": "x"}]}
+    {"op": "mesh", "clip": 5, "do": "warp", "math": "[0.1 * sin(5 * z), 0.1 * cos(5 * z), 0]"}
+    {"op": "mesh", "clip": 5, "do": "repeat", "count": 8, "around": true, "radius": 300}
+    {"op": "animate", "clip": 7, "property": "position", "curve": {"preset": "lissajous", "a": 3, "b": 2, "size": 500, "orient": true, "loops": 2}}
+    {"op": "animate", "clip": 7, "property": "position", "curve": {"attractor": "lorenz", "size": 400}}
+    {"op": "animate", "clip": 7, "property": "rotation_y", "formula": "360 * t / 4 + 10 * sin(t * tau)"}
+    {"op": "shape", "items": [{"type": "curve", "preset": "rose", "n": 7, "d": 3, "size": 500}, {"type": "stroke", "colour": "#f0c", "width": 3}]}
+    {"op": "shape", "items": [{"type": "curve", "fourier": {"of": "heart", "terms": 16, "period": 6}, "size": 500}, {"type": "stroke", "colour": "white", "width": 2}]}
+
+**`curve` items and `animate` curves** (studio's shape layers): `preset` with its settings (rose [n, d], lissajous [a, b, delta], heart, spiral [turns], log_spiral [growth, turns], fermat_spiral, superformula [m, n1, n2, n3], spirograph [big, small, pen], epitrochoid, cardioid, astroid, deltoid, butterfly, lemniscate, maurer_rose [n, step], wave [cycles, amount, speed]; implicit cassini [a, b], folium, devil, heart_implicit; L-systems koch, dragon, hilbert, sierpinski, gosper, levy, plant, fern, square_tiles), or `x` + `y` (formulas of `u`, `t`), `polar` (r of `theta`, `t`), `u` (range), `samples` (up to 20 000); `implicit` (f of `x y t r` = 0) with `bounds`, `resolution` (up to 600); `lsystem` `{axiom, rules, iterations, angle, draw}`; `fourier` `{of: points (px) | an SVG path | a preset | a curve, terms (up to 500), epicycles (circles, arm and trace, default true), period (s), trace}`. `size` fits the curve (px), `scale` is px per unit (default 100), `smooth: true` bends it through its points. On `animate`, the curve also takes `duration`, `start`, `loops`, `keys` (up to 600), `centre`, `orient`; with `z` (and `x`, `y` formulas of u) or an `attractor` it is a 3D path keying x, y and z.
+
+**Caps**: formula grids at most 400 a side and 60 million evaluations a build (a finer `detail` is made coarser and said so); surfaces 512 × 512 samples; L-systems 200 000 symbols and 60 000 drawn points; phyllotaxis 20 000 seeds; attractors 200 000 steps; fractal iterations 30; a bake at most 240 frames and 30 million vertex positions (a lower frame rate, played smoothly between); formula animations 600 keys.

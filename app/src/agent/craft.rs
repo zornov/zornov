@@ -308,6 +308,10 @@ impl Session {
             }
             return Ok(said.join("; "));
         }
+        // Along a curve from mathematics, or by a formula of t.
+        if op.get("curve").is_some() || op.get("formula").is_some() {
+            return self.animate_math(op);
+        }
         let id = op.get("clip").and_then(Value::as_u64).ok_or("animate needs \"clip\"")? as u32;
         let c = self.clip(id)?;
         let name = op.get("property").and_then(Value::as_str).ok_or("animate needs \"property\"")?.trim().to_lowercase();

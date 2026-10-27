@@ -179,7 +179,7 @@ fn split(m: &mut Mesh) {
     let mut out_mats = Vec::with_capacity(mats.len() * 4);
     let has_uv = m.uvs.len() == m.positions.len();
     let has_n = m.normals.len() == m.positions.len();
-    for t in 0..m.triangles() {
+    for (t, mat) in mats.iter().enumerate() {
         let v = [m.indices[3 * t], m.indices[3 * t + 1], m.indices[3 * t + 2]];
         let mut e = [0u32; 3];
         for k in 0..3 {
@@ -199,7 +199,7 @@ fn split(m: &mut Mesh) {
             });
         }
         idx.extend_from_slice(&[v[0], e[0], e[2], e[0], v[1], e[1], e[2], e[1], v[2], e[0], e[1], e[2]]);
-        out_mats.extend_from_slice(&[mats[t]; 4]);
+        out_mats.extend_from_slice(&[*mat; 4]);
     }
     m.indices = idx;
     m.regroup(&out_mats);

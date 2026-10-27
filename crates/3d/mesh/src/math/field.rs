@@ -42,6 +42,87 @@ impl Clip {
     }
 }
 
+/// What a field is, in words a file can keep: its formulas (settings
+/// already bound), the morph weight, the domain, the cut and the part's
+/// size (px). The renderer rebuilds the field from it to draw it directly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Recipe {
+    pub formulas: Vec<String>,
+    pub weight: Option<String>,
+    pub lo: [f64; 3],
+    pub hi: [f64; 3],
+    pub clip: Clip,
+    /// The part's size, px (Studio axes).
+    pub size: V3,
+}
+
+fn esc(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\n', "\\n")
+}
+
+fn unesc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c == '\\' {
+            match it.next() {
+                Some('n') => out.push('\n'),
+                Some(o) => out.push(o),
+                None => {}
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+impl Recipe {
+    /// One line per entry: `formula …`, `weight …`, `lo x y z`, `hi x y z`,
+    /// `clip box|ball`, `size x y z`.
+    pub fn to_text(&self) -> String {
+        let mut s = String::new();
+        for f in &self.formulas {
+            s.push_str(&format!("formula {}\n", esc(f)));
+        }
+        if let Some(w) = &self.weight {
+            s.push_str(&format!("weight {}\n", esc(w)));
+        }
+        s.push_str(&format!("lo {} {} {}\nhi {} {} {}\n", self.lo[0], self.lo[1], self.lo[2], self.hi[0], self.hi[1], self.hi[2]));
+        s.push_str(&format!("clip {}\nsize {} {} {}\n", if self.clip == Clip::Ball { "ball" } else { "box" }, self.size[0], self.size[1], self.size[2]));
+        s
+    }
+
+    pub fn from_text(s: &str) -> Result<Recipe, String> {
+        let mut r = Recipe { formulas: Vec::new(), weight: None, lo: [-1.0; 3], hi: [1.0; 3], clip: Clip::Box, size: [100.0; 3] };
+        let three = |v: &str| -> Result<[f64; 3], String> {
+            let n: Vec<f64> = v.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if n.len() == 3 { Ok([n[0], n[1], n[2]]) } else { Err(format!("a field recipe needs three numbers, not \"{v}\"")) }
+        };
+        for line in s.lines() {
+            let (k, v) = line.split_once(' ').unwrap_or((line, ""));
+            match k {
+                "formula" => r.formulas.push(unesc(v)),
+                "weight" => r.weight = Some(unesc(v)),
+                "lo" => r.lo = three(v)?,
+                "hi" => r.hi = three(v)?,
+                "clip" => r.clip = Clip::parse(v).unwrap_or(Clip::Box),
+                "size" => r.size = three(v)?.map(|x| x as f32),
+                "" => {}
+                other => return Err(format!("a field recipe has no \"{other}\"")),
+            }
+        }
+        Ok(r)
+    }
+
+    /// The field, at time `t`.
+    pub fn field(&self, t: f64) -> Result<Field, String> {
+        let progs = self.formulas.iter().map(|f| super::compile("field", f, NAMES)).collect::<Result<Vec<_>, _>>()?;
+        let weight = self.weight.as_ref().map(|w| super::compile("weight", w, NAMES)).transpose()?;
+        Field::new(progs, weight, self.lo, self.hi, self.clip, t)
+    }
+}
+
 /// An implicit solid.
 pub struct Field {
     formulas: Vec<Program>,
@@ -62,7 +143,7 @@ impl Field {
         if formulas.is_empty() {
             return Err("a field needs a formula".into());
         }
-        if (0..3).any(|i| !(hi[i] > lo[i]) || !lo[i].is_finite() || !hi[i].is_finite()) {
+        if (0..3).any(|i| hi[i] <= lo[i] || !lo[i].is_finite() || !hi[i].is_finite()) {
             return Err("the domain's low corner must be below its high corner on every axis".into());
         }
         let mut f = Field { formulas, weight, t, lo, hi, clip, norm: 1.0 };
@@ -78,6 +159,75 @@ impl Field {
     /// Whether it changes with `t`.
     pub fn moves(&self) -> bool {
         self.formulas.iter().chain(self.weight.iter()).any(|p| p.uses(3))
+    }
+
+    /// The field's distance in WGSL, the GPU's own copy of
+    /// [`FieldFn::distance`]: `fn field_distance(q: vec3<f32>, size:
+    /// vec3<f32>, t: f32) -> f32` (part space, px), with the language's
+    /// functions in front.
+    pub fn wgsl(&self) -> Result<String, String> {
+        use studio_model::modifier::formula_wgsl::PRELUDE;
+        let mut s = String::from(PRELUDE);
+        for (k, f) in self.formulas.iter().enumerate() {
+            s.push_str(&f.to_wgsl(&format!("fm_f{k}"))?);
+        }
+        if let Some(w) = &self.weight {
+            s.push_str(&w.to_wgsl("fm_w")?);
+        }
+        let h = [(self.hi[0] - self.lo[0]) * 0.5, (self.hi[1] - self.lo[1]) * 0.5, (self.hi[2] - self.lo[2]) * 0.5];
+        let c = [self.lo[0] + h[0], self.lo[1] + h[1], self.lo[2] + h[2]];
+        let v = |a: [f64; 3]| format!("vec3<f32>({:?}, {:?}, {:?})", a[0] as f32, a[1] as f32, a[2] as f32);
+        let call = |k: usize| format!("fm_f{k}(m.x, m.y, m.z, t, r)");
+        let value = if self.formulas.len() == 1 {
+            format!("    return {};
+", call(0))
+        } else {
+            let n = self.formulas.len();
+            let mut b = format!("    let w = clamp(fm_w(m.x, m.y, m.z, t, r), 0.0, {:?});
+    let k = min(u32(floor(w)), {}u);
+    let u = w - f32(k);
+    var a = {};
+    var b = {};
+", (n - 1) as f32, n - 2, call(0), call(1));
+            for k in 1..n - 1 {
+                b.push_str(&format!("    if (k == {k}u) {{ a = {}; b = {}; }}
+", call(k), call(k + 1)));
+            }
+            b.push_str("    return mix(a, b, clamp(u, 0.0, 1.0));
+");
+            b
+        };
+        let cut = match self.clip {
+            Clip::Box => "let e = abs(mq) - s;
+    let cut = length(max(e, vec3<f32>(0.0))) + min(max(e.x, max(e.y, e.z)), 0.0);",
+            Clip::Ball => "let cut = (length(mq / s) - 1.0) * min(s.x, min(s.y, s.z));",
+        };
+        s.push_str(&format!(
+            "fn field_value(m: vec3<f32>, t: f32) -> f32 {{
+    let r = length(m - {c});
+{value}}}
+fn field_distance(q: vec3<f32>, size: vec3<f32>, t: f32) -> f32 {{
+    let s = max(vec3<f32>(size.x, size.z, size.y), vec3<f32>(1e-6)) * 0.5;
+    let mq = vec3<f32>(q.x, q.z, -q.y);
+    let h = {h};
+    let m = {c} + mq / s * h;
+    let k = min(min(s.x / h.x, s.y / h.y), s.z / h.z);
+    var f = field_value(m, t) * {norm:?} * k;
+    if (f != f) {{ f = k; }}
+    {cut}
+    return clamp(max(f, cut), -1e9, 1e9);
+}}
+",
+            c = v(c),
+            h = v(h),
+            norm = self.norm as f32,
+        ));
+        Ok(s)
+    }
+
+    /// The time it is worked out at.
+    pub fn time(&self) -> f64 {
+        self.t
     }
 
     /// Formula evaluations per sample.
@@ -241,6 +391,46 @@ pub fn bind(what: &str, params: &[(&str, f64)], given: &[(String, f64)], body: &
     Ok(out)
 }
 
+/// Moves each point onto the zero of `f` nearby (Newton steps along its
+/// gradient, each at most `step` px, `iterations` of them): the same
+/// triangles following a surface as it changes. Formula evaluations made
+/// are 4 per point per iteration.
+pub fn track(points: &[V3], f: &(dyn Fn(V3) -> f32 + Sync), step: f32, iterations: usize) -> Vec<V3> {
+    let eps = (step * 0.25).max(1e-4);
+    let one = |mut p: V3| {
+        for _ in 0..iterations {
+            let d = f(p);
+            if !d.is_finite() {
+                break;
+            }
+            let g = [f([p[0] + eps, p[1], p[2]]) - d, f([p[0], p[1] + eps, p[2]]) - d, f([p[0], p[1], p[2] + eps]) - d].map(|v| v / eps);
+            let gg = g[0] * g[0] + g[1] * g[1] + g[2] * g[2];
+            if gg < 1e-12 || !gg.is_finite() {
+                break;
+            }
+            let k = (d / gg).clamp(-step / gg.sqrt(), step / gg.sqrt());
+            p = [p[0] - g[0] * k, p[1] - g[1] * k, p[2] - g[2] * k];
+            if d.abs() < 1e-3 {
+                break;
+            }
+        }
+        p
+    };
+    let mut out = vec![[0.0f32; 3]; points.len()];
+    let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16);
+    let chunk = points.len().div_ceil(threads).max(1);
+    std::thread::scope(|s| {
+        for (o, p) in out.chunks_mut(chunk).zip(points.chunks(chunk)) {
+            s.spawn(move || {
+                for (a, b) in o.iter_mut().zip(p) {
+                    *a = one(*b);
+                }
+            });
+        }
+    });
+    out
+}
+
 /// A grid step (px) for fields spanning `extent` px at `detail` 1 to 6,
 /// coarse enough that the grid costs at most [`super::MAX_EVALS`] when
 /// each sample costs `cost` evaluations.
@@ -339,6 +529,18 @@ mod tests {
         assert!(f.value(corner) > 0.0, "a ball misses the corner");
         assert!(f.at_time(1.0).value(corner) < 0.0, "a box holds it");
         assert!(f.moves() && f.cost() == 3);
+    }
+
+    #[test]
+    fn tracking_moves_a_surface_s_points_onto_it_at_a_later_time() {
+        let f = Arc::new(Field::new(vec![compile("b", "sphere(x, y, z, 0.5 + 0.2 * t)", NAMES).unwrap()], None, [-1.0; 3], [1.0; 3], Clip::Box, 0.0).unwrap());
+        let m = build(&[Part::field(f.clone(), [0.0; 3], [100.0; 3])], vec![], 2.0);
+        assert!(m.positions.iter().all(|p| (crate::length(*p) - 25.0).abs() < 1.0));
+        let later = Arc::new(f.at_time(1.0));
+        let sample = crate::sdf::sampler(&[Part::field(later, [0.0; 3], [100.0; 3])]);
+        let moved = track(&m.positions, &sample, 4.0, 6);
+        let worst = moved.iter().map(|p| (crate::length(*p) - 35.0).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 0.5, "{worst}");
     }
 
     #[test]

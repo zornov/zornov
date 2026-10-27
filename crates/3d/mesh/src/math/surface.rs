@@ -463,7 +463,9 @@ pub fn tube(curve: &[[f64; 3]], radius: &[f64], sides: usize) -> Sheet {
     } else {
         0.0
     };
-    let mut rows: Vec<([f64; 3], [f64; 3], [f64; 3], f64)> = Vec::new();
+    // Each ring: its centre, its two axes and its radius.
+    type Ring = ([f64; 3], [f64; 3], [f64; 3], f64);
+    let mut rows: Vec<Ring> = Vec::new();
     if !closed {
         rows.push((curve[0], frames[0].1, frames[0].2, 0.0));
     }
@@ -528,7 +530,7 @@ const TAU: &str = "tau";
 
 /// The parametric presets.
 pub const PRESETS: &[Preset] = &[
-    Preset { name: "torus", about: "a ring: `radius` round, `tube` thick (in the same units)", params: &[("radius", 1.0), ("tube", 0.4)], formula: "[(radius + tube * cos(v)) * cos(u), (radius + tube * cos(v)) * sin(u), tube * sin(v)]", coords: Coords::Cartesian, u: ["0", TAU], v: ["0", TAU], thickness: 0.0 },
+    Preset { name: "torus", about: "a ring: `major` round, `minor` the radius of its tube (in the same units)", params: &[("major", 1.0), ("minor", 0.4)], formula: "[(major + minor * cos(v)) * cos(u), (major + minor * cos(v)) * sin(u), minor * sin(v)]", coords: Coords::Cartesian, u: ["0", TAU], v: ["0", TAU], thickness: 0.0 },
     Preset { name: "sphere", about: "a ball by latitude and longitude", params: &[], formula: "[cos(u) * cos(v), sin(u) * cos(v), sin(v)]", coords: Coords::Cartesian, u: ["0", TAU], v: ["-pi / 2", "pi / 2"], thickness: 0.0 },
     Preset { name: "swirl_torus", about: "a cylindrical-coordinate knot of a ring: r = 3 + sin u + cos v, theta = 2u, z = sin v + 2 cos u", params: &[("a", 3.0), ("turns", 2.0)], formula: "[a + sin(u) + cos(v), turns * u, sin(v) + 2 * cos(u)]", coords: Coords::Cylindrical, u: ["0", TAU], v: ["0", TAU], thickness: 0.0 },
     Preset { name: "mobius", about: "a Möbius strip: one side, one edge (`width` across, `twists` half turns, odd ones one-sided)", params: &[("width", 0.5), ("twists", 1.0)], formula: "[(1 + v * width * cos(twists * u / 2)) * cos(u), (1 + v * width * cos(twists * u / 2)) * sin(u), v * width * sin(twists * u / 2)]", coords: Coords::Cartesian, u: ["0", TAU], v: ["-1", "1"], thickness: 0.03 },
@@ -536,11 +538,11 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "seashell", about: "a spiral shell grown by a logarithmic spiral (`turns` coils)", params: &[("turns", 3.0)], formula: "g = exp(u / (6 * pi)); c = cos(v / 2)^2\n[2 * (1 - g) * cos(u) * c, 2 * (g - 1) * sin(u) * c, 1 - exp(u / (3 * pi)) - sin(v) + g * sin(v)]", coords: Coords::Cartesian, u: ["0", "turns * 2 * pi"], v: ["0", TAU], thickness: 0.0 },
     Preset { name: "nautilus", about: "a chambered spiral: a tube widening by `growth` each turn, coiled `turns` times", params: &[("turns", 3.0), ("growth", 0.18), ("open", 0.85)], formula: "k = exp(growth * u)\n[k * (1 + open * cos(v)) * cos(u), k * (1 + open * cos(v)) * sin(u), k * open * sin(v)]", coords: Coords::Cartesian, u: ["0", "turns * 2 * pi"], v: ["0", TAU], thickness: 0.0 },
     Preset { name: "horn", about: "a curling horn, thin at its tip", params: &[("curl", 2.0)], formula: "[(2 + u * cos(v)) * sin(curl * pi * u), (2 + u * cos(v)) * cos(curl * pi * u) + 2 * u, u * sin(v)]", coords: Coords::Cartesian, u: ["0", "1"], v: ["0", TAU], thickness: 0.0 },
-    Preset { name: "vase", about: "a vase turned on a lathe: its radius waves `waves` times up its height, closed at the foot, open at the mouth", params: &[("waves", 1.5), ("bulge", 0.3), ("height", 2.0)], formula: "rr = (0.55 + bulge * sin(waves * pi * v / height + 0.6)) * min(1, v * 6)\n[rr * cos(u), rr * sin(u), v]", coords: Coords::Cartesian, u: ["0", TAU], v: ["0", "height"], thickness: 0.025 },
+    Preset { name: "vase", about: "a vase turned on a lathe: its radius waves `waves` times up its height, closed at the foot, open at the mouth", params: &[("waves", 1.5), ("bulge", 0.3), ("tall", 2.0)], formula: "rr = (0.55 + bulge * sin(waves * pi * v / tall + 0.6)) * min(1, v * 6)\n[rr * cos(u), rr * sin(u), v]", coords: Coords::Cartesian, u: ["0", TAU], v: ["0", "tall"], thickness: 0.025 },
     Preset { name: "dini", about: "Dini's surface: a twisted pseudosphere, a spiralling trumpet", params: &[("a", 1.0), ("b", 0.2), ("turns", 2.0)], formula: "[a * cos(u) * sin(v), a * sin(u) * sin(v), a * (cos(v) + ln(tan(v / 2))) + b * u]", coords: Coords::Cartesian, u: ["0", "turns * 2 * pi"], v: ["0.05", "2"], thickness: 0.02 },
     Preset { name: "enneper", about: "Enneper's minimal surface: a saddle that folds over itself", params: &[("size", 1.6)], formula: "[u - u^3 / 3 + u * v^2, v - v^3 / 3 + v * u^2, u^2 - v^2]", coords: Coords::Cartesian, u: ["-size", "size"], v: ["-size", "size"], thickness: 0.02 },
     Preset { name: "helicoid", about: "a helicoid: a spiral ramp, the surface of a screw", params: &[("turns", 2.0), ("pitch", 0.3)], formula: "[v * cos(u), v * sin(u), pitch * u]", coords: Coords::Cartesian, u: ["0", "turns * 2 * pi"], v: ["0.2", "1"], thickness: 0.03 },
-    Preset { name: "catenoid", about: "a catenoid: the minimal surface between two rings (a soap film)", params: &[("c", 1.0), ("height", 1.2)], formula: "[c * cosh(v / c) * cos(u), c * cosh(v / c) * sin(u), v]", coords: Coords::Cartesian, u: ["0", TAU], v: ["-height / 2", "height / 2"], thickness: 0.02 },
+    Preset { name: "catenoid", about: "a catenoid: the minimal surface between two rings (a soap film)", params: &[("c", 1.0), ("span", 1.2)], formula: "[c * cosh(v / c) * cos(u), c * cosh(v / c) * sin(u), v]", coords: Coords::Cartesian, u: ["0", TAU], v: ["-span / 2", "span / 2"], thickness: 0.02 },
     Preset { name: "supershape", about: "Gielis's supershape: the superformula in two directions (stars, flowers, shells, crystals by m and n1..n3)", params: &[("m", 6.0), ("n1", 1.0), ("n2", 1.0), ("n3", 1.0), ("m2", 3.0), ("k1", 1.0), ("k2", 1.0), ("k3", 1.0)], formula: "r1 = superformula(u, m, n1, n2, n3); r2 = superformula(v, m2, k1, k2, k3)\n[r1 * cos(u) * r2 * cos(v), r1 * sin(u) * r2 * cos(v), r2 * sin(v)]", coords: Coords::Cartesian, u: ["-pi", "pi"], v: ["-pi / 2", "pi / 2"], thickness: 0.0 },
     Preset { name: "boy", about: "Boy's surface (Bryant–Kusner): the projective plane in space, three lobes round a triple point", params: &[], formula: "rr = v; th = u\nre = rr * cos(th); im = rr * sin(th)\n// w = re + i im; the powers of w\nw2r = re^2 - im^2; w2i = 2 * re * im\nw3r = w2r * re - w2i * im; w3i = w2r * im + w2i * re\nw4r = w2r^2 - w2i^2; w4i = 2 * w2r * w2i\nw6r = w3r^2 - w3i^2; w6i = 2 * w3r * w3i\ndr = w6r + sqrt(5) * w3r - 1; di = w6i + sqrt(5) * w3i\nden = dr^2 + di^2\n// g1 = -3/2 Im(w(1 - w^4)/d), g2 = -3/2 Re(w(1 + w^4)/d), g3 = Im((1 + w^6)/d) - 1/2\nn1r = re - (w4r * re - w4i * im); n1i = im - (w4r * im + w4i * re)\nn2r = re + (w4r * re - w4i * im); n2i = im + (w4r * im + w4i * re)\nn3r = 1 + w6r; n3i = w6i\ng1 = -1.5 * (n1i * dr - n1r * di) / den\ng2 = -1.5 * (n2r * dr + n2i * di) / den\ng3 = (n3i * dr - n3r * di) / den - 0.5\ns = g1^2 + g2^2 + g3^2\n[g1 / s, g2 / s, g3 / s]", coords: Coords::Cartesian, u: ["0", TAU], v: ["0", "1"], thickness: 0.0 },
 ];
@@ -564,7 +566,7 @@ pub struct CurvePreset {
 
 /// The tube presets.
 pub const TUBES: &[CurvePreset] = &[
-    CurvePreset { name: "torus_knot", about: "a (p, q) torus knot: p times round the hole, q times through it (2, 3 is the trefoil)", params: &[("p", 2.0), ("q", 3.0), ("radius", 1.0), ("tube", 0.4)], formula: "[(radius + tube * cos(q * u)) * cos(p * u), (radius + tube * cos(q * u)) * sin(p * u), tube * sin(q * u)]", u: ["0", TAU], radius: 0.13 },
+    CurvePreset { name: "torus_knot", about: "a (p, q) torus knot: p times round the hole, q times through it (2, 3 is the trefoil)", params: &[("p", 2.0), ("q", 3.0), ("major", 1.0), ("minor", 0.4)], formula: "[(major + minor * cos(q * u)) * cos(p * u), (major + minor * cos(q * u)) * sin(p * u), minor * sin(q * u)]", u: ["0", TAU], radius: 0.13 },
     CurvePreset { name: "trefoil", about: "the trefoil knot", params: &[], formula: "[sin(u) + 2 * sin(2 * u), cos(u) - 2 * cos(2 * u), -sin(3 * u)]", u: ["0", TAU], radius: 0.35 },
     CurvePreset { name: "figure_eight_knot", about: "the figure-eight knot", params: &[], formula: "[(2 + cos(2 * u)) * cos(3 * u), (2 + cos(2 * u)) * sin(3 * u), sin(4 * u)]", u: ["0", TAU], radius: 0.25 },
     CurvePreset { name: "lissajous_knot", about: "a Lissajous knot (frequencies a, b, c)", params: &[("a", 3.0), ("b", 2.0), ("c", 7.0), ("phase", 0.7)], formula: "[cos(a * u + phase), cos(b * u + 1.5), cos(c * u)]", u: ["0", TAU], radius: 0.05 },
@@ -658,7 +660,7 @@ mod tests {
     fn a_uv_pattern_cuts_holes_and_the_shell_stays_closed() {
         let (mut sheet, _) = surface(preset("sphere").unwrap(), 96);
         let cut = compile("cut", "fract(u * 12) < 0.4 && fract(v * 8) < 0.5", CUT_NAMES).unwrap();
-        let n = sheet.cut(&cut, [0.0, 6.28], [-1.57, 1.57], 0.0);
+        let n = sheet.cut(&cut, [0.0, std::f64::consts::TAU], [-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2], 0.0);
         assert!(n > 1000, "{n}");
         let lattice = build(&sheet, &place(100.0), 3.0, None);
         assert!(lattice.closed, "{:?}", open_edges(&lattice.mesh));

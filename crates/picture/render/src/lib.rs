@@ -38,6 +38,7 @@ pub mod mask;
 pub mod matte;
 pub mod mesh_render;
 pub mod model_anim;
+pub mod direct;
 #[cfg(feature = "model")]
 pub mod model_scene;
 pub mod nodes;

@@ -110,6 +110,7 @@ fn main() {
         casts_shadows: true,
         accepts_shadows: true,
         motion: None,
+        direct: None,
     };
     let frame = render(&MeshDesc { instances: vec![inst], camera: None, lights: vec![] }, &canvas, (size, size));
     // Over a plain dark backdrop.

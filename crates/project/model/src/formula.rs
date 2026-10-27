@@ -195,13 +195,15 @@ pub fn smin(a: f64, b: f64, k: f64) -> f64 {
     b + (a - b) * h - k * h * (1.0 - h)
 }
 
-fn hash(i: [i64; 3], seed: u32) -> u64 {
-    let mut h = (i[0] as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (i[1] as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F) ^ (i[2] as u64).wrapping_mul(0x1656_67B1_9E37_79F9) ^ (seed as u64).wrapping_mul(0x27D4_EB2F_1656_67C5);
-    h ^= h >> 31;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^= h >> 27;
-    h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
-    h ^ (h >> 31)
+/// A lattice point's hash: 32-bit, so the GPU (WGSL has no 64-bit
+/// integers) works out the same noise as here.
+fn hash(i: [i64; 3], seed: u32) -> u32 {
+    let mut h = (i[0] as i32 as u32).wrapping_mul(0x8da6_b343) ^ (i[1] as i32 as u32).wrapping_mul(0xd816_3841) ^ (i[2] as i32 as u32).wrapping_mul(0xcb1a_b31f) ^ seed.wrapping_mul(0x9e37_79b9);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x7feb_352d);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x846c_a68b);
+    h ^ (h >> 16)
 }
 
 fn fade(f: f64) -> f64 {
@@ -255,7 +257,7 @@ pub fn voronoi(a: &[f64]) -> (f64, f64) {
             for dx in -1..=1 {
                 let cell = [c[0] + dx, c[1] + dy, c[2] + dz];
                 let h = hash(cell, 7);
-                let j = |k: u32| ((h >> (k * 16)) & 0xffff) as f64 / 65535.0;
+                let j = |k: u32| ((h >> (k * 10)) & 1023) as f64 / 1023.0;
                 let q = [cell[0] as f64 + j(0), cell[1] as f64 + j(1), if flat { p[2] } else { cell[2] as f64 + j(2) }];
                 let d = ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + (q[2] - p[2]).powi(2)).sqrt();
                 if d < f1 {
@@ -399,6 +401,8 @@ enum Op {
 #[derive(Clone, Debug)]
 pub struct Program {
     ops: Vec<Op>,
+    expr: Expr,
+    given: Vec<String>,
     names: usize,
     used: Vec<bool>,
     src: String,
@@ -577,7 +581,7 @@ impl Program {
                 used[*s as usize] = true;
             }
         }
-        Ok(Program { ops: c.ops, names: names.len(), used, src: src.to_owned() })
+        Ok(Program { ops: c.ops, names: names.len(), used, src: src.to_owned(), given: names.iter().map(|n| n.to_string()).collect(), expr: e.clone() })
     }
 
     /// The formula's value, `vars` the values of its names in order
@@ -654,6 +658,16 @@ impl Program {
     /// The formula as written.
     pub fn source(&self) -> &str {
         &self.src
+    }
+
+    /// The formula as parsed.
+    pub fn expr(&self) -> &Expr {
+        &self.expr
+    }
+
+    /// The names it reads, in order.
+    pub fn names(&self) -> &[String] {
+        &self.given
     }
 
     /// How many steps it runs at most (a measure of its cost).

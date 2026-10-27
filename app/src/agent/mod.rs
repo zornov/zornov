@@ -68,6 +68,9 @@ mod look_check;
 mod lighting;
 pub mod guides;
 mod models;
+mod math_shapes;
+#[cfg(all(test, feature = "render"))]
+mod math_showcase;
 mod mesh_edit;
 mod anim3d;
 mod wardrobe;
