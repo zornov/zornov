@@ -217,7 +217,7 @@ impl Session {
                         }
                     }
                 }
-                if lop.get("flame") == Some(&json!(true)) {
+                if lop.get("flame").is_some_and(|v| v.as_bool().unwrap_or_else(|| v.as_f64().is_some_and(|x| x > 0.0))) {
                     lop["flame_height"] = json!(0.12);
                 }
             }

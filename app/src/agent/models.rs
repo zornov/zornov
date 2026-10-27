@@ -29,8 +29,10 @@ pub(super) fn field_v3(op: &Value, k: &str) -> Result<Option<V3>, String> {
     }
 }
 
+/// A number field, read as `f` in the agent reads them (a quoted number,
+/// or a switch for a strength: `fire: true` is 1).
 pub(super) fn num(op: &Value, k: &str) -> Option<f32> {
-    op.get(k).and_then(Value::as_f64).map(|v| v as f32)
+    super::f(op, k).map(|v| v as f32)
 }
 
 /// A colour in words ("#rrggbb" or a basic name) as linear RGBA.

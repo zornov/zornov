@@ -418,10 +418,12 @@ fn new_clip_end(film_end: view::Time, at: view::Time) -> view::Time {
 }
 
 /// A number field. A number written as a string ("0.5", " 12 ") counts:
-/// models often quote their numbers, and the meaning is not in doubt.
+/// models often quote their numbers, and the meaning is not in doubt. So
+/// does a switch for a strength (`fire: true`, `glow: true`): 1, or 0.
 fn f(v: &Value, k: &str) -> Option<f64> {
     match v.get(k)? {
         Value::String(s) => s.trim().parse::<f64>().ok().filter(|x| x.is_finite()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         x => x.as_f64(),
     }
 }
