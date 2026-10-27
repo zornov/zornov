@@ -108,11 +108,40 @@ fn mood(word: &str) -> Option<&'static str> {
     })
 }
 
+/// A mood in free words ("night city", "cosy kitchen at dusk"): the set-up
+/// of the first word that names one (a mood word or a preset), else the
+/// preset whose description shares the most words. With a note that says
+/// which was picked, so the agent knows it was a guess.
+fn mood_phrase(phrase: &str) -> Option<(&'static str, String)> {
+    let low = phrase.to_lowercase();
+    let words: Vec<&str> = low.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1).collect();
+    for w in &words {
+        if let Some(n) = mood(w).or_else(|| setup(w).map(|s| s.name)) {
+            return Some((n, format!("mood \"{phrase}\" read as {n} (from \"{w}\")")));
+        }
+    }
+    let score = |s: &Setup| words.iter().filter(|w| w.len() > 3 && s.words.to_lowercase().contains(**w)).count();
+    let best = SETUPS.iter().max_by_key(|s| score(s)).filter(|s| score(s) > 0)?;
+    Some((best.name, format!("mood \"{phrase}\" has no set-up of its own; the nearest is {} ({})", best.name, best.words)))
+}
+
 const SETUP_NAMES: &str = "three_point, rembrandt, butterfly, loop, split, high_key, low_key, rim, silhouette, golden_hour, blue_hour, moonlight, firelight, neon, overcast, under, motivated";
 
 impl Session {
     /// `lighting`: a whole set-up of lights round a subject.
     pub(super) fn lighting(&mut self, op: &Value) -> Result<String, String> {
+        // A mood in free words becomes the nearest set-up, said in the reply.
+        if let (None, Some(md)) = (op.get("preset").and_then(Value::as_str), op.get("mood").and_then(Value::as_str))
+            && mood(md).is_none()
+            && let Some((name, note)) = mood_phrase(md)
+        {
+            let mut o = op.clone();
+            if let Some(m) = o.as_object_mut() {
+                m.remove("mood");
+                m.insert("preset".into(), json!(name));
+            }
+            return self.lighting(&o).map(|r| format!("{note}; {r}"));
+        }
         let (w, h) = (self.width(), self.doc.project.height as f64);
         let at = micros(f(op, "at").unwrap_or(0.0));
         let end = f(op, "duration").map(|d| at + micros(d)).unwrap_or(super::new_clip_end(self.doc.project.duration(), at));
