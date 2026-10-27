@@ -678,7 +678,25 @@ impl Session {
                 }
             }
         }
-        Err("can't find this layer's silhouette (no transparency, plain backdrop or cut-out): cut it out first (cut_out), or place pins yourself with \"pins\"".into())
+        // A vector drawing: its own see-through parts give the outline
+        // (cut_out works on footage only, so puppets of drawings had no way in).
+        if let m::ClipSource::Generator(g) = &mc.source
+            && let Some(m::Value::Text(art)) = g.params.get("art")
+            && let Ok(doc) = studio_vector_art::interop::open(std::path::Path::new(art))
+        {
+            let ab = match g.params.get("artboard") {
+                Some(m::Value::Text(a)) => Some(a.as_str()),
+                _ => None,
+            };
+            let k = (1024.0 / self.doc.project.width.max(self.doc.project.height).max(1) as f64).min(1.0);
+            let (w, h) = (((self.doc.project.width as f64 * k) as u32).max(16), ((self.doc.project.height as f64 * k) as u32).max(16));
+            let pm = studio_vector_art::build::render_artboard(&doc, ab, w, h, &studio_vector_art::build::BuildOptions { base_dir: std::path::Path::new(art).parent().map(|d| d.to_path_buf()), show_hidden: false });
+            let alpha: Vec<u8> = pm.data.chunks_exact(4).map(|p| p[3]).collect();
+            if let Some(s) = rig::Shape::from_coverage(pm.width as usize, pm.height as usize, &alpha, false, "its drawing's outline") {
+                return Ok(s);
+            }
+        }
+        Err("can't find this layer's silhouette (no transparency, plain backdrop, cut-out or drawing): cut footage out first (cut_out), use a PNG with transparency or a vector drawing, or place pins yourself with \"pins\"".into())
     }
 
     /// `mask_puppet`: pins and point moves on a mask's outline.
