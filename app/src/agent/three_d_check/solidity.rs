@@ -40,10 +40,10 @@ impl Solidity {
         // (eyelids, lashes, corneas, hair cards) are left out.
         let (ids, _) = mesh.position_ids();
         let mats = mesh.tri_materials();
-        let thin: Vec<bool> = mesh.materials.iter().map(|m| studio_mesh::seal::thin_by_nature(&m.name)).collect();
+        let sheet: Vec<bool> = mesh.materials.iter().map(|m| studio_mesh::seal::thin_by_nature(&m.name)).collect();
         let mut count: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
         for t in 0..mesh.triangles() {
-            if thin.get(mats[t] as usize).copied().unwrap_or(false) {
+            if sheet.get(mats[t] as usize).copied().unwrap_or(false) {
                 continue;
             }
             let c = mesh.tri(t);
