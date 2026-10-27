@@ -322,6 +322,14 @@ impl<'a> Fit<'a> {
         (j, w)
     }
 
+    /// A bone of an arm, a hand or a finger.
+    fn on_arm(&self, bone: usize) -> bool {
+        self.rig.bones.get(bone).is_some_and(|b| {
+            let n = b.name.to_ascii_lowercase();
+            n.contains("arm") || ["shoulder", "hand", "grip", "thumb", "index", "middle", "ring", "pinky"].iter().any(|k| n.starts_with(k))
+        })
+    }
+
     fn rigid_weights(&self, n: usize, bone: usize) -> (Vec<[u16; 4]>, Vec<[f32; 4]>) {
         (vec![[bone as u16, 0, 0, 0]; n], vec![[1.0, 0.0, 0.0, 0.0]; n])
     }
@@ -898,7 +906,9 @@ impl<'a> Fit<'a> {
         let (e1, e2) = perp(axis);
         let dir = add(scale(e1, a.cos()), scale(e2, a.sin()));
         let c = self.along(b, t);
-        Self::reach_in(&self.bvh, c, dir, self.h * 0.3).unwrap_or(self.h * 0.02)
+        // The first surface going out from the bone: the limb's own, not a
+        // thigh or a hip the arm hangs beside.
+        self.bvh.ray(c, dir, 0.0, self.h * 0.1).map_or_else(|| Self::reach_in(&self.bvh, c, dir, self.h * 0.06).unwrap_or(self.h * 0.02), |hit| hit.t)
     }
 
     /// The y of a hem named in words, or a fraction from the shoulders to the floor.
@@ -1476,7 +1486,9 @@ impl<'a> Fit<'a> {
                 if w[k][q] > 0.0 {
                     acc.push((j[k][q], w[k][q] * a));
                 }
-                if bw[k][q] > 0.0 {
+                // A hand hanging by the hip is nearer than the hip itself:
+                // a skirt never follows the arms.
+                if bw[k][q] > 0.0 && !self.on_arm(bj[k][q] as usize) {
                     match acc.iter_mut().find(|e| e.0 == bj[k][q]) {
                         Some(e) => e.1 += bw[k][q] * (1.0 - a),
                         None => acc.push((bj[k][q], bw[k][q] * (1.0 - a))),
