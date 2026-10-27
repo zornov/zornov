@@ -26,8 +26,8 @@ pub enum Shape {
     /// A tapering pill from `a` (radius `size[0] / 2`) to `b` (radius
     /// `size[1] / 2`): beaks, horns, claws, tails, legs, fingers.
     Cone,
-    /// A box `size` across cut on the diagonal from its top at −x to its
-    /// bottom at +x: a ramp, a wedge, a doorstop, a roof.
+    /// A box `size` across cut on the diagonal from its bottom at −x to its
+    /// top at +x: a ramp, a wedge, a doorstop, a roof.
     Wedge,
 }
 
@@ -593,6 +593,7 @@ mod tests {
         let at = |x: f32| m.positions.iter().filter(|p| (p[0] - x).abs() < 2.0).map(|p| p[1]).fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), y| (a.min(y), b.max(y)));
         let (l0, h0) = at(-45.0);
         let (l1, h1) = at(45.0);
-        assert!(h0 - l0 > h1 - l1 + 25.0, "{l0} {h0} vs {l1} {h1}");
+        // Thin at −x, the full height at +x.
+        assert!(h1 - l1 > h0 - l0 + 25.0, "{l0} {h0} vs {l1} {h1}");
     }
 }
