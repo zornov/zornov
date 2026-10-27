@@ -196,8 +196,8 @@ pub fn all_ops() -> Vec<&'static str> {
             }
         }
     }
-    for w in super::shell::OPS {
-        if super::args::op_fields(w).is_some() && !out.contains(w) {
+    for &w in super::shell::OPS {
+        if super::args::op_fields(w).is_some() && !out.contains(&w) {
             out.push(w);
         }
     }

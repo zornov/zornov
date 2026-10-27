@@ -502,7 +502,10 @@ fn inspect_filter(v: Value, a: &Value) -> Result<Value, String> {
     if what.is_empty() && props.is_empty() {
         return Ok(v);
     }
-    let Value::Object(all) = v else { return Ok(v) };
+    let all = match v {
+        Value::Object(o) => o,
+        other => return Ok(other),
+    };
     let sections: Vec<String> = all.keys().cloned().collect();
     let mut out = serde_json::Map::new();
     for k in ["id", "clip", "name", "kind"] {

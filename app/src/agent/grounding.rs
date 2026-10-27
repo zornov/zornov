@@ -194,7 +194,7 @@ impl Session {
 fn sunk_on_purpose(model: &str, surface: &str) -> bool {
     let words = |s: &str| s.to_lowercase().split(|c: char| !c.is_alphanumeric()).map(str::to_owned).collect::<Vec<_>>();
     let (m, s) = (words(model), words(surface));
-    let any = |ws: &[String], list: &[&str]| ws.iter().any(|w| list.iter().any(|l| w == l || w.strip_suffix('s') == Some(l)));
+    let any = |ws: &[String], list: &[&str]| ws.iter().any(|w| list.iter().any(|l| w.as_str() == *l || w.strip_suffix('s') == Some(*l)));
     any(&s, &["sea", "ocean", "water", "lake", "river", "pond", "wave", "harbour", "harbor"])
         || (any(&s, &["terrain", "ground", "land", "island", "hill", "beach", "sand", "rock", "cliff", "grass", "snow", "floor"]) && any(&m, &["lighthouse", "house", "tower", "building", "post", "pole", "pillar", "column", "fence", "tree", "rock", "boulder", "stone", "pier", "jetty", "dock", "wall", "castle", "ruin", "mast", "sign", "lamp", "streetlight"]))
 }
