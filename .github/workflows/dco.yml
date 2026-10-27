@@ -1,0 +1,56 @@
+# Every commit in a pull request carries a Signed-off-by line from its author,
+# certifying the Developer Certificate of Origin (CONTRIBUTING.md, Sign-off).
+# Commits by bots (Dependabot and the like) are skipped: they cannot sign.
+# The Contributor Licence Agreement is checked by CLA Assistant, a GitHub App,
+# not here.
+#
+# Safety: an ordinary pull_request run with a read-only token. The pull
+# request's commits are read as data and nothing from them is run.
+name: dco
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  sign-off:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          bad=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            name=$(git log -1 --format=%an "$c")
+            email=$(git log -1 --format=%ae "$c")
+            case "$name $email" in
+              *"[bot]"*) echo "skip $c: $name is a bot"; continue ;;
+            esac
+            # A sign-off counts when its address is the author's.
+            if git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$c" | grep -qiF "<$email>"; then
+              echo "ok   $c: $name"
+            else
+              echo "::error::$c ($name <$email>) has no Signed-off-by from its author"
+              bad=1
+            fi
+          done
+          if [ "$bad" = 1 ]; then
+            echo "Sign each commit with 'git commit -s'; to fix ones already made: git rebase --signoff $BASE, then push with --force-with-lease."
+            exit 1
+          fi

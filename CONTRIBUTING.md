@@ -82,10 +82,13 @@ keeps that project's own notice instead (see `NOTICE`).
 
 ## Contributor Licence Agreement
 
-Before your first contribution is merged, you may be asked to sign Ashrox
-LLC's Contributor Licence Agreement, once. It sets out the same grant as the
-section above in a signed form. Contributions made as part of your job may
-need your employer's agreement too; please check before you submit.
+Before your first contribution is merged, you sign Ashrox LLC's Contributor
+Licence Agreement, once. It sets out the same grant as the section above in a
+signed form. On your first pull request, CLA Assistant comments with a link;
+you sign in with GitHub and agree, and the check turns green. The agreement
+covers the GitHub account your commits' email address belongs to, so make
+sure that address is on your account. Contributions made as part of your job
+may need your employer's agreement too; please check before you submit.
 
 ## Sign-off
 
@@ -93,7 +96,9 @@ Each commit carries a `Signed-off-by:` line (`git commit -s`) with your real
 name or the name you are known by, certifying the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/):
 that you wrote the change or otherwise have the right to submit it under
-these terms.
+these terms. The `dco` check on pull requests looks for a sign-off from each
+commit's author (same email address). To sign off commits already made:
+`git rebase --signoff main`, then push with `--force-with-lease`.
 
 ## Code, models and content from elsewhere
 
