@@ -124,6 +124,11 @@ impl Session {
             Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
             _ => Vec::new(),
         };
+        // Pictures asked for and no library to find them in: said, with the
+        // way to get it, rather than a coloured card made without a word.
+        if !show.is_empty() && crate::content::get().is_none() {
+            return Err(format!("{}. Until then: generate pictures (generate), import your own (import), or leave \"show\" out for a caption on colour", crate::library_download::how_to_get()));
+        }
         if say.is_empty() && show.is_empty() {
             return Err("scene needs \"say\" (what it says: spoken, with captions) and/or \"show\" (things to see)".into());
         }

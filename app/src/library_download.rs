@@ -40,6 +40,22 @@ pub fn conf() -> Option<Conf> {
     parse(include_str!("../../packaging/library.conf"))
 }
 
+/// How to get the library, in words for an agent to pass on: the app's
+/// own offer, or the shell command that does the same.
+pub fn how_to_get() -> String {
+    let d = dir();
+    match conf() {
+        Some(c) => format!(
+            "Zornov's content library (pictures, footage, music, sounds) is not installed. Get it in the app (Assets or Audio panel: Download library, {} MB), or from a shell: mkdir -p \"{}\" && curl -L {} | tar xz -C \"{}\" (then restart Zornov), or point STUDIO_CONTENT at a copy you already have",
+            c.size.div_ceil(1 << 20),
+            d.display(),
+            c.url,
+            d.display()
+        ),
+        None => format!("Zornov's content library is not installed: download it from the app's Assets panel, or unpack it into \"{}\", or point STUDIO_CONTENT at a copy", d.display()),
+    }
+}
+
 /// Where a downloaded library lives: its `core/` folder is inside.
 pub fn dir() -> PathBuf {
     studio_paths::data_dir().join("library")
