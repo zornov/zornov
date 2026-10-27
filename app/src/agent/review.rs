@@ -118,6 +118,18 @@ impl Session {
         let p = &self.doc.project;
         let spine = p.spine();
         let mut cs: Vec<view::Clip> = p.clips.iter().filter(|c| Some(c.lane) == spine && c.kind == ClipKind::Video).cloned().collect();
+        // A film built on overlay lanes (vector scenes, a 3D set with its
+        // camera) has an empty main lane but shots all the same: the
+        // picture clips of the lowest picture lane that has any (it said
+        // "0 shots").
+        if cs.is_empty() {
+            let rig = |id: u32| self.doc.model.active().clip(m::ClipId(id as u64)).is_some_and(|mc| mc.is_camera_or_light());
+            let picture = |c: &&view::Clip| c.kind == ClipKind::Video && !rig(c.id);
+            let lanes: Vec<u32> = p.lanes.iter().rev().filter(|l| l.kind == view::LaneKind::Visual).map(|l| l.id).collect();
+            if let Some(lane) = lanes.into_iter().find(|l| p.clips.iter().filter(picture).any(|c| c.lane == *l)) {
+                cs = p.clips.iter().filter(picture).filter(|c| c.lane == lane).cloned().collect();
+            }
+        }
         cs.sort_by_key(|c| c.start);
         cs
     }
