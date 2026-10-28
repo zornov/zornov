@@ -256,7 +256,7 @@ pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if from_file && let Some(paths) = rfd::FileDialog::new().set_title("Add a 3D model").add_filter("3D models", &["glb", "gltf", "obj", "stl"]).pick_files() {
+    if from_file && let Some(paths) = rfd::FileDialog::new().set_title("Add a 3D model").add_filter("3D models", &crate::mesh_store::model_extensions()).pick_files() {
         crate::mesh_store::import_models(app, &ctx, &paths);
     }
     if let Some(what) = add
@@ -986,16 +986,9 @@ fn model_section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, mc: &m::Clip) 
             }
             if kit::Button::secondary("Export…").compact().show(ui).clicked()
                 && let Ok(mesh) = &mesh
-                && let Some(path) = rfd::FileDialog::new().set_title("Export 3D model").set_file_name(format!("{}.glb", mc.name)).add_filter("glTF binary", &["glb"]).add_filter("OBJ", &["obj"]).save_file()
+                && let Some(path) = crate::mesh_store::EXPORT_FILTERS.iter().fold(rfd::FileDialog::new().set_title("Export 3D model").set_file_name(format!("{}.glb", mc.name)), |d, (name, exts)| d.add_filter(*name, exts)).save_file()
             {
-                let r = if path.extension().and_then(|e| e.to_str()) == Some("obj") {
-                    let mtl = path.with_extension("mtl");
-                    let name = mtl.file_name().and_then(|n| n.to_str()).unwrap_or("model.mtl").to_owned();
-                    let (o, mt, pics) = studio_mesh::export::obj(mesh, &name);
-                    std::fs::write(&path, o).and_then(|_| std::fs::write(&mtl, mt)).and_then(|_| pics.into_iter().try_for_each(|(f, png)| std::fs::write(path.with_file_name(f), png)))
-                } else {
-                    std::fs::write(&path, studio_mesh::export::glb(mesh))
-                };
+                let r = crate::mesh_store::export_model(&mc, mesh, &path);
                 let note = match r {
                     Ok(()) => crate::i18n::tf(format!("Exported {}", path.display())),
                     Err(e) => crate::i18n::tf(format!("Could not export: {e}")),

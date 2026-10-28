@@ -90,6 +90,9 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("before-after", "Before / after", "\\"),
     ("export", "Export", "⌘E"),
     ("settings", "Settings", "⌘,"),
+    ("agent", "Open the AI editor", "⌘K"),
+    ("all-projects", "All projects", "⇧⌘H"),
+    ("overlays", "Viewer overlays", "⇧O"),
     ("macro-record", "Start / stop recording a macro", "⌥⌘R"),
     ("macro-run", "Run the last macro on the selection", "⌥⌘M"),
     ("workspace-edit", "Edit workspace", "⌥1"),
@@ -500,27 +503,29 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             let saved = *st.ai_key_saved.get_or_insert_with(|| keychain::api_key(account).is_some());
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
-                    ui.label(egui::RichText::new(crate::i18n::shown("Saved in the Keychain")).font(theme::body()));
+                    ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
                     if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
                         keychain::remove_api_key(account);
+                        forget_saved_label(ui, account);
                         st.ai_key_saved = Some(false);
                         st.ai_key_note = Some("Key removed.".into());
                     }
                 } else {
                     ui.add(egui::TextEdit::singleline(&mut st.ai_key).password(true).hint_text(hint).desired_width(220.0));
                     if Button::primary("Save").show(ui).clicked() {
-                        match keychain::set_api_key(account, &st.ai_key) {
-                            Ok(()) => {
+                        match keychain::save_api_key(account, &st.ai_key) {
+                            Ok(kept) => {
                                 st.ai_key.clear();
                                 st.ai_key_saved = Some(true);
-                                st.ai_key_note = Some("Key saved in the Keychain.".into());
+                                forget_saved_label(ui, account);
+                                st.ai_key_note = Some(keychain::saved_note(&kept));
                             }
                             Err(e) => st.ai_key_note = Some(e),
                         }
                     }
                 }
             });
-            let default_note = crate::i18n::tf(format!("From {from}. Kept in your login Keychain; Zornov never shows it again."));
+            let default_note = crate::i18n::tf(format!("From {from}. {}; Zornov never shows it again.", keychain::kept_in()));
             note(ui, st.ai_key_note.as_deref().unwrap_or(&default_note));
         }
         kit::labeled_row(ui, "Changes", |ui| {
@@ -701,7 +706,7 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
                 }
             };
             key_row(ui, account, saved, &mut st.voice_key, &mut st.voice_key_note, |s| st.voice_key_saved = Some((v.provider, s)));
-            let default_note = crate::i18n::tf(format!("Key from {from}. Kept in your login Keychain. If this service fails, the line fails and says why: nothing falls back to another voice."));
+            let default_note = voice_note(v.provider.name(), from, v.mac_voice_allowed());
             note(ui, st.voice_key_note.as_deref().unwrap_or(&default_note));
         }
         kit::labeled_row(ui, "Never use Mac voices", |ui| {
@@ -713,10 +718,11 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
         });
         note(ui, "On: no agent can speak with the Mac's built-in voices, even by asking for one by name; narration comes only from the service above, or not at all. Holds for the AI editor, the studio command and Claude Code / Codex alike. STUDIO_NO_SYSTEM_VOICE=1 in the environment forces it on.");
         let sound_saved = *st.sound_key_saved.get_or_insert_with(|| keychain::api_key(keychain::ELEVENLABS).is_some());
+        let (status, sound_note) = described_sounds(sound_saved);
         kit::labeled_row(ui, "Described sounds", |ui| {
-            ui.label(egui::RichText::new(if sound_saved { "ElevenLabs key saved: any sound in words" } else { "Need an ElevenLabs key (choose ElevenLabs above to add it)" }).font(theme::body()));
+            ui.label(egui::RichText::new(crate::i18n::shown(status)).font(theme::body()));
         });
-        note(ui, "Risers, whooshes, booms and hits are made by Zornov itself. Any other sound described in words (\"rain on a tin roof\") comes from ElevenLabs.");
+        note(ui, sound_note);
     });
     if v != before {
         if let Err(e) = v.save() {
@@ -726,19 +732,57 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
     st.voice = Some(v);
 }
 
-/// How pictures are generated: by Codex, with no key. Video, music and
-/// sound from words are not available yet.
+/// The note under a voice service's key: where the key came from and is
+/// kept, and what happens to a line the service cannot speak
+/// (`voice_service::speak_with`: a Mac voice says it, when they are allowed).
+fn voice_note(service: &str, from: &str, mac_allowed: bool) -> String {
+    if mac_allowed {
+        crate::i18n::tf(format!("Key from {from}. {}. If {service} cannot speak a line (no key, no credit, offline), a Mac voice says it instead and the reply says so. Switch on Never use Mac voices to have the line fail instead.", crate::agent::keychain::kept_in()))
+    } else {
+        crate::i18n::tf(format!("Key from {from}. {}. If {service} cannot speak a line, the line fails and says why: the Mac voices are off, so no other voice stands in.", crate::agent::keychain::kept_in()))
+    }
+}
+
+/// Who makes sounds described in words: ElevenLabs with its key, else
+/// Zornov's own physical models (`synth::described_sfx`). (status, note)
+fn described_sounds(key_saved: bool) -> (&'static str, &'static str) {
+    let status = if key_saved { "ElevenLabs, with Zornov's own models when it does not answer" } else { "Made by Zornov on this computer (an ElevenLabs key adds its sounds)" };
+    (status, "Risers, whooshes, booms and hits are made by Zornov itself. Any other sound described in words (\"rain on a tin roof\") comes from ElevenLabs when its key is saved; without one, or when ElevenLabs does not answer, Zornov makes it from its own physical models.")
+}
+
+/// How things are generated: pictures by Codex, with no key; music and
+/// sounds by the AI editor on this computer. Video from words is not
+/// available yet.
 fn generated_media(ui: &mut egui::Ui) {
     Section::new("set-ai-generate", "Generated media").icon(Icon::Sparkle).fixed().show(ui, |ui| {
         let codex = crate::agent::brain::find_codex().is_some();
         kit::labeled_row(ui, "Pictures", |ui| {
             ui.label(egui::RichText::new(crate::i18n::shown(if codex { "Codex image generation (your ChatGPT plan)" } else { "Needs the Codex app on this Mac" })).font(theme::body()));
         });
-        kit::labeled_row(ui, "Video, music, sound", |ui| {
+        kit::labeled_row(ui, "Music and sound", |ui| {
+            ui.label(egui::RichText::new(crate::i18n::shown("Made on this computer by the AI editor")).font(theme::body()));
+        });
+        kit::labeled_row(ui, "Video", |ui| {
             ui.label(egui::RichText::new(crate::i18n::shown("Not available yet")).font(theme::body()));
         });
-        note(ui, "Pictures the AI editor makes from words come from the Codex app's image generation, on your own ChatGPT plan: no API key, nothing billed by Zornov. Video, music and sound effects made from words are not available yet; Zornov's library music, made-to-measure sound effects and camera moves cover them for now.");
+        note(ui, "Pictures the AI editor makes from words come from the Codex app's image generation, on your own ChatGPT plan: no API key, nothing billed by Zornov. Ask the AI editor for music or a sound in words and it makes them on this computer: original music in a genre, fitted to the length, and sounds from physical models. Video from words is not available yet; camera moves through a still cover it for now.");
     });
+}
+
+/// Where a saved key is ("Saved in the Keychain"), asked of the store once
+/// and remembered while Settings is open.
+fn saved_label(ui: &egui::Ui, account: &str) -> String {
+    let id = egui::Id::unique(("key-saved-label", account));
+    if let Some(l) = ui.data(|d| d.get_temp::<String>(id)) {
+        return l;
+    }
+    let l = crate::agent::keychain::saved_label(account);
+    ui.data_mut(|d| d.insert_temp(id, l.clone()));
+    l
+}
+
+fn forget_saved_label(ui: &egui::Ui, account: &str) {
+    ui.data_mut(|d| d.remove::<String>(egui::Id::unique(("key-saved-label", account))));
 }
 
 /// A key's row: saved (with Remove) or a field to paste one into.
@@ -746,20 +790,22 @@ fn key_row(ui: &mut egui::Ui, account: &str, saved: bool, typed: &mut String, no
     use crate::agent::keychain;
     kit::labeled_row(ui, "API key", |ui| {
         if saved {
-            ui.label(egui::RichText::new(crate::i18n::shown("Saved in the Keychain")).font(theme::body()));
+            ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
             if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
                 keychain::remove_api_key(account);
+                forget_saved_label(ui, account);
                 set_saved(false);
                 *note_out = Some("Key removed.".into());
             }
         } else {
             ui.add(egui::TextEdit::singleline(typed).password(true).hint_text("paste the key").desired_width(220.0));
             if Button::primary("Save").show(ui).clicked() {
-                match keychain::set_api_key(account, typed.trim()) {
-                    Ok(()) => {
+                match keychain::save_api_key(account, typed.trim()) {
+                    Ok(kept) => {
                         typed.clear();
                         set_saved(true);
-                        *note_out = Some("Key saved in the Keychain.".into());
+                        forget_saved_label(ui, account);
+                        *note_out = Some(keychain::saved_note(&kept));
                     }
                     Err(e) => *note_out = Some(e),
                 }
@@ -927,5 +973,76 @@ mod no_account_tests {
     fn settings_show_nothing_about_accounts() {
         assert!(super::PAGES.iter().all(|(n, _)| *n != "Account"));
         assert_eq!(super::PAGES.last().map(|p| p.0), Some("About"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every "Settings ▸ Page ▸ Section" the app writes names a real page,
+    /// and what follows a page is a section of it, not another page.
+    #[test]
+    fn every_settings_path_names_a_real_page() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let pages: Vec<&str> = PAGES.iter().map(|p| p.0).chain(["Account"]).collect();
+        let mut wrong = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                    continue;
+                }
+                if p.extension().is_none_or(|x| x != "rs") {
+                    continue;
+                }
+                let all = std::fs::read_to_string(&p).unwrap_or_default();
+                // Tests write paths of their own.
+                let src = all.split("#[cfg(test)]").next().unwrap_or("");
+                for (at, _) in src.match_indices("Settings ▸ ") {
+                    // The Mac's own System Settings are not Zornov's.
+                    if src[..at].ends_with("System ") {
+                        continue;
+                    }
+                    let rest = &src[at + "Settings ▸ ".len()..];
+                    let parts: Vec<&str> = rest.split(" ▸ ").take(2).map(|x| x.split(|c: char| !c.is_alphanumeric() && c != '&').next().unwrap_or("")).collect();
+                    let rel = p.strip_prefix(&root).unwrap_or(&p).display().to_string();
+                    if !pages.contains(&parts[0]) {
+                        wrong.push(format!("{rel}: \"Settings ▸ {}\": there is no {} page", parts[0], parts[0]));
+                    } else if rest.split(" ▸ ").next().is_some_and(|first| first.len() == parts[0].len()) && parts.get(1).is_some_and(|x| pages.contains(x)) {
+                        wrong.push(format!("{rel}: \"Settings ▸ {} ▸ {}\": {} is a page of its own", parts[0], parts[1], parts[1]));
+                    } else if let Some(word) = rest[parts[0].len()..].strip_prefix(' ').and_then(|r| r.split(|c: char| !c.is_alphanumeric()).next()) {
+                        // "Settings ▸ AI models" for the Models page.
+                        let cap: String = word.chars().take(1).flat_map(char::to_uppercase).chain(word.chars().skip(1)).collect();
+                        if pages.contains(&cap.as_str()) {
+                            wrong.push(format!("{rel}: \"Settings ▸ {} {word}\": {cap} is a page of its own", parts[0]));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+
+    /// A service that cannot speak hands the line to a Mac voice when the
+    /// Mac voices are allowed (`voice_service::speak_with`); the note says so.
+    #[test]
+    fn the_voice_note_says_what_happens_when_a_service_fails() {
+        let on = voice_note("ElevenLabs", "elevenlabs.io", true);
+        assert!(on.contains("Mac voice") && !on.contains("nothing falls back"), "{on}");
+        let off = voice_note("ElevenLabs", "elevenlabs.io", false);
+        assert!(off.contains("fails") && off.contains("says why"), "{off}");
+    }
+
+    /// Without a key, described sounds are made here (`synth::described_sfx`).
+    #[test]
+    fn described_sounds_without_a_key_are_made_here() {
+        let (label, _) = described_sounds(false);
+        assert!(!label.contains("Need"), "{label}");
+        assert!(described_sounds(true).0.contains("ElevenLabs"));
+        let (_, note) = described_sounds(false);
+        assert!(note.contains("Zornov makes"), "{note}");
     }
 }

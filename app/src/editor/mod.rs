@@ -580,7 +580,7 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
 const EDITOR_KEYS: &[&str] = &[
     "redo", "undo", "duplicate", "select-all", "export", "zoom-in", "zoom-out", "fit", "clear-range", "play", "stop", "shuttle-fwd", "shuttle-back", "frame-back", "frame-fwd", "select", "blade", "slip", "range", "snap", "fullscreen", "in", "out", "split", "marker", "delete",
     "macro-record", "macro-run", "workspace-edit", "workspace-colour", "workspace-audio", "workspace-vfx", "workspace-motion", "workspace-production",
-    "panel-library", "panel-inspector", "panel-timeline",
+    "panel-library", "panel-inspector", "panel-timeline", "agent", "overlays", "all-projects",
 ];
 
 fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
@@ -595,12 +595,8 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     let pressed = |m: M, k: Key| ctx.input_mut(|i| i.consume_shortcut(&S::new(m, k)));
     let fps = app.doc.project.fps;
     let frame = app.editor.frame_dur(fps);
-    // Keys not in the shortcut table: the agent panel, ⌘+ for zoom, a
-    // second key for delete, a second's step.
-    if pressed(M::COMMAND, Key::K) {
-        agent_panel::open(app);
-        return;
-    }
+    // Keys not in the shortcut table: ⌘+ for zoom, a second key for
+    // delete, a second's step.
     let extra_zoom = pressed(M::COMMAND, Key::Plus);
     let extra_delete = pressed(M::NONE, Key::Delete);
     if pressed(M::SHIFT, Key::ArrowLeft) {
@@ -666,6 +662,12 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
             "split" => run(app, ctx, Action::Split),
             "marker" => run(app, ctx, Action::Marker),
             "delete" => run(app, ctx, Action::Delete),
+            "agent" => {
+                agent_panel::open(app);
+                return;
+            }
+            "overlays" => kit::toggle_open(ctx, viewer::overlays_id()),
+            "all-projects" => app.screen = crate::cli::Screen::Start,
             "macro-record" => library_plugins::toggle_recording(app, ctx),
             "macro-run" => library_plugins::run_last_macro(app, ctx),
             "panel-library" | "panel-inspector" | "panel-timeline" => {
@@ -698,6 +700,20 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
             ed.selection.clear();
         }
     }
+}
+
+/// An outline over the editor and a word while files from the desktop are
+/// dragged over it (they are imported when dropped).
+pub fn drop_hint(ctx: &egui::Context) {
+    if ctx.input(|i| i.raw.hovered_files.is_empty()) {
+        return;
+    }
+    let t = theme::tokens(ctx);
+    let r = ctx.content_rect().shrink(6.0);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("window-drop")));
+    p.rect_filled(r, CornerRadius::same(theme::radius::CARD), t.accent_soft.gamma_multiply(0.35));
+    p.rect_stroke(r, CornerRadius::same(theme::radius::CARD), egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    p.text(r.center(), egui::Align2::CENTER_CENTER, crate::i18n::shown("Drop to import"), theme::body_medium(), t.accent);
 }
 
 /// Fill colour for a clip kind.

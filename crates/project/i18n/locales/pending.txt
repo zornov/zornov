@@ -665,3 +665,4 @@ check-automatically
 check-for-updates-automatically
 update-now
 restart-now
+music-and-sound

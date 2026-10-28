@@ -5591,7 +5591,6 @@ dependencies = [
  "resvg 0.48.1",
  "rfd",
  "roxmltree 0.20.0",
- "security-framework 3.7.0",
  "serde",
  "serde_json",
  "studio-aac",
@@ -5614,6 +5613,7 @@ dependencies = [
  "studio-hw",
  "studio-i18n",
  "studio-imageio",
+ "studio-keystore",
  "studio-live",
  "studio-lottie",
  "studio-media",
@@ -5843,6 +5843,17 @@ name = "studio-imageio"
 version = "0.1.2"
 dependencies = [
  "studio-media",
+]
+
+[[package]]
+name = "studio-keystore"
+version = "0.1.2"
+dependencies = [
+ "security-framework 3.7.0",
+ "serde_json",
+ "studio-paths",
+ "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

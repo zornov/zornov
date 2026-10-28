@@ -75,6 +75,8 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     let visual_one = ids.len() == 1 && app.doc.project.clip(ids[0]).is_some_and(|c| c.kind != crate::view::ClipKind::Audio);
     let h = held(ctx);
     let mut act: Option<Act> = None;
+    let key = |id: &str| crate::keymap::hint(&app.prefs, id);
+    let (split_k, dup_k, marker_k, delete_k) = (key("split"), key("duplicate"), key("marker"), key("delete"));
     kit::popover(ctx, open_id(), anchor, kit::Side::Below, 232.0, |ui| {
         let item = |ui: &mut egui::Ui, label: &str, shortcut: &str, icon: Icon, enabled: bool| {
             let mut m = MenuItem::new(label).icon(icon).enabled(enabled);
@@ -83,10 +85,10 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
             }
             m.show(ui).clicked()
         };
-        if item(ui, "Split at playhead", "S", Icon::Scissors, inside) {
+        if item(ui, "Split at playhead", &split_k, Icon::Scissors, inside) {
             act = Some(Act::Do(Action::Split));
         }
-        if item(ui, "Duplicate", "⌘D", Icon::Copy, true) {
+        if item(ui, "Duplicate", &dup_k, Icon::Copy, true) {
             act = Some(Act::Do(Action::Duplicate));
         }
         if item(ui, "Copy", "", Icon::Copy, true) {
@@ -147,14 +149,14 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
         if item(ui, "Paste look", "", Icon::Palette, h.look.is_some()) {
             act = Some(Act::PasteLook);
         }
-        if item(ui, "Add marker at playhead", "M", Icon::Flag, true) {
+        if item(ui, "Add marker at playhead", &marker_k, Icon::Flag, true) {
             act = Some(Act::Do(Action::Marker));
         }
         if item(ui, "Show in Inspector", "", Icon::Faders, true) {
             act = Some(Act::Inspector);
         }
         kit::menu_separator(ui);
-        if MenuItem::new("Delete").icon(Icon::Trash).shortcut("⌫").danger().show(ui).clicked() {
+        if MenuItem::new("Delete").icon(Icon::Trash).shortcut(&delete_k).danger().show(ui).clicked() {
             act = Some(Act::Do(Action::Delete));
         }
     });

@@ -30,7 +30,7 @@ pub fn playable(path: &Path) -> bool {
     }
     // Sound files: playable when Studio's decoders actually read them (an
     // Ogg may hold Opus, a FLAC may be 32-bit). Decoded once and cached.
-    if matches!(ext.as_str(), "wav" | "wave" | "mp3" | "ogg" | "oga" | "flac" | "aif" | "aiff" | "aifc") {
+    if media_io::SOUND_DECODED.contains(&ext.as_str()) {
         return path.to_str().is_some_and(|p| crate::sound_bridge::decoded(p).is_some());
     }
     let Ok(dm) = studio_mp4::open(path) else { return false };

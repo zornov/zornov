@@ -14,32 +14,6 @@ use studio_mesh::{Mesh, V3, ops};
 /// Most triangles a sculpted model keeps (more is slow to draw and save).
 const MAX_TRIANGLES: usize = 1_500_000;
 
-/// Whether a file is Zornov's own editable model source (`.smodel`), by
-/// its name or its first bytes.
-fn is_smodel(path: &std::path::Path) -> bool {
-    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("smodel"))
-        || std::fs::File::open(path).ok().is_some_and(|mut f| {
-            use std::io::Read;
-            let mut magic = [0u8; 8];
-            f.read_exact(&mut magic).is_ok() && &magic == b"SMODEL1\0"
-        })
-}
-
-/// A `.smodel` read as a model: its parts built to triangles, centred and
-/// fitted like any imported file.
-fn smodel(path: &std::path::Path, fit: f32) -> Result<studio_mesh::import::Imported, String> {
-    let asset = studio_modeling::asset::load(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let mut mesh = asset.to_mesh(false)?;
-    if mesh.triangles() == 0 {
-        return Err(format!("{}: no triangles in the model", path.display()));
-    }
-    mesh.tidy();
-    if fit > 0.0 {
-        ops::centre_and_fit(&mut mesh, fit);
-    }
-    Ok(studio_mesh::import::Imported { mesh, notes: vec![format!("read the editable source ({} parts)", asset.parts.len())] })
-}
-
 pub(super) fn v3(v: &Value) -> Option<V3> {
     let a = v.as_array()?;
     if a.len() != 3 {
@@ -718,24 +692,8 @@ impl Session {
     pub(super) fn model(&mut self, op: &Value) -> Result<String, String> {
         if let Some(out) = op.get("export").and_then(Value::as_str) {
             let id = op.get("clip").and_then(Value::as_u64).ok_or("export needs \"clip\"")? as u32;
-            let (_, mesh) = self.model_of(id)?;
-            let path = std::path::Path::new(out);
-            match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
-                Some("glb") => std::fs::write(path, studio_mesh::export::glb(&mesh)).map_err(|e| format!("{out}: {e}"))?,
-                Some("obj") => {
-                    let mtl = path.with_extension("mtl");
-                    let name = mtl.file_name().and_then(|n| n.to_str()).unwrap_or("model.mtl").to_owned();
-                    let (o, m, pictures) = studio_mesh::export::obj(&mesh, &name);
-                    std::fs::write(path, o).map_err(|e| format!("{out}: {e}"))?;
-                    std::fs::write(&mtl, m).map_err(|e| format!("{}: {e}", mtl.display()))?;
-                    for (file, png) in pictures {
-                        let p = path.with_file_name(file);
-                        std::fs::write(&p, png).map_err(|e| format!("{}: {e}", p.display()))?;
-                    }
-                }
-                Some("smesh") => studio_mesh::io::save(&mesh, path)?,
-                _ => return Err("export to a .glb, .obj or .smesh path".into()),
-            }
+            let (mc, mesh) = self.model_of(id)?;
+            crate::mesh_store::export_model(&mc, &mesh, std::path::Path::new(out))?;
             return Ok(format!("clip {id} exported to {out}"));
         }
         if op.get("clip").is_some() {
@@ -761,7 +719,7 @@ impl Session {
                 let path = self.input_file(file)?;
                 let file = path.to_string_lossy().into_owned();
                 let file = file.as_str();
-                let got = if is_smodel(&path) { smodel(&path, fit)? } else { studio_mesh::import::load(&path, fit)? };
+                let got = crate::mesh_store::read_model(&path, fit)?;
                 let n = op.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or("Model").to_owned());
                 if got.mesh.triangles() > MAX_TRIANGLES {
                     let mut m = got.mesh;
@@ -1411,6 +1369,51 @@ mod tests {
         let (lo, hi) = mesh.bounds();
         let longest = (0..3).map(|k| hi[k] - lo[k]).fold(0.0f32, f32::max);
         assert!((longest - 200.0).abs() < 1.0, "fitted to size: {longest}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// USD text (.usda, and a .usdz holding one) loads as a model through
+    /// the same path as any model file, by hand and by the agent.
+    #[test]
+    fn a_usd_file_loads_as_a_model() {
+        let dir = std::env::temp_dir().join(format!("studio-usd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = studio_modeling::asset::Asset::new("Box");
+        a.parts.push(studio_modeling::asset::Part::new("body", studio_modeling::prim::cube([100.0, 60.0, 40.0], 1)));
+        let usda = dir.join("box.usda");
+        let usdz = dir.join("box.usdz");
+        let mesh = a.to_mesh(false).unwrap();
+        studio_modeling::formats::write(&mesh, &a, &usda).unwrap();
+        studio_modeling::formats::write(&mesh, &a, &usdz).unwrap();
+        for path in [&usda, &usdz] {
+            assert!(crate::mesh_store::is_model_file(path), "{} is a model file", path.display());
+            let got = crate::mesh_store::read_model(path, 200.0).unwrap();
+            assert_eq!(got.mesh.triangles(), 12, "{}: a box is 12 triangles", path.display());
+            let mut s = Session::new(services::project::new_custom("Models", 640, 360, 30.0));
+            let r = s.edit(&[json!({"op": "model", "file": path.to_string_lossy(), "size": 200})], "add", false);
+            assert!(r.is_ok(), "{r:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A model exports to USD (.usdz, .usda), FBX, STL and PLY as well as
+    /// glTF and OBJ, and what is written reads back.
+    #[test]
+    fn a_model_exports_to_usd_fbx_stl_and_ply() {
+        let dir = std::env::temp_dir().join(format!("studio-model-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::new(services::project::new_custom("Models", 640, 360, 30.0));
+        s.edit(&[json!({"op": "model", "shape": "cube", "size": 200})], "add", false).unwrap();
+        let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        for ext in ["usdz", "usda", "fbx", "stl", "ply", "glb", "obj"] {
+            let out = dir.join(format!("cube.{ext}"));
+            let r = s.edit(&[json!({"op": "model", "clip": id, "export": out.to_string_lossy()})], "export", false);
+            assert!(r.is_ok(), "{ext}: {r:?}");
+            assert!(out.is_file(), "{ext}: nothing written");
+            let back = studio_modeling::formats::import(&out, 0.0).unwrap_or_else(|e| panic!("{ext}: {e}"));
+            assert!(back.iter().map(|(_, p)| p.faces()).sum::<usize>() >= 6, "{ext}: the cube's faces come back");
+        }
+        assert!(crate::mesh_store::MODEL_EXPORTS.contains(&"usdz"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

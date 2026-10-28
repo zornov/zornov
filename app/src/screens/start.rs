@@ -69,7 +69,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let hy = full.top() + TITLE_BAR_H + 14.0;
     wordmark(ui.painter(), egui::pos2(at(0.0, 110.0), hy), &t);
     let gear = Rect::from_center_size(egui::pos2(at(content_w - 28.0, 28.0) + 14.0, hy), Vec2::splat(28.0));
-    if IconButton::new(Icon::GearSix, "Settings").shortcut("⌘,").show_at(ui, gear).clicked() {
+    let settings_keys = crate::keymap::hint(&app.prefs, "settings");
+    if IconButton::new(Icon::GearSix, "Settings").shortcut(&settings_keys).show_at(ui, gear).clicked() {
         app.overlay = Overlay::Settings;
     }
     let search_w = 240.0_f32.min(content_w - 160.0).max(120.0);

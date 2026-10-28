@@ -306,7 +306,7 @@ pub fn keyframe_toggle(ui: &mut Ui, on: &mut bool, forced: Option<Forced>) -> Re
     if st.focused {
         focus_ring(p, Rect::from_center_size(rect.center(), Vec2::splat(20.0)), CornerRadius::same(4), &t);
     }
-    tip(resp, if on_v { "Remove keyframe" } else { "Add keyframe" }, Some("K"))
+    tip(resp, if on_v { "Remove keyframe" } else { "Add keyframe" }, None)
 }
 
 // --- field row -----------------------------------------------------------

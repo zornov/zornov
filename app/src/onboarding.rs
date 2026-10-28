@@ -4,7 +4,7 @@
 //! First-run tour and contextual tips.
 //!
 //! The tour walks through the editor's regions once, the first time an
-//! editor opens (Settings ▸ Accessibility ▸ "Replay the welcome tour"
+//! editor opens (Settings ▸ General ▸ Accessibility, "Replay the welcome tour",
 //! brings it back). It works from the keyboard (`→` / `Enter` next, `←`
 //! back, `Esc` skip) and every step is announced to a screen reader.
 //!
@@ -366,6 +366,18 @@ mod tests {
         let regions: Vec<_> = STEPS.iter().filter_map(|s| if let Target::Region(r) = s.target { Some(r) } else { None }).collect();
         use crate::a11y::Region::*;
         assert_eq!(regions, [Library, Viewer, Inspector, Timeline]);
+    }
+
+    /// ⌘Z undoes only the person's own edits; the AI editor's work comes
+    /// back with "Undo this request" (agent::live). The tour and the help
+    /// say so, in every language's English source.
+    #[test]
+    fn the_tour_and_help_say_how_the_ai_s_change_is_taken_back() {
+        for id in ["tour-ai-body", "help-undo-body"] {
+            let text = studio_i18n::tr_in(studio_i18n::Lang::En, id, &[]);
+            assert!(text.contains("Undo this request"), "{id}: {text}");
+            assert!(!text.contains("⌘Z takes it back") && !text.contains("single undo step"), "{id} says ⌘Z undoes the AI's change: {text}");
+        }
     }
 
     #[test]

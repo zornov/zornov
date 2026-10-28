@@ -634,7 +634,7 @@ fn animate_local(req: &Request, ctx: &JobCtx, status: &mut dyn FnMut(String)) ->
     status("Working out the picture's depth".into());
     let (depth, depth_by) = match depth_of(&still) {
         Some(d) => (d, "Depth Anything V2"),
-        None => (parallax::ground_plane(still.width, still.height), "a ground-plane guess (install Depth Anything in Settings ▸ AI models for real depth)"),
+        None => (parallax::ground_plane(still.width, still.height), "a ground-plane guess (install Depth Anything in Settings ▸ Models for real depth)"),
     };
     let fps = req.f("fps").unwrap_or(30.0).clamp(12.0, 60.0);
     let seconds = req.f("seconds").unwrap_or(5.0).clamp(1.0, 30.0);
@@ -675,7 +675,7 @@ fn between_local(req: &Request, ctx: &JobCtx, status: &mut dyn FnMut(String)) ->
         ctx.set_progress((i + 1) as f32 / n as f32);
     }
     let file = out.finish()?;
-    let engine = if fi.engine() == studio_ai::features::interpolate::InterpEngine::Rife { "RIFE" } else { "cross-fades (install RIFE in Settings ▸ AI models)" };
+    let engine = if fi.engine() == studio_ai::features::interpolate::InterpEngine::Rife { "RIFE" } else { "cross-fades (install RIFE in Settings ▸ Models)" };
     Ok(Outcome { files: vec![file], video: true, by: format!("this Mac ({engine})"), price: Some("free".into()), details: json!({"seconds": seconds, "fps": fps}), ..Default::default() })
 }
 
@@ -771,7 +771,7 @@ fn picture_local(req: &Request, ctx: &JobCtx, status: &mut dyn FnMut(String)) ->
 fn engine_name(up: &Upscaler) -> &'static str {
     match up.engine() {
         studio_ai::features::upscale::UpscaleEngine::RealEsrgan => "Real-ESRGAN",
-        studio_ai::features::upscale::UpscaleEngine::Bicubic => "bicubic (install Real-ESRGAN in Settings ▸ AI models for real detail)",
+        studio_ai::features::upscale::UpscaleEngine::Bicubic => "bicubic (install Real-ESRGAN in Settings ▸ Models for real detail)",
     }
 }
 

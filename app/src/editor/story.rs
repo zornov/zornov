@@ -283,11 +283,18 @@ pub fn import_dialog(app: &mut StudioApp, ctx: &egui::Context) {
 /// A script file dropped on the panel is imported; anything else says so.
 fn take_dropped_script(app: &mut StudioApp, ctx: &egui::Context, body: Rect) {
     let (files, pos) = ctx.input(|i| (i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect::<Vec<_>>(), i.pointer.hover_pos()));
-    // A drag from outside the window carries no pointer position.
+    // A drag from outside the window may carry no pointer position: then
+    // the panel takes only a script, and leaves media to the window.
     if files.is_empty() || pos.is_some_and(|p| !body.contains(p)) {
         return;
     }
-    match files.iter().find(|p| crate::script_import::is_script_file(p)) {
+    let script = files.iter().find(|p| crate::script_import::is_script_file(p));
+    if pos.is_none() && script.is_none() {
+        return;
+    }
+    // Taken here: the window does not import it as media too.
+    ctx.input_mut(|i| i.raw.dropped_files.clear());
+    match script {
         Some(p) => import_file(app, ctx, p),
         None => {
             kit::push(ctx, "That is not a script file: drop text, Markdown, Fountain, SRT, VTT or Word", None, Some(Icon::Warning));

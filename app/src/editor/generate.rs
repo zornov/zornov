@@ -3,8 +3,9 @@
 
 //! The AI panel's "Generate" card: a picture from words, made by Codex's
 //! image generation on the person's own ChatGPT plan (the same engine as
-//! the AI's `generate` tool). Video, music and sound from words are not
-//! available yet. What it makes is imported and laid at the playhead.
+//! the AI's `generate` tool). Music and sounds from words are made by the
+//! AI editor, on this computer; video from words is not available yet.
+//! What it makes is imported and laid at the playhead.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -97,6 +98,18 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+/// Where a kind this card does not make comes from instead (`None`: the
+/// card makes it). Music and sounds come from the AI editor, which makes
+/// them on this computer (`agent::local_sound`, `agent::synth`).
+fn elsewhere(kind: Kind) -> Option<&'static str> {
+    match kind {
+        Kind::Picture => None,
+        Kind::Video => Some("Video from words is not available yet. Animate a still under Change instead."),
+        Kind::Music => Some("Ask the AI editor for music in words (a genre, a mood, a length): it composes an original piece on this computer, or scores from Zornov's library."),
+        Kind::Sound => Some("Ask the AI editor for a sound in words: it makes it on this computer from physical models (risers, whooshes, booms, hits, footsteps, rain…), or with ElevenLabs when its key is saved."),
+    }
+}
+
 /// The card.
 pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
@@ -119,13 +132,7 @@ pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
         let segs: Vec<Segment> = ["Picture", "Video", "Music", "Sound"].into_iter().map(Segment::text).collect();
         kit::segmented(ui, "gen-kind", &mut f.kind, &segs, Some(w - 24.0), None);
         let kind = KINDS[f.kind.min(3)];
-        let soon = match kind {
-            Kind::Picture => None,
-            Kind::Video => Some("Video from words is not available yet. Animate a still under Change instead."),
-            Kind::Music => Some("Music from words is not available yet. The AI editor scores from Zornov's library."),
-            Kind::Sound => Some("Sound from words is not available yet. The AI editor makes risers, whooshes, booms and hits to measure."),
-        };
-        if let Some(m) = soon {
+        if let Some(m) = elsewhere(kind) {
             ui.label(egui::RichText::new(crate::i18n::shown(m)).font(theme::caption()).color(t.text_2));
             return;
         }
@@ -180,6 +187,18 @@ mod tests {
             out.extend_from_slice(&(((i as f32 * 0.03).sin() * 6000.0) as i16).to_le_bytes());
         }
         std::fs::write(path, out).unwrap();
+    }
+
+    /// Music and sounds from words are made here by the AI editor
+    /// (`local_sound`, `synth`); only video from words is missing.
+    #[test]
+    fn the_card_says_music_and_sound_are_made_by_the_ai_editor() {
+        for k in [Kind::Music, Kind::Sound] {
+            let said = elsewhere(k).unwrap();
+            assert!(!said.contains("not available") && said.contains("AI editor"), "{k:?}: {said}");
+        }
+        assert!(elsewhere(Kind::Video).unwrap().contains("not available"));
+        assert!(elsewhere(Kind::Picture).is_none());
     }
 
     /// The card draws for every kind, and a finished run lands on a sound

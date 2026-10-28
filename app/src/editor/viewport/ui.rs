@@ -1718,10 +1718,10 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
         if MenuItem::new("Quad view").checked(ws.quad).show(ui).clicked() {
             act = Some("quad");
         }
-        if MenuItem::new("Fly mode").shortcut("~").checked(ws.rt.fly == Some(Fly::Fly)).show(ui).clicked() {
+        if MenuItem::new("Fly mode").shortcut("`").checked(ws.rt.fly == Some(Fly::Fly)).show(ui).clicked() {
             act = Some("fly");
         }
-        if MenuItem::new("Walk mode").shortcut("⇧~").checked(ws.rt.fly == Some(Fly::Walk)).show(ui).clicked() {
+        if MenuItem::new("Walk mode").shortcut("⇧`").checked(ws.rt.fly == Some(Fly::Walk)).show(ui).clicked() {
             act = Some("walk");
         }
         if super::world::find(&app.doc, time_of(app)).is_some() {

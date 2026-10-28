@@ -202,7 +202,7 @@ pub fn picker(ui: &mut Ui, id: egui::Id, colour: &mut Color32) {
             }
         }
         let active = ui.data(|d| d.get_temp(eyedropper_id()).unwrap_or(false));
-        if IconButton::new(Icon::Eyedropper, "Pick from viewer").shortcut("I").active(active).show(ui).clicked() {
+        if IconButton::new(Icon::Eyedropper, "Pick from viewer").active(active).show(ui).clicked() {
             ui.data_mut(|d| d.insert_temp(eyedropper_id(), !active));
         }
     });

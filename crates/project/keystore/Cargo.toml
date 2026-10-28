@@ -1,0 +1,20 @@
+[package]
+name = "studio-keystore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "API keys in the system's own secret store on macOS, Windows and Linux, with a private file as the last resort"
+
+[dependencies]
+serde_json = "1"
+studio-paths = { path = "../paths" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Credentials"] }
+
+# The Secret Service (GNOME Keyring, KWallet, KeePassXC) over D-Bus.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+zbus = "5"

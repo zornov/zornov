@@ -174,13 +174,16 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
     let ctx = ui.ctx().clone();
     let inner = r.shrink2(Vec2::new(10.0, 4.0));
     let mut action = None;
+    let key = |id: &str| crate::keymap::hint(&app.prefs, id);
+    let keys: std::collections::HashMap<&str, String> = ["fit", "zoom-in", "zoom-out", "undo", "redo", "split", "delete", "marker", "snap", "magnetic", "select", "blade", "slip", "range"].into_iter().map(|id| (id, key(id))).collect();
+    let k = |id: &str| keys.get(id).map_or("", String::as_str);
     // Right: zoom (laid out first, so the tools know their room).
     let mut right = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)));
     right.spacing_mut().item_spacing.x = 4.0;
-    if IconButton::new(Icon::ArrowsOutLineHorizontal, "Fit sequence").shortcut("⇧Z").show(&mut right).clicked() {
+    if IconButton::new(Icon::ArrowsOutLineHorizontal, "Fit sequence").shortcut(k("fit")).show(&mut right).clicked() {
         action = Some(Action::Fit);
     }
-    if IconButton::new(Icon::MagnifyingGlassPlus, "Zoom in").shortcut("⌘=").show(&mut right).clicked() {
+    if IconButton::new(Icon::MagnifyingGlassPlus, "Zoom in").shortcut(k("zoom-in")).show(&mut right).clicked() {
         action = Some(Action::ZoomIn);
     }
     // Log-scale zoom slider.
@@ -190,7 +193,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
         zoom_to(app, MIN_PPS * (MAX_PPS / MIN_PPS).powf(z / 100.0), None, r.left() + HEADER_W + 12.0);
         app.editor.auto_fit = false;
     }
-    if IconButton::new(Icon::MagnifyingGlassMinus, "Zoom out").shortcut("⌘-").show(&mut right).clicked() {
+    if IconButton::new(Icon::MagnifyingGlassMinus, "Zoom out").shortcut(k("zoom-out")).show(&mut right).clicked() {
         action = Some(Action::ZoomOut);
     }
     if inner.width() > 820.0 {
@@ -206,8 +209,8 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
     outer.set_clip_rect(left.intersect(ui.clip_rect()));
     kit::scroll_strip(&mut outer, "timeline-tools", |bar| {
         bar.spacing_mut().item_spacing.x = 4.0;
-        for (tool, icon, name, key) in [(Tool::Select, Icon::Cursor, "Select (drag empty space to box-select)", "A"), (Tool::Blade, Icon::Scissors, "Blade", "B"), (Tool::Slip, Icon::ArrowsHorizontal, "Slip", "Y"), (Tool::Range, Icon::BracketsSquare, "Range", "R")] {
-            if IconButton::new(icon, name).shortcut(key).active(app.editor.tool == tool).show(bar).clicked() {
+        for (tool, icon, name, id) in [(Tool::Select, Icon::Cursor, "Select (drag empty space to box-select)", "select"), (Tool::Blade, Icon::Scissors, "Blade", "blade"), (Tool::Slip, Icon::ArrowsHorizontal, "Slip", "slip"), (Tool::Range, Icon::BracketsSquare, "Range", "range")] {
+            if IconButton::new(icon, name).shortcut(k(id)).active(app.editor.tool == tool).show(bar).clicked() {
                 app.editor.tool = tool;
                 app.editor.cutting.mode = super::cutting::TrimMode::Off;
             }
@@ -215,32 +218,32 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
         super::cutting::toolbar(app, bar);
         divider(bar);
         bar.add_enabled_ui(app.doc.can_undo(), |ui| {
-            if IconButton::new(Icon::ArrowUUpLeft, "Undo").shortcut("⌘Z").show(ui).clicked() {
+            if IconButton::new(Icon::ArrowUUpLeft, "Undo").shortcut(k("undo")).show(ui).clicked() {
                 action = Some(Action::Undo);
             }
         });
         bar.add_enabled_ui(app.doc.can_redo(), |ui| {
-            if IconButton::new(Icon::ArrowUUpRight, "Redo").shortcut("⇧⌘Z").show(ui).clicked() {
+            if IconButton::new(Icon::ArrowUUpRight, "Redo").shortcut(k("redo")).show(ui).clicked() {
                 action = Some(Action::Redo);
             }
         });
         divider(bar);
-        if IconButton::new(Icon::Scissors, "Split at playhead").shortcut("S").show(bar).clicked() {
+        if IconButton::new(Icon::Scissors, "Split at playhead").shortcut(k("split")).show(bar).clicked() {
             action = Some(Action::Split);
         }
         bar.add_enabled_ui(!app.editor.selection.is_empty(), |ui| {
-            if IconButton::new(Icon::Trash, "Delete selection").shortcut("⌫").show(ui).clicked() {
+            if IconButton::new(Icon::Trash, "Delete selection").shortcut(k("delete")).show(ui).clicked() {
                 action = Some(Action::Delete);
             }
         });
-        if IconButton::new(Icon::Flag, "Add marker").shortcut("M").show(bar).clicked() {
+        if IconButton::new(Icon::Flag, "Add marker").shortcut(k("marker")).show(bar).clicked() {
             action = Some(Action::Marker);
         }
         divider(bar);
-        if IconButton::new(Icon::Magnet, if app.prefs.snapping { "Snapping on" } else { "Snapping off" }).shortcut("N").active(app.prefs.snapping).show(bar).clicked() {
+        if IconButton::new(Icon::Magnet, if app.prefs.snapping { "Snapping on" } else { "Snapping off" }).shortcut(k("snap")).active(app.prefs.snapping).show(bar).clicked() {
             app.prefs.snapping = !app.prefs.snapping;
         }
-        if IconButton::new(Icon::MagnetStraight, if app.prefs.magnetic { "Magnetic main lane on" } else { "Magnetic main lane off" }).shortcut("⇧M").active(app.prefs.magnetic).show(bar).clicked() {
+        if IconButton::new(Icon::MagnetStraight, if app.prefs.magnetic { "Magnetic main lane on" } else { "Magnetic main lane off" }).shortcut(k("magnetic")).active(app.prefs.magnetic).show(bar).clicked() {
             app.prefs.magnetic = !app.prefs.magnetic;
         }
         if !ctx.egui_wants_keyboard_input() && crate::keymap::hit(&ctx, &app.prefs, "magnetic") {

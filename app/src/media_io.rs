@@ -57,6 +57,8 @@ pub fn lottie(path: &Path) -> Option<std::sync::Arc<studio_lottie::Animation>> {
 pub const VIDEO_EXT: &[&str] = &["mp4", "mov", "m4v"];
 pub const AUDIO_EXT: &[&str] = &["m4a", "wav", "mp3", "aac", "flac", "ogg", "aif", "aiff"];
 pub const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg"];
+/// Sound files Zornov's own decoders read (`sound_bridge`).
+pub const SOUND_DECODED: &[&str] = &["wav", "wave", "mp3", "ogg", "oga", "flac", "aif", "aiff", "aifc"];
 
 pub fn probe(path: &Path) -> Result<Probe, String> {
     // ProRes, EXR / DPX / TIFF / 16-bit PNG and frame sequences.
@@ -84,7 +86,7 @@ pub fn probe(path: &Path) -> Result<Probe, String> {
             container: e,
         });
     }
-    if matches!(e.as_str(), "wav" | "wave" | "mp3" | "ogg" | "oga" | "flac" | "aif" | "aiff" | "aifc") {
+    if SOUND_DECODED.contains(&e.as_str()) {
         // Decoded once and cached (playback and export reuse it), so the
         // probe reports the true length, rate and channel count.
         let path_str = path.to_str().ok_or("The file name is not valid UTF-8")?;

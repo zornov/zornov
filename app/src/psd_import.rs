@@ -75,6 +75,9 @@ pub fn blend(key: &str) -> Option<&'static str> {
 }
 
 /// Whether `path` is a Photoshop document (by its first bytes).
+/// Photoshop documents and large documents.
+pub const EXTENSIONS: &[&str] = &["psd", "psb"];
+
 pub fn is_psd(path: &Path) -> bool {
     use std::io::Read;
     let mut head = [0u8; 4];

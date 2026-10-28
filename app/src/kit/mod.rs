@@ -150,7 +150,7 @@ pub fn tooltip_body(ui: &mut Ui, name: &str, shortcut: Option<&str>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.label(egui::RichText::new(shown(name)).font(theme::body()).color(t.text));
-        if let Some(s) = shortcut {
+        if let Some(s) = shortcut.filter(|s| !s.is_empty()) {
             shortcut_badge(ui, s);
         }
     });

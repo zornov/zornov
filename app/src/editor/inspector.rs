@@ -379,6 +379,27 @@ fn set_matte(app: &mut StudioApp, id: u64, now: Option<(&'static str, u64)>, cho
     }
 }
 
+/// An effect's colour setting as shown: its own, else the effect's default.
+fn effect_colour(e: &m::Effect, pd: &studio_fx::ParamDef) -> egui::Color32 {
+    let c = match (e.params.get(pd.id), pd.default) {
+        (Some(m::Value::Colour(c)), _) => *c,
+        (_, studio_fx::ParamValue::Colour(l)) => m::Rgba::from_linear(l.map(f64::from)),
+        _ => m::Rgba::new(0.0, 0.0, 0.0, 1.0),
+    };
+    let u = |x: f64| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    egui::Color32::from_rgba_unmultiplied(u(c.r), u(c.g), u(c.b), u(c.a))
+}
+
+/// An effect's on/off setting: its own, else the effect's default.
+fn effect_bool(e: &m::Effect, pd: &studio_fx::ParamDef) -> bool {
+    match (e.params.get(pd.id), pd.default) {
+        (Some(m::Value::Bool(b)), _) => *b,
+        (Some(m::Value::Scalar(x)), _) => *x != 0.0,
+        (_, studio_fx::ParamValue::Bool(b)) => b,
+        _ => false,
+    }
+}
+
 fn edit_all(app: &mut StudioApp, ids: &[u32], label: &str, f: impl Fn(&mut Clip)) {
     let ids = ids.to_vec();
     app.doc.edit(label, |p| {
@@ -409,9 +430,12 @@ pub(crate) fn clip_tabs(kind: ClipKind, generated: Option<m::GeneratorKind>) -> 
                 Some(G::Model) => "Model",
                 _ => "Shape",
             };
+            // A model's own panel (parts, modifiers, materials, UVs,
+            // shading) sits under the Model section; its rigid-body physics
+            // with the other physics, under Animation.
             vec![
-                (first, vec!["clip", "text", "shape", "mograph-template", "mograph-shape", "mograph-text", "model", "world-spec", "sim-settings", "transform", "crop", "space", "mask", "pins"]),
-                ("Animation", vec!["motion", "modifiers", "physics", "drivers", "skeleton", "character3d", "sim3d"]),
+                (first, vec!["clip", "text", "shape", "mograph-template", "mograph-shape", "mograph-text", "model", "model-parts", "model-modifiers", "model-materials", "model-uv", "model-object", "world-spec", "sim-settings", "transform", "crop", "space", "mask", "pins"]),
+                ("Animation", vec!["motion", "modifiers", "physics", "physics3d", "drivers", "skeleton", "character3d", "sim3d"]),
                 ("Adjust", vec!["colour", "effects"]),
                 advanced(&["world3d"]),
             ]
@@ -711,6 +735,32 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                             }
                             continue;
                         }
+                        // Colours and switches (a key's colour, Show matte), the
+                        // same way: on the model's effect, a drag one step.
+                        if matches!(pd.kind, studio_fx::ParamKind::Colour | studio_fx::ParamKind::Bool) {
+                            let clip = m::ClipId(ids[0] as u64);
+                            let Some(mut me) = app.doc.model.sequences.iter().find_map(|q| q.clip(clip)).and_then(|mc| mc.effects.iter().find(|x| x.id.0 == e.id).cloned()) else { continue };
+                            let key = format!("fx-{}-{}", e.id, pd.id);
+                            let mut changed = false;
+                            if matches!(pd.kind, studio_fx::ParamKind::Colour) {
+                                let mut col = effect_colour(&me, pd);
+                                kit::labeled_row(ui, pd.label, |ui| {
+                                    changed = kit::colour_well(ui, &key, &mut col, None).changed();
+                                    ui.label(egui::RichText::new(kit::to_hex(col)).font(theme::body()).color(t.text_2));
+                                });
+                                let [r, g, b, a] = col.to_srgba_unmultiplied().map(|x| x as f64 / 255.0);
+                                me.params.insert(pd.id.into(), m::Value::Colour(m::Rgba::new(r, g, b, a)));
+                            } else {
+                                let mut on = effect_bool(&me, pd);
+                                kit::labeled_row(ui, pd.label, |ui| changed = kit::toggle(ui, &mut on, pd.label, None).changed());
+                                me.params.insert(pd.id.into(), m::Value::Bool(on));
+                            }
+                            if changed {
+                                let seq = app.doc.seq();
+                                app.doc.apply_gesture(&key, pd.label, m::Edit::SetEffect { seq, clip, effect: me });
+                            }
+                            continue;
+                        }
                         let (lo, hi, int) = match pd.kind {
                             studio_fx::ParamKind::Float { min, max } => (min, max, false),
                             studio_fx::ParamKind::Int { min, max } => (min as f32, max as f32, true),
@@ -929,5 +979,74 @@ mod tests {
         }
         assert_eq!(percent_to_db(100.0), 0.0);
         assert!((percent_to_db(200.0) - 12.0).abs() < 1e-4);
+    }
+
+    fn painted(out: &egui::FullOutput) -> String {
+        out.shapes.iter().filter_map(|c| if let egui::epaint::Shape::Text(t) = &c.shape { Some(t.galley.text().to_owned()) } else { None }).collect::<Vec<_>>().join("\n")
+    }
+
+    /// Every effect's settings show in the Inspector, colours and switches
+    /// too: a chroma key's Key colour and Show matte, so a blue screen can
+    /// be keyed by hand.
+    #[test]
+    fn colour_and_switch_settings_of_effects_show() {
+        use crate::agent::Session;
+        use crate::ui_tests::Harness;
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.frames(3);
+        let doc = std::mem::replace(&mut h.app.doc, Session::default().doc);
+        let mut s = Session::new(doc);
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#1030e0", "at": 0.0, "duration": 3.0, "lane": "overlay"})], "card", false).expect("a card");
+        let id = s.doc.model.active().clips.iter().map(|c| c.id.0).max().unwrap();
+        s.edit(&[serde_json::json!({"op": "apply", "item": "chroma key", "clips": [id]})], "key", false).expect("a key");
+        h.app.doc = s.doc;
+        h.app.editor.selection = vec![id as u32];
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("workspace-inspector-tab"), "Adjust".to_owned()));
+        h.frames(5);
+        let text = painted(h.last.as_ref().unwrap());
+        let def = studio_fx::effects::find("chroma_key").unwrap();
+        for pd in def.params {
+            assert!(text.contains(pd.label), "\"{}\" ({:?}) is in the Inspector:\n{text}", pd.label, pd.kind);
+        }
+        // The key's colour shows as it is, green until it is changed.
+        assert!(text.contains(&key_hex(&h.app, id)), "the key colour's hex:\n{text}");
+    }
+
+    fn key_hex(app: &StudioApp, id: u64) -> String {
+        let e = app.doc.model.active().clip(m::ClipId(id)).unwrap().effects.iter().find(|e| e.kind == "chroma_key").cloned().unwrap();
+        let c = effect_colour(&e, studio_fx::effects::find("chroma_key").unwrap().params.iter().find(|p| p.id == "key").unwrap());
+        kit::to_hex(c)
+    }
+
+    /// The section kinds a source file draws, read from its `Section::new("…"` calls.
+    fn section_kinds(src: &str) -> Vec<String> {
+        let pat = "Section::new(\"";
+        let mut out = Vec::new();
+        let mut rest = src;
+        while let Some(at) = rest.find(pat) {
+            rest = &rest[at + pat.len()..];
+            if let Some(end) = rest.find('"') {
+                out.push(rest[..end].to_owned());
+            }
+        }
+        out
+    }
+
+    /// Every section a 3D model clip can draw (its own model panel, physics,
+    /// character and simulation) sits in one of the model clip's tabs, so
+    /// the tab filter never hides it for good.
+    #[test]
+    fn every_model_clip_section_is_in_a_tab() {
+        let tabs = clip_tabs(ClipKind::Title, Some(m::GeneratorKind::Model));
+        let shown: Vec<&str> = tabs.iter().flat_map(|t| t.1.iter().copied()).collect();
+        let mut kinds: Vec<String> = Vec::new();
+        kinds.extend(section_kinds(include_str!("model_edit/panel.rs")));
+        kinds.extend(section_kinds(include_str!("body3d.rs")));
+        // The model's own section and the Model arm of the 3D animation sections.
+        kinds.extend(["model", "character3d", "sim3d"].map(String::from));
+        assert!(kinds.len() >= 9, "found only {kinds:?}");
+        for k in &kinds {
+            assert!(shown.contains(&k.as_str()), "model clip section \"{k}\" is in no tab of a model clip, so it never shows");
+        }
     }
 }

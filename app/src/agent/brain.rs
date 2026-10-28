@@ -693,13 +693,34 @@ pub trait Brain: Send {
 // ---------------------------------------------------------------- Claude Code
 
 /// `claude` where a window can find it (apps get a short PATH).
-pub fn find_claude() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let mut places = vec![home.join(".local/bin/claude"), home.join(".claude/local/claude"), PathBuf::from("/opt/homebrew/bin/claude"), PathBuf::from("/usr/local/bin/claude")];
-    if let Some(path) = std::env::var_os("PATH") {
-        places.extend(std::env::split_paths(&path).map(|d| d.join("claude")));
+/// An installed command-line program: in `home`'s `.local/bin` (where
+/// Claude Code's and Codex's own installers put them), in `extra` folders,
+/// in npm's global folder (`roaming`, Windows' `%APPDATA%`), then on
+/// `path`. On Windows a program is `name.exe`, or the `name.cmd` that npm
+/// writes (an .exe wins); elsewhere it is the bare name.
+fn find_program(name: &str, home: &std::path::Path, path: Option<&std::ffi::OsStr>, roaming: Option<&std::path::Path>, windows: bool, extra: &[PathBuf]) -> Option<PathBuf> {
+    let mut dirs = vec![home.join(".local").join("bin")];
+    dirs.extend(extra.iter().cloned());
+    if windows && let Some(r) = roaming {
+        dirs.push(r.join("npm"));
     }
-    places.into_iter().find(|p| p.is_file())
+    if let Some(p) = path {
+        dirs.extend(std::env::split_paths(p));
+    }
+    let names: Vec<String> = if windows { ["exe", "cmd", "bat"].iter().map(|x| format!("{name}.{x}")).collect() } else { vec![name.to_owned()] };
+    // Every folder for the .exe first, then the wrappers.
+    names.iter().find_map(|n| dirs.iter().map(|d| d.join(n)).find(|p| p.is_file()))
+}
+
+/// [`find_program`] on this computer.
+fn installed(name: &str, extra: &[PathBuf]) -> Option<PathBuf> {
+    let roaming = std::env::var_os("APPDATA").map(PathBuf::from);
+    find_program(name, &studio_paths::home(), std::env::var_os("PATH").as_deref(), roaming.as_deref(), cfg!(windows), extra)
+}
+
+pub fn find_claude() -> Option<PathBuf> {
+    let home = studio_paths::home();
+    installed("claude", &[home.join(".claude").join("local"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")])
 }
 
 pub struct ClaudeCodeBrain {
@@ -837,12 +858,7 @@ impl Brain for ClaudeCodeBrain {
 
 /// `codex` where a window can find it.
 pub fn find_codex() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let mut places = vec![home.join(".local/bin/codex"), PathBuf::from("/opt/homebrew/bin/codex"), PathBuf::from("/usr/local/bin/codex")];
-    if let Some(path) = std::env::var_os("PATH") {
-        places.extend(std::env::split_paths(&path).map(|d| d.join("codex")));
-    }
-    places.into_iter().find(|p| p.is_file())
+    installed("codex", &[PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")])
 }
 
 pub struct CodexBrain {
@@ -1297,6 +1313,35 @@ fn stream_once(key: &str, model: &str, body: &[u8], gate: &Gate) -> Result<Reply
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On Windows a program is `claude.exe` (or the `claude.cmd` npm
+    /// writes), found under the person's profile and on PATH; elsewhere it
+    /// is the bare name.
+    #[test]
+    fn programs_are_found_with_their_windows_names() {
+        let dir = std::env::temp_dir().join(format!("studio-find-program-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (home, npm, on_path) = (dir.join("home"), dir.join("AppData/Roaming/npm"), dir.join("tools"));
+        for d in [home.join(".local/bin"), npm.clone(), on_path.clone()] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let path = std::env::join_paths([on_path.clone()]).unwrap();
+        // Nothing installed: nothing found.
+        assert_eq!(find_program("claude", &home, Some(&path), Some(&dir.join("AppData/Roaming")), true, &[]), None);
+        // npm's wrapper is found; an .exe beside it wins.
+        std::fs::write(npm.join("codex.cmd"), b"@echo off").unwrap();
+        assert_eq!(find_program("codex", &home, Some(&path), Some(&dir.join("AppData/Roaming")), true, &[]), Some(npm.join("codex.cmd")));
+        std::fs::write(on_path.join("codex.exe"), b"MZ").unwrap();
+        assert_eq!(find_program("codex", &home, Some(&path), Some(&dir.join("AppData/Roaming")), true, &[]), Some(on_path.join("codex.exe")));
+        // Claude Code's own installer puts claude.exe in ~/.local/bin.
+        std::fs::write(home.join(".local/bin/claude.exe"), b"MZ").unwrap();
+        assert_eq!(find_program("claude", &home, Some(&path), None, true, &[]), Some(home.join(".local/bin/claude.exe")));
+        // Elsewhere the bare name, and a Windows name is not taken for it.
+        assert_eq!(find_program("claude", &home, Some(&path), None, false, &[]), None);
+        std::fs::write(home.join(".local/bin/claude"), b"#!").unwrap();
+        assert_eq!(find_program("claude", &home, Some(&path), None, false, &[]), Some(home.join(".local/bin/claude")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_streamed_message_is_rebuilt_block_by_block() {
