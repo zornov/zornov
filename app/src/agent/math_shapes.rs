@@ -233,6 +233,7 @@ fn placer(lo: [f64; 3], hi: [f64; 3], fit: Fit) -> (impl Fn([f64; 3]) -> V3 + Co
     let c = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5];
     let e = math::to_studio([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]).map(f32::abs);
     let k = fit.scales(e);
+    FRAME.with(|f| f.set(Some(super::anim3d::Frame { formula: true, centre: c, scale: k })));
     let place = move |p: [f64; 3]| {
         let q = math::to_studio([p[0] - c[0], p[1] - c[1], p[2] - c[2]]);
         [q[0] * k[0], q[1] * k[1], q[2] * k[2]]
@@ -253,8 +254,24 @@ fn fineness(detail: usize, table: [usize; 6]) -> usize {
     table[detail.clamp(1, 6) - 1]
 }
 
-/// Builds what `spec` describes, `fit` its size, at `detail` (1 to 6).
+thread_local! {
+    /// How the last shape made was centred and scaled into model px.
+    static FRAME: std::cell::Cell<Option<super::anim3d::Frame>> = const { std::cell::Cell::new(None) };
+}
+
+/// Builds what `spec` describes, `fit` its size, at `detail` (1 to 6). The
+/// reply's `frame` says how its formula units became model px, which `rig`
+/// with `space: "formula"` converts back.
 pub(super) fn make(spec: &Value, fit: Fit, detail: usize) -> Result<Made, String> {
+    FRAME.with(|f| f.set(None));
+    let mut made = build(spec, fit, detail)?;
+    if let Some(f) = FRAME.with(|f| f.take()) {
+        made.said["frame"] = f.json();
+    }
+    Ok(made)
+}
+
+fn build(spec: &Value, fit: Fit, detail: usize) -> Result<Made, String> {
     let (o, kind, preset) = read(spec)?;
     let given = settings(&o, kind)?;
     match kind {
@@ -360,6 +377,7 @@ fn implicit(o: &Map<String, Value>, preset: Option<&str>, _given: &[(String, f64
     let (f, sides, sources, mut recipe) = recipe_of(&Value::Object(o.clone()))?;
     let size = field_size(sides, fit);
     recipe.size = size;
+    FRAME.with(|c| c.set(Some(super::anim3d::Frame { formula: true, centre: [0.0; 3], scale: fit.scales(sides) })));
     let cell = field::cell_for(size, detail, f.cost());
     let parts = vec![Part::field(f.clone(), [0.0; 3], size)];
     let (mesh, cost) = studio_mesh::sdf::build_counted(&parts, vec![studio_mesh::Material::default()], cell);
@@ -1032,15 +1050,18 @@ impl Session {
             if keys.len() < 2 {
                 return Err(format!("formula \"{src}\" is undefined over the clip"));
             }
-            let said = self.animate(&json!({"clip": id, "property": prop, "keys": keys, "ease": "linear"}))?;
-            // Say what was stored, and where the formula had no value: the
-            // property holds still over those moments.
-            let skipped = match undefined.as_slice() {
+            self.animate(&json!({"clip": id, "property": prop, "keys": keys, "ease": "linear"}))?;
+            // Written is every sample taken; kept is what the track holds.
+            // Where the formula had no value the property holds still.
+            let mut tally = super::craft::KeyTally::new(n);
+            let hold = match undefined.as_slice() {
                 [] => String::new(),
-                [first, .., last] => format!(" ({} of {n} samples undefined, skipped, from {first:.2} s to {last:.2} s: the property holds still there)", undefined.len()),
-                [only] => format!(" (1 of {n} samples undefined, skipped, at {only:.2} s)"),
+                [first, .., last] => format!(" (undefined from {first:.2} s to {last:.2} s: the property holds still there)"),
+                [only] => format!(" (undefined at {only:.2} s: the property holds still there)"),
             };
-            return Ok(format!("{prop} follows {src} over {dur:.2} s: {said}{skipped}"));
+            tally.lose(undefined.len(), &format!("undefined, skipped{hold}"));
+            tally.settle(self.keys_on(id, prop), super::craft::SAME_MOMENT);
+            return Ok(format!("{prop} follows {src} over {dur:.2} s: {}", tally.say()));
         }
         let spec = op.get("curve").ok_or("animate needs \"keys\", \"curve\" or \"formula\"")?;
         let mut o = match spec {
@@ -1058,6 +1079,7 @@ impl Session {
         let loops = opt("loops", &mut o).and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.05, 100.0);
         let orient = opt("orient", &mut o).and_then(|v| v.as_bool()).unwrap_or(false);
         let centre = opt("centre", &mut o).or(opt("center", &mut o));
+        let timing = opt("timing", &mut o).and_then(|v| v.as_str().map(str::to_owned));
         let keys_n = opt("keys", &mut o).and_then(|v| v.as_f64()).map_or((dur * fps).ceil() as usize + 1, |k| k as usize).clamp(2, MAX_KEYS);
         let mc = self.model_clip(id).ok_or("that clip is gone")?;
         let here = [mc.transform.position.x, mc.transform.position.y, mc.transform.position_z];
@@ -1070,6 +1092,7 @@ impl Session {
         };
         // The path in canvas px about its centre: (x, y down, depth).
         let three_d = o.contains_key("attractor") || o.contains_key("z");
+        let mut transform = String::new();
         let (path, closed, evals): (Vec<[f64; 3]>, bool, u64) = if three_d {
             let size = o.get("size").and_then(Value::as_f64).unwrap_or(400.0);
             let pts: Vec<[f64; 3]> = if o.contains_key("attractor") {
@@ -1090,15 +1113,32 @@ impl Session {
             };
             let (lo, hi) = bounds3(&pts);
             let span = (0..3).map(|i| hi[i] - lo[i]).fold(1e-12f64, f64::max);
-            let c = [0, 1, 2].map(|i| (lo[i] + hi[i]) * 0.5);
-            let k = size / span;
+            // Absolute by default: `scale` px per formula unit about the
+            // formula's origin. Only a given `size` fits the curve to a
+            // size about its own bounding-box centre.
+            let (c, k) = match o.get("size").and_then(Value::as_f64) {
+                Some(size) => {
+                    let c = [0, 1, 2].map(|i| (lo[i] + hi[i]) * 0.5);
+                    transform = format!("fitted to size {size} px about the curve's own bounding-box centre {:?} (formula units), which was subtracted", c.map(|v| (v * 1000.0).round() / 1000.0));
+                    (c, size / span)
+                }
+                None => {
+                    let k = o.get("scale").and_then(Value::as_f64).unwrap_or(100.0);
+                    transform = format!("absolute: {k} px per formula unit about the formula's origin, no re-centring");
+                    ([0.0; 3], k)
+                }
+            };
             // Formula space (z up, y away) to the canvas (y down) and depth.
             let px: Vec<[f64; 3]> = pts.iter().map(|p| [(p[0] - c[0]) * k, -(p[2] - c[2]) * k, (p[1] - c[1]) * k]).collect();
             (px, false, pts.len() as u64 * 3)
         } else {
-            if !o.contains_key("size") && !o.contains_key("scale") {
-                o.insert("size".into(), json!(300));
-            }
+            // No default fit: without `size` the curve keeps its own units
+            // (`scale` px per unit, 100 unless given) about the formula's origin.
+            transform = match (o.get("size").and_then(Value::as_f64), o.get("scale").and_then(Value::as_f64)) {
+                (Some(sz), _) => format!("fitted to size {sz} px about the curve's own bounding-box centre, which was subtracted"),
+                (None, Some(k)) => format!("absolute: {k} px per formula unit about the formula's origin, no re-centring"),
+                (None, None) => "absolute: 100 px per formula unit about the formula's origin, no re-centring (size fits it instead)".into(),
+            };
             let l = studio_vector::curve::make(&o, 0.0, &|k, d| o.get(k).and_then(Value::as_f64).unwrap_or(d))?;
             let (pts, closed) = l.lines.into_iter().max_by_key(|(p, _)| p.len()).ok_or("the curve has no points")?;
             (pts.into_iter().map(|p| [p[0], p[1], 0.0]).collect(), closed, l.evals)
@@ -1112,6 +1152,21 @@ impl Session {
         let mut acc = vec![0.0];
         for w in ring.windows(2) {
             acc.push(acc[acc.len() - 1] + d3(w[0], w[1]));
+        }
+        let arc_total = acc[acc.len() - 1].max(1e-9);
+        // The formula's own timing: time runs along the parameter u, so a
+        // point is where the formula puts it at that moment. `even` spaces
+        // points by length instead (and is the way for a drawn outline).
+        let by_formula = match timing.as_deref() {
+            Some("even") | Some("length") => false,
+            Some("formula") => true,
+            None => !(o.contains_key("attractor") || o.contains_key("lsystem") || o.contains_key("fourier") || o.contains_key("implicit") || o.get("preset").and_then(Value::as_str).is_some_and(|n| studio_vector::curve::IMPLICIT.iter().any(|p| p.0 == n) || studio_vector::curve::LSYSTEMS.iter().any(|p| p.0 == n))),
+            Some(other) => return Err(format!("timing \"{other}\": formula (keeps the formula's own pace) or even (equal length per second)")),
+        };
+        if by_formula {
+            for (k, a) in acc.iter_mut().enumerate() {
+                *a = k as f64;
+            }
         }
         let total = acc[acc.len() - 1].max(1e-9);
         let at_len = |s: f64| {
@@ -1153,7 +1208,7 @@ impl Session {
         if orient {
             said.push(self.animate(&json!({"clip": id, "property": "rotation", "keys": turns, "ease": "linear"}))?);
         }
-        Ok(format!("clip {id} follows the curve ({}{} px long, {keys_n} keys over {dur:.2} s, {loops} time{}; {evals} formula evaluations): {}", if three_d { "3D, " } else { "" }, total.round(), if loops == 1.0 { "" } else { "s" }, said.join("; ")))
+        Ok(format!("clip {id} follows the curve ({}{} px long, {keys_n} keys over {dur:.2} s, {loops} time{}; {evals} formula evaluations; transform: {transform}; timing: {}): {}", if three_d { "3D, " } else { "" }, arc_total.round(), if loops == 1.0 { "" } else { "s" }, if by_formula { "the formula's own" } else { "even speed along the length" }, said.join("; ")))
     }
 }
 
@@ -1292,6 +1347,29 @@ mod tests {
 
     fn last(s: &Session) -> u32 {
         s.doc.project.clips.iter().map(|c| c.id).max().unwrap()
+    }
+
+    /// A bake keeps absolute units and the formula's pace, and says so.
+    #[test]
+    fn a_curve_bake_keeps_units_and_reports_the_transform() {
+        let mut s = Session::new(crate::services::project::new_custom("Bake", 640, 360, 30.0));
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            s.edit(&[json!({"op": "card", "colour": "#ff0000", "at": 0, "duration": 2})], "card", false).unwrap();
+            ids.push(s.doc.project.clips.iter().map(|c| c.id).max().unwrap());
+        }
+        let r = s.edit(&[json!({"op": "animate", "clip": ids[0], "property": "position", "curve": {"x": "2*cos(u)", "y": "sin(u)", "u": [0, "tau"], "keys": 5}})], "c", false).unwrap();
+        let said = r.to_string();
+        assert!(said.contains("absolute: 100 px per formula unit") && said.contains("timing: the formula's own"), "{said}");
+        // Every object keeps its own place: no per-object re-centring.
+        let r2 = s.edit(&[json!({"op": "animate", "clip": ids[1], "property": "position", "curve": {"x": "u", "y": "0", "u": [3, 5], "keys": 3}})], "c", false).unwrap();
+        assert!(r2.to_string().contains("no re-centring"));
+        let c = s.model_clip(ids[1]).unwrap();
+        let tr = c.keyframes.get("transform.position").unwrap();
+        let xs: Vec<f64> = tr.keys.iter().filter_map(|k| match &k.value { m::Value::Point(p) => Some(p.x), _ => None }).collect();
+        assert!((xs[xs.len() - 1] - xs[0] - 200.0).abs() < 1.0, "u runs 3..5 at 100 px per unit: {xs:?}");
+        let sized = s.edit(&[json!({"op": "animate", "clip": ids[0], "property": "position", "curve": {"x": "2*cos(u)", "y": "sin(u)", "size": 300, "keys": 5}})], "c", false).unwrap();
+        assert!(sized.to_string().contains("fitted to size 300"), "{sized}");
     }
 
     #[test]
