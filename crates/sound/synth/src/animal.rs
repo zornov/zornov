@@ -5,7 +5,9 @@
 //! vocal folds (a pitch that glides, shakes and roughens) with breath noise,
 //! run through resonances that move like a mouth opening and closing. Each
 //! call is a handful of syllables with a pitch contour and three formants.
-//! The formant numbers are typical of the species, not measurements of one
+//! Breath calls (a bear's huff, a snort) are unvoiced: turbulent noise,
+//! tilted down as breath noise is, through the same moving formants. The
+//! formant numbers are typical of the species, not measurements of one
 //! animal.
 
 use crate::dsp::*;
@@ -25,7 +27,7 @@ pub struct Syl {
     pub amp: f32,
     /// Roughness: rate (Hz) and depth (0..1) of an amplitude flutter, as in a growl.
     pub rough: (f32, f32),
-    /// Breath noise 0..1.
+    /// Breath noise 0..1; 1 is unvoiced (breath alone: a huff, a snort).
     pub noise: f32,
     /// Pitch wobble: rate (Hz) and depth (cents).
     pub vib: (f32, f32),
@@ -232,6 +234,36 @@ pub const SPECIES: &[Species] = &[
         ] }],
     },
     Species {
+        name: "bear",
+        words: &["bear", "grizzly", "brown bear", "black bear", "polar bear", "bruin"],
+        calls: &[
+            // A long vocal tract (F1 near 400 Hz, formants ~650 Hz apart)
+            // over a low, rough voice.
+            Call { name: "growl", words: &["growl", "snarl", "grumble", "rumble", "call"], syls: &[
+                syl(0.0, 1.4, [62.0, 74.0, 56.0], [420.0, 470.0], [1020.0, 1080.0], [1880.0, 1820.0], 0.95, (22.0, 0.85), 0.35),
+            ] },
+            // Forced breath out through the mouth, twice: unvoiced.
+            Call { name: "huff", words: &["huff", "huffs", "huffing", "chuff", "blow", "exhale", "breath", "breathing", "pant", "panting"], syls: &[
+                syl(0.0, 0.24, [80.0, 75.0, 70.0], [400.0, 340.0], [980.0, 900.0], [1820.0, 1750.0], 0.95, (16.0, 0.3), 1.0),
+                syl(0.36, 0.2, [80.0, 75.0, 70.0], [380.0, 330.0], [950.0, 880.0], [1800.0, 1740.0], 0.75, (16.0, 0.3), 1.0),
+            ] },
+            // Through the nose: lower, narrower, the nostrils fluttering.
+            Call { name: "snort", words: &["snort", "snorts", "snorting", "sniff", "sniffing", "snuffle"], syls: &[
+                syl(0.0, 0.17, [70.0, 60.0, 50.0], [300.0, 290.0], [880.0, 840.0], [1900.0, 1820.0], 0.95, (38.0, 0.8), 1.0),
+            ] },
+            Call { name: "roar", words: &["roar", "bellow", "bawl"], syls: &[
+                syl(0.0, 1.6, [110.0, 165.0, 80.0], [560.0, 460.0], [1150.0, 960.0], [2100.0, 1900.0], 0.95, (30.0, 0.6), 0.4),
+            ] },
+        ],
+    },
+    Species {
+        name: "rabbit",
+        words: &["rabbit", "bunny", "hare", "rabbits", "bunnies", "hares"],
+        calls: &[Call { name: "squeal", words: &["squeal", "scream", "shriek", "call"], syls: &[
+            wob(syl(0.0, 0.35, [1300.0, 1700.0, 1200.0], [1000.0, 1150.0], [2500.0, 2700.0], [3800.0, 3800.0], 0.8, NONE, 0.2), (7.0, 40.0), NONE),
+        ] }],
+    },
+    Species {
         name: "mouse",
         words: &["mouse", "rat", "squeak", "hamster", "rodent"],
         calls: &[Call { name: "squeak", words: &["squeak", "call"], syls: &[
@@ -269,6 +301,47 @@ pub fn find(text: &str) -> Option<(&'static Species, &'static Call)> {
     Some((sp, call))
 }
 
+/// A species and every call of it the text names, in the order named
+/// ("a bear's huff and snort" is a huff then a snort); the species' usual
+/// call when none is named.
+pub fn find_calls(text: &str) -> Option<(&'static Species, Vec<&'static Call>)> {
+    let (sp, _) = find(text)?;
+    let t = format!(" {} ", text.to_lowercase().replace([',', '.', ';', ':', '\'', '\u{2019}'], " "));
+    let mut named: Vec<(usize, &Call)> = sp
+        .calls
+        .iter()
+        .filter_map(|c| c.words.iter().filter(|w| **w != "call").filter_map(|w| [format!(" {w} "), format!(" {w}s "), format!(" {w}ing "), format!(" {w}ed ")].iter().filter_map(|p| t.find(p.as_str())).min()).min().map(|at| (at, c)))
+        .collect();
+    named.sort_by_key(|n| n.0);
+    let calls: Vec<&Call> = if named.is_empty() { vec![&sp.calls[0]] } else { named.into_iter().map(|n| n.1).collect() };
+    Some((sp, calls))
+}
+
+/// Whether the text names one of the species' calls (rather than only
+/// the animal, as in "a bear walking").
+pub fn names_a_call(text: &str) -> bool {
+    let Some((sp, _)) = find(text) else { return false };
+    let t = format!(" {} ", text.to_lowercase().replace([',', '.', ';', ':', '\'', '\u{2019}'], " "));
+    sp.calls.iter().flat_map(|c| c.words.iter()).filter(|w| **w != "call").any(|w| [format!(" {w} "), format!(" {w}s "), format!(" {w}ing "), format!(" {w}ed ")].iter().any(|p| t.contains(p.as_str())))
+}
+
+/// How heavy an animal is on its feet, 0 (a mouse) to 1 (a bear, a
+/// horse), and whether it walks on four feet.
+pub fn body(sp: &Species) -> (f32, bool) {
+    match sp.name {
+        "mouse" | "frog" => (0.02, true),
+        "hen" | "duck" | "crow" | "owl" | "rooster" => (0.08, false),
+        "rabbit" => (0.12, true),
+        "cat" => (0.2, true),
+        "dog" => (0.45, true),
+        "sheep" | "pig" => (0.6, true),
+        "donkey" => (0.75, true),
+        "lion" => (0.85, true),
+        "horse" | "cow" | "bear" | "elephant" => (1.0, true),
+        _ => (0.5, true),
+    }
+}
+
 /// Roughly where a call's energy sits: the mean of its three formants over
 /// its syllables, weighted by length, and its mean pitch.
 pub fn mean_formants(call: &Call) -> ([f32; 3], f32) {
@@ -292,6 +365,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 fn render_syl(s: &Syl, scale: f32, form: f32, rng: &mut Rng) -> Vec<f32> {
     let total = s.dur + 0.04;
     let len = frames(total);
+    let unvoiced = s.noise >= 1.0;
     let mut saw = Saw::at(rng.unit());
     let mut pul = Pulse::at(rng.unit());
     let mut filters = [Svf::new(), Svf::new(), Svf::new()];
@@ -309,15 +383,17 @@ fn render_syl(s: &Syl, scale: f32, form: f32, rng: &mut Rng) -> Vec<f32> {
         let f = f0 * cents(s.vib.1 * (std::f32::consts::TAU * s.vib.0 * t).sin()) * (1.0 + walk);
         let glottal = 0.65 * saw.tick(f) + 0.45 * pul.tick(f, 0.22);
         let n = rng.signed();
-        let src = lp.tick(glottal, f * 12.0 + 2000.0) * (1.0 - 0.5 * s.noise) + n * s.noise;
+        // Unvoiced: breath alone, its turbulence falling off above ~1.5 kHz.
+        let src = if unvoiced { lp.tick(n, 1500.0) * 3.0 } else { lp.tick(glottal, f * 12.0 + 2000.0) * (1.0 - 0.5 * s.noise) + n * s.noise };
         let mut y = 0.0;
         for (k, flt) in filters.iter_mut().enumerate() {
             let fc = lerp(s.fm[k][0], s.fm[k][1], p) * form;
             let q = [5.0, 7.0, 8.0][k];
             y += flt.tick(&SvfCoef::new(fc, q), src).bp * gains[k];
         }
-        // Keep a little of the raw source so the pitch stays clear.
-        y = y * 1.6 + src * 0.12;
+        // Keep a little of the raw source so the pitch stays clear (breath
+        // has no pitch to keep).
+        y = y * 1.6 + if unvoiced { 0.0 } else { src * 0.12 };
         let rough = if s.rough.1 > 0.0 { 1.0 - s.rough.1 * 0.5 * (1.0 + (std::f32::consts::TAU * s.rough.0 * t).sin()) } else { 1.0 };
         let warble = if s.warble.1 > 0.0 { 1.0 - s.warble.1 * 0.5 * (1.0 + (std::f32::consts::TAU * s.warble.0 * t).sin()) } else { 1.0 };
         let env = smooth(t, att) * smooth(total - t, rel);

@@ -8,7 +8,11 @@
 //! weighted by its size in the character bible; swims paddle, pecks tap.
 //! One-off action sounds (splash, rustle, thud, flap, swish) are made to
 //! measure at a moment. Every act is remembered on the clip, so footsteps
-//! can be laid (or laid again on another ground) at any time.
+//! can be laid (or laid again on another ground) at any time. Contacts can
+//! also be given as times (`contacts`), from keys or a gait worked out
+//! elsewhere. Steps and landings are `studio-synth`'s physical footfalls:
+//! the foot's weight and the ground (turf pressed down, not a clap), on
+//! padded paws for an animal on four feet.
 
 use super::synth::{Band, Noise, RATE};
 use super::{Session, f, micros, secs};
@@ -123,16 +127,61 @@ fn hit(l: &mut [f32], r: &mut [f32], at: usize, kind: Hit, surface: &str, w: f32
     }
 }
 
+/// Who is walking: how heavy a foot is (0..1) and whether it is a paw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Feet {
+    /// 0 a mouse .. 1 a bear.
+    pub weight: f32,
+    /// Padded paws (an animal on four feet).
+    pub paws: bool,
+}
+
+impl Feet {
+    /// Feet for a character of `size` (1 a person; bigger is heavier).
+    pub fn of(size: f32, paws: bool) -> Feet {
+        Feet { weight: (0.45 * size.max(0.0).sqrt()).clamp(0.03, 1.0), paws }
+    }
+}
+
 /// A foley track `dur` seconds long with `hits` at their times.
 pub fn track(hits: &[(f64, f32, Hit)], dur: f64, surface: &str, size: f32, pan: f32, seed: u64) -> (Vec<f32>, Vec<f32>) {
+    track_for(hits, dur, surface, Feet::of(size, false), pan, seed)
+}
+
+/// A foley track for these feet: steps and landings from the physical
+/// footfall models, paddles and taps made here.
+pub fn track_for(hits: &[(f64, f32, Hit)], dur: f64, surface: &str, feet: Feet, pan: f32, seed: u64) -> (Vec<f32>, Vec<f32>) {
+    use studio_synth::foley as sf;
     let n = (dur * RATE as f64) as usize + 1;
     let (mut l, mut r) = (vec![0f32; n], vec![0f32; n]);
     let mut rng = Noise(seed | 1);
+    let mut srng = studio_synth::dsp::Rng::new(seed);
+    let ground = sf::Surface::parse(surface).unwrap_or(sf::Surface::Dirt);
+    let shoe = if feet.paws { sf::Shoe::Paw } else { sf::Shoe::Sneaker };
+    // The old size scale, for paddles and taps.
+    let size = (feet.weight / 0.45).powi(2);
     for (i, (t, w, kind)) in hits.iter().enumerate() {
         // Feet alternate a hair either side of the body.
         let p = (pan + if i % 2 == 0 { -0.04 } else { 0.04 }).clamp(0.0, 1.0);
         let jitter = 0.9 + 0.2 * rng.unit();
-        hit(&mut l, &mut r, (t * RATE as f64) as usize, *kind, surface, w * jitter, size, p, &mut rng);
+        let at = (t * RATE as f64) as usize;
+        let made = match kind {
+            Hit::Step => Some(sf::step(ground, shoe, feet.weight, (w * jitter).clamp(0.1, 1.0), &mut srng)),
+            Hit::Land => Some(sf::landing(ground, feet.weight, (w * jitter).clamp(0.1, 1.0), &mut srng)),
+            Hit::Paddle | Hit::Tap => None,
+        };
+        match made {
+            Some(x) => {
+                for (k, v) in x.iter().enumerate() {
+                    if at + k >= n {
+                        break;
+                    }
+                    l[at + k] += v * (1.0 - p).sqrt();
+                    r[at + k] += v * p.sqrt();
+                }
+            }
+            None => hit(&mut l, &mut r, at, *kind, surface, w * jitter, size, p, &mut rng),
+        }
     }
     normalise(&mut l, &mut r, 0.5);
     (l, r)
@@ -276,11 +325,48 @@ impl Session {
         }
     }
 
+    /// The feet a character walks on: paws for an animal on four feet (by
+    /// the op's `feet`, else by the character's look), weighted by size.
+    fn feet_of(&self, op: &Value, ch: Option<&studio_model::Character>, size: f32) -> Feet {
+        let said = op.get("feet").and_then(Value::as_str).map(str::to_lowercase);
+        let paws = match said.as_deref() {
+            Some("paws" | "paw" | "pads" | "animal") => true,
+            Some(_) => false,
+            None => ch.and_then(|c| studio_synth::animal::find(&format!("{} {}", c.look, c.id))).is_some_and(|(sp, _)| studio_synth::animal::body(sp).1),
+        };
+        Feet::of(size, paws)
+    }
+
     /// `foley`: footsteps (and paddles, taps, landings) for a puppet's
     /// acts, or a one-off action sound at a moment.
     pub(super) fn foley(&mut self, op: &Value) -> Result<String, String> {
         let lane = op.get("lane").cloned().unwrap_or(json!("sound"));
         let volume = f(op, "volume");
+        // Contacts given as timeline seconds: steps (or `hit`: land, tap,
+        // paddle) exactly there.
+        if let Some(cs) = op.get("contacts").and_then(Value::as_array) {
+            let mut times: Vec<f64> = cs.iter().filter_map(Value::as_f64).filter(|t| *t >= 0.0).collect();
+            if times.is_empty() {
+                return Err("foley contacts are timeline seconds, e.g. [1.0, 1.5, 2.0]".into());
+            }
+            times.sort_by(f64::total_cmp);
+            let kind = match op.get("hit").and_then(Value::as_str).unwrap_or("step") {
+                "step" => Hit::Step,
+                "land" | "landing" | "hop" => Hit::Land,
+                "tap" | "peck" => Hit::Tap,
+                "paddle" | "swim" => Hit::Paddle,
+                other => return Err(format!("foley hit \"{other}\": step, land, tap or paddle")),
+            };
+            let from = times[0];
+            let hits: Vec<(f64, f32, Hit)> = times.iter().map(|t| (t - from, 1.0, kind)).collect();
+            let size = f(op, "size").unwrap_or(1.0) as f32;
+            let feet = self.feet_of(op, None, size);
+            let (ground, why) = self.ground_at(op, micros(from) as m::Micros, None)?;
+            let dur = times[times.len() - 1] - from + 0.8;
+            let (l, r) = track_for(&hits, dur, ground, feet, 0.5, (from * 1000.0) as u64);
+            let note = self.lay(&l, &r, "foley contacts", from, &lane, volume)?;
+            return Ok(format!("{} steps on {ground} ({why}) at the contacts given, {}: {note}", hits.len(), if feet.paws { "on paws" } else { "on feet" }));
+        }
         if let Some(kind) = op.get("kind").and_then(Value::as_str) {
             let at = f(op, "at").ok_or_else(|| format!("foley {kind} needs \"at\" (timeline seconds)"))?.max(0.0);
             let size = f(op, "size").unwrap_or(1.0) as f32;
@@ -300,6 +386,7 @@ impl Session {
                 let (from, to) = (secs(mc.start as _), secs((mc.start + mc.duration) as _));
                 let hits: Vec<(f64, f32, Hit)> = steps.iter().map(|t| (t - from, 1.0, Hit::Step)).collect();
                 let size = f(op, "size").map(|s| s as f32).or_else(|| ch.as_ref().map(|c| c.size as f32)).unwrap_or(1.0);
+                let feet = self.feet_of(op, ch.as_ref(), size);
                 let w = self.doc.project.width.max(1) as f32;
                 let pan = (0.5 + mc.transform.position.x as f32 / w * 0.8).clamp(0.1, 0.9);
                 let old: Vec<u32> = self.doc.project.clips.iter().filter(|c| c.name.starts_with(&format!("foley {id} "))).map(|c| c.id).collect();
@@ -307,7 +394,7 @@ impl Session {
                     self.op(&json!({"op": "delete", "clips": old, "ripple": false}))?;
                 }
                 let (ground, why) = self.ground_at(op, micros((from + to) / 2.0) as m::Micros, Some(id))?;
-                let (l, r) = track(&hits, to - from, ground, size, pan, id as u64);
+                let (l, r) = track_for(&hits, to - from, ground, feet, pan, id as u64);
                 let note = self.lay(&l, &r, &format!("foley {id} steps"), from, &lane, volume)?;
                 let shown: Vec<String> = steps.iter().take(6).map(|t| format!("{t:.2}")).collect();
                 return Ok(format!("{} steps on {ground} ({why}) where the feet come down, at {}{}: {note}", steps.len(), shown.join(", "), if steps.len() > 6 { "…" } else { "" }));
@@ -315,6 +402,7 @@ impl Session {
             return Err(format!("clip {id} has not acted yet: a 3D figure needs `act` (a walk, run…) first; a puppet needs puppet {{clip, act: \"walk\"}} (acts are remembered for foley)"));
         }
         let size = f(op, "size").map(|s| s as f32).or_else(|| ch.as_ref().map(|c| c.size as f32)).unwrap_or(1.0);
+        let feet = self.feet_of(op, ch.as_ref(), size);
         // Pan from where the character stands.
         let w = self.doc.project.width.max(1) as f32;
         let pan = (0.5 + mc.transform.position.x as f32 / w * 0.8).clamp(0.1, 0.9);
@@ -342,7 +430,7 @@ impl Session {
             hits.sort_by(|a, b| a.0.total_cmp(&b.0));
             let at = secs(start as _) + from;
             let (ground, why) = self.ground_at(op, micros(at + dur / 2.0) as m::Micros, Some(id))?;
-            let (l, r) = track(&hits, dur, ground, size, pan, id as u64 ^ (from * 100.0) as u64);
+            let (l, r) = track_for(&hits, dur, ground, feet, pan, id as u64 ^ (from * 100.0) as u64);
             let note = self.lay(&l, &r, &format!("foley {id} {}", acts.join("+")), at, &lane, volume)?;
             said.push(format!("{} steps of {} on {ground} ({why}) at {}: {note}", hits.len(), acts.join(" + "), hits.iter().take(6).map(|(t, _, _)| format!("{:.2}", at + t)).collect::<Vec<_>>().join(", ") + if hits.len() > 6 { "…" } else { "" }));
         }
@@ -426,13 +514,64 @@ mod tests {
             spectra.push((g, diff));
         }
         let b = |g: &str| spectra.iter().find(|(x, _)| *x == g).unwrap().1;
-        assert!(b("stone") > b("dirt"), "{spectra:?}");
+        // Loose, crunchy grounds are brighter than a soft sole's tap on
+        // stone or the squelch of mud.
+        assert!(b("gravel") > b("dirt") && b("leaves") > b("stone"), "{spectra:?}");
         assert!(b("grass") > b("mud"), "{spectra:?}");
         // Bigger feet ring longer.
         let (small, _) = track(&[(0.1, 1.0, Hit::Step)], 1.0, "dirt", 0.5, 0.5, 3);
         let (big, _) = track(&[(0.1, 1.0, Hit::Step)], 1.0, "dirt", 3.0, 0.5, 3);
         let tail = |v: &[f32]| v.iter().rposition(|x| x.abs() > 0.01).unwrap_or(0);
         assert!(tail(&big) > tail(&small));
+    }
+
+    /// Spectral centroid (Hz) of a sound.
+    fn centroid(x: &[f32]) -> f32 {
+        let n = 4096;
+        let fft = studio_sound::fft::Fft::new(n);
+        let mut win = vec![0.0; n];
+        studio_sound::fft::hann(&mut win);
+        let (mut num, mut den) = (0.0f64, 0.0f64);
+        let mut pos = 0;
+        while pos + n <= x.len() {
+            let mut re: Vec<f32> = x[pos..pos + n].iter().zip(&win).map(|(a, w)| a * w).collect();
+            let mut im = vec![0.0; n];
+            fft.forward(&mut re, &mut im);
+            for k in 0..n / 2 {
+                let p = (re[k] * re[k] + im[k] * im[k]) as f64;
+                num += p * k as f64 * RATE as f64 / n as f64;
+                den += p;
+            }
+            pos += n / 2;
+        }
+        (num / den.max(1e-20)) as f32
+    }
+
+    /// Footfalls on grass laid at contacts are turf pressed by a foot, low
+    /// for a heavy animal on paws, not bright claps; a hop lands low.
+    #[test]
+    fn steps_on_grass_are_feet_not_claps() {
+        let hits: Vec<(f64, f32, Hit)> = (0..8).map(|i| (0.3 + i as f64 * 0.45, 1.0, Hit::Step)).collect();
+        let (bear, _) = track_for(&hits, 4.0, "grass", Feet::of(3.0, true), 0.5, 3);
+        let (person, _) = track_for(&hits, 4.0, "grass", Feet::of(1.0, false), 0.5, 3);
+        let (cb, cp) = (centroid(&bear), centroid(&person));
+        assert!(cb < 600.0, "a bear on grass: centroid {cb:.0} Hz");
+        assert!(cp < 1500.0 && cp > cb, "a person on grass: {cp:.0} Hz (bear {cb:.0} Hz)");
+        let lands: Vec<(f64, f32, Hit)> = (0..6).map(|i| (0.3 + i as f64 * 0.5, 0.9, Hit::Land)).collect();
+        let (hop, _) = track_for(&lands, 3.5, "grass", Feet::of(0.4, true), 0.5, 4);
+        assert!(centroid(&hop) < 800.0, "rabbit landings: {:.0} Hz", centroid(&hop));
+    }
+
+    /// Contacts given as times (from keys, a gait, another tool) are where
+    /// the steps land.
+    #[test]
+    fn keyed_contacts_lay_steps_where_they_are_given() {
+        let mut s = Session::new(crate::services::project::new_custom("Foley", 640, 360, 30.0));
+        let r = s.edit(&[json!({"op": "foley", "contacts": [1.0, 1.6, 2.2, 2.8], "surface": "grass", "size": 3, "feet": "paws"})], "x", false).unwrap();
+        let note = r["notes"][0].as_str().unwrap().to_owned();
+        assert!(note.contains("4 steps on grass"), "{note}");
+        let clip = s.doc.project.clips.iter().find(|c| c.kind == crate::view::ClipKind::Audio).unwrap().clone();
+        assert!((clip.start as f64 / 1e6 - 1.0).abs() < 0.05, "starts at the first contact: {}", clip.start);
     }
 
     #[test]

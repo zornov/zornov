@@ -184,6 +184,17 @@ fn call(s: &mut Session, tool: &str, args: Value) -> Result<String, String> {
     Ok(parts.into_iter().filter_map(|p| if let super::Content::Text(t) = p { Some(t) } else { None }).collect::<Vec<_>>().join("\n"))
 }
 
+/// A tool's JSON answer: the first text part that parses. Notes that
+/// follow it (the outside-content note after media with speech in it)
+/// are not part of the answer.
+fn call_json(s: &mut Session, tool: &str, args: Value) -> Result<Value, String> {
+    let parts = s.run(tool, &args)?;
+    parts
+        .into_iter()
+        .find_map(|p| if let super::Content::Text(t) = p { serde_json::from_str::<Value>(&t).ok() } else { None })
+        .ok_or_else(|| format!("{tool} gave no JSON answer"))
+}
+
 fn setup_music_video(s: &mut Session, dir: &Path) -> Result<(), String> {
     let media = dir.join("Footage");
     std::fs::create_dir_all(&media).map_err(|e| e.to_string())?;
@@ -318,8 +329,7 @@ fn score_music_video(s: &mut Session, run: &Run) -> Vec<Check> {
     let song = clips.iter().find(|c| c.kind == ClipKind::Audio);
     // Beats of the song, on the timeline.
     let beats: Vec<f64> = song
-        .and_then(|c| call(s, "listen", json!({"clip": c.id})).ok())
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|c| call_json(s, "listen", json!({"clip": c.id})).ok())
         .map(|v| v["beats"].as_array().cloned().unwrap_or_default().iter().filter_map(Value::as_f64).collect())
         .unwrap_or_default();
     let cuts: Vec<f64> = video.iter().map(|c| secs(c.start)).filter(|t| *t > 0.05).collect();
@@ -841,6 +851,62 @@ mod tests {
         assert!(beat.detail.contains("not scored"), "{beat:?}");
     }
 
+    /// A 120 bpm song, 20 s, written as a WAV: kick on the beat, snare on
+    /// two and four, eighth hats, a bass and a pad, mastered loud.
+    fn song_wav(path: &Path) {
+        let rate = 44_100usize;
+        let mut x = vec![0f32; rate * 20];
+        let mut seed = 9u32;
+        for b in 0..40 {
+            let s0 = b * rate / 2;
+            for k in 0..rate / 3 {
+                let u = k as f32 / rate as f32;
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let noise = (seed >> 8) as f32 / (1u32 << 23) as f32 - 1.0;
+                let mut v = 0.9 * (std::f32::consts::TAU * (45.0 + 70.0 * (-u / 0.03).exp()) * u).sin() * (-u / 0.12).exp();
+                if b % 2 == 1 {
+                    v += 0.5 * noise * (-u / 0.05).exp();
+                }
+                v += 0.15 * noise * (-(u % 0.25) / 0.012).exp();
+                if s0 + k < x.len() {
+                    x[s0 + k] += v;
+                }
+            }
+        }
+        for (i, v) in x.iter_mut().enumerate() {
+            let t = i as f32 / rate as f32;
+            *v += 0.12 * ((std::f32::consts::TAU * 220.0 * t).sin() + (std::f32::consts::TAU * 329.6 * t).sin()) + 0.2 * (2.0 * (t * 55.0).fract() - 1.0);
+            *v = (2.0 * *v).tanh() * 0.8;
+        }
+        let wav = studio_media::wav::Wav { sample_rate: rate as u32, channels: 1, samples: x };
+        std::fs::write(path, studio_media::wav::encode_pcm16(&wav)).unwrap();
+    }
+
+    /// The scorer hears the song's beats from `listen`'s answer, whatever
+    /// notes follow that answer (after media with speech in it, the
+    /// outside-content note comes as a second part: joined to the answer
+    /// it is not JSON, and every beat was lost).
+    #[test]
+    fn the_scorer_hears_the_beats_of_a_song() {
+        let dir = std::env::temp_dir().join(format!("studio-eval-beats-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let song = dir.join("song.wav");
+        song_wav(&song);
+        let mut s = blank();
+        call(&mut s, "import", json!({"paths": [song.display().to_string()]})).unwrap();
+        call(&mut s, "edit", json!({"ops": [{"op": "place", "media": "song", "at": 0}]})).unwrap();
+        let checks = score_music_video(&mut s, &Run::default());
+        let beat = named(&checks, "on the beat");
+        assert_eq!(beat.weight, 3.0, "{beat:?}");
+        let heard: usize = beat.detail.split('(').nth(1).and_then(|d| d.split(' ').next()).and_then(|n| n.parse().ok()).unwrap_or(0);
+        assert!(heard >= 36, "{beat:?}");
+        // A tool answer followed by a note still reads as the answer.
+        let id = s.doc.project.clips.iter().find(|c| c.kind == ClipKind::Audio).unwrap().id;
+        let v = call_json(&mut s, "listen", json!({"clip": id})).unwrap();
+        assert!(v["bpm"].as_f64().is_some_and(|b| (b - 120.0).abs() < 2.0), "{}", v["bpm"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Two evals cannot write into the same folder at once: one would
     /// wipe the other's live project.
     #[test]
@@ -862,3 +928,4 @@ mod tests {
         assert_eq!(tasks().len(), 5);
     }
 }
+

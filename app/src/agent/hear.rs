@@ -286,6 +286,65 @@ mod listen_tests {
         v.iter().find_map(|c| if let Content::Text(t) = c { serde_json::from_str(t).ok() } else { None }).unwrap()
     }
 
+    /// `listen` on a clip hears the clip as it plays: its volume, its EQ
+    /// and its effects, not the file underneath. `from` / `to` are timeline
+    /// seconds, as the answer's times are.
+    #[test]
+    fn listen_to_a_clip_hears_its_volume_and_effects() {
+        let dir = std::env::temp_dir().join(format!("studio-hear-fx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bed = music(&dir);
+        let mut s = Session::new(services::project::new_custom("Hear", 640, 360, 30.0));
+        let v = text(s.call("import", &json!({"paths": [bed.to_string_lossy()]})).unwrap());
+        let media = v["media"][0].as_u64().unwrap();
+        let r = s.edit(&[json!({"op": "place", "media": media, "at": 2.0})], "place", false).unwrap();
+        let id = r["changed"]["added"][0]["id"].as_u64().unwrap();
+        let raw = s.listen(&json!({"clip": id})).unwrap();
+        // 20 dB down and the top cut away at 300 Hz.
+        s.edit(&[json!({"op": "set", "clip": id, "volume": -20})], "down", false).unwrap();
+        s.edit(&[json!({"op": "audio", "clip": id, "effect": "eq", "params": {"low_pass": 300}})], "dull", false).unwrap();
+        let done = s.listen(&json!({"clip": id})).unwrap();
+        let (a, b) = (raw["average_db"].as_f64().unwrap(), done["average_db"].as_f64().unwrap());
+        assert!(a - b > 20.0, "average {a} dB → {b} dB");
+        assert_eq!(done["brightness"], "dark, bass-heavy", "{done}");
+        assert!(done["listened_to"].as_str().unwrap().contains("as it plays"), "{done}");
+        // Timeline seconds: 4..6 s of the timeline is 2..4 s into the clip.
+        let part = s.listen(&json!({"clip": id, "from": 4.0, "to": 6.0})).unwrap();
+        assert!((part["duration"].as_f64().unwrap() - 2.0).abs() < 0.02, "{part}");
+        assert!(part["loudest_at"].as_f64().is_some_and(|t| (4.0..=6.0).contains(&t)), "{part}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A film with only music, a riser and a night of crickets has no
+    /// speech for QC to want captions for; a voice over it does.
+    #[test]
+    fn music_risers_and_crickets_are_not_speech_to_qc() {
+        let dir = std::env::temp_dir().join(format!("studio-hear-qc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mono = |(l, r): (Vec<f32>, Vec<f32>)| -> Vec<f32> { l.iter().zip(&r).map(|(a, b)| 0.5 * (a + b)).collect() };
+        let rate = crate::agent::synth::RATE;
+        let riser = dir.join("riser.wav");
+        wav(&riser, rate, &mono(crate::agent::synth::make("riser", 3.0, 1).unwrap()));
+        let night = dir.join("night.wav");
+        wav(&night, rate, &mono(crate::agent::synth::ambience("crickets", 10.0, 2).unwrap()));
+        let bed = music(&dir);
+        let mut s = Session::new(services::project::new_custom("QC", 640, 360, 30.0));
+        let v = text(s.call("import", &json!({"paths": [bed.to_string_lossy(), riser.to_string_lossy(), night.to_string_lossy()]})).unwrap());
+        let ids: Vec<u64> = v["media"].as_array().unwrap().iter().map(|m| m.as_u64().unwrap()).collect();
+        s.edit(&[json!({"op": "place", "media": ids[0], "at": 0}), json!({"op": "place", "media": ids[1], "at": 9}), json!({"op": "place", "media": ids[2], "at": 12})], "place", false).unwrap();
+        let end = s.doc.project.duration();
+        let heard: f64 = crate::deliver_run::speech_spans(&s.doc, 0, end).iter().map(|(a, b)| b - a).sum();
+        assert!(heard < 1.0, "{heard:.1} s of speech in a film of music, a riser and crickets");
+        if let Some(talk) = speech(&dir) {
+            let v = text(s.call("import", &json!({"paths": [talk.to_string_lossy()]})).unwrap());
+            s.edit(&[json!({"op": "place", "media": v["media"][0], "at": 2})], "talk", false).unwrap();
+            let end = s.doc.project.duration();
+            let said: f64 = crate::deliver_run::speech_spans(&s.doc, 0, end).iter().map(|(a, b)| b - a).sum();
+            assert!(said > 4.0, "a voice over it: {said:.1} s of speech");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn listen_hears_speech_and_the_mix_balance() {
         let dir = std::env::temp_dir().join(format!("studio-hear-{}", std::process::id()));

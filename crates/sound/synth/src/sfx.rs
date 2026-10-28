@@ -11,12 +11,15 @@
 //! material, era). Several sounds in one description are layered into one
 //! passage; "then" puts them in order. Every call with a different `variant`
 //! makes a different take. A description no model's words match is given
-//! the nearest model (by its words, its summary and near spellings), and
-//! the reply says which.
+//! a model only when one of its words is a near spelling of that model's own
+//! word (or names its family), and the reply says which; anything less would
+//! be a different kind of sound, so it is refused with the nearest models.
+//! An animal named with a walk or a hop is the walker (padded paws, its
+//! weight, four feet), not a call.
 
 use crate::animal;
 use crate::dsp::*;
-use crate::foley::{Shoe, Surface, Walk, walk};
+use crate::foley::{Shoe, Surface, Walk, landing, walk};
 use crate::instrument::{boom, riser};
 use crate::level;
 use std::f32::consts::{PI, TAU};
@@ -75,6 +78,7 @@ pub enum Kind {
     Boom,
     Ui,
     Steps,
+    Hops,
     Animal,
     Thunder,
     Explosion,
@@ -152,7 +156,8 @@ pub const MODELS: &[ModelInfo] = &[
     m!("riser", &["riser", "rise", "buildup", "build-up", "build up", "tension riser", "uplifter", "swell", "sweep up"], "synth riser with a tail", "a rising sweep to a peak, then a tail", Kind::Riser, false),
     m!("boom", &["boom", "sub drop", "impact boom", "cinematic hit", "stinger", "drop"], "cinematic boom", "a low drop with a long tail", Kind::Boom, false),
     m!("ui", &["beep", "blip", "ding", "chime", "notification", "ui", "pop", "alert", "ping", "bleep", "error sound", "success sound", "confirm", "bloop", "boop", "ui click", "menu click", "interface", "app sound", "mouse click", "tap sound", "digital click", "select sound", "hover sound"], "notification ding", "interface sounds: clicks, taps, blips, pops, chimes, alerts", Kind::Ui, false),
-    m!("footsteps", &["footsteps", "footstep", "steps", "walking", "walks", "walk", "running", "runs", "tiptoe", "tiptoeing", "marching", "stomping", "treading", "pacing", "strolling", "sneaking", "footfalls", "jogging"], "footsteps on gravel", "foot falls on a surface, each different", Kind::Steps, false),
+    m!("footsteps", &["footsteps", "footstep", "steps", "walking", "walks", "walk", "running", "runs", "tiptoe", "tiptoeing", "marching", "stomping", "treading", "pacing", "strolling", "sneaking", "footfalls", "jogging", "scurrying", "scurry", "scampering", "scamper", "padding", "prowling", "prowls", "lumbering", "lumbers", "pawsteps"], "footsteps on gravel", "foot falls on a surface, each different", Kind::Steps, false),
+    m!("hops", &["hop", "hops", "hopping", "hopped", "bounding", "bounds", "leaping", "leaps", "jumping", "jumps"], "a rabbit hopping on grass", "an animal hopping: fore feet then hind feet land, soft and low", Kind::Hops, false),
     m!("thunder", &["thunder", "thunderclap", "lightning", "rumble", "rumbling"], "distant thunder", "a crack and a rolling rumble", Kind::Thunder, false),
     m!("explosion", &["explosion", "explode", "explodes", "blast", "detonation", "bomb", "grenade", "dynamite"], "an explosion", "a blast, a boom and debris", Kind::Explosion, false),
     m!("gunshot", &["gunshot", "gunshots", "gun", "rifle", "pistol", "shot", "shotgun", "gunfire", "shoots"], "a gunshot", "a crack with a room or outdoor tail", Kind::Gunshot, false),
@@ -190,6 +195,9 @@ struct Params {
     period: bool,
     intensity: f32,
     text: String,
+    /// The animal walking or hopping, when one is: how heavy (0..1) and
+    /// whether on four feet.
+    walker: Option<(f32, bool)>,
 }
 
 /// The materials of struck things: (name, words, base Hz range, modes as
@@ -276,6 +284,7 @@ impl Params {
             period: ["period", "vintage", "old", "1920s", "1930s", "1940s", "antique", "old-fashioned", "historic", "victorian", "nineteen-thirties", "thirties", "twenties", "forties", "retro", "classic", "old-time"].iter().any(|x| has_word(&all, x)),
             intensity,
             text: w,
+            walker: None,
         }
     }
     /// Distance with a default for the kind of sound.
@@ -1532,18 +1541,40 @@ fn mk_ui(rng: &mut Rng, p: &Params) -> Vec<f32> {
 }
 
 fn mk_steps(rng: &mut Rng, p: &Params, dur: f32, seed: u64) -> Stereo {
-    let pace = (1.1 + 2.6 * p.speed).clamp(0.9, 4.2);
+    // Four feet fall half as far apart again as two.
+    let four = p.walker.is_some_and(|w| w.1);
+    let pace = (1.1 + 2.6 * p.speed).clamp(0.9, 4.2) * if four { 1.4 } else { 1.0 };
     let steps = p.count.unwrap_or(((dur - 0.3) * pace).max(2.0) as usize);
     let w = Walk {
         surface: p.surface.unwrap_or(Surface::Dirt),
-        shoe: p.shoe.unwrap_or(if p.size > 0.7 { Shoe::Boot } else { Shoe::Sneaker }),
+        shoe: if p.walker.is_some() { Shoe::Paw } else { p.shoe.unwrap_or(if p.size > 0.7 { Shoe::Boot } else { Shoe::Sneaker }) },
         steps,
         pace,
-        weight: 0.25 + 0.7 * p.size,
-        force: 0.55 + 0.4 * p.speed,
+        weight: p.walker.map_or(0.25 + 0.7 * p.size, |w| w.0),
+        force: (0.55 + 0.4 * p.speed) * if p.intensity < 0.5 { 0.8 } else { 1.0 },
+        four_feet: four,
     };
     let (s, _) = walk(&w, seed ^ rng.u64());
     s
+}
+
+/// An animal hopping: a landing every hop (fore feet, then hind feet), a
+/// little irregular, softer when the words say so. Without an animal named
+/// the hopper is rabbit-sized.
+fn mk_hops(rng: &mut Rng, p: &Params, dur: f32) -> Stereo {
+    let weight = p.walker.map_or(0.15 + 0.3 * (p.size - 0.5).max(0.0), |w| w.0);
+    let rate = 1.4 + 1.6 * p.speed;
+    let surface = p.surface.unwrap_or(Surface::Grass);
+    let n = p.count.unwrap_or(((dur - 0.3) * rate).max(1.0) as usize).clamp(1, 200);
+    let mut out = Stereo::silent(frames(dur.max(n as f32 / rate + 0.5)));
+    let mut t = rng.range(0.03, 0.1);
+    for i in 0..n {
+        let force = (0.45 + 0.5 * p.intensity) * rng.range(0.8, 1.0);
+        let l = landing(surface, weight, force, rng);
+        out.add_mono(&l, frames(t), 1.0, if i % 2 == 0 { -0.08 } else { 0.08 });
+        t += rng.range(0.85, 1.2) / rate;
+    }
+    out
 }
 
 fn mk_thunder(rng: &mut Rng, p: &Params, dur: f32) -> Stereo {
@@ -1765,6 +1796,7 @@ fn natural(kind: Kind, p: &Params) -> f32 {
         Kind::Boom => 3.0,
         Kind::Ui => 0.8,
         Kind::Steps => p.count.map_or(5.0, |c| c as f32 / (1.1 + 2.6 * p.speed) + 0.6),
+        Kind::Hops => p.count.map_or(4.0, |c| c as f32 / (1.4 + 1.6 * p.speed) + 0.5),
         Kind::Animal => 1.5,
         Kind::Thunder => 5.0,
         Kind::Explosion => 3.0,
@@ -1797,10 +1829,10 @@ fn layers_of(desc: &str) -> Vec<Layer> {
     let padded = format!(" {} ", lower.replace(',', " , "));
     let mut hits: Vec<(usize, Kind, String)> = Vec::new();
     // Animals first: they have their own vocabulary.
-    if let Some((sp, call)) = animal::find(&lower) {
+    if let Some((sp, calls)) = animal::find_calls(&lower) {
         // Where does the species word sit?
         let pos = sp.words.iter().filter_map(|w| padded.find(&format!(" {w} ")).or_else(|| padded.find(&format!(" {w}s "))).or_else(|| padded.find(&format!(" {w}ing ")))).min().unwrap_or(0);
-        hits.push((pos, Kind::Animal, format!("{} {}", sp.name, call.name)));
+        hits.push((pos, Kind::Animal, format!("{} {}", sp.name, calls.iter().map(|c| c.name).collect::<Vec<_>>().join(" and "))));
     }
     for m in MODELS.iter().filter(|m| m.kind != Kind::Animal) {
         let mut best: Option<usize> = None;
@@ -1843,6 +1875,17 @@ fn layers_of(desc: &str) -> Vec<Layer> {
     }
     if has(Kind::Steps) {
         drop.extend([Kind::Impact, Kind::Hooves]);
+    }
+    if has(Kind::Hops) {
+        // "Soft thumps" of hopping are the landings themselves.
+        drop.extend([Kind::Impact, Kind::Steps, Kind::Bounce]);
+    }
+    // An animal that walks or hops and is not said to call is the walker.
+    let walker = (has(Kind::Steps) || has(Kind::Hops)) && has(Kind::Animal) && !animal::names_a_call(&lower);
+    let walker_sp = if walker { animal::find(&lower).map(|(sp, _)| sp) } else { None };
+    let walker_body = walker_sp.map(animal::body);
+    if walker {
+        drop.push(Kind::Animal);
     }
     if has(Kind::Hooves) {
         drop.extend([Kind::Steps, Kind::Impact]);
@@ -1916,7 +1959,15 @@ fn layers_of(desc: &str) -> Vec<Layer> {
             let after = padded[pos..].split_whitespace().take(6).collect::<Vec<_>>().join(" ");
             let window = format!("{before} {after}");
             let bed = MODELS.iter().find(|m| m.kind == kind).is_some_and(|m| m.bed);
-            Layer { kind, bed, p: Params::read(&window, &lower), info }
+            let mut p = Params::read(&window, &lower);
+            let mut info = info;
+            if matches!(kind, Kind::Steps | Kind::Hops) {
+                p.walker = walker_body;
+                if let Some(sp) = walker_sp {
+                    info = format!("{} {}", sp.name, if kind == Kind::Hops { "hops" } else { "pawsteps" });
+                }
+            }
+            Layer { kind, bed, p, info }
         })
         .collect()
 }
@@ -2039,15 +2090,20 @@ fn build(layer: &Layer, dur: f32, seed: u64) -> (Stereo, Option<f32>) {
         }
         Kind::Ui => st = Stereo::from_mono(&mk_ui(&mut rng, p)),
         Kind::Steps => st = mk_steps(&mut rng, p, dur, seed),
+        Kind::Hops => st = mk_hops(&mut rng, p, dur),
         Kind::Animal => {
-            if let Some((sp, call)) = animal::find(&layer.info) {
+            if let Some((sp, calls)) = animal::find_calls(&layer.info) {
                 let size = 1.0 / (0.5 + p.size).powf(0.8);
-                let one = animal::render(sp, call, seed, if p.size == 0.5 { 1.0 } else { size }, p.intensity);
-                let k = p.count.unwrap_or(if dur > 2.4 * (one.len() as f32 / SR) { (dur / (one.len() as f32 / SR * 1.5)).floor().max(1.0) as usize } else { 1 }).clamp(1, 12);
+                let one = animal::render(sp, calls[0], seed, if p.size == 0.5 { 1.0 } else { size }, p.intensity);
+                // Every call named is heard at least once, in order.
+                let k = p.count.unwrap_or(if dur > 2.4 * (one.len() as f32 / SR) { (dur / (one.len() as f32 / SR * 1.5)).floor().max(1.0) as usize } else { 1 }).max(calls.len()).clamp(1, 12);
                 let mut out = vec![0.0; frames(dur.max(one.len() as f32 / SR))];
                 let mut t = 0.0;
                 for i in 0..k {
-                    let v = animal::render(sp, call, seed.wrapping_add(i as u64 * 7), size, p.intensity);
+                    let v = animal::render(sp, calls[i % calls.len()], seed.wrapping_add(i as u64 * 7), size, p.intensity);
+                    if frames(t) + v.len() > out.len() {
+                        out.resize(frames(t) + v.len(), 0.0);
+                    }
                     put(&mut out, &v, t, 1.0 - 0.1 * (i % 3) as f32);
                     t += v.len() as f32 / SR * rng.range(1.15, 1.8);
                 }
@@ -2107,12 +2163,16 @@ pub fn make(desc: &str, seconds: Option<f32>, variant: u64) -> Result<Made, Stri
     };
     let mut layers_by_stage: Vec<Vec<Layer>> = stages.iter().map(|s| layers_of(s)).collect();
     // Qualities said once apply to the whole: "period" and "distant" carry across stages.
-    // Nothing matched: the nearest model, said so; words like no model at
-    // all are refused with what exists.
+    // Nothing matched: a word that is a near spelling of a model's own
+    // word (or names its family) gets that model, said so. Anything less
+    // (a likeness to words in a model's description, a stop word) would be
+    // a different kind of sound, so it is refused with the nearest options.
     let mut stand_in = None;
     if layers_by_stage.iter().all(|l| l.is_empty()) {
         let Some(m) = nearest(desc) else {
-            return Err(format!("no sound model matches \"{desc}\". Models: {}", catalogue()));
+            let near = nearest_options(desc, 3);
+            let near = if near.is_empty() { String::new() } else { format!(" The nearest models: {}; say it with their words if one is meant.", near.join(", ")) };
+            return Err(format!("no sound model matches \"{desc}\" (none is made for it, and a different kind of sound is not made in its place).{near} Models: {}", catalogue()));
         };
         let low = desc.to_lowercase();
         layers_by_stage = vec![vec![Layer { kind: m.kind, bed: m.bed, p: Params::read(&low, &low), info: m.name.to_owned() }]];
@@ -2156,7 +2216,11 @@ pub fn make(desc: &str, seconds: Option<f32>, variant: u64) -> Result<Made, Stri
                 s.edges(0.15f32.min(ldur * 0.3));
             }
             out.add_at(&s, frames(start), 1.0);
-            let name = if l.kind == Kind::Animal { l.info.clone() } else if l.kind == Kind::Steps { format!("footsteps on {}", l.p.surface.map_or("dirt", |s| s.name())) } else { l.info.clone() };
+            let name = match l.kind {
+                Kind::Steps => format!("{} on {}", if l.p.walker.is_some() { l.info.as_str() } else { "footsteps" }, l.p.surface.map_or("dirt", |s| s.name())),
+                Kind::Hops => format!("{} on {}", if l.p.walker.is_some() { l.info.as_str() } else { "hops" }, l.p.surface.map_or("grass", |s| s.name())),
+                _ => l.info.clone(),
+            };
             if !names.contains(&name) {
                 names.push(name);
             }
@@ -2223,29 +2287,60 @@ const FAMILIES: &[(&[&str], &str)] = &[
     (&["magic", "sparkle", "spell", "fairy", "shimmer", "twinkle"], "zap"),
 ];
 
-/// The model nearest a description no model's words match: by how alike
-/// its words are to each model's words, summary and example (near
-/// spellings count), and the family words above; a generic impact when
-/// nothing is alike at all.
+/// Words that say how or which, never what: they match no model.
+const STOP: &[&str] = &[
+    "and", "the", "with", "from", "into", "onto", "over", "under", "then", "that", "this", "its", "his", "her", "their", "some", "very", "soft", "softly", "gentle", "gently", "loud", "loudly", "quiet", "quietly", "small", "big", "little", "large", "huge", "tiny", "distant", "close", "slow", "slowly", "fast", "quick", "heavy", "light", "sound", "sounds", "noise", "noises", "like", "kind", "sort", "few", "many", "one", "two", "three", "long", "short", "far", "near", "away", "while", "about",
+];
+
+/// The words of a description that could name a sound.
+fn content_words(desc: &str) -> Vec<String> {
+    desc.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 3 && !STOP.contains(w)).map(str::to_owned).collect()
+}
+
+/// How near each model is to the words: by its own words (near spellings
+/// count) and the family words above, and, weakly, by the words of its
+/// summary and example. `(model, own, said)`: `own` is the best likeness
+/// to the model's own or family words, `said` the total with the weak ones.
+fn likeness(desc: &str) -> Vec<(&'static ModelInfo, f32, f32)> {
+    let words = content_words(desc);
+    MODELS
+        .iter()
+        .filter(|m| m.kind != Kind::Animal)
+        .map(|m| {
+            let vocab: Vec<&str> = m.words.iter().flat_map(|w| w.split(' ')).chain(m.summary.split(|c: char| !c.is_alphanumeric())).chain(m.example.split(' ')).filter(|w| w.len() >= 3 && !STOP.contains(w)).collect();
+            let (mut own_best, mut total) = (0.0f32, 0.0f32);
+            for w in &words {
+                // One letter apart is a misspelling only in a long word:
+                // "snort" is not "snore".
+                let own = m.words.iter().flat_map(|x| x.split(' ')).filter(|v| !STOP.contains(v)).map(|v| word_likeness(w, v)).map(|l| if l < 0.8 && w.len() < 6 { 0.0 } else { l }).fold(0.0, f32::max);
+                let family = if FAMILIES.iter().any(|(ws, name)| *name == m.name && ws.contains(&w.as_str())) { 0.9 } else { 0.0 };
+                let said = vocab.iter().map(|v| word_likeness(w, v) * 0.6).fold(0.0, f32::max);
+                own_best = own_best.max(own).max(family);
+                total += own.max(family).max(said);
+            }
+            (m, own_best, total)
+        })
+        .collect()
+}
+
+/// The model a description no model's words match stands for: one of its
+/// words is a near spelling of a model's own word, or names its family.
 fn nearest(desc: &str) -> Option<&'static ModelInfo> {
-    let low = desc.to_lowercase();
-    let words: Vec<&str> = low.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 3).collect();
-    let mut best: Option<(&ModelInfo, f32)> = None;
-    for m in MODELS.iter().filter(|m| m.kind != Kind::Animal) {
-        let vocab: Vec<&str> = m.words.iter().flat_map(|w| w.split(' ')).chain(m.summary.split(|c: char| !c.is_alphanumeric())).chain(m.example.split(' ')).filter(|w| w.len() >= 3).collect();
-        let mut score = 0.0f32;
-        for w in &words {
-            let own = m.words.iter().flat_map(|x| x.split(' ')).map(|v| word_likeness(w, v)).fold(0.0, f32::max);
-            let said = vocab.iter().map(|v| word_likeness(w, v) * 0.6).fold(0.0, f32::max);
-            let family = FAMILIES.iter().filter(|(ws, name)| *name == m.name && ws.contains(w)).count() as f32 * 0.9;
-            score += own.max(said).max(family);
-        }
-        if score > 0.0 && best.is_none_or(|(_, s)| score > s) {
-            best = Some((m, score));
+    let mut best: Option<(&ModelInfo, f32, f32)> = None;
+    for (m, own, total) in likeness(desc) {
+        if own >= 0.7 && best.is_none_or(|(_, o, t)| (own, total) > (o, t)) {
+            best = Some((m, own, total));
         }
     }
-    // One word a model is known by, or said in its summary, at the least.
-    best.filter(|&(_, s)| s >= 0.6).map(|(m, _)| m)
+    best.map(|(m, _, _)| m)
+}
+
+/// The `n` models with any likeness to the words, nearest first, with an
+/// example of how to ask for each.
+fn nearest_options(desc: &str, n: usize) -> Vec<String> {
+    let mut l: Vec<_> = likeness(desc).into_iter().filter(|x| x.2 > 0.0).collect();
+    l.sort_by(|a, b| b.2.total_cmp(&a.2));
+    l.into_iter().take(n).map(|(m, _, _)| format!("{} (\"{}\")", m.name, m.example)).collect()
 }
 
 #[cfg(test)]
@@ -2343,6 +2438,103 @@ mod tests {
     fn unknown_words_say_what_exists() {
         let e = make("a quantum flux capacitor", None, 0).unwrap_err();
         assert!(e.contains("footsteps") && e.contains("animals"), "{e}");
+    }
+
+    /// Where a sound's energy sits: (spectral centroid Hz, share of the
+    /// energy under 300 Hz).
+    fn colour(x: &[f32]) -> (f32, f32) {
+        use studio_sound::fft::{Fft, hann};
+        let n = 4096;
+        let fft = Fft::new(n);
+        let mut win = vec![0.0; n];
+        hann(&mut win);
+        let mut acc = vec![0.0f64; n / 2];
+        let mut pos = 0;
+        while pos + n <= x.len() {
+            let mut re: Vec<f32> = x[pos..pos + n].iter().zip(&win).map(|(a, w)| a * w).collect();
+            let mut im = vec![0.0; n];
+            fft.forward(&mut re, &mut im);
+            for k in 0..n / 2 {
+                acc[k] += (re[k] * re[k] + im[k] * im[k]) as f64;
+            }
+            pos += n / 2;
+        }
+        let hz = |k: usize| k as f64 * SR as f64 / n as f64;
+        let total: f64 = acc.iter().sum::<f64>().max(1e-20);
+        let centroid = acc.iter().enumerate().map(|(k, p)| hz(k) * p).sum::<f64>() / total;
+        let low = acc.iter().enumerate().filter(|(k, _)| hz(*k) < 300.0).map(|(_, p)| p).sum::<f64>() / total;
+        (centroid as f32, low as f32)
+    }
+
+    /// How many separate events a sound has (rises of its 10 ms envelope
+    /// through a third of its peak, 80 ms apart at least).
+    fn events(x: &[f32]) -> usize {
+        let env: Vec<f32> = x.chunks(480).map(rms).collect();
+        let top = env.iter().cloned().fold(0.0, f32::max);
+        let (mut n, mut last) = (0, -100i32);
+        for i in 1..env.len() {
+            if env[i] > top / 3.0 && env[i - 1] <= top / 3.0 && i as i32 - last >= 8 {
+                n += 1;
+                last = i as i32;
+            }
+        }
+        n
+    }
+
+    /// A bear walking on grass is heavy, padded feet pressing turf: a low
+    /// thud under a soft rustle, nothing like a crowd's bright claps.
+    #[test]
+    fn a_bear_on_grass_is_heavy_and_dull_not_applause() {
+        let bear = make("bear footsteps on grass", Some(5.0), 0).unwrap();
+        assert!(bear.model.contains("bear pawsteps on grass"), "{}", bear.model);
+        let clap = make("applause", Some(5.0), 0).unwrap();
+        let (bc, bl) = colour(&bear.audio.l);
+        let (ac, _) = colour(&clap.audio.l);
+        assert!(bc < 900.0 && bl > 0.3, "bear on grass: centroid {bc:.0} Hz, {:.0}% under 300 Hz (applause {ac:.0} Hz)", bl * 100.0);
+        // A person on grass is lighter, but still not a clap.
+        let (pc, _) = colour(&make("footsteps on grass", Some(5.0), 0).unwrap().audio.l);
+        assert!(pc < 0.6 * ac, "person on grass {pc:.0} Hz, applause {ac:.0} Hz");
+        // Heavier is lower.
+        let (mc, _) = colour(&make("a mouse scurrying on grass", Some(3.0), 0).unwrap().audio.l);
+        assert!(mc > bc * 1.5, "mouse {mc:.0} Hz, bear {bc:.0} Hz");
+    }
+
+    /// Rabbits hopping are soft low thumps, one per landing.
+    #[test]
+    fn rabbits_hopping_are_soft_low_thumps() {
+        let m = make("rabbits hopping, soft thumps", Some(4.0), 0).unwrap();
+        let (c, low) = colour(&m.audio.l);
+        assert!(c < 700.0 && low > 0.4, "{}: centroid {c:.0} Hz, {:.0}% under 300 Hz", m.model, low * 100.0);
+        let n = events(&m.audio.l);
+        assert!((4..=16).contains(&n), "{}: {n} landings in 4 s", m.model);
+    }
+
+    /// An animal no model was made for is made by its voice, from its size
+    /// and the call asked for, never by a different class of sound.
+    #[test]
+    fn a_bear_huffs_and_snorts_as_a_bear() {
+        let m = make("a bear's soft huff and snort", None, 0).unwrap();
+        assert!(m.model.contains("bear"), "{}", m.model);
+        let (c, _) = colour(&m.audio.l);
+        assert!(c < 1500.0, "{}: a big animal's breath is low, centroid {c:.0} Hz", m.model);
+        let g = make("a bear growling", None, 0).unwrap();
+        assert!(g.model.contains("bear growl"), "{}", g.model);
+    }
+
+    /// A description that only looks like a model's words by accident
+    /// (stop words, words in its summary) is refused with the nearest real
+    /// options, not given a sound of another kind.
+    #[test]
+    fn a_far_likeness_is_refused_with_the_nearest_options() {
+        for desc in ["a soft and gentle presence", "the aardvark's tidy burrow", "a moose's snort"] {
+            match make(desc, None, 0) {
+                Ok(m) => panic!("{desc}: made {}", m.model),
+                Err(e) => assert!(e.contains("no sound model matches"), "{desc}: {e}"),
+            }
+        }
+        // What is near is offered, to be asked for in its own words.
+        let e = make("a moose's snort", None, 0).map(|m| m.model).unwrap_err();
+        assert!(e.contains("nearest models: breath"), "{e}");
     }
 
     #[test]
