@@ -2821,7 +2821,9 @@ pub fn remove(body: &mut Mesh, name: &str) -> Result<usize, String> {
 /// What is worn: the material names that are not the body's own (the
 /// first material, and the plain clothes painted on at birth).
 pub fn worn(body: &Mesh) -> Vec<String> {
-    body.materials.iter().map(|m| m.name.clone()).filter(|n| !matches!(n.as_str(), "Skin" | "Lips" | "Eye white" | "Iris" | "Pupil" | "Brow")).collect()
+    // Hair drawn as cards is named "<name> cards" so a check knows it is a
+    // sheet; what is worn is the "<name>".
+    body.materials.iter().map(|m| m.name.strip_suffix(" cards").unwrap_or(&m.name).to_string()).filter(|n| !matches!(n.as_str(), "Skin" | "Lips" | "Eye white" | "Iris" | "Pupil" | "Brow")).collect()
 }
 
 #[cfg(test)]
@@ -2865,21 +2867,47 @@ mod tests {
     /// inner side of the nearest cloth, never outside it. Vertices near the
     /// cloth's open edges (hems, cuffs) are not judged: the cloth ends there.
     /// Returns (vertices the garment covers, those that poke through).
+    /// Vertices where the faces round them turn by 70 degrees or more.
+    fn rim_vertices(m: &Mesh) -> Vec<bool> {
+        let (ids, unique) = m.position_ids();
+        let mut normals: Vec<Vec<V3>> = vec![Vec::new(); unique.len()];
+        for t in 0..m.triangles() {
+            let n = m.face_normal(t);
+            // Slivers have no direction to turn from.
+            if !(dot(n, n) > 0.5) {
+                continue;
+            }
+            for v in m.tri(t) {
+                normals[ids[v] as usize].push(n);
+            }
+        }
+        let sharp: Vec<bool> = normals.iter().map(|ns| ns.iter().any(|a| ns.iter().any(|b| dot(*a, *b) < 0.35))).collect();
+        (0..m.positions.len()).map(|v| sharp[ids[v] as usize]).collect()
+    }
+
     fn poked_through(body: &Mesh, g: &Garment, probe: f32) -> (usize, usize) {
         let bvh = Bvh::of_mesh(&g.mesh);
+        // Where the cloth ends: open edges, or on a closed shell the rim,
+        // where the outside turns into the wall round a hem or a cuff.
         let open = open_vertices(&g.mesh);
+        let rim = rim_vertices(&g.mesh);
         let edge_pts: Vec<V3> = (0..g.mesh.positions.len()).filter(|&i| open[i]).map(|i| g.mesh.positions[i]).collect();
         let (mut covered, mut poked) = (0, 0);
         for (v, p) in body.positions.iter().enumerate() {
             let Some((q, tri, d)) = bvh.nearest(*p, probe) else { continue };
-            if edge_pts.iter().any(|e| length(sub(*e, q)) < probe * 1.5) {
+            if edge_pts.iter().any(|e| length(sub(*e, q)) < probe * 1.5) || g.mesh.tri(tri as usize).iter().any(|&c| rim[c]) {
                 continue;
             }
             covered += 1;
-            let sd = dot(sub(*p, q), g.mesh.face_normal(tri as usize));
-            // Outside the nearest cloth, and no cloth over it either.
+            let n = g.mesh.face_normal(tri as usize);
+            let sd = dot(sub(*p, q), n);
+            // Outside the nearest cloth, and no cloth over it either. Cloth
+            // is a closed shell: only its outside (facing the way the body
+            // does) can be poked through; its inside and the wall round a
+            // hem face the body or across it.
+            let outer = dot(n, body.normals[v]) > 0.3;
             let covered_above = bvh.ray(*p, body.normals[v], 1e-3, probe * 2.0).is_some();
-            if sd > 0.15 && d < probe && !covered_above {
+            if outer && sd > 0.15 && d < probe && !covered_above {
                 poked += 1;
                 if poked < 6 {
                     eprintln!("poke at {p:?} signed gap {sd:.2}");
