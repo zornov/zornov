@@ -7,12 +7,12 @@
     "source": "github"
   },
   "websiteUrl": "https://zornov.com",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/zornov/zornov/releases/download/v0.1.1/Zornov-0.1.1.mcpb",
-      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "identifier": "https://github.com/zornov/zornov/releases/download/v0.1.2/Zornov-0.1.2.mcpb",
+      "fileSha256": "79faa4f8d47ebca8a5565f9e2a330e86c18f8e2a043f3e302bd22f943dcc92a1",
       "transport": {
         "type": "stdio"
       }
