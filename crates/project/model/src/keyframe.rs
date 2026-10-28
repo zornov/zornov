@@ -484,25 +484,39 @@ impl Track {
 
 /// A cubic Bézier path walked by distance, not by its parameter, so a
 /// clip moves along it at the speed its timing curve says.
+///
+/// Lengths are measured by Gauss–Legendre quadrature of the curve's speed
+/// over each of a few spans of the parameter (a sum of chords comes out
+/// short, most where the path bends hardest), and a distance is turned
+/// back into the parameter by Newton's method on that measured length, so
+/// equal times cover equal distances to a part in a million, not the few
+/// per cent the chord table's straight steps between samples gave.
 struct Bend {
     pts: [[f64; 2]; 4],
-    /// Length travelled at each of the samples along the parameter.
+    /// Length travelled at the start of each span and at the end.
     lengths: [f64; Bend::SAMPLES + 1],
 }
 
+/// Five-point Gauss–Legendre nodes and weights on -1..1.
+const GAUSS: [(f64, f64); 5] = [
+    (0.0, 0.568_888_888_888_888_9),
+    (-0.538_469_310_105_683_1, 0.478_628_670_499_366_5),
+    (0.538_469_310_105_683_1, 0.478_628_670_499_366_5),
+    (-0.906_179_845_938_664, 0.236_926_885_056_189_1),
+    (0.906_179_845_938_664, 0.236_926_885_056_189_1),
+];
+
 impl Bend {
-    const SAMPLES: usize = 48;
+    const SAMPLES: usize = 16;
+    /// How far in from an end (in the parameter) the direction a path
+    /// carries on past that end is read.
+    const END_LOOK: f64 = 1.0 / 48.0;
 
     fn new(pts: [[f64; 2]; 4]) -> Self {
         let mut lengths = [0.0; Self::SAMPLES + 1];
-        let mut prev = pts[0];
-        for (j, l) in lengths.iter_mut().enumerate().skip(1) {
-            let p = Self::point(&pts, j as f64 / Self::SAMPLES as f64);
-            *l = (p[0] - prev[0]).hypot(p[1] - prev[1]);
-            prev = p;
-        }
         for j in 1..=Self::SAMPLES {
-            lengths[j] += lengths[j - 1];
+            let (a, b) = ((j - 1) as f64 / Self::SAMPLES as f64, j as f64 / Self::SAMPLES as f64);
+            lengths[j] = lengths[j - 1] + Self::length(&pts, a, b);
         }
         Self { pts, lengths }
     }
@@ -511,6 +525,21 @@ impl Bend {
         let m = 1.0 - s;
         let (a, b, c, d) = (m * m * m, 3.0 * m * m * s, 3.0 * m * s * s, s * s * s);
         [a * p[0][0] + b * p[1][0] + c * p[2][0] + d * p[3][0], a * p[0][1] + b * p[1][1] + c * p[2][1] + d * p[3][1]]
+    }
+
+    /// How fast the point moves with the parameter at `s`.
+    fn speed(p: &[[f64; 2]; 4], s: f64) -> f64 {
+        let m = 1.0 - s;
+        let (a, b, c) = (3.0 * m * m, 6.0 * m * s, 3.0 * s * s);
+        let d = |k: usize| a * (p[1][k] - p[0][k]) + b * (p[2][k] - p[1][k]) + c * (p[3][k] - p[2][k]);
+        let (x, y) = (d(0), d(1));
+        (x * x + y * y).sqrt()
+    }
+
+    /// Length of the curve between parameters `a` and `b`.
+    fn length(p: &[[f64; 2]; 4], a: f64, b: f64) -> f64 {
+        let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+        GAUSS.iter().map(|&(x, w)| w * Self::speed(p, mid + half * x)).sum::<f64>() * half
     }
 
     /// The point a fraction `f` of the way along (past either end it
@@ -527,17 +556,38 @@ impl Bend {
             [from[0] + dx / n * d, from[1] + dy / n * d]
         };
         if f <= 0.0 {
-            let ahead = Self::point(&self.pts, 1.0 / Self::SAMPLES as f64);
+            let ahead = Self::point(&self.pts, Self::END_LOOK);
             return beyond(self.pts[0], [2.0 * self.pts[0][0] - ahead[0], 2.0 * self.pts[0][1] - ahead[1]], -f * total);
         }
         if f >= 1.0 {
-            let behind = Self::point(&self.pts, 1.0 - 1.0 / Self::SAMPLES as f64);
+            let behind = Self::point(&self.pts, 1.0 - Self::END_LOOK);
             return beyond(self.pts[3], [2.0 * self.pts[3][0] - behind[0], 2.0 * self.pts[3][1] - behind[1]], (f - 1.0) * total);
         }
         let want = f * total;
         let j = self.lengths.partition_point(|&l| l < want).clamp(1, Self::SAMPLES);
         let (l0, l1) = (self.lengths[j - 1], self.lengths[j]);
-        let s = ((j - 1) as f64 + if l1 > l0 { (want - l0) / (l1 - l0) } else { 0.0 }) / Self::SAMPLES as f64;
+        // Within span j: the parameter whose length from the span's start
+        // is what is left, by Newton's steps kept inside the span (where
+        // the speed is 0, at a cusp, the bracket is halved instead).
+        let (mut lo, mut hi) = ((j - 1) as f64 / Self::SAMPLES as f64, j as f64 / Self::SAMPLES as f64);
+        let left = want - l0;
+        let start = lo;
+        let mut s = lo + (hi - lo) * if l1 > l0 { left / (l1 - l0) } else { 0.0 };
+        for _ in 0..12 {
+            let err = Self::length(&self.pts, start, s) - left;
+            if err.abs() <= total * 1e-9 {
+                break;
+            }
+            if err < 0.0 { lo = s } else { hi = s }
+            let v = Self::speed(&self.pts, s);
+            let next = if v > 0.0 { s - err / v } else { f64::NAN };
+            let to = if next > lo && next < hi { next } else { 0.5 * (lo + hi) };
+            if (to - s).abs() < 1e-12 {
+                s = to;
+                break;
+            }
+            s = to;
+        }
         Self::point(&self.pts, s)
     }
 }
@@ -557,14 +607,36 @@ fn bezier_progress(u: f64, out: Handle, inn: Handle) -> f64 {
         let m = 1.0 - s;
         3.0 * m * m * s * p1 + 3.0 * m * s * s * p2 + s * s * s
     };
-    // x(s) is monotonic because x1, x2 lie in 0..=1, so bisection always
-    // finds the unique s; 50 halvings is far below a microsecond.
-    let (mut lo, mut hi) = (0.0f64, 1.0f64);
-    for _ in 0..50 {
-        let mid = 0.5 * (lo + hi);
-        if bez(x1, x2, mid) < u { lo = mid } else { hi = mid }
+    if u <= 0.0 {
+        return 0.0;
     }
-    bez(y1, y2, 0.5 * (lo + hi))
+    if u >= 1.0 {
+        return 1.0;
+    }
+    // x(s) rises from 0 to 1 because x1, x2 lie in 0..=1, so there is one
+    // s for u. Newton's steps find it in a handful of looks; one that
+    // would leave the bracket known to hold s (where x is flat, at a
+    // handle of 0 or 1) halves the bracket instead, so it always lands.
+    let dx = |s: f64| {
+        let m = 1.0 - s;
+        3.0 * m * m * x1 + 6.0 * m * s * (x2 - x1) + 3.0 * s * s * (1.0 - x2)
+    };
+    let (mut lo, mut hi, mut s) = (0.0f64, 1.0f64, u);
+    for _ in 0..100 {
+        let x = bez(x1, x2, s) - u;
+        if x == 0.0 {
+            break;
+        }
+        if x < 0.0 { lo = s } else { hi = s }
+        let d = dx(s);
+        let next = if d > 0.0 { s - x / d } else { f64::NAN };
+        let to = if next > lo && next < hi { next } else { 0.5 * (lo + hi) };
+        if to == s || hi - lo <= f64::EPSILON {
+            break;
+        }
+        s = to;
+    }
+    bez(y1, y2, s)
 }
 
 fn hermite(p0: f64, p1: f64, m0: f64, m1: f64, u: f64) -> f64 {
@@ -576,6 +648,14 @@ fn hermite(p0: f64, p1: f64, m0: f64, m1: f64, u: f64) -> f64 {
 /// Tangents (value per microsecond) at keys `i` and `i + 1` for component
 /// `d`, using Catmull-Rom slopes limited as in Fritsch–Carlson monotone
 /// interpolation, so the curve never overshoots its keys.
+///
+/// Each key's tangent is limited once, by the slopes on both its sides
+/// (at most three times the smaller): that alone keeps every segment
+/// within the square 0 ≤ α, β ≤ 3 that de Boor and Swartz show is
+/// monotone, and since both segments meeting at a key read the same
+/// tangent the curve has no kink there. (Scaling a segment's pair down
+/// onto the circle α² + β² ≤ 9 as well changed a key's tangent on one
+/// side only.)
 fn clamped_tangents(keys: &[Keyframe], comps: &Window, d: usize, i: usize) -> (f64, f64) {
     let p = |j: usize| comps.at(j).0[d];
     let t = |j: usize| keys[j].time as f64;
@@ -593,19 +673,10 @@ fn clamped_tangents(keys: &[Keyframe], comps: &Window, d: usize, i: usize) -> (f
         let m = slope(j - 1, j + 1);
         m.signum() * m.abs().min(3.0 * d0.abs().min(d1.abs()))
     };
-    let (mut m0, mut m1) = (tangent(i), tangent(i + 1));
-    let delta = slope(i, i + 1);
-    if delta == 0.0 {
+    if slope(i, i + 1) == 0.0 {
         return (0.0, 0.0);
     }
-    let (a, b) = (m0 / delta, m1 / delta);
-    let r = a * a + b * b;
-    if r > 9.0 {
-        let s = 3.0 / r.sqrt();
-        m0 *= s;
-        m1 *= s;
-    }
-    (m0, m1)
+    (tangent(i), tangent(i + 1))
 }
 
 #[cfg(test)]
@@ -679,6 +750,95 @@ mod tests {
                 assert!(v >= lo - 1e-9 && v <= hi + 1e-9, "segment {i}: {v} not in {lo}..{hi}");
             }
         }
+    }
+
+    /// Auto keys meet with one speed: the curve leaving a key goes as fast
+    /// as the curve arriving at it (no kink), even where the clamp that
+    /// stops overshoot bites.
+    #[test]
+    fn auto_is_smooth_through_its_keys() {
+        let vals = [0.0, 1.0, 2.0, 10.0, 11.0, 30.0, 29.0];
+        let keys = vals.iter().enumerate().map(|(i, v)| Keyframe::new(i as i64 * 1_000_000, *v, Interp::Auto)).collect();
+        let tr = Track::new(keys);
+        for k in 1..vals.len() - 1 {
+            let t = k as i64 * 1_000_000;
+            let left = scalar(&tr, t) - scalar(&tr, t - 1);
+            let right = scalar(&tr, t + 1) - scalar(&tr, t);
+            // (The curve's own bend over a microsecond is about 1e-11.)
+            assert!((left - right).abs() <= 1e-4 * left.abs().max(right.abs()) + 1e-10, "key {k}: {left} in, {right} out");
+        }
+    }
+
+    /// The ease curve's timing is solved to full precision for every
+    /// handle, steep and flat ends included.
+    #[test]
+    fn ease_is_solved_exactly() {
+        // Walk the curve by its own parameter: at time x(s) the value is
+        // y(s) exactly.
+        let bez = |p1: f64, p2: f64, s: f64| 3.0 * (1.0 - s) * (1.0 - s) * s * p1 + 3.0 * (1.0 - s) * s * s * p2 + s * s * s;
+        let hs = [0.0, 1e-6, 0.1, 0.42, 0.7, 1.0 - 1e-6, 1.0];
+        for &ox in &hs {
+            for &ix in &hs {
+                for oy in [0.0, 0.5, 1.3, -0.4] {
+                    let (out, inn) = (Handle { x: ox, y: oy }, Handle { x: ix, y: 0.2 });
+                    let (x1, x2, y1, y2) = (ox, 1.0 - ix, oy, 0.8);
+                    for k in 0..=200 {
+                        let s = k as f64 / 200.0;
+                        let (u, want) = (bez(x1, x2, s), bez(y1, y2, s));
+                        // Where time barely moves with s (a handle of 0 or
+                        // 1 makes x flat) no solver can place s finer than
+                        // the rounding of x allows.
+                        let flat = (bez(x1, x2, (s + 1e-3).min(1.0)) - bez(x1, x2, (s - 1e-3).max(0.0))).abs() < 1e-5;
+                        let got = bezier_progress(u, out, inn);
+                        assert!((got - want).abs() < if flat { 1e-4 } else { 1e-9 }, "s {s} handles {ox} {ix} {oy}: {got} vs {want}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// A tightly bent path is still travelled at one speed: the distance
+    /// along it is measured, not added up from chords.
+    #[test]
+    fn a_tight_bend_is_travelled_evenly() {
+        let mut a = Keyframe::new(0, Vec2::ZERO, Interp::Linear);
+        a.path = Some(PathHandles { inn: [0.0, 0.0], out: [400.0, -300.0] });
+        let mut b = Keyframe::new(1_000_000, Vec2::new(100.0, 0.0), Interp::Linear);
+        b.path = Some(PathHandles { inn: [-400.0, -300.0], out: [0.0, 0.0] });
+        let tr = Track::new(vec![a, b]);
+        let at = |t: i64| tr.eval(t).unwrap().as_point().unwrap();
+        let steps: Vec<f64> = (0..200).map(|i| {
+            let (p, q) = (at(i * 5000), at((i + 1) * 5000));
+            (q.x - p.x).hypot(q.y - p.y)
+        }).collect();
+        let (lo, hi) = (steps.iter().cloned().fold(f64::MAX, f64::min), steps.iter().cloned().fold(0.0, f64::max));
+        assert!(hi / lo < 1.002, "speed varies {:.4}x: {lo} to {hi}", hi / lo);
+    }
+
+    /// Timings for the hot paths (run with `--ignored --nocapture`, in a
+    /// release build, to compare).
+    #[test]
+    #[ignore]
+    fn timing_of_interpolation() {
+        let n = 200_000;
+        let ease = Track::new(vec![Keyframe::new(0, 0.0, Interp::Ease), Keyframe::new(1_000_000, 1.0, Interp::Linear)]);
+        let start = std::time::Instant::now();
+        let mut sum = 0.0;
+        for k in 0..n {
+            sum += scalar(&ease, (k * 5) as i64 % 1_000_000);
+        }
+        let per_ease = start.elapsed().as_nanos() as f64 / n as f64;
+        let mut a = Keyframe::new(0, Vec2::ZERO, Interp::Linear);
+        a.path = Some(PathHandles { inn: [0.0, 0.0], out: [0.0, -200.0] });
+        let mut b = Keyframe::new(1_000_000, Vec2::new(200.0, 0.0), Interp::Linear);
+        b.path = Some(PathHandles { inn: [0.0, -200.0], out: [0.0, 0.0] });
+        let path = Track::new(vec![a, b]);
+        let start = std::time::Instant::now();
+        for k in 0..n {
+            sum += path.eval((k * 5) as i64 % 1_000_000).unwrap().as_point().unwrap().x;
+        }
+        let per_path = start.elapsed().as_nanos() as f64 / n as f64;
+        println!("ease key: {per_ease:.0} ns a look; bent path: {per_path:.0} ns a look ({sum})");
     }
 
     #[test]
