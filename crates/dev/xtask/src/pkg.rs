@@ -56,6 +56,18 @@ fn gz_tar(items: &[Item], made: &[Made], prefix: Option<&str>, tmp: &Path) -> Re
     Ok(b)
 }
 
+/// What the program needs installed: the C library; ALSA (libasound.so.2)
+/// and SQLite (libsqlite3.so.0), which it links; Vulkan, which it loads.
+/// Ubuntu 24.04 renamed ALSA's package libasound2t64.
+const DEPENDS: &str = "libc6 (>= 2.31), libasound2t64 | libasound2, libsqlite3-0, libvulkan1";
+
+/// The package's control file.
+fn control(arch: &str, size_kb: u64) -> String {
+    format!(
+        "Package: zornov\nVersion: {VERSION}\nSection: video\nPriority: optional\nArchitecture: {arch}\nInstalled-Size: {size_kb}\nMaintainer: Ashrox LLC <noreply@ashrox.invalid>\nDepends: {DEPENDS}\nDescription: Zornov video editor\n A video editor with an AI editor, 3D, effects and export, in Rust.\n"
+    )
+}
+
 /// Where Linux packages put the licence notices.
 pub const LINUX_DOC: &str = "usr/share/doc/zornov";
 
@@ -75,10 +87,7 @@ pub fn deb_from(exe: &Path, content: Option<&Path>, notices: &Notices, out: &Pat
     made.extend(notices.iter().map(|(name, data)| Made::file(&format!("{LINUX_DOC}/{name}"), data.clone(), false)));
     let tmp = out.with_extension("tmp");
     let data = gz_tar(&items, &made, Some("."), &tmp)?;
-    let control = format!(
-        "Package: zornov\nVersion: {VERSION}\nSection: video\nPriority: optional\nArchitecture: {arch}\nInstalled-Size: {size_kb}\nMaintainer: Ashrox LLC <noreply@ashrox.invalid>\nDepends: libc6 (>= 2.31), libasound2t64 | libasound2, libvulkan1\nDescription: Zornov video editor\n A video editor with an AI editor, 3D, effects and export, in Rust.\n"
-    );
-    let ctl = gz_tar(&[], &[Made::file("control", control.into_bytes(), false)], Some("."), &tmp)?;
+    let ctl = gz_tar(&[], &[Made::file("control", control(arch, size_kb).into_bytes(), false)], Some("."), &tmp)?;
     let deb = ar(&[("debian-binary", b"2.0\n".to_vec()), ("control.tar.gz", ctl), ("data.tar.gz", data)], repro::epoch());
     std::fs::write(out, deb).map_err(|e| format!("{}: {e}", out.display()))
 }
@@ -310,6 +319,17 @@ mod tests {
         let s = String::from_utf8_lossy(&bytes);
         assert!(s.contains("control.tar.gz") && s.contains("data.tar.gz"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The package declares a package for every shared library the
+    /// program loads at start (`readelf -d zornov | grep NEEDED`).
+    #[test]
+    fn deb_depends_on_every_library_the_program_needs() {
+        let c = control("amd64", 1);
+        let depends = c.lines().find_map(|l| l.strip_prefix("Depends: ")).expect("a Depends line");
+        for (soname, package) in [("libc.so.6", "libc6"), ("libasound.so.2", "libasound2"), ("libsqlite3.so.0", "libsqlite3-0")] {
+            assert!(depends.split(", ").any(|d| d.split(" | ").any(|alt| alt.split(' ').next() == Some(package) || alt.starts_with(&format!("{package}t64")))), "{soname} needs {package}: {depends}");
+        }
     }
 
     #[test]
