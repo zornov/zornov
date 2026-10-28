@@ -211,7 +211,8 @@ fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistr
     let (w, h) = (even(req.size.0), even(req.size.1));
     let first = (req.range.0 as f64 / 1e6 * req.fps).floor() as u64;
     let last = ((req.range.1 as f64 / 1e6 * req.fps).ceil() as u64).max(first + 1);
-    let (fps_num, fps_den) = if (req.fps - req.fps.round()).abs() < 1e-3 { (req.fps.round() as u32, 1) } else { ((req.fps * 1001.0).round() as u32, 1001) };
+    let rate = studio_model::time::FrameRate::from_f64(req.fps, 1e-3);
+    let (fps_num, fps_den) = (rate.num, rate.den);
     let io = |e: std::io::Error| e.to_string();
     // An output folder that does not exist yet is made (the AI names
     // "Exports/AURA.mp4" before anything made "Exports").

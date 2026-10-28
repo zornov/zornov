@@ -250,7 +250,7 @@ pub fn simulate(project: &m::Project, mut scene: Scene, run: &Run) -> Baked {
         let t_abs = run.from + (t_rel as f64 * 1e6) as m::Micros;
         // Sample frames that are due.
         while (next_frame as f32) / fps <= t_rel + dt * 0.5 {
-            let ft = run.from + ((next_frame as f64 / fps as f64) * 1e6) as m::Micros;
+            let ft = run.from + ((next_frame as f64 / fps as f64) * 1e6).round() as m::Micros;
             sample(&scene, ft, &mut tracks, &mut bone_tracks, &loose, &broken);
             for (k, bs) in broken.iter().enumerate() {
                 let mut frame = Vec::with_capacity(bs.shards.parts.len());

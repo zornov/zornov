@@ -52,6 +52,47 @@ impl FrameRate {
         self.num as f64 / self.den as f64
     }
 
+    /// The exact rate a float stands for: a whole number within `tol`
+    /// frames a second is that number, one within `tol` of a whole number
+    /// slowed by 1000/1001 is that NTSC rate (29.97 is 30000/1001), and
+    /// any other is the nearest fraction with at most 1001 below the line
+    /// (12.5 is 25/2, not the 12512/1001 that treating every fractional
+    /// rate as NTSC made of it).
+    pub fn from_f64(fps: f64, tol: f64) -> Self {
+        if !fps.is_finite() || fps <= 0.0 {
+            return Self::FPS_30;
+        }
+        let whole = fps.round();
+        if whole >= 1.0 && (fps - whole).abs() < tol {
+            return Self::new(whole as u32, 1);
+        }
+        let ntsc = (fps * 1.001).round();
+        if ntsc >= 1.0 && (fps - ntsc / 1.001).abs() < tol {
+            return Self::new(ntsc as u32 * 1000, 1001);
+        }
+        // Continued fractions: the convergents are the best fractions for
+        // their size; stop at the last whose denominator fits.
+        let (mut p0, mut q0, mut p1, mut q1) = (0u64, 1u64, 1u64, 0u64);
+        let mut x = fps;
+        for _ in 0..32 {
+            let a = x.floor();
+            let (p2, q2) = (a as u64 * p1 + p0, a as u64 * q1 + q0);
+            if q2 > 1001 || p2 > u32::MAX as u64 {
+                break;
+            }
+            (p0, q0, p1, q1) = (p1, q1, p2, q2);
+            let frac = x - a;
+            if frac < 1e-12 || ((p1 as f64 / q1 as f64) - fps).abs() < 1e-9 {
+                break;
+            }
+            x = 1.0 / frac;
+        }
+        if p1 == 0 || q1 == 0 {
+            return Self::new(1, 1);
+        }
+        Self::new(p1 as u32, q1 as u32)
+    }
+
     /// The start time of frame `index` (rounded to the nearest microsecond).
     pub fn frame_to_micros(self, index: i64) -> Micros {
         let n = index as i128 * SECOND as i128 * self.den as i128;
@@ -163,6 +204,26 @@ mod tests {
         assert_eq!(r.snap_floor(79_999), 40_000);
         assert_eq!(r.frame_duration(), 40_000);
         assert_eq!(FrameRate::FPS_29_97.frame_duration(), 33_367);
+    }
+
+    #[test]
+    fn rates_from_floats_are_the_fractions_they_stand_for() {
+        let r = |fps: f64| {
+            let f = FrameRate::from_f64(fps, 1e-3);
+            (f.num, f.den)
+        };
+        assert_eq!(r(30.0), (30, 1));
+        assert_eq!(r(29.97), (30000, 1001));
+        assert_eq!(r(30000.0 / 1001.0), (30000, 1001));
+        assert_eq!(r(23.976), (24000, 1001));
+        assert_eq!(r(59.94), (60000, 1001));
+        assert_eq!(r(12.5), (25, 2));
+        assert_eq!(r(7.5), (15, 2));
+        assert_eq!(r(14.985), (15000, 1001));
+        assert_eq!(r(2.0 / 3.0), (2, 3));
+        assert_eq!(r(0.0), (30, 1));
+        // A looser tolerance takes a slightly-off rate as the whole one.
+        assert_eq!(FrameRate::from_f64(30.01, 0.02), FrameRate::FPS_30);
     }
 
     #[test]
