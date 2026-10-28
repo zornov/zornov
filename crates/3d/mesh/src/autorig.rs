@@ -321,6 +321,9 @@ pub struct BodyFrame {
     /// (the low end of the long axis: -x for a body along x, -z for one
     /// along z).
     pub head_found: bool,
+    /// The long axis was told (a `forward`) or found from the shape; false
+    /// when the body is as wide as it is long in plan and the box decided.
+    pub axis_found: bool,
 }
 
 impl BodyFrame {
@@ -354,10 +357,12 @@ pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
         acc[4] += area * x * z;
         acc[5] += area * z * z;
     }
-    let long_axis = || -> V3 {
+    let mut axis_found = true;
+    let mut long_axis = || -> V3 {
         let ext = [hi[0] - lo[0], hi[2] - lo[2]];
         let by_box: V3 = if ext[0] >= ext[1] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
         if acc[0] <= 1e-9 {
+            axis_found = false;
             return by_box;
         }
         let w = acc[0];
@@ -370,6 +375,7 @@ pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
         let (l1, l2) = (tr / 2.0 + disc, tr / 2.0 - disc);
         if l1 < 1.15 * l2.max(1e-12) {
             // Round in plan: no long axis worth trusting.
+            axis_found = false;
             return by_box;
         }
         let th = 0.5 * (2.0 * sxz).atan2(sxx - szz);
@@ -386,7 +392,7 @@ pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
         d
     };
     let given = forward.map(|f| [f[0], 0.0, f[2]]).filter(|f| length(*f) > 1e-6).map(normalise);
-    let axis = given.unwrap_or_else(long_axis);
+    let axis = given.unwrap_or_else(&mut long_axis);
     let up: V3 = [0.0, -1.0, 0.0];
     let proj = |p: V3, d: V3| p[0] * d[0] + p[2] * d[2];
     let (mut a_lo, mut a_hi) = (f32::INFINITY, f32::NEG_INFINITY);
@@ -437,9 +443,9 @@ pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
         s_hi = s_hi.max(s);
     }
     if !a_lo.is_finite() {
-        return BodyFrame { fwd: [-1.0, 0.0, 0.0], left: [0.0, 0.0, -1.0], head_at: 0.0, length: 1.0, mid: 0.0, width: 1.0, top: 0.0, bottom: 1.0, head_found: false };
+        return BodyFrame { fwd: [-1.0, 0.0, 0.0], left: [0.0, 0.0, -1.0], head_at: 0.0, length: 1.0, mid: 0.0, width: 1.0, top: 0.0, bottom: 1.0, head_found: false, axis_found: false };
     }
-    BodyFrame { fwd, left, head_at: a_hi, length: (a_hi - a_lo).max(1.0), mid: (s_lo + s_hi) * 0.5, width: (s_hi - s_lo).max(1.0), top: lo[1], bottom: hi[1], head_found }
+    BodyFrame { fwd, left, head_at: a_hi, length: (a_hi - a_lo).max(1.0), mid: (s_lo + s_hi) * 0.5, width: (s_hi - s_lo).max(1.0), top: lo[1], bottom: hi[1], head_found, axis_found }
 }
 
 /// An animal standing on all fours, along its own long axis (found from
@@ -449,6 +455,21 @@ pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
 /// (`leg_front.L`… with `.0` upper and `.1` lower, `paw_front.L`…).
 pub fn quadruped(mesh: &Mesh) -> Rig {
     quadruped_facing(mesh, None)
+}
+
+/// [`quadruped_facing`] that refuses a body it cannot orient: round in plan
+/// (no long axis) or with ends that look alike and no `forward` given. The
+/// message says what to do. [`quadruped`] guesses instead (head at the low
+/// end of the long axis).
+pub fn try_quadruped(mesh: &Mesh, forward: Option<V3>) -> Result<Rig, String> {
+    let fr = body_frame(mesh, forward);
+    if !fr.axis_found {
+        return Err("quadruped: the body is as wide as it is long, so its length axis is unclear; say which way it faces (forward) or use a body with a clear length".into());
+    }
+    if !fr.head_found {
+        return Err("quadruped: the two ends look alike, so which one is the head is unclear; say which way it faces (forward)".into());
+    }
+    Ok(quadruped_facing(mesh, forward))
 }
 
 /// [`quadruped`] with the head towards `forward` (its ground-plane part)
@@ -991,9 +1012,10 @@ pub fn rig_mesh(mesh: &mut Mesh, template: &str) -> Result<(), String> {
         "humanoid" | "biped" | "human" | "person" => humanoid(mesh, Arms::Auto),
         "humanoid_t" | "t_pose" => humanoid(mesh, Arms::T),
         "humanoid_a" | "a_pose" => humanoid(mesh, Arms::A),
-        "quadruped" | "animal" | "dog" | "cat" | "horse" => quadruped(mesh),
+        "quadruped" | "animal" | "dog" | "cat" | "horse" => try_quadruped(mesh, None)?,
         "chain" | "tail" | "rope" | "tentacle" | "snake" => chain(mesh, 8, "", "bone"),
-        other => return Err(format!("template \"{other}\": humanoid, quadruped or chain")),
+        "branches" | "tree" => return Err("template \"branches\" needs the tree's branch tags: build the bark with treerig::bark and rig it with treerig::rig_mesh".into()),
+        other => return Err(format!("template \"{other}\": humanoid, quadruped, chain or branches")),
     };
     // Keep what the model already had (shape keys, motion).
     if let Some(old) = &mesh.rig {
@@ -1045,6 +1067,14 @@ mod tests {
         assert!(b.far * 10 < a.far && b.cross_side * 10 < a.cross_side, "geodesic {b:?} vs sight {a:?}");
         // Rows sum to one with at most four bones.
         assert!(geo.weights.iter().all(|w| (w.iter().sum::<f32>() - 1.0).abs() < 1e-3));
+    }
+
+    #[test]
+    fn the_quadruped_template_takes_a_clay_animal_with_a_head() {
+        let mut m = clay_animal();
+        rig_mesh(&mut m, "quadruped").unwrap();
+        assert!(m.rig.is_some());
+        assert!(rig_mesh(&mut clay_animal(), "branches").unwrap_err().contains("treerig"));
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub fn unsupported(ext: &str) -> Option<&'static str> {
 /// Whether `ext` is a 3D model format (read or not), for telling a model
 /// from other files.
 pub fn is_model_ext(ext: &str) -> bool {
-    matches!(ext, "glb" | "gltf" | "obj" | "stl" | "ply" | "fbx" | "smesh") || unsupported(ext).is_some()
+    matches!(ext, "glb" | "gltf" | "obj" | "stl" | "ply" | "fbx" | "smesh" | "smodel") || unsupported(ext).is_some()
 }
 
 /// The model format `bytes` start like, as an extension, whatever the file
