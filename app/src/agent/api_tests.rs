@@ -235,16 +235,6 @@ fn summary_is_scoped() {
     assert!(v.get("more").is_none());
 }
 
-#[test]
-#[ignore]
-fn print_tool_sizes() {
-    let mut v: Vec<(usize, String)> = super::mcp::tools().iter().map(|t| (serde_json::to_string(t).unwrap().len(), t["name"].as_str().unwrap().to_owned())).collect();
-    v.sort();
-    for (n, name) in v.iter().rev().take(25) {
-        eprintln!("{n} {name}");
-    }
-}
-
 /// Marker colours had to be one of eight names; a #rrggbb takes the nearest.
 #[test]
 fn a_marker_takes_a_hex_colour() {
