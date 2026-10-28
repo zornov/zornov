@@ -7,8 +7,7 @@ cask "zornov" do
   version "0.1.2"
   sha256 "b8c0a6672057267028339985bd9b73ae6459e4a719427c01de7f287800a97541"
 
-  url "https://github.com/zornov/zornov/releases/download/v#{version}/Zornov-#{version}-macos-aarch64.dmg",
-      verified: "github.com/zornov/zornov/"
+  url "https://github.com/zornov/zornov/releases/download/v#{version}/Zornov-#{version}-macos-aarch64.dmg"
   name "Zornov"
   desc "Free, open-source film studio that AI assistants can drive over MCP"
   homepage "https://zornov.com/"
