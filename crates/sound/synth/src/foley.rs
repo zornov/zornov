@@ -206,7 +206,7 @@ fn impact(surface: Surface, shoe: Shoe, weight: f32, force: f32, heel: bool, rng
     // The body: a soft low thud.
     // Heavier feet thud lower and longer; a mouse's barely thuds at all.
     let thud_hz = (if heel { 85.0 } else { 120.0 }) * (1.45 - 0.8 * weight) * rng.range(0.92, 1.08);
-    let thud_tau = 0.03 + if shoe == Shoe::Paw { 0.03 * weight } else { 0.0 };
+    let thud_tau = 0.022 + 0.015 * weight + if shoe == Shoe::Paw { 0.03 * weight } else { 0.0 };
     let body = {
         let mut f = Svf::new();
         let c = SvfCoef::new(thud_hz, 1.0);

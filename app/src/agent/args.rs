@@ -131,7 +131,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "unmerge" => &["clip"],
         "sfx" => &["kind", "describe", "at", "ends_at", "duration", "volume", "lane", "variant", "surface", "shoe", "count", "species", "animal", "call", "distance", "size", "speed", "material", "period", "era", "tail", "intensity"],
         "sing" => &["voices", "voice", "kind", "type", "notes", "part", "score", "name", "at", "bpm", "tempo", "vibrato", "breath", "pan", "lane", "volume", "seed"],
-        "foley" => &["clip", "kind", "at", "surface", "size", "character", "volume", "lane", "variant"],
+        "foley" => &["clip", "kind", "at", "surface", "size", "character", "volume", "lane", "variant", "contacts", "feet", "hit"],
         "mask" => &["clip", "shape", "mask", "remove", "invert", "params", "region", "t", "feather", "expand", "backdrop"],
         "particles" => &["preset", "at", "duration", "region", "t", "lane", "behind", "params"],
         "living" => &["recipes", "recipe", "backdrop", "at", "t", "duration", "ramp", "front"],
