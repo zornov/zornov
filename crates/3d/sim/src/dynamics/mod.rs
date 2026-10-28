@@ -382,6 +382,59 @@ impl World {
         best
     }
 
+    /// How far body `i` can move along `dir` (a unit vector) before it
+    /// touches another, if it does within `reach` (see
+    /// [`collide::sweep`]); negative when it is in something now.
+    pub fn sweep(&self, i: usize, dir: V3, reach: f32) -> Option<f32> {
+        let bi = &self.bodies[i];
+        let b = bi.bounds();
+        let swept = b.union(&Aabb { lo: mad(b.lo, dir, reach), hi: mad(b.hi, dir, reach) }).fattened(1e-3);
+        let mut best: Option<f32> = None;
+        for (j, bj) in self.bodies.iter().enumerate() {
+            if j == i || !swept.overlaps(&bj.bounds()) {
+                continue;
+            }
+            for ca in &bi.colliders {
+                for cb in &bj.colliders {
+                    if ca.group & cb.mask == 0 || cb.group & ca.mask == 0 {
+                        continue;
+                    }
+                    if let Some(t) = collide::sweep(&ca.shape, &bi.pose.then(&ca.local), &cb.shape, &bj.pose.then(&cb.local), dir, best.unwrap_or(reach))
+                        && best.is_none_or(|b| t < b)
+                    {
+                        best = Some(t);
+                    }
+                }
+            }
+        }
+        best
+    }
+
+    /// How deep body `i` is in anything else now (0 when only touching);
+    /// it stops looking once it is deeper than `enough`.
+    pub fn overlap(&self, i: usize, enough: f32) -> f32 {
+        let bi = &self.bodies[i];
+        let b = bi.bounds().fattened(1e-3);
+        let mut most = 0.0f32;
+        for (j, bj) in self.bodies.iter().enumerate() {
+            if j == i || !b.overlaps(&bj.bounds()) {
+                continue;
+            }
+            for ca in &bi.colliders {
+                for cb in &bj.colliders {
+                    if ca.group & cb.mask == 0 || cb.group & ca.mask == 0 {
+                        continue;
+                    }
+                    most = most.max(collide::overlap(&ca.shape, &bi.pose.then(&ca.local), &cb.shape, &bj.pose.then(&cb.local), enough));
+                    if most > enough {
+                        return most;
+                    }
+                }
+            }
+        }
+        most
+    }
+
     /// Every manifold between body `i` and anything else now (normals
     /// from `i`), with the other body.
     pub fn contacts_of(&self, i: usize, margin: f32) -> Vec<(usize, Manifold)> {

@@ -180,3 +180,48 @@ fn a_door_on_a_hinge_swings_shut_on_its_spring() {
     // It turned about its hinge: the hinge edge stayed put.
     assert!((end.position.x - 100.0).abs() < 110.0);
 }
+
+#[test]
+fn models_placed_around_a_million_triangles_rest_quickly_and_right() {
+    let mut s = session();
+    // About a million triangles packed into a block 600 × 250 × 600 px
+    // (like a gyroid lattice): ten bumpy sheets 25 px apart, the top one
+    // at y 42..58 once placed, the bottom one near 300.
+    let mut stack = studio_mesh::Mesh::default();
+    for layer in 0..10 {
+        let sheet = studio_mesh::prim::plane(600.0, 600.0, 223);
+        let base = stack.positions.len() as u32;
+        stack.positions.extend(sheet.positions.iter().map(|p| [p[0], -125.0 + 25.0 * layer as f32 + 8.0 * (p[0] / 9.0).sin() * (p[2] / 9.0).sin(), p[2]]));
+        stack.normals.extend(sheet.normals);
+        stack.uvs.extend(sheet.uvs);
+        stack.indices.extend(sheet.indices.iter().map(|i| i + base));
+    }
+    stack.single_group();
+    assert!(stack.triangles() > 990_000);
+    let big = crate::mesh_store::add_model_at(&mut s.doc, &stack, "Lattice", 0).unwrap();
+    let mut c = s.model_clip(big).unwrap().clone();
+    c.transform.position = m::Vec2::new(0.0, 175.0);
+    assert!(s.doc.apply("Place", m::Edit::SetClip { seq: s.doc.seq(), clip: Box::new(c) }));
+    let mut place = |s: &mut Session, op: Value, first: bool| {
+        let t0 = std::time::Instant::now();
+        s.edit(&[op], "add", false).unwrap();
+        // The first pays for the tree over the big mesh, once.
+        let most = if first { 10.0 } else { 1.0 };
+        assert!(t0.elapsed().as_secs_f64() < most, "placing took {:?}", t0.elapsed());
+        let id = last(s);
+        at(s, id, 0.0).position.y
+    };
+    // Under the block, nothing under it in reach: it stays, and is not
+    // lifted up into the block.
+    let y = place(&mut s, json!({"op": "model", "shape": "sphere", "size": 150, "detail": 6, "position": [0, 400, 0], "name": "Under"}), true);
+    assert_eq!(y, 400.0);
+    // Above: down onto the top sheet.
+    let y = place(&mut s, json!({"op": "model", "shape": "torus", "size": 200, "position": [100, -100, 0], "name": "Ring"}), false);
+    assert!((42.0..=59.0).contains(&(y + 24.0)), "the ring's underside on the top sheet: {}", y + 24.0);
+    // Put inside the block: it stays where put.
+    let y = place(&mut s, json!({"op": "model", "shape": "sphere", "size": 120, "position": [-100, 150, 0], "name": "Inside"}), false);
+    assert_eq!(y, 150.0);
+    // Sunk a little into the top: up out of it, onto it.
+    let y = place(&mut s, json!({"op": "model", "shape": "cube", "size": 100, "position": [150, 12, -200], "name": "Crate"}), false);
+    assert!((42.0..=59.0).contains(&(y + 50.0)), "the crate's underside on the top sheet: {}", y + 50.0);
+}

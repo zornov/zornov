@@ -39,17 +39,22 @@ pub fn load_mesh(c: &m::Clip) -> Option<Arc<Mesh>> {
     Some(mesh)
 }
 
-/// The fitted shapes of a model at a size, kept (fitting takes a while).
-fn shapes_cached(file: &str, tris: &[[V3; 3]], fit: Fit, key: [u32; 4]) -> Option<Arc<Shapes>> {
-    static CACHE: OnceLock<Mutex<HashMap<(String, [u32; 4], String), Arc<Shapes>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
+/// The fitted shapes of a model at a size, kept (fitting takes a while,
+/// and so does the tree over a big surface). Surfaces are kept up to a
+/// few million triangles in all.
+fn shapes_cached(file: &str, tris: impl FnOnce() -> Vec<[V3; 3]>, fit: Fit, key: [u32; 7]) -> Option<Arc<Shapes>> {
+    type Kept = Mutex<HashMap<(String, [u32; 7], String), Arc<Shapes>>>;
+    static FITTED: OnceLock<Kept> = OnceLock::new();
+    static SURFACES: OnceLock<Kept> = OnceLock::new();
+    let cache = if fit == Fit::Mesh { &SURFACES } else { &FITTED }.get_or_init(Default::default);
     let k = (file.to_string(), key, format!("{fit:?}"));
     if let Some(s) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&k) {
         return Some(s.clone());
     }
-    let s = Arc::new(decompose::shapes_for(tris, fit, 32)?);
+    let s = Arc::new(decompose::shapes_for(&tris(), fit, if fit == Fit::Mesh { 0 } else { 32 })?);
     let mut g = cache.lock().unwrap_or_else(|e| e.into_inner());
-    if g.len() > 128 {
+    let full = if fit == Fit::Mesh { g.values().chain([&s]).map(|s| s.parts.iter().map(|(p, _)| if let Shape::Mesh(m) = p { m.bvh.tris.len() } else { 0 }).sum::<usize>()).sum::<usize>() > 4_000_000 } else { g.len() > 128 };
+    if full {
         g.clear();
     }
     g.insert(k, s.clone());
@@ -271,14 +276,15 @@ impl Scene {
                 body = rd.bodies().first().copied().unwrap_or(0);
                 item_role = Role::Character(Box::new(rd));
             } else {
-                let tris = physics_tris(&mesh, &tr, ppm);
                 let file = crate::mesh_store::file_of(c).unwrap_or_default();
                 let fit = match (role, props.fit) {
                     (BodyType::Static | BodyType::Kinematic, Fit::Auto) => Fit::Mesh,
                     (_, f) => f,
                 };
-                let key = [ppm.to_bits(), tr.scale_x.to_bits() as u32 ^ (tr.scale_x.to_bits() >> 32) as u32, tr.scale_y.to_bits() as u32 ^ tr.scale_z.to_bits() as u32, (tr.anchor.x + tr.anchor.y * 3.0 + tr.anchor_z * 7.0).to_bits() as u32];
-                let shapes = if fit == Fit::Mesh { decompose::shapes_for(&tris, Fit::Mesh, 0).map(Arc::new) } else { shapes_cached(&file, &tris, fit, key) };
+                // Everything the triangles are made from (see physics_tris).
+                let k = super::scale_of(&tr);
+                let key = [ppm, k[0], k[1], k[2], tr.anchor.x as f32, tr.anchor.y as f32, tr.anchor_z as f32].map(f32::to_bits);
+                let shapes = shapes_cached(&file, || physics_tris(&mesh, &tr, ppm), fit, key);
                 let Some(shapes) = shapes else { continue };
                 let mut cols: Vec<Collider> = shapes.parts.iter().map(|(s, p)| Collider::new(s.clone(), *p, &stuff)).collect();
                 if let Some(mass) = props.mass

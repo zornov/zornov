@@ -613,6 +613,184 @@ fn against_mesh(m: &TriMesh, pose: &Pose, world_bounds: &Aabb, margin: f32, out:
     }
 }
 
+/// How far `a` at `pa` can move along `dir` (a unit vector) before it
+/// touches `b` at `pb`, if it does within `reach`. It steps in by what
+/// each contact leaves between them (the separation over how much of the
+/// normal runs along `dir`) until they touch; a contact beside or above
+/// (its normal under a quarter along `dir`) does not stop it. Already in
+/// `b`, the distance is negative: back out to touching. A fixed surface
+/// is searched down its tree nearest first, only under `a`, and no
+/// further than the nearest hit so far, so a big one costs little more
+/// than the few triangles in the way.
+pub fn sweep(a: &Shape, pa: &Pose, b: &Shape, pb: &Pose, dir: V3, reach: f32) -> Option<f32> {
+    if a.is_static_only() {
+        return None;
+    }
+    if let Shape::Mesh(m) = b {
+        let poly = if let Shape::Hull(h) = a { Some(Poly::of_hull(h, pa)) } else { None };
+        return sweep_mesh(m, pb, &a.bounds(pa), dir, reach, |tri, margin| against_tri(a, pa, poly.as_ref(), tri, margin));
+    }
+    let mut ms = Vec::new();
+    advance(dir, reach, |t, margin| {
+        ms.clear();
+        collide(a, &Pose { p: mad(pa.p, dir, t), q: pa.q }, b, pb, margin, &mut ms);
+        ms.pop()
+    })
+}
+
+/// How deep `a` at `pa` is in `b` at `pb` (0 when apart or only
+/// touching). A fixed surface stops counting once it is deeper than
+/// `enough`.
+pub fn overlap(a: &Shape, pa: &Pose, b: &Shape, pb: &Pose, enough: f32) -> f32 {
+    let deepest = |m: &Manifold| m.points.iter().fold(0.0f32, |d, p| d.max(-p.sep));
+    match b {
+        Shape::Mesh(m) if !a.is_static_only() => {
+            let poly = if let Shape::Hull(h) = a { Some(Poly::of_hull(h, pa)) } else { None };
+            let mut hits = Vec::new();
+            m.query(&local_box(&a.bounds(pa), pb), &mut hits);
+            let mut most = 0.0f32;
+            for t in hits {
+                let tri = m.bvh.tris[t as usize].map(|v| pb.apply(v));
+                if let Some(mf) = against_tri(a, pa, poly.as_ref(), &Poly::of_tri(tri), 0.0) {
+                    most = most.max(deepest(&mf));
+                    if most > enough {
+                        break;
+                    }
+                }
+            }
+            most
+        }
+        _ => {
+            let mut ms = Vec::new();
+            collide(a, pa, b, pb, 0.0, &mut ms);
+            ms.iter().map(deepest).fold(0.0, f32::max)
+        }
+    }
+}
+
+/// A convex shape against one triangle (normal from the shape).
+fn against_tri(a: &Shape, pa: &Pose, poly: Option<&Poly>, tri: &Poly, margin: f32) -> Option<Manifold> {
+    match a {
+        Shape::Sphere { r } => ball_poly(pa.p, *r, tri, margin),
+        Shape::Capsule { half, r } => capsule_poly(ends(pa, *half), *r, tri, margin),
+        Shape::Hull(_) => poly_poly(poly?, tri, margin),
+        _ => None,
+    }
+}
+
+/// A world box in the frame of `pose` (the box around its corners).
+fn local_box(b: &Aabb, pose: &Pose) -> Aabb {
+    let mut lb = Aabb::EMPTY;
+    for i in 0..8 {
+        lb.grow(pose.unapply([if i & 1 == 0 { b.lo[0] } else { b.hi[0] }, if i & 2 == 0 { b.lo[1] } else { b.hi[1] }, if i & 4 == 0 { b.lo[2] } else { b.hi[2] }]));
+    }
+    lb
+}
+
+/// Steps toward a convex thing: `contact(t, margin)` is the manifold with
+/// the moving shape `t` along `dir`, counting points up to `margin` apart.
+fn advance(dir: V3, reach: f32, mut contact: impl FnMut(f32, f32) -> Option<Manifold>) -> Option<f32> {
+    let mut t = 0.0f32;
+    // Each step closes the gap a face contact leaves, so a few do; the
+    // cap stops one that creeps along an edge.
+    for _ in 0..16 {
+        let mf = contact(t, (reach - t).max(0.0) + 0.001)?;
+        let along = dot(mf.normal, dir);
+        if along < 0.25 {
+            return None;
+        }
+        let step = mf.points.iter().map(|p| p.sep / along).fold(f32::INFINITY, f32::min);
+        if !step.is_finite() {
+            return None;
+        }
+        if step.abs() < 1e-4 {
+            break;
+        }
+        t += step;
+        if t > reach {
+            return None;
+        }
+    }
+    Some(t)
+}
+
+/// A tree node (or triangle) to look at, the nearest along the sweep first.
+struct Ahead(f32, u32);
+
+impl PartialEq for Ahead {
+    fn eq(&self, o: &Ahead) -> bool {
+        self.0.total_cmp(&o.0).is_eq()
+    }
+}
+impl Eq for Ahead {}
+impl PartialOrd for Ahead {
+    fn partial_cmp(&self, o: &Ahead) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Ahead {
+    fn cmp(&self, o: &Ahead) -> std::cmp::Ordering {
+        o.0.total_cmp(&self.0)
+    }
+}
+
+/// [`sweep`] against the triangles of a fixed surface: `contact(tri,
+/// margin)` is the moving shape against a triangle (in the world).
+fn sweep_mesh(m: &TriMesh, pose: &Pose, part: &Aabb, dir: V3, reach: f32, mut contact: impl FnMut(&Poly, f32) -> Option<Manifold>) -> Option<f32> {
+    if m.bvh.tris.is_empty() || part.is_empty() {
+        return None;
+    }
+    // The column the shape sweeps through, in the mesh's frame.
+    let swept = part.union(&Aabb { lo: mad(part.lo, dir, reach), hi: mad(part.hi, dir, reach) }).fattened(1e-3);
+    let col = local_box(&swept, pose);
+    let meets = |lo: &V3, hi: &V3| (0..3).all(|k| lo[k] <= col.hi[k] && col.lo[k] <= hi[k]);
+    // How far along `dir` the shape reaches, and how far it must go to
+    // meet a box: no triangle in the box is nearer.
+    let front: f32 = (0..3).map(|k| if dir[k] > 0.0 { part.hi[k] * dir[k] } else { part.lo[k] * dir[k] }).sum();
+    let ld = pose.unrotate(dir);
+    let base = dot(dir, pose.p) - front;
+    let ahead = |lo: &V3, hi: &V3| (0..3).map(|k| if ld[k] > 0.0 { lo[k] * ld[k] } else { hi[k] * ld[k] }).sum::<f32>() + base;
+    let mut best: Option<f32> = None;
+    let mut heap = std::collections::BinaryHeap::new();
+    let root = &m.bvh.nodes[0];
+    if meets(&root.lo, &root.hi) {
+        heap.push(Ahead(ahead(&root.lo, &root.hi), 0));
+    }
+    while let Some(Ahead(d, i)) = heap.pop() {
+        let limit = best.unwrap_or(reach);
+        if d > limit {
+            break;
+        }
+        let node = &m.bvh.nodes[i as usize];
+        if node.count == 0 {
+            for c in [node.index, i + 1] {
+                let n = &m.bvh.nodes[c as usize];
+                if meets(&n.lo, &n.hi) {
+                    heap.push(Ahead(ahead(&n.lo, &n.hi), c));
+                }
+            }
+            continue;
+        }
+        for k in node.index..node.index + node.count {
+            let lt = m.bvh.tris[m.bvh.order[k as usize] as usize];
+            let lo = vmin(lt[0], vmin(lt[1], lt[2]));
+            let hi = vmax(lt[0], vmax(lt[1], lt[2]));
+            let limit = best.unwrap_or(reach);
+            if !meets(&lo, &hi) || ahead(&lo, &hi) > limit {
+                continue;
+            }
+            let tri = lt.map(|v| pose.apply(v));
+            // The triangle comes back along `dir` instead of the shape going on.
+            if let Some(t) = advance(dir, limit, |t, margin| contact(&Poly::of_tri(tri.map(|v| mad(v, dir, -t))), margin))
+                && best.is_none_or(|b| t < b)
+            {
+                best = Some(t);
+            }
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,5 +871,59 @@ mod tests {
         assert_eq!(out.len(), 1, "{out:?}");
         assert!(out[0].normal[1].abs() > 0.99);
         assert_eq!(out[0].points.len(), 4);
+    }
+
+    /// A flat square of two triangles at height `y` (down is +y).
+    fn floor_at(y: f32, half: f32) -> Vec<[V3; 3]> {
+        vec![[[-half, y, -half], [half, y, half], [half, y, -half]], [[-half, y, -half], [-half, y, half], [half, y, half]]]
+    }
+
+    #[test]
+    fn a_sweep_stops_at_the_first_surface_under_it() {
+        let mut tris = floor_at(0.0, 5.0);
+        tris.extend(floor_at(2.0, 5.0));
+        // A wall touching the box's side: beside it, not under it.
+        tris.push([[0.5, -10.0, -5.0], [0.5, 10.0, -5.0], [0.5, 10.0, 5.0]]);
+        let mesh = Shape::Mesh(Arc::new(TriMesh::new(tris)));
+        let down = [0.0, 1.0, 0.0];
+        let at = |y: f32| Pose::at([0.0, y, 0.0]);
+        for shape in [boxy([0.5; 3]), Shape::Sphere { r: 0.5 }, Shape::Capsule { half: 0.0, r: 0.5 }] {
+            let d = sweep(&shape, &at(-3.0), &mesh, &Pose::IDENTITY, down, 10.0).unwrap();
+            assert!((d - 2.5).abs() < 1e-3, "{shape:?}: {d}");
+            // Out of reach: nothing.
+            assert!(sweep(&shape, &at(-3.0), &mesh, &Pose::IDENTITY, down, 2.0).is_none(), "{shape:?}");
+            // Sunk 0.2 into the floor: back out by that much.
+            let d = sweep(&shape, &at(-0.3), &mesh, &Pose::IDENTITY, down, 10.0).unwrap();
+            assert!((d + 0.2).abs() < 1e-3, "{shape:?}: {d}");
+            let o = overlap(&shape, &at(-0.3), &mesh, &Pose::IDENTITY, f32::INFINITY);
+            assert!((o - 0.2).abs() < 1e-3, "{shape:?}: {o}");
+            assert_eq!(overlap(&shape, &at(-3.0), &mesh, &Pose::IDENTITY, f32::INFINITY), 0.0);
+        }
+        // The same against a convex floor.
+        let slab = boxy([5.0, 0.5, 5.0]);
+        let d = sweep(&boxy([0.5; 3]), &at(-3.0), &slab, &at(0.5), down, 10.0).unwrap();
+        assert!((d - 2.5).abs() < 1e-3, "{d}");
+    }
+
+    #[test]
+    fn a_sweep_over_a_big_surface_looks_only_under_the_shape() {
+        // 320 000 triangles of floor; a box above one corner of it.
+        let n = 400;
+        let mut tris = Vec::with_capacity(n * n * 2);
+        for i in 0..n {
+            for j in 0..n {
+                let (x, z) = (i as f32 * 0.1 - 20.0, j as f32 * 0.1 - 20.0);
+                let y = 0.05 * (x * 3.0).sin() * (z * 3.0).sin();
+                tris.push([[x, y, z], [x + 0.1, y, z + 0.1], [x + 0.1, y, z]]);
+                tris.push([[x, y, z], [x, y, z + 0.1], [x + 0.1, y, z + 0.1]]);
+            }
+        }
+        let mesh = Shape::Mesh(Arc::new(TriMesh::new(tris)));
+        let t0 = std::time::Instant::now();
+        for k in 0..20 {
+            let d = sweep(&boxy([0.5; 3]), &Pose::at([k as f32 - 10.0, -3.0, 4.0]), &mesh, &Pose::IDENTITY, [0.0, 1.0, 0.0], 100.0).unwrap();
+            assert!(d > 2.4 && d < 2.6, "{d}");
+        }
+        assert!(t0.elapsed().as_secs_f32() < 1.0, "20 sweeps took {:?}", t0.elapsed());
     }
 }
