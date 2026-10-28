@@ -132,6 +132,9 @@ impl Context for Vars<'_> {
     }
 }
 
+/// The most arguments any function takes.
+const MAX_ARGS: usize = 8;
+
 /// Function names, their argument counts (least, most), and whether some
 /// arguments are words in quotes.
 const FUNCS: &[(&str, usize, usize)] = &[
@@ -255,24 +258,67 @@ pub fn parse_with(src: &str, names: &[&str]) -> Result<Expr, String> {
     Ok(e)
 }
 
+/// How many parsed formulas [`parse_cached`] keeps (per thread).
+const CACHE_SIZE: usize = 512;
+
+/// A remembered parse, with when it was last asked for.
+struct Cached {
+    src: String,
+    names: Vec<String>,
+    parsed: Rc<Result<Expr, String>>,
+    used: u64,
+}
+
+#[derive(Default)]
+struct Cache {
+    /// By a hash of the source and names; a hash shared by two formulas
+    /// holds both.
+    by_hash: HashMap<u64, Vec<Cached>>,
+    len: usize,
+    clock: u64,
+}
+
 thread_local! {
-    static CACHE: RefCell<HashMap<(String, String), Rc<Result<Expr, String>>>> = RefCell::new(HashMap::new());
+    static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+}
+
+fn cache_hash(src: &str, names: &[&str]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    src.hash(&mut h);
+    names.hash(&mut h);
+    h.finish()
 }
 
 /// [`parse_with`], remembered: frames evaluate the same formulas over and
-/// over.
+/// over. A look that finds its formula copies nothing; when the cache is
+/// full the formula asked for longest ago goes (a project with more
+/// formulas than the cache holds keeps its busiest ones instead of losing
+/// them all at once).
 pub fn parse_cached(src: &str, names: &[&str]) -> Rc<Result<Expr, String>> {
-    let key = (src.to_owned(), names.join(","));
+    let h = cache_hash(src, names);
     CACHE.with(|c| {
-        if let Some(hit) = c.borrow().get(&key) {
-            return hit.clone();
+        let mut c = c.borrow_mut();
+        c.clock += 1;
+        let now = c.clock;
+        if let Some(hit) = c.by_hash.get_mut(&h).and_then(|v| v.iter_mut().find(|e| e.src == src && e.names.iter().map(String::as_str).eq(names.iter().copied()))) {
+            hit.used = now;
+            return hit.parsed.clone();
         }
         let parsed = Rc::new(parse_with(src, names));
-        let mut c = c.borrow_mut();
-        if c.len() > 512 {
-            c.clear();
+        if c.len >= CACHE_SIZE {
+            let oldest = c.by_hash.iter().flat_map(|(k, v)| v.iter().enumerate().map(move |(i, e)| (e.used, *k, i))).min();
+            if let Some((_, k, i)) = oldest {
+                let v = c.by_hash.get_mut(&k).expect("found above");
+                v.swap_remove(i);
+                if v.is_empty() {
+                    c.by_hash.remove(&k);
+                }
+                c.len -= 1;
+            }
         }
-        c.insert(key, parsed.clone());
+        c.by_hash.entry(h).or_default().push(Cached { src: src.to_owned(), names: names.iter().map(|n| (*n).to_owned()).collect(), parsed: parsed.clone(), used: now });
+        c.len += 1;
         parsed
     })
 }
@@ -805,11 +851,17 @@ impl<'a> Eval<'a> {
             }
             _ => {}
         }
-        let a: Vec<f64> = args.iter().map(|e| self.ev(e)).collect();
-        if let Some(g) = super::formula::lookup(f) {
-            return g(&a);
+        // The parser allows at most `MAX_ARGS` arguments: worked out onto
+        // the stack, not into a new vector each call.
+        let mut buf = [0.0f64; MAX_ARGS];
+        for (slot, e) in buf.iter_mut().zip(args) {
+            *slot = self.ev(e);
         }
-        match (f, a.as_slice()) {
+        let a = &buf[..args.len().min(MAX_ARGS)];
+        if let Some(g) = super::formula::lookup(f) {
+            return g(a);
+        }
+        match (f, a) {
             ("wiggle", xs) => {
                 let (freq, amp) = (xs[0], xs[1]);
                 let oct = xs.get(2).map_or(1, |o| o.round().clamp(1.0, 8.0) as u32);
@@ -1090,5 +1142,40 @@ mod tests {
         let b = parse_cached("value * 2", &[]);
         assert!(Rc::ptr_eq(&a, &b));
         assert!(parse_cached("nope(", &[]).is_err());
+        // The names are part of what is remembered.
+        let c = parse_cached("x + 1", &["x"]);
+        assert!(c.is_ok() && parse_cached("x + 1", &[]).is_err());
+        assert!(Rc::ptr_eq(&c, &parse_cached("x + 1", &["x"])));
+        assert!(FUNCS.iter().all(|f| f.2 <= MAX_ARGS));
+    }
+
+    /// More formulas than the cache holds: the ones asked for lately stay,
+    /// instead of the whole cache emptying when it fills.
+    #[test]
+    fn a_full_cache_keeps_its_recent_formulas() {
+        let src = |k: usize| format!("value + {k}");
+        let first: Vec<_> = (0..CACHE_SIZE + 100).map(|k| parse_cached(&src(k), &[])).collect();
+        for k in 100..CACHE_SIZE + 100 {
+            assert!(Rc::ptr_eq(&first[k], &parse_cached(&src(k), &[])), "formula {k} was parsed again");
+        }
+    }
+
+    /// Timings for the hot path (run with `--ignored --nocapture`, in a
+    /// release build, to compare).
+    #[test]
+    #[ignore]
+    fn timing_of_evaluation() {
+        let mut cx = Keys { t: 0.4, i: 0.0, keys: vec![(0.0, 0.0), (1.0, 100.0)] };
+        let src = "amp = 3; wiggle(2, amp) + sin(t * 3) * max(1, 2, value, 4) + clamp(t, 0, 1)";
+        let n = 200_000;
+        let start = std::time::Instant::now();
+        let mut sum = 0.0;
+        for k in 0..n {
+            let e = parse_cached(src, &[]);
+            cx.t = k as f64 * 1e-4;
+            sum += e.as_ref().as_ref().unwrap().eval_in(&cx);
+        }
+        let per = start.elapsed().as_nanos() as f64 / n as f64;
+        println!("cached parse + eval: {per:.0} ns a look ({sum})");
     }
 }
