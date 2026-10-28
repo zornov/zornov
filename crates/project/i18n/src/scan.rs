@@ -428,6 +428,12 @@ pub fn prose_literals(file: &str, src: &str) -> Vec<Found> {
     out
 }
 
+/// `f` relative to `app_src` with `/` between parts on every system, as the
+/// baseline and the reports write it.
+pub fn relative(app_src: &Path, f: &Path) -> String {
+    f.strip_prefix(app_src).unwrap_or(f).components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+}
+
 /// The app source files that draw the interface (not the AI prompts,
 /// services or tools).
 pub fn ui_files(app_src: &Path) -> Vec<PathBuf> {

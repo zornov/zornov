@@ -6,5 +6,5 @@ license.workspace = true
 description = "Zornov's one GPU device per process, shared by the renderer, the vector rasterizer and every other GPU pass."
 
 [dependencies]
-wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"] }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "metal", "vulkan", "dx12"] }
 pollster = "0.4"

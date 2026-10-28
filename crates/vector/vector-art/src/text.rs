@@ -792,6 +792,8 @@ mod tests {
         n.kind = TextKind::OnPath { path: arc, offset: 10.0, flip: false };
         let o = layout(&n, &n.char, &n.para, &[CharProps::default()], &[]);
         let b = o.parts[0].1.bounding_box();
-        assert!(b.height() > 50.0, "glyphs climb with the path: {b:?}");
+        // A straight line of 24 px type is about 30 px tall; how far up the
+        // arc the words reach depends on the system font's widths.
+        assert!(b.height() > 24.0 * 1.6, "glyphs climb with the path: {b:?}");
     }
 }

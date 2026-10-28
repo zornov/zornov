@@ -150,6 +150,21 @@ impl ExportJob {
         self.task.progress.cancel();
     }
 
+    /// How the job ended, or `None` while it runs; unlike [`poll`](Self::poll)
+    /// it can be asked again.
+    pub fn outcome(&self) -> Option<Event> {
+        if !self.is_finished() {
+            return None;
+        }
+        Some(if let Some(e) = self.task.error.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            Event::Failed(e)
+        } else if self.task.progress.is_cancelled() {
+            Event::Cancelled
+        } else {
+            Event::Finished { path: self.request.path.clone() }
+        })
+    }
+
     /// Events since the last call: progress when it moved, then exactly one
     /// of Finished / Failed / Cancelled when the job ends.
     pub fn poll(&mut self) -> Vec<Event> {
@@ -162,15 +177,9 @@ impl ExportJob {
             self.last = f;
             out.push(Event::Progress { fraction: f, eta_secs: self.eta_secs() });
         }
-        if self.is_finished() {
+        if let Some(e) = self.outcome() {
             self.ended = true;
-            out.push(if let Some(e) = self.task.error.lock().unwrap_or_else(|e| e.into_inner()).clone() {
-                Event::Failed(e)
-            } else if self.task.progress.is_cancelled() {
-                Event::Cancelled
-            } else {
-                Event::Finished { path: self.request.path.clone() }
-            });
+            out.push(e);
         }
         out
     }

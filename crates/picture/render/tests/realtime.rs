@@ -236,18 +236,25 @@ fn frame_times_of_a_busy_forest_at_720p_and_1080p() {
         return;
     };
     eprintln!("adapter: {}", r.context().adapter_name);
+    // On llvmpipe or WARP the frame times measure the CPU, and the full run
+    // takes past ten minutes there: a few low-poly frames check it draws.
+    let software = r.context().software;
+    let worlds: &[(&str, &str)] = if software { &[("fast", "low-poly")] } else { &[("fast", "low-poly"), ("high", "modeled kits")] };
+    let sizes: &[(&str, u32, u32, Quality)] = &[("720p Fast (moving)", 1280, 720, Quality::Fast), ("1080p Balanced", 1920, 1080, Quality::Balanced), ("1080p High", 1920, 1080, Quality::High)];
+    let sizes = if software { &sizes[..1] } else { sizes };
+    let frames = if software { 3 } else { 40 };
     let mut median_fast = 0.0;
-    for (worldq, label0) in [("fast", "low-poly"), ("high", "modeled kits")] {
+    for &(worldq, label0) in worlds {
     let mut s = spec("forest", 400.0);
     s.quality = worldq.into();
     let t0 = std::time::Instant::now();
     let w = build(&s, &NoLibrary).unwrap();
     eprintln!("forest {label0}: built in {:?}, {} triangles in all", t0.elapsed(), w.triangle_count());
     let base = studio_world::walk::Pose { pos: [w.spawn.position[0], w.spawn.position[1] + 1.62, w.spawn.position[2]], yaw: w.spawn.yaw, pitch: 0.0, fov: 65.0 };
-    for (label, width, height, quality) in [("720p Fast (moving)", 1280u32, 720u32, Quality::Fast), ("1080p Balanced", 1920, 1080, Quality::Balanced), ("1080p High", 1920, 1080, Quality::High)] {
+    for &(label, width, height, quality) in sizes {
         let mut times = Vec::new();
         let mut tris = 0;
-        for i in 0..40 {
+        for i in 0..frames {
             let mut p = base;
             p.yaw += i as f32 * 1.5;
             let mut v = View::from_pose(&p);
@@ -267,7 +274,7 @@ fn frame_times_of_a_busy_forest_at_720p_and_1080p() {
         }
     }
     }
-    if r.context().software {
+    if software {
         // A frame-time bar on llvmpipe or WARP measures the CPU, not a GPU.
         eprintln!("software adapter: the 250 ms bar holds on GPUs only (median {median_fast:.1} ms here)");
         return;

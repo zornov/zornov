@@ -22,9 +22,21 @@ fn fixture_bundle(root: &Path) -> PathBuf {
         .status()
         .unwrap();
     assert!(st.success(), "fixture builds");
-    let lib = target.join("release").join(if cfg!(target_os = "macos") { "libofx_fixture.dylib" } else { "libofx_fixture.so" });
+    let lib = target.join("release").join(if cfg!(target_os = "macos") {
+        "libofx_fixture.dylib"
+    } else if cfg!(windows) {
+        "ofx_fixture.dll"
+    } else {
+        "libofx_fixture.so"
+    });
     let bundle = root.join("StudioTest.ofx.bundle");
-    let dir = bundle.join("Contents").join(if cfg!(target_os = "macos") { "MacOS" } else { "Linux-x86-64" });
+    let dir = bundle.join("Contents").join(if cfg!(target_os = "macos") {
+        "MacOS"
+    } else if cfg!(windows) {
+        "Win64"
+    } else {
+        "Linux-x86-64"
+    });
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::copy(&lib, dir.join("StudioTest.ofx")).unwrap();
     bundle

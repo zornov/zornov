@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn home_is_scrubbed() {
-        let home = std::env::var("HOME").unwrap();
+        let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
         assert_eq!(scrub(&format!("at {home}/Projects/x.rs")), "at ~/Projects/x.rs");
     }
 

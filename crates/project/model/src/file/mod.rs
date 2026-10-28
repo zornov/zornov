@@ -390,8 +390,10 @@ mod tests {
 
     #[test]
     fn relative_paths() {
-        assert_eq!(relative_path(Path::new("/a/b/proj"), Path::new("/a/b/proj/media/x.mp4")).as_deref(), Some("media/x.mp4"));
-        assert_eq!(relative_path(Path::new("/a/b/proj"), Path::new("/a/c/x.mp4")).as_deref(), Some("../../c/x.mp4"));
+        // Absolute needs a drive on Windows.
+        let abs = |p: &str| PathBuf::from(if cfg!(windows) { format!("C:{p}") } else { p.to_owned() });
+        assert_eq!(relative_path(&abs("/a/b/proj"), &abs("/a/b/proj/media/x.mp4")).as_deref(), Some("media/x.mp4"));
+        assert_eq!(relative_path(&abs("/a/b/proj"), &abs("/a/c/x.mp4")).as_deref(), Some("../../c/x.mp4"));
         assert_eq!(relative_path(Path::new("/a"), Path::new("rel.mp4")), None);
         assert_eq!(normalize(Path::new("/a/b/../c/./d")), PathBuf::from("/a/c/d"));
     }
