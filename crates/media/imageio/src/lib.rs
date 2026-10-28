@@ -133,6 +133,10 @@ pub enum Format {
     Png,
 }
 
+/// The file extensions [`read`] takes (by contents; these are the names
+/// such files go by).
+pub const EXTENSIONS: &[&str] = &["exr", "dpx", "tif", "tiff", "png"];
+
 impl Format {
     /// By file extension.
     pub fn from_path(path: &Path) -> Option<Format> {
@@ -236,6 +240,13 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_listed_extension_is_a_format() {
+        for e in EXTENSIONS {
+            assert!(Format::from_path(Path::new(&format!("a.{e}"))).is_some(), ".{e}");
+        }
+    }
 
     #[test]
     fn timecode_bcd() {

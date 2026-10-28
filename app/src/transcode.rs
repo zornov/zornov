@@ -19,6 +19,10 @@ use std::path::Path;
 use studio_craft_media::matroska as mkv;
 use studio_encode::{aac, h264, mux, yuv::Yuv420};
 
+/// Containers only the converter reads (MP4 and MOV holding VP9, AV1 or
+/// ProRes go by their usual names, [`crate::media_io::VIDEO_EXT`]).
+pub const CONTAINERS: &[&str] = &["webm", "mkv"];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VCodec {
     Vp9,

@@ -121,6 +121,39 @@ pub fn merge_shared(recents: &mut Vec<Recent>) {
     }
 }
 
+/// File ▸ Import media's choices, built from what reads each kind: the
+/// MP4 / MOV demuxer and the WebM / MKV converter, the picture readers
+/// (PNG, JPEG, and EXR, DPX and TIFF through `studio-imageio`), Photoshop
+/// documents, the sound decoders, Lottie, and every model importer. The
+/// first, "All media", holds them all.
+pub(crate) fn import_filters() -> Vec<(&'static str, Vec<&'static str>)> {
+    let join = |lists: &[&[&'static str]]| -> Vec<&'static str> {
+        let mut v: Vec<&'static str> = Vec::new();
+        for e in lists.iter().flat_map(|l| l.iter()) {
+            if !v.contains(e) {
+                v.push(e);
+            }
+        }
+        v
+    };
+    let models = crate::mesh_store::model_extensions();
+    let groups = vec![
+        ("Video", join(&[media_io::VIDEO_EXT, crate::transcode::CONTAINERS])),
+        ("Pictures", join(&[media_io::IMAGE_EXT, studio_imageio::EXTENSIONS, crate::psd_import::EXTENSIONS])),
+        ("Sound", join(&[media_io::AUDIO_EXT, media_io::SOUND_DECODED])),
+        ("3D models", models),
+        ("Lottie animations", media_io::LOTTIE_EXT.to_vec()),
+    ];
+    let all = join(&groups.iter().map(|g| g.1.as_slice()).collect::<Vec<_>>());
+    std::iter::once(("All media", all)).chain(groups).collect()
+}
+
+/// Whether Import media takes a file, by its extension (any case).
+pub(crate) fn importable(path: &Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    import_filters()[0].1.contains(&ext.as_str())
+}
+
 impl StudioApp {
     fn remember(&mut self, path: &Path) {
         let p = &self.doc.project;
@@ -240,13 +273,8 @@ impl StudioApp {
 
     /// Pick media files and add them to the project bin.
     pub fn import_media_files(&mut self, ctx: &egui::Context) {
-        let mut exts: Vec<&str> = media_io::VIDEO_EXT.to_vec();
-        exts.extend(["glb", "gltf", "obj", "stl"]);
-        exts.extend(media_io::AUDIO_EXT);
-        exts.extend(media_io::IMAGE_EXT);
-        exts.extend(["psd", "psb"]);
-        exts.extend(media_io::LOTTIE_EXT);
-        let Some(paths) = rfd::FileDialog::new().set_title("Import media").add_filter("Media", &exts).pick_files() else { return };
+        let dialog = import_filters().into_iter().fold(rfd::FileDialog::new().set_title("Import media"), |d, (name, exts)| d.add_filter(name, &exts));
+        let Some(paths) = dialog.pick_files() else { return };
         self.import_paths(ctx, &paths);
     }
 
@@ -425,4 +453,42 @@ pub enum Autosaved {
     Changed,
     /// The backup or the save failed.
     Failed,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// File ▸ Import media offers what the decoders and importers read:
+    /// WebM and MKV (converted), TIFF, EXR and DPX stills, every model file.
+    #[test]
+    fn import_media_offers_every_format_zornov_reads() {
+        let filters = import_filters();
+        let (name, all) = &filters[0];
+        assert_eq!(*name, "All media");
+        for e in ["mp4", "mov", "m4v", "webm", "mkv", "png", "jpg", "jpeg", "tif", "tiff", "exr", "dpx", "psd", "wav", "mp3", "flac", "ogg", "aif", "m4a", "json", "glb", "gltf", "obj", "stl", "fbx", "ply", "smodel", "usda", "usdz"] {
+            assert!(all.contains(&e), "Import media does not offer .{e}");
+            assert!(importable(Path::new(&format!("clip.{}", e.to_uppercase()))), ".{e} is importable, whatever its case");
+        }
+        for (group, exts) in &filters[1..] {
+            for e in exts {
+                assert!(all.contains(e), "{group}: .{e} is missing from All media");
+            }
+        }
+        assert!(!importable(Path::new("notes.docx")));
+        // What it offers really imports: the pro stills.
+        let dir = std::env::temp_dir().join(format!("studio-import-filters-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let px = vec![[0.5, 0.25, 0.1, 1.0]; 8];
+        let files = [("still.tif", studio_imageio::tiff::encode(4, 2, &px, false)), ("still.exr", studio_imageio::exr::encode(4, 2, &px, &Default::default())), ("still.dpx", studio_imageio::dpx::encode(4, 2, &px, &Default::default()))];
+        let paths: Vec<PathBuf> = files.iter().map(|(n, b)| {
+            let p = dir.join(n);
+            std::fs::write(&p, b).unwrap();
+            p
+        }).collect();
+        let mut doc = crate::agent::Session::new(crate::services::project::new_custom("Import", 640, 360, 30.0)).doc;
+        let r = crate::services::project::import_media(&mut doc, &paths);
+        assert_eq!(r.ids.len(), 3, "failed: {:?}", r.failed);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
