@@ -14,7 +14,9 @@ use std::collections::HashMap;
 /// out for each.
 pub fn unsupported(ext: &str) -> Option<&'static str> {
     Some(match ext {
-        "usdz" | "usd" | "usda" | "usdc" => "USD / USDZ is not read yet; export it as .glb (Reality Converter and Apple's usdzconvert can)",
+        "usdc" => "binary USD (.usdc) is not read; save it as text (.usda) or export it as .glb",
+        // The app reads USD text through studio-modeling, which builds it from its parts.
+        "usdz" | "usd" | "usda" => "USD is read by the model import, not as plain triangles; export it as .glb (Reality Converter and Apple's usdzconvert can)",
         "dae" => "COLLADA is not read yet; export it as .glb, .obj or .fbx",
         "3ds" | "blend" | "max" | "ma" | "mb" | "c4d" | "skp" | "abc" | "3mf" | "step" | "stp" | "iges" | "igs" | "off" | "x3d" | "wrl" | "vrml" | "lwo" | "fbx_ascii" => "that program's own format is not read; export it as .glb, .obj, .fbx, .stl or .ply",
         _ => return None,

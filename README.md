@@ -136,7 +136,7 @@ The assistant gets the whole studio, not a render API: `edit` takes ops in one u
 - Physics: rigid bodies, ragdolls, cloth, hair, fracture, fluids and smoke, baked to the timeline.
 - A real-time renderer and a path tracer with weather, fog, light beams and wet surfaces.
 - Walkable worlds with terrain, plants, water and sky, recorded as camera shots. Procedural streets and interiors in eight styles.
-- glTF, OBJ, FBX, STL and PLY import, plus USD in the modelling workspace. Export to glTF, FBX, USD, OBJ, STL and PLY.
+- glTF, OBJ, FBX, STL, PLY and USD import (USD as text: .usda, or a .usdz holding a text layer; binary .usdc is not read). Export to glTF, USD (.usdz and .usda), FBX, OBJ, STL and PLY.
 
 ### Animation
 - Puppets with pins, bones and scissor cuts, so limbs and lips move apart. They walk, run and sneak, each foot planted on the ground and lifted in an arc.

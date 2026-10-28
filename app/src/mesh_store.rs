@@ -14,9 +14,96 @@ use crate::doc::Doc;
 use studio_mesh::Mesh;
 use studio_model as m;
 
+/// USD text: `.usda` (and `.usd` saved as text) and a `.usdz` holding a
+/// text layer, read by `studio_modeling::formats` (binary USD is not).
+const USD: &[&str] = &["usda", "usd", "usdz"];
+
+/// Every model file Zornov reads: the mesh importers' (glTF, OBJ, STL,
+/// PLY, FBX and `.smesh`), its own editable source (`.smodel`) and USD text.
+pub fn model_extensions() -> Vec<&'static str> {
+    let mut v = studio_mesh::import::EXTENSIONS.to_vec();
+    v.push("smodel");
+    v.extend(USD);
+    v
+}
+
+/// The formats a model exports to, in the order the dialog lists them.
+pub const MODEL_EXPORTS: &[&str] = &["glb", "usdz", "usda", "fbx", "obj", "stl", "ply"];
+
+/// The export dialog's choices, one per [`MODEL_EXPORTS`] entry.
+pub const EXPORT_FILTERS: &[(&str, &[&str])] = &[("glTF binary", &["glb"]), ("USDZ", &["usdz"]), ("USD text", &["usda"]), ("FBX", &["fbx"]), ("OBJ", &["obj"]), ("STL", &["stl"]), ("PLY", &["ply"])];
+
 /// The model files an import takes.
 pub fn is_model_file(p: &std::path::Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).is_some_and(|e| studio_mesh::import::EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| model_extensions().contains(&e.to_ascii_lowercase().as_str()))
+}
+
+/// Whether a file is Zornov's own editable model source (`.smodel`), by
+/// its name or its first bytes.
+pub fn is_smodel(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("smodel"))
+        || std::fs::File::open(path).ok().is_some_and(|mut f| {
+            use std::io::Read;
+            let mut magic = [0u8; 8];
+            f.read_exact(&mut magic).is_ok() && &magic == b"SMODEL1\0"
+        })
+}
+
+/// Reads any model file Zornov reads ([`model_extensions`]), centred and
+/// with its largest side `fit` pixels (0 keeps its size). The editable
+/// source and USD are built from their parts, faces as they are; the rest
+/// go through `studio_mesh::import`.
+pub fn read_model(path: &std::path::Path, fit: f32) -> Result<studio_mesh::import::Imported, String> {
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let (asset, note) = if is_smodel(path) {
+        let a = studio_modeling::asset::load(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let n = format!("read the editable source ({} parts)", a.parts.len());
+        (a, n)
+    } else if USD.contains(&ext.as_str()) {
+        let parts = studio_modeling::formats::import(path, 0.0).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut a = studio_modeling::asset::Asset::new(path.file_stem().and_then(|s| s.to_str()).unwrap_or("Model"));
+        let n = format!("read {} USD mesh{}", parts.len(), if parts.len() == 1 { "" } else { "es" });
+        a.parts.extend(parts.into_iter().map(|(name, poly)| studio_modeling::asset::Part::new(&name, poly)));
+        (a, n)
+    } else {
+        return studio_mesh::import::load(path, fit);
+    };
+    let mut mesh = asset.to_mesh(false)?;
+    if mesh.triangles() == 0 {
+        return Err(format!("{}: no triangles in the model", path.display()));
+    }
+    mesh.tidy();
+    if fit > 0.0 {
+        studio_mesh::ops::centre_and_fit(&mut mesh, fit);
+    }
+    Ok(studio_mesh::import::Imported { mesh, notes: vec![note] })
+}
+
+/// Writes a model clip to `path` by its extension: glTF (`.glb`) and OBJ
+/// with their textures from the triangles; USD (`.usdz`, `.usda`), FBX,
+/// STL and PLY from its editable source, faces as they are; `.smesh` and
+/// `.smodel`, Zornov's own.
+pub fn export_model(c: &m::Clip, mesh: &Mesh, path: &std::path::Path) -> Result<(), String> {
+    let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    let w = |p: &std::path::Path, bytes: &[u8]| std::fs::write(p, bytes).map_err(|e| format!("{}: {e}", p.display()));
+    match ext.as_str() {
+        "glb" => w(path, &studio_mesh::export::glb(mesh)),
+        "obj" => {
+            let mtl = path.with_extension("mtl");
+            let name = mtl.file_name().and_then(|n| n.to_str()).unwrap_or("model.mtl").to_owned();
+            let (o, mt, pictures) = studio_mesh::export::obj(mesh, &name);
+            w(path, o.as_bytes())?;
+            w(&mtl, mt.as_bytes())?;
+            pictures.into_iter().try_for_each(|(file, png)| w(&path.with_file_name(file), &png))
+        }
+        "smesh" => studio_mesh::io::save(mesh, path),
+        "smodel" => studio_modeling::asset::save(&load_asset(c)?.0, path),
+        "usdz" | "usda" | "usd" | "fbx" | "stl" | "ply" => {
+            let (asset, _) = load_asset(c)?;
+            studio_modeling::formats::write(mesh, &asset, path)
+        }
+        _ => Err(format!("export a model to {}, .smesh or .smodel", MODEL_EXPORTS.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", "))),
+    }
 }
 
 /// This project's models folder (a shared one until it is saved).
@@ -284,7 +371,7 @@ pub fn import_models(app: &mut crate::app::StudioApp, ctx: &eframe::egui::Contex
     let fit = app.doc.project.width.min(app.doc.project.height) as f32 * 0.6;
     for p in paths {
         let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Model").to_owned();
-        match studio_mesh::import::load(p, fit) {
+        match read_model(p, fit) {
             Ok(mut got) => {
                 if got.mesh.triangles() > 1_500_000 {
                     studio_mesh::decimate::decimate(&mut got.mesh, 1_500_000);
