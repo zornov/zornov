@@ -1008,15 +1008,24 @@ impl Session {
             let dur = o.get("duration").and_then(Value::as_f64).unwrap_or(clip_len - start).clamp(0.0, clip_len - start);
             let every = o.get("every").and_then(Value::as_f64).unwrap_or(1.0 / fps).max(dur / MAX_KEYS as f64).max(1e-3);
             let n = ((dur / every).round() as usize + 1).clamp(2, MAX_KEYS);
-            let keys: Vec<Value> = (0..n).map(|k| {
+            let samples: Vec<(f64, f64)> = (0..n).map(|k| {
                 let t = start + dur * k as f64 / (n - 1) as f64;
-                json!([t, prog.eval(&[t])])
-            }).filter(|k| k[1].as_f64().is_some_and(f64::is_finite)).collect();
+                (t, prog.eval(&[t]))
+            }).collect();
+            let undefined: Vec<f64> = samples.iter().filter(|(_, v)| !v.is_finite()).map(|(t, _)| *t).collect();
+            let keys: Vec<Value> = samples.iter().filter(|(_, v)| v.is_finite()).map(|(t, v)| json!([t, v])).collect();
             if keys.len() < 2 {
                 return Err(format!("formula \"{src}\" is undefined over the clip"));
             }
             let said = self.animate(&json!({"clip": id, "property": prop, "keys": keys, "ease": "linear"}))?;
-            return Ok(format!("{prop} follows {src}: {n} keys over {dur:.2} s; {said}"));
+            // Say what was stored, and where the formula had no value: the
+            // property holds still over those moments.
+            let skipped = match undefined.as_slice() {
+                [] => String::new(),
+                [first, .., last] => format!(" ({} of {n} samples undefined, skipped, from {first:.2} s to {last:.2} s: the property holds still there)", undefined.len()),
+                [only] => format!(" (1 of {n} samples undefined, skipped, at {only:.2} s)"),
+            };
+            return Ok(format!("{prop} follows {src} over {dur:.2} s: {said}{skipped}"));
         }
         let spec = op.get("curve").ok_or("animate needs \"keys\", \"curve\" or \"formula\"")?;
         let mut o = match spec {

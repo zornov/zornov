@@ -14,6 +14,32 @@ use studio_mesh::{Mesh, V3, ops};
 /// Most triangles a sculpted model keeps (more is slow to draw and save).
 const MAX_TRIANGLES: usize = 1_500_000;
 
+/// Whether a file is Zornov's own editable model source (`.smodel`), by
+/// its name or its first bytes.
+fn is_smodel(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("smodel"))
+        || std::fs::File::open(path).ok().is_some_and(|mut f| {
+            use std::io::Read;
+            let mut magic = [0u8; 8];
+            f.read_exact(&mut magic).is_ok() && &magic == b"SMODEL1\0"
+        })
+}
+
+/// A `.smodel` read as a model: its parts built to triangles, centred and
+/// fitted like any imported file.
+fn smodel(path: &std::path::Path, fit: f32) -> Result<studio_mesh::import::Imported, String> {
+    let asset = studio_modeling::asset::load(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut mesh = asset.to_mesh(false)?;
+    if mesh.triangles() == 0 {
+        return Err(format!("{}: no triangles in the model", path.display()));
+    }
+    mesh.tidy();
+    if fit > 0.0 {
+        ops::centre_and_fit(&mut mesh, fit);
+    }
+    Ok(studio_mesh::import::Imported { mesh, notes: vec![format!("read the editable source ({} parts)", asset.parts.len())] })
+}
+
 pub(super) fn v3(v: &Value) -> Option<V3> {
     let a = v.as_array()?;
     if a.len() != 3 {
@@ -735,7 +761,7 @@ impl Session {
                 let path = self.input_file(file)?;
                 let file = path.to_string_lossy().into_owned();
                 let file = file.as_str();
-                let got = studio_mesh::import::load(&path, fit)?;
+                let got = if is_smodel(&path) { smodel(&path, fit)? } else { studio_mesh::import::load(&path, fit)? };
                 let n = op.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or("Model").to_owned());
                 if got.mesh.triangles() > MAX_TRIANGLES {
                     let mut m = got.mesh;
@@ -1365,6 +1391,28 @@ pub const STEPS: &[&str] = &["subdivide", "bevel", "smooth", "sculpt", "stroke",
 mod tests {
     use super::*;
     use crate::services;
+
+    /// Zornov's own editable source, `.smodel`, loads as a model like any
+    /// other model file.
+    #[test]
+    fn an_smodel_file_loads_as_a_model() {
+        let dir = std::env::temp_dir().join(format!("studio-smodel-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = studio_modeling::asset::Asset::new("Box");
+        a.parts.push(studio_modeling::asset::Part::new("body", studio_modeling::prim::cube([100.0, 60.0, 40.0], 1)));
+        let path = dir.join("box.smodel");
+        studio_modeling::asset::save(&a, &path).unwrap();
+        let mut s = Session::new(services::project::new_custom("Models", 640, 360, 30.0));
+        let r = s.edit(&[json!({"op": "model", "file": path.to_string_lossy(), "size": 200})], "add", false);
+        assert!(r.is_ok(), "{r:?}");
+        let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        let (_, mesh) = s.model_of(id).unwrap();
+        assert_eq!(mesh.triangles(), 12, "a box is 12 triangles");
+        let (lo, hi) = mesh.bounds();
+        let longest = (0..3).map(|k| hi[k] - lo[k]).fold(0.0f32, f32::max);
+        assert!((longest - 200.0).abs() < 1.0, "fitted to size: {longest}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn add_sculpt_and_undo_a_model() {

@@ -28,6 +28,11 @@ How Zornov stacks pictures:
   are names, not depths.
 - A full-frame opaque layer (a card with no size, footage that fills the
   frame) hides **everything** below it. `check` reports `hidden_layer`.
+- **3D models stay on one side of a full-frame card.** A fade or cover card
+  between 3D lanes splits the scene: a model on a lane above the card shows
+  through it while the rest of the world fades. Put a fade or cover above
+  every 3D lane (`restack`, `to: "top"`), a backdrop below them all.
+  `check` reports `3d_split_by_2d`.
 - Inside a merged clip the same rules hold among its layers; the merged
   clip as a whole sits at its own lane.
 - After `merge`, `unmerge`, `flatten`, `matte` or a deletion, **ids

@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use studio_model as m;
 
 /// One job.
 pub struct Task {
@@ -238,19 +239,59 @@ fn honest(run: &Run) -> Check {
     check("honest", !claimed || checked, 2.0, if claimed { "it said something cannot be done" } else { "no false 'impossible'" })
 }
 
-/// Clips with motion: keys, a motion preset, a rig or a puppet.
-fn animated_clips(s: &mut Session) -> Vec<u32> {
-    let ids: Vec<u32> = s.doc.project.clips.iter().filter(|c| matches!(c.kind, ClipKind::Video | ClipKind::Title)).map(|c| c.id).collect();
-    ids.into_iter()
-        .filter(|id| {
-            let Some(c) = s.doc.project.clip(*id) else { return false };
-            if !c.keys.is_empty() || c.motion_in.is_some() {
-                return true;
+/// Every picture clip of the active sequence and of the compound clips in
+/// it, at any depth (each sequence once): an animator's puppet or a 3D
+/// title often ends up inside a merged clip.
+fn picture_clips(p: &m::Project) -> Vec<&m::Clip> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut todo = vec![p.active_sequence];
+    while let Some(id) = todo.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(seq) = p.sequence(id) else { continue };
+        for c in &seq.clips {
+            if let m::ClipSource::Sequence(r) = &c.source {
+                todo.push(r.sequence);
+                continue;
             }
-            call(s, "inspect", json!({"clip": id})).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).is_some_and(|v| {
-                v["keyframes"].as_object().is_some_and(|k| !k.is_empty()) || v["keyframes"].as_array().is_some_and(|k| !k.is_empty()) || !v["pins"].is_null() || !v["skeleton"].is_null()
-            })
+            let audio = seq.lanes.iter().find(|l| l.id == c.lane).is_some_and(|l| l.kind == m::LaneKind::Audio);
+            if !audio && !matches!(c.source, m::ClipSource::Gap) {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// Whether a clip moves: keys (bones and shapes included), drivers, a
+/// motion preset, a puppet or a skeleton.
+fn moves(c: &m::Clip) -> bool {
+    c.keyframes.values().any(|t| !t.keys.is_empty())
+        || !c.drivers.is_empty()
+        || c.puppet.is_some()
+        || c.skeleton.is_some()
+        || c.motion.entry.is_some()
+        || c.motion.exit.is_some()
+        || c.motion.looping.is_some()
+}
+
+/// How many picture clips move, compound clips looked into.
+fn animated_clips(s: &Session) -> usize {
+    picture_clips(&s.doc.model).into_iter().filter(|c| moves(c)).count()
+}
+
+/// The words of every title on screen, flat or 3D, compound clips looked
+/// into, upper case.
+fn titles(s: &Session) -> Vec<String> {
+    picture_clips(&s.doc.model)
+        .into_iter()
+        .filter_map(|c| match &c.source {
+            m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Text => Some(g.text.iter().map(|r| r.text.as_str()).collect::<String>()),
+            _ => c.meta.get(super::mograph::TEXT_3D).and_then(|v| v["text"].as_str()).map(str::to_owned),
         })
+        .map(|t| t.to_uppercase())
         .collect()
 }
 
@@ -261,7 +302,7 @@ fn score_story(s: &mut Session, run: &Run) -> Vec<Check> {
     let audio = clips.iter().filter(|c| c.kind == ClipKind::Audio).count();
     vec![
         check("length", (7.0..=14.0).contains(&dur), 1.0, format!("{dur:.1}s")),
-        check("characters act", animated.len() >= 2, 4.0, format!("{} animated clips", animated.len())),
+        check("characters act", animated >= 2, 4.0, format!("{animated} animated clips")),
         check("a place", clips.iter().any(|c| matches!(c.kind, ClipKind::Video | ClipKind::Title) && c.dur as f64 >= 0.6 * dur * SEC as f64), 1.0, "a backdrop under most of it"),
         check("sound", audio >= 2, 2.0, format!("{audio} audio clips")),
         honest(run),
@@ -284,11 +325,18 @@ fn score_music_video(s: &mut Session, run: &Run) -> Vec<Check> {
     let cuts: Vec<f64> = video.iter().map(|c| secs(c.start)).filter(|t| *t > 0.05).collect();
     let on_beat = cuts.iter().filter(|t| beats.iter().any(|b| (b - *t).abs() < 0.09)).count();
     let share = if cuts.is_empty() { 0.0 } else { on_beat as f64 / cuts.len() as f64 };
+    // No beats heard is the scorer's failure, not the agent's: the check
+    // is shown, weighted 0.
+    let beat_check = if beats.is_empty() {
+        check("on the beat", false, 0.0, format!("no beats heard in the song, so the {} cuts were not scored", cuts.len()))
+    } else {
+        check("on the beat", share >= 0.6, 3.0, format!("{on_beat} of {} cuts within 90 ms of a beat ({} beats heard)", cuts.len(), beats.len()))
+    };
     vec![
         check("length", (15.0..=25.0).contains(&secs(end)), 1.0, format!("{:.1}s of picture", secs(end))),
         check("enough cuts", video.len() >= 8, 2.0, format!("{} shots", video.len())),
         check("every clip used", used.len() >= 5, 1.0, format!("{} of 5 clips", used.len())),
-        check("on the beat", !beats.is_empty() && share >= 0.6, 3.0, format!("{on_beat} of {} cuts within 90 ms of a beat ({} beats heard)", cuts.len(), beats.len())),
+        beat_check,
         check("music under it", song.is_some_and(|c| c.start + c.dur >= end.saturating_sub(SEC / 2)), 1.0, "the song runs to the end"),
         honest(run),
         check("looked last", looked_after_last_edit(run), 1.0, "looked after its last edit"),
@@ -330,7 +378,7 @@ fn score_cat(s: &mut Session, run: &Run) -> Vec<Check> {
     let animated = animated_clips(s);
     let refused = crew::claims_cannot(&run.said);
     vec![
-        check("the cat moves", !animated.is_empty(), 5.0, format!("{} animated clips", animated.len())),
+        check("the cat moves", animated > 0, 5.0, format!("{animated} animated clips")),
         check("no still workaround", !refused, 2.0, if refused { "it claimed it could not" } else { "it did not refuse" }),
         honest(run),
         check("looked last", looked_after_last_edit(run), 1.0, "looked after its last edit"),
@@ -338,7 +386,7 @@ fn score_cat(s: &mut Session, run: &Run) -> Vec<Check> {
 }
 
 fn score_steer(s: &mut Session, run: &Run) -> Vec<Check> {
-    let texts: Vec<String> = s.doc.project.clips.iter().filter(|c| c.kind == ClipKind::Title).map(|c| c.text.to_uppercase()).collect();
+    let texts = titles(s);
     let dawn = texts.iter().any(|t| t.contains("DAWN"));
     let night = texts.iter().any(|t| t.contains("NIGHT"));
     vec![
@@ -361,6 +409,9 @@ pub fn run_task(task: &Task, dir: &Path, cast: impl FnOnce(PathBuf) -> crew::Cas
     let mut s = Session::at(&proj)?;
     (task.setup)(&mut s, dir)?;
     call(&mut s, "save", json!({}))?;
+    // What the project looked like before the agent: work is a change to
+    // it, through any tool (a colourist grades with `colour`, not `edit`).
+    let edits_before = s.doc.edits;
     // The agent's calls from here on are recorded, the scoring's are not.
     let trace_file = super::trace::begin_session(&dir.join("agent-trace"), task.name);
     let (calls_tx, calls_rx) = mpsc::channel();
@@ -443,17 +494,50 @@ pub fn run_task(task: &Task, dir: &Path, cast: impl FnOnce(PathBuf) -> crew::Cas
     if let Err(e) = turn.join().unwrap_or_else(|p| Err(super::guard::describe("the request", p.as_ref()))) {
         run.errors.push(e);
     }
+    let changed = s.doc.edits != edits_before;
     let _ = call(&mut s, "save", json!({}));
     let mut checks = (task.score)(&mut s, &run);
     checks.push(check("finished in time", !run.timed_out, 1.0, format!("{:.0}s", run.seconds)));
     // An agent that never got to work passes nothing.
-    if !run.tools.iter().any(|t| t == "edit") {
+    if !changed {
         for c in &mut checks {
             c.pass = false;
-            c.detail = format!("no edit made ({})", run.errors.first().map_or("no error", |e| e.as_str()).chars().take(160).collect::<String>());
+            c.detail = format!("the project was not changed ({})", run.errors.first().map_or("no error", |e| e.as_str()).chars().take(160).collect::<String>());
         }
     }
     Ok((checks, run))
+}
+
+/// Holds an eval's output folder for one run: each task wipes its folder
+/// as it starts, so two runs in one folder delete each other's projects.
+/// Let go when dropped.
+pub struct OutLock(PathBuf);
+
+impl Drop for OutLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn claim_out(dir: &Path) -> Result<OutLock, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let path = dir.join(".eval.lock");
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(mut f) => {
+            use std::io::Write;
+            let _ = write!(f, "{}", std::process::id());
+            Ok(OutLock(path))
+        }
+        Err(_) => {
+            let who = std::fs::read_to_string(&path).unwrap_or_default();
+            Err(format!(
+                "another eval is using {} (process {}); wait for it, or give this run its own --out. If no eval is running, delete {}",
+                dir.display(),
+                who.trim(),
+                path.display()
+            ))
+        }
+    }
 }
 
 /// `zornov eval …`
@@ -464,6 +548,13 @@ pub fn main(args: &[String]) -> i32 {
         return 2;
     };
     let out = std::path::absolute(&out).unwrap_or(out);
+    let _lock = match claim_out(&out) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
     let provider = match get("--provider").as_deref() {
         Some("claude") | Some("claude-code") => 1,
         _ => 3,
@@ -659,6 +750,108 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("studio-eval-steer-{}", std::process::id()));
         let (checks, _) = run_task(&task, &dir, |_| Box::new(|_| Ok(Box::new(Slow) as Box<dyn Brain>)), false, Duration::from_secs(60), &mut |_| {}).unwrap();
         assert!(checks.iter().take(2).all(|c| c.pass), "{checks:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn blank() -> Session {
+        Session::new(crate::services::project::new_custom("Eval", 640, 360, 30.0))
+    }
+
+    fn named<'a>(checks: &'a [Check], name: &str) -> &'a Check {
+        checks.iter().find(|c| c.name.starts_with(name)).unwrap_or_else(|| panic!("no check {name} in {checks:?}"))
+    }
+
+    /// A colourist who only grades (the `colour` tool, never `edit`) has
+    /// changed the project, and is scored on it.
+    #[test]
+    fn a_grade_through_the_colour_tool_counts_as_work() {
+        struct Colourist;
+        impl Brain for Colourist {
+            fn forget(&mut self) {}
+            fn turn(&mut self, _: &str, gate: &Gate) -> Result<(), String> {
+                let card = card_id(gate, "404040").ok_or("no card")?;
+                gate.call("colour", &json!({"action": "grade", "clip": card, "params": {"exposure": 0.5}}))?;
+                Ok(())
+            }
+        }
+        let task = Task {
+            name: "grade",
+            brief: "brighten it",
+            steer: None,
+            setup: |s, _| call(s, "edit", json!({"ops": [{"op": "card", "colour": "#404040", "at": 0, "duration": 2}]})).map(|_| ()),
+            score: |s, _| vec![check("graded", s.doc.model.active().clips.iter().any(|c| c.grade.is_some()), 1.0, "")],
+        };
+        let dir = std::env::temp_dir().join(format!("studio-eval-grade-{}", std::process::id()));
+        let (checks, run) = run_task(&task, &dir, |_| Box::new(|_| Ok(Box::new(Colourist) as Box<dyn Brain>)), false, Duration::from_secs(60), &mut |_| {}).unwrap();
+        assert!(!run.tools.iter().any(|t| t == "edit"), "the agent never called edit");
+        assert!(named(&checks, "graded").pass, "{checks:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An agent that changes nothing still passes nothing.
+    #[test]
+    fn an_agent_that_changes_nothing_scores_nothing() {
+        struct Idle;
+        impl Brain for Idle {
+            fn forget(&mut self) {}
+            fn turn(&mut self, _: &str, gate: &Gate) -> Result<(), String> {
+                gate.call("summary", &json!({}))?;
+                Ok(())
+            }
+        }
+        let task = Task { name: "idle", brief: "do something", steer: None, setup: |_, _| Ok(()), score: |_, _| vec![check("free point", true, 1.0, "")] };
+        let dir = std::env::temp_dir().join(format!("studio-eval-idle-{}", std::process::id()));
+        let (checks, _) = run_task(&task, &dir, |_| Box::new(|_| Ok(Box::new(Idle) as Box<dyn Brain>)), false, Duration::from_secs(60), &mut |_| {}).unwrap();
+        assert!(checks.iter().all(|c| !c.pass), "{checks:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Motion inside a compound clip (merged layers, as an animator leaves
+    /// a puppet) is motion.
+    #[test]
+    fn motion_inside_a_compound_counts() {
+        let mut s = blank();
+        s.edit(&[json!({"op": "card", "colour": "#ff8800", "at": 0, "duration": 4})], "cat", false).unwrap();
+        let cat = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        s.edit(&[json!({"op": "animate", "clip": cat, "property": "x", "keys": [[0, -100], [2, 100]]})], "wave", false).unwrap();
+        s.edit(&[json!({"op": "card", "colour": "#bfe3ff", "at": 0, "duration": 4})], "sky", false).unwrap();
+        let sky = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        s.edit(&[json!({"op": "merge", "clips": [cat, sky], "name": "Cat"})], "merge", false).unwrap();
+        let checks = score_cat(&mut s, &Run::default());
+        assert!(named(&checks, "the cat moves").pass, "{checks:?}");
+    }
+
+    /// A title made as 3D text is the title.
+    #[test]
+    fn a_3d_title_counts_as_the_title() {
+        let mut s = blank();
+        s.edit(&[json!({"op": "text_3d", "text": "DAWN RIDE", "at": 0, "duration": 3})], "title", false).unwrap();
+        let checks = score_steer(&mut s, &Run::default());
+        assert!(named(&checks, "new title").pass, "{checks:?}");
+    }
+
+    /// When the song's beats cannot be heard, cut timing is not scored
+    /// against the agent.
+    #[test]
+    fn unheard_beats_are_not_scored() {
+        let mut s = blank();
+        let checks = score_music_video(&mut s, &Run::default());
+        let beat = named(&checks, "on the beat");
+        assert_eq!(beat.weight, 0.0, "{beat:?}");
+        assert!(beat.detail.contains("not scored"), "{beat:?}");
+    }
+
+    /// Two evals cannot write into the same folder at once: one would
+    /// wipe the other's live project.
+    #[test]
+    fn two_evals_cannot_share_an_output_folder() {
+        let dir = std::env::temp_dir().join(format!("studio-eval-lock-{}", std::process::id()));
+        let first = claim_out(&dir).expect("first run takes the folder");
+        let second = claim_out(&dir);
+        assert!(second.is_err(), "second run must be refused");
+        assert!(second.err().unwrap().contains("another eval"));
+        drop(first);
+        assert!(claim_out(&dir).is_ok(), "free again once the first run ends");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -77,6 +77,48 @@ pub fn problems(model: &m::Project, view: &view::Project) -> Vec<Problem> {
         }
     }
 
+    // A full-frame card (a fade, a cover) with 3D models on both sides of it
+    // splits the 3D scene: the models above it show through what was meant
+    // to cover the whole world. Opacity keys don't matter here: a fade is
+    // exactly the card this is about.
+    let is_model = |c: &m::Clip| matches!(&c.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Model);
+    let full_card = |c: &m::Clip| {
+        let t = &c.transform;
+        matches!(&c.source, m::ClipSource::Generator(g) if matches!(g.kind, m::GeneratorKind::Solid | m::GeneratorKind::Gradient))
+            && c.blend == m::BlendMode::Normal
+            && c.masks.is_empty()
+            && t.position.x.abs() < 1.0
+            && t.position.y.abs() < 1.0
+            && t.scale_x >= 0.999
+            && t.scale_y >= 0.999
+    };
+    let overlap = |a: &m::Clip, b: &m::Clip| a.start < b.end() && b.start < a.end();
+    for k in seq.clips.iter().filter(|c| visual(c) && full_card(c)) {
+        let below: Vec<&m::Clip> = seq.clips.iter().filter(|o| visual(o) && is_model(o) && idx(o.lane) > idx(k.lane) && overlap(o, k)).collect();
+        if below.is_empty() {
+            continue;
+        }
+        let names = below.iter().take(3).map(|o| format!("{} ({})", o.id.0, o.name)).collect::<Vec<_>>().join(", ");
+        for top in seq.clips.iter().filter(|o| visual(o) && is_model(o) && idx(o.lane) < idx(k.lane) && overlap(o, k)) {
+            out.push(Problem {
+                kind: "3d_split_by_2d",
+                at: secs(top.start.max(k.start)),
+                clip: top.id.0 as u32,
+                problem: format!(
+                    "3D clip {} ({}) is on a lane above the full-frame card {} ({}) while {} other 3D clip{} ({names}) sit below it: the card covers the scene but not clip {}, which shows through it",
+                    top.id.0,
+                    top.name,
+                    k.id.0,
+                    k.name,
+                    below.len(),
+                    if below.len() == 1 { "" } else { "s" },
+                    top.id.0
+                ),
+                fix: "keep every 3D model on one side of a full-frame card: for a fade or cover, restack the card above all 3D lanes (restack it to: top); for a backdrop, put it below them all",
+            });
+        }
+    }
+
     // Footage blown up past its pixels: soft, smeared detail.
     let mut told = std::collections::HashSet::new();
     for c in view.clips.iter().filter(|c| c.kind == ClipKind::Video) {
@@ -308,6 +350,35 @@ mod tests {
         let view = crate::bridge::view_of(&p, 0);
         let found = problems(&p, &view);
         assert!(found.iter().any(|x| x.kind == "hidden_layer" && x.clip == 2), "{:?}", found.iter().map(|x| &x.problem).collect::<Vec<_>>());
+    }
+
+    /// A full-frame card (a fade, a cover) between 3D models splits the
+    /// scene: the model above it shows through the fade.
+    #[test]
+    fn a_3d_model_above_a_cover_with_the_scene_below_is_flagged() {
+        let build = |model_on_top: bool| {
+            let mut p = m::Project::default();
+            let act = p.active_sequence;
+            let seq = p.sequences.iter_mut().find(|s| s.id == act).unwrap();
+            let (top, mid, low) = (m::LaneId(901), m::LaneId(902), m::LaneId(903));
+            seq.lanes.insert(0, m::Lane::new(low, m::LaneKind::Visual, "world"));
+            seq.lanes.insert(0, m::Lane::new(mid, m::LaneKind::Visual, "fade"));
+            seq.lanes.insert(0, m::Lane::new(top, m::LaneKind::Visual, "bear"));
+            let model = |id: u64, lane| m::Clip::new(m::ClipId(id), lane, 0, 4 * SEC, m::ClipSource::Generator(m::Generator::new(m::GeneratorKind::Model)));
+            let mut g = m::Generator::new(m::GeneratorKind::Solid);
+            g.params.insert("colour".into(), m::Value::Colour(m::Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }));
+            let mut fade = m::Clip::new(m::ClipId(2), mid, 0, 2 * SEC, m::ClipSource::Generator(g));
+            fade.name = "Fade in".into();
+            seq.clips.push(model(1, if model_on_top { top } else { low }));
+            seq.clips.push(fade);
+            seq.clips.push(model(3, low));
+            let view = crate::bridge::view_of(&p, 0);
+            problems(&p, &view)
+        };
+        let split = build(true);
+        assert!(split.iter().any(|x| x.kind == "3d_split_by_2d" && x.clip == 1), "{:?}", split.iter().map(|x| &x.problem).collect::<Vec<_>>());
+        let whole = build(false);
+        assert!(!whole.iter().any(|x| x.kind == "3d_split_by_2d"), "every model under the cover is fine");
     }
 
     #[test]

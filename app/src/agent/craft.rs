@@ -526,10 +526,22 @@ impl Session {
                 let side = side.clamp(-1.0, 1.0);
                 let follow: Vec<Value> = keys.iter().map(|(t, v, e)| json!({"t": t, "v": side * v.as_f64().unwrap_or(0.0) / 2.0, "ease": e})).collect();
                 self.animate(&json!({"op": "animate", "clip": id, "property": if horizontal { "anchor_x" } else { "anchor_y" }, "keys": follow}))?;
-                return Ok(format!("{} keys on {name} of clip {id}, growing from its {} edge", keys.len(), match (horizontal, side < 0.0) { (true, true) => "left", (true, false) => "right", (false, true) => "top", (false, false) => "bottom" }));
+                return Ok(format!("{} on {name} of clip {id}, growing from its {} edge", self.keys_kept(id, &prop.paths, keys.len()), match (horizontal, side < 0.0) { (true, true) => "left", (true, false) => "right", (false, true) => "top", (false, false) => "bottom" }));
             }
         }
-        Ok(format!("{} keys on {name} of clip {id}", keys.len()))
+        Ok(format!("{} on {name} of clip {id}", self.keys_kept(id, &prop.paths, keys.len())))
+    }
+
+    /// "N keys", or "K of N keys kept (…)" when the stored tracks hold
+    /// fewer than were asked for: keys on the same moment merge, and the
+    /// reply must say so rather than echo the request.
+    fn keys_kept(&self, id: u32, paths: &[String], asked: usize) -> String {
+        let kept = self.model_clip(id).map_or(0, |c| paths.iter().filter_map(|p| c.keyframes.get(p)).map(|t| t.keys.len()).min().unwrap_or(0));
+        if kept < asked {
+            format!("{kept} of {asked} keys kept ({} landed on the same moment as another and merged)", asked - kept)
+        } else {
+            format!("{asked} keys")
+        }
     }
 
     /// `animate` `speed`: a speed ramp inside one clip, keys of playback
@@ -1042,6 +1054,39 @@ mod tests {
 
     fn added(r: &Value) -> u32 {
         r["changed"]["added"][0]["id"].as_u64().expect("a clip was added") as u32
+    }
+
+    fn notes(r: &Value) -> String {
+        r["notes"].to_string()
+    }
+
+    fn most_keys(s: &Session, id: u32) -> usize {
+        s.model_clip(id).unwrap().keyframes.values().map(|t| t.keys.len()).max().unwrap_or(0)
+    }
+
+    /// Keys that land on the same moment merge; the reply says how many
+    /// were kept, not only how many were asked for.
+    #[test]
+    fn animate_reports_the_keys_it_kept() {
+        let mut s = session();
+        let id = added(&s.edit(&[json!({"op": "card", "colour": "#ff0000", "at": 0, "duration": 2})], "card", false).unwrap());
+        let r = s.edit(&[json!({"op": "animate", "clip": id, "property": "x", "keys": [[0, 0], [0.0000001, 5], [1, 10]]})], "x", false).unwrap();
+        let kept = most_keys(&s, id);
+        assert_eq!(kept, 2, "two keys round to the same microsecond");
+        assert!(notes(&r).contains("2 of 3 keys kept"), "{}", notes(&r));
+    }
+
+    /// A formula's undefined samples are skipped, and the reply counts
+    /// what was stored, not what was sampled.
+    #[test]
+    fn a_formula_reports_skipped_samples() {
+        let mut s = session();
+        let id = added(&s.edit(&[json!({"op": "card", "colour": "#00ff00", "at": 0, "duration": 2})], "card", false).unwrap());
+        let r = s.edit(&[json!({"op": "animate", "clip": id, "property": "x", "formula": "sqrt(t - 1) * 100"})], "f", false).unwrap();
+        let kept = most_keys(&s, id);
+        let said = notes(&r);
+        assert!(said.contains(&format!("{kept} keys")), "{said}");
+        assert!(said.contains("undefined, skipped"), "{said}");
     }
 
     /// Agents send ids as strings ("8") as often as numbers.

@@ -233,7 +233,15 @@ impl Session {
         }
         if let Some(c) = op.get("constraint") {
             let mut r = mesh.rig.as_deref().cloned().ok_or("add bones before constraints")?;
-            said.push(add_constraint(&mut r, &mesh, c)?);
+            // One constraint, or a list of them ("constraints": [...]): a
+            // list lands in this one op, so one undo takes it all off.
+            let list = match c {
+                Value::Array(list) => list.iter().collect(),
+                one => vec![one],
+            };
+            for (i, one) in list.iter().enumerate() {
+                said.push(add_constraint(&mut r, &mesh, one).map_err(|e| if list.len() > 1 { format!("constraint {}: {e}", i + 1) } else { e })?);
+            }
             mesh.rig = Some(Arc::new(r));
         }
         if let Some(k) = op.get("skinning").and_then(Value::as_str) {
@@ -670,6 +678,31 @@ mod tests {
         s.doc.undo();
         let (_, mesh) = s.model_of(id).unwrap();
         assert!(mesh.rig.as_ref().unwrap().constraints.is_empty());
+    }
+
+    /// Several constraints in one op, as a list, land together in one
+    /// undo step.
+    #[test]
+    fn several_constraints_in_one_op() {
+        let mut s = Session::new(services::project::new_custom("Anim", 640, 360, 30.0));
+        s.edit(&[json!({"op": "model", "shape": "cylinder", "size": [60, 300, 60], "detail": 5})], "add", false).unwrap();
+        let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        s.edit(&[json!({"op": "rig", "clip": id, "template": "chain", "count": 4, "start": "top"})], "rig", false).unwrap();
+        let r = s
+            .edit(
+                &[json!({"op": "rig", "clip": id, "constraints": [
+                    {"kind": "ik", "bone": "bone.3", "chain": 4, "target": [80, 100, 0]},
+                    {"kind": "limit", "bone": "bone.1", "min": [-30, -30, -30], "max": [30, 30, 30]},
+                ]})],
+                "constraints",
+                false,
+            )
+            .unwrap();
+        let (_, mesh) = s.model_of(id).unwrap();
+        assert_eq!(mesh.rig.as_ref().unwrap().constraints.len(), 2, "{r}");
+        s.doc.undo();
+        let (_, mesh) = s.model_of(id).unwrap();
+        assert!(mesh.rig.as_ref().unwrap().constraints.is_empty(), "one undo takes both off");
     }
 
     #[test]
