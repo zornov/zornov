@@ -91,17 +91,20 @@ pub fn close_holes(m: &mut Mesh, max_span: f32, keep: impl Fn(&str) -> bool) -> 
         return 0;
     }
     let mut mats = m.tri_materials();
-    // The material on the rim of each loop: the triangle using its first edge.
-    let mut owner: std::collections::HashMap<(usize, usize), u32> = Default::default();
+    // The material on the rim of each loop: the triangle using its first
+    // edge, found by welded corners (a loop's vertices come from different
+    // triangles where corners are split).
+    let (ids, _) = m.position_ids();
+    let mut owner: std::collections::HashMap<(u32, u32), u32> = Default::default();
     for t in 0..m.triangles() {
         let c = m.tri(t);
         for k in 0..3 {
-            owner.insert((c[k], c[(k + 1) % 3]), mats[t]);
+            owner.insert((ids[c[k]], ids[c[(k + 1) % 3]]), mats[t]);
         }
     }
     let mut closed = 0;
     for lp in loops {
-        let Some(&mat) = owner.get(&(lp[0], lp[1])) else { continue };
+        let Some(&mat) = owner.get(&(ids[lp[0]], ids[lp[1]])) else { continue };
         let name = m.materials.get(mat as usize).map_or("", |x| x.name.as_str());
         if thin_by_nature(name) || !keep(name) || span(m, &lp) > max_span {
             continue;
