@@ -606,8 +606,10 @@ fn joint_hops(rig: &Rig) -> impl Fn(usize, usize) -> usize + '_ {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WeightAudit {
     pub vertices: usize,
-    /// Pulled (weight over 5 %) by a bone much further than its nearest:
-    /// more than a tenth of the rig's size beyond it.
+    /// Pulled (weight over 5 %, in a blend of two bones or more) by a bone
+    /// much further than its nearest: more than a tenth of the rig's size
+    /// beyond it. A vertex wholly on one bone (a part bound rigid) is not
+    /// counted.
     pub far: usize,
     /// Pulled (over 5 %) by a left bone while on the right of the middle,
     /// or the other way round (the middle found from the rig's paired
@@ -706,7 +708,10 @@ pub fn audit_weights(mesh: &Mesh, rig: &Rig) -> WeightAudit {
         let infl: Vec<(usize, f32)> = (0..4).filter(|&j| rig.weights[v][j] > 0.0 && (rig.joints[v][j] as usize) < nb).map(|j| (rig.joints[v][j] as usize, rig.weights[v][j])).collect();
         let dist = |b: usize| length(sub(p, closest_on_segment(rig.bones[b].head, rig.bones[b].tail, p)));
         let (nearest, near) = deform.iter().map(|&b| (b, dist(b))).fold((0, f32::INFINITY), |a, x| if x.1 < a.1 { x } else { a });
-        if let Some(&(b, _)) = infl.iter().find(|&&(b, w)| w > 0.05 && dist(b) > near + 0.1 * size) {
+        // A vertex wholly on one bone was put there on purpose (a part bound
+        // rigid: a lid on its hinge); far counts in blends only.
+        let blended = infl.iter().filter(|e| e.1 > 0.05).count() >= 2;
+        if let Some(&(b, _)) = infl.iter().find(|&&(b, w)| blended && w > 0.05 && dist(b) > near + 0.1 * size) {
             out.far += 1;
             *pairs.entry((b, nearest)).or_default() += 1;
         }
