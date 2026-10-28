@@ -11,7 +11,8 @@
 //! - [`chain`]: a row of bones along a model (a tail, a rope, a tentacle,
 //!   a snake, a flag pole).
 //! - [`quadruped`]: four legs, a spine, a neck, a head and a tail for an
-//!   animal standing along x.
+//!   animal standing on all fours along any line on the ground (its long
+//!   axis found from the shape, the head at the end that has one).
 //! - [`bind`]: skin weights. Each vertex goes to the bones it can see
 //!   (a straight line inside the body reaches them, so an arm does not
 //!   pull the side of the chest it rests against), nearer bones weighing
@@ -95,7 +96,7 @@ pub fn humanoid_fitted(mesh: &Mesh, arms: Arms, pr: &Proportions) -> Rig {
         let foot = add_bone(&format!("foot.{side}"), Some(shin), [hip_x, y(0.955), cz + 0.01 * h], [hip_x, y(0.99), cz - 0.07 * h * pr.foot]);
         add_bone(&format!("toe.{side}"), Some(foot), [hip_x, y(0.99), cz - 0.07 * h * pr.foot], [hip_x, y(1.0), cz - 0.115 * h * pr.foot]);
     }
-    centre_joints(mesh, &mut r, h);
+    centre_joints(mesh, &mut r, h, [1.0, 0.0, 0.0]);
     add_head_details(&mut r, pr, h, cz);
     add_hands(&mut r, cx);
     humanoid_controls(&mut r);
@@ -204,8 +205,10 @@ pub fn humanoid_controls(r: &mut Rig) {
 }
 
 /// Pulls each joint to the middle of the body around it: the centroid of
-/// the vertices in a thin slice across the bone at that joint.
-fn centre_joints(mesh: &Mesh, r: &mut Rig, h: f32) {
+/// the vertices in a thin slice across the bone at that joint. Bones on
+/// the middle line (no side in their name) keep their place along
+/// `lateral`, the axis across the body.
+fn centre_joints(mesh: &Mesh, r: &mut Rig, h: f32, lateral: V3) {
     let slab = 0.018 * h;
     let reach = 0.11 * h;
     let mut moved: Vec<(V3, V3)> = Vec::with_capacity(r.bones.len());
@@ -242,8 +245,11 @@ fn centre_joints(mesh: &Mesh, r: &mut Rig, h: f32) {
         }
         let centre_line = !r.bones[i].name.contains('.');
         if centre_line {
-            head[0] = r.bones[i].head[0];
-            tail[0] = r.bones[i].tail[0];
+            // Kept where the template put it across the body (`lateral`):
+            // x for a figure facing -z, the animal's left for one on all
+            // fours.
+            head = add(head, scale(lateral, dot(sub(r.bones[i].head, head), lateral)));
+            tail = add(tail, scale(lateral, dot(sub(r.bones[i].tail, tail), lateral)));
         }
         // Ends of limbs (hand and toe tips, the top of the head) keep their
         // length along the bone.
@@ -285,45 +291,193 @@ pub fn chain(mesh: &Mesh, count: usize, start: &str, name: &str) -> Rig {
         r.bones.push(Bone::new(format!("{name}.{i}"), if i == 0 { None } else { Some(i - 1) }, h0, h1));
     }
     let h = length(sub(b, a));
-    centre_joints(mesh, &mut r, h * 0.5);
+    centre_joints(mesh, &mut r, h * 0.5, [1.0, 0.0, 0.0]);
     r
 }
 
-/// An animal standing along x, head towards -x: spine, neck, head, jaw,
-/// tail and four legs (`leg_front.L`… with `.0` upper and `.1` lower,
-/// `paw_front.L`…).
-pub fn quadruped(mesh: &Mesh) -> Rig {
+/// How a four-legged body lies on the ground: its long axis (the line
+/// through it with the most spread, found from the surface's second
+/// moments in the ground plane), which end its head is at, and its
+/// extent along, across and up. Y is down in Studio, so up is -y.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyFrame {
+    /// Unit, in the ground plane, from the tail end to the head end.
+    pub fwd: V3,
+    /// Unit, in the ground plane: the animal's left (up × forward).
+    pub left: V3,
+    /// Along `fwd`: the head end's coordinate, and the length.
+    pub head_at: f32,
+    pub length: f32,
+    /// Along `left`: the middle and the width.
+    pub mid: f32,
+    pub width: f32,
+    /// Top and bottom (y, down).
+    pub top: f32,
+    pub bottom: f32,
+    /// The head end was told, or found from the shape (the end with more
+    /// surface high up: a head is bulky and held up, a tail thin); false
+    /// when the ends look alike and the head went to the default end
+    /// (the low end of the long axis: -x for a body along x, -z for one
+    /// along z).
+    pub head_found: bool,
+}
+
+impl BodyFrame {
+    /// A point `f` of the length back from the head end (0 head, 1 tail),
+    /// `s` px to the animal's left of its middle, at height `y`.
+    pub fn at(&self, f: f32, s: f32, y: f32) -> V3 {
+        let a = self.head_at - f * self.length;
+        let l = self.mid + s;
+        [self.fwd[0] * a + self.left[0] * l, y, self.fwd[2] * a + self.left[2] * l]
+    }
+}
+
+/// The frame of a body standing on all fours: see [`BodyFrame`]. With
+/// `forward` given (any direction; only its ground-plane part counts) the
+/// head goes that way and the long axis is not looked for.
+pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
     let (lo, hi) = mesh.bounds();
-    let len = (hi[0] - lo[0]).max(1.0);
-    let ht = (hi[1] - lo[1]).max(1.0);
-    let cz = (lo[2] + hi[2]) * 0.5;
-    let x = |f: f32| lo[0] + f * len;
-    let y = |f: f32| lo[1] + f * ht;
-    let half_w = (hi[2] - lo[2]) * 0.3;
+    // Area-weighted second moments of the surface in x and z: vertex
+    // counts would follow where a mesh happens to be dense (a UV sphere's
+    // poles), area follows the shape.
+    let mut acc = [0f64; 6]; // area, cx, cz, xx, xz, zz
+    for t in 0..mesh.triangles() {
+        let [a, b, c] = mesh.tri(t).map(|v| mesh.positions[v]);
+        let area = 0.5 * length(crate::cross(sub(b, a), sub(c, a))) as f64;
+        let m = scale(add(add(a, b), c), 1.0 / 3.0);
+        let (x, z) = (m[0] as f64, m[2] as f64);
+        acc[0] += area;
+        acc[1] += area * x;
+        acc[2] += area * z;
+        acc[3] += area * x * x;
+        acc[4] += area * x * z;
+        acc[5] += area * z * z;
+    }
+    let long_axis = || -> V3 {
+        let ext = [hi[0] - lo[0], hi[2] - lo[2]];
+        let by_box: V3 = if ext[0] >= ext[1] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
+        if acc[0] <= 1e-9 {
+            return by_box;
+        }
+        let w = acc[0];
+        let (mx, mz) = (acc[1] / w, acc[2] / w);
+        let (sxx, sxz, szz) = (acc[3] / w - mx * mx, acc[4] / w - mx * mz, acc[5] / w - mz * mz);
+        // Eigenvalues of [[sxx, sxz], [sxz, szz]].
+        let tr = sxx + szz;
+        let det = sxx * szz - sxz * sxz;
+        let disc = (tr * tr / 4.0 - det).max(0.0).sqrt();
+        let (l1, l2) = (tr / 2.0 + disc, tr / 2.0 - disc);
+        if l1 < 1.15 * l2.max(1e-12) {
+            // Round in plan: no long axis worth trusting.
+            return by_box;
+        }
+        let th = 0.5 * (2.0 * sxz).atan2(sxx - szz);
+        let mut d = [th.cos() as f32, 0.0, th.sin() as f32];
+        // A fixed sign: the long axis points to +x (or +z when it runs
+        // along z), so the default head end is the low end.
+        if d[0].abs() >= d[2].abs() { if d[0] < 0.0 { d = scale(d, -1.0) } } else if d[2] < 0.0 {
+            d = scale(d, -1.0);
+        }
+        d
+    };
+    let given = forward.map(|f| [f[0], 0.0, f[2]]).filter(|f| length(*f) > 1e-6).map(normalise);
+    let axis = given.unwrap_or_else(long_axis);
+    let up: V3 = [0.0, -1.0, 0.0];
+    let proj = |p: V3, d: V3| p[0] * d[0] + p[2] * d[2];
+    let (mut a_lo, mut a_hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for p in &mesh.positions {
+        let a = proj(*p, axis);
+        a_lo = a_lo.min(a);
+        a_hi = a_hi.max(a);
+    }
+    let len = (a_hi - a_lo).max(1.0);
+    // Which end the head is at (when not told): the end with more surface
+    // above the body's middle height within a fifth of the length.
+    let (fwd, head_found) = match given {
+        Some(g) => (g, true),
+        None => {
+            let mid_y = (lo[1] + hi[1]) * 0.5;
+            let slice = 0.2 * len;
+            let (mut at_lo, mut at_hi) = (0f32, 0f32);
+            for t in 0..mesh.triangles() {
+                let [a, b, c] = mesh.tri(t).map(|v| mesh.positions[v]);
+                let m = scale(add(add(a, b), c), 1.0 / 3.0);
+                if m[1] > mid_y {
+                    continue;
+                }
+                let area = 0.5 * length(crate::cross(sub(b, a), sub(c, a)));
+                let along = proj(m, axis);
+                if along < a_lo + slice {
+                    at_lo += area;
+                } else if along > a_hi - slice {
+                    at_hi += area;
+                }
+            }
+            if at_hi > 1.15 * at_lo && at_hi > 0.0 {
+                (axis, true)
+            } else if at_lo > 1.15 * at_hi && at_lo > 0.0 {
+                (scale(axis, -1.0), true)
+            } else {
+                (scale(axis, -1.0), false)
+            }
+        }
+    };
+    let left = normalise(crate::cross(up, fwd));
+    let (mut a_lo, mut a_hi, mut s_lo, mut s_hi) = (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
+    for p in &mesh.positions {
+        let (a, s) = (proj(*p, fwd), proj(*p, left));
+        a_lo = a_lo.min(a);
+        a_hi = a_hi.max(a);
+        s_lo = s_lo.min(s);
+        s_hi = s_hi.max(s);
+    }
+    if !a_lo.is_finite() {
+        return BodyFrame { fwd: [-1.0, 0.0, 0.0], left: [0.0, 0.0, -1.0], head_at: 0.0, length: 1.0, mid: 0.0, width: 1.0, top: 0.0, bottom: 1.0, head_found: false };
+    }
+    BodyFrame { fwd, left, head_at: a_hi, length: (a_hi - a_lo).max(1.0), mid: (s_lo + s_hi) * 0.5, width: (s_hi - s_lo).max(1.0), top: lo[1], bottom: hi[1], head_found }
+}
+
+/// An animal standing on all fours, along its own long axis (found from
+/// the shape, see [`body_frame`]), head towards the end that has one
+/// (or the low end of the axis when the two ends look alike: -x for a
+/// body along x): spine, neck, head, jaw, tail and four legs
+/// (`leg_front.L`… with `.0` upper and `.1` lower, `paw_front.L`…).
+pub fn quadruped(mesh: &Mesh) -> Rig {
+    quadruped_facing(mesh, None)
+}
+
+/// [`quadruped`] with the head towards `forward` (its ground-plane part)
+/// when given.
+pub fn quadruped_facing(mesh: &Mesh, forward: Option<V3>) -> Rig {
+    let fr = body_frame(mesh, forward);
+    let ht = (fr.bottom - fr.top).max(1.0);
+    let y = |f: f32| fr.top + f * ht;
+    let half_w = fr.width * 0.3;
+    let at = |f: f32, s: f32, h: f32| fr.at(f, s, y(h));
     let mut r = Rig::default();
     let mut b = |name: &str, parent: Option<usize>, head: V3, tail: V3| -> usize {
         r.bones.push(Bone::new(name, parent, head, tail));
         r.bones.len() - 1
     };
-    let hips = b("hips", None, [x(0.72), y(0.35), cz], [x(0.55), y(0.33), cz]);
-    let spine = b("spine", Some(hips), [x(0.55), y(0.33), cz], [x(0.3), y(0.32), cz]);
-    let neck = b("neck", Some(spine), [x(0.3), y(0.32), cz], [x(0.16), y(0.15), cz]);
-    let head = b("head", Some(neck), [x(0.16), y(0.15), cz], [x(0.0), y(0.2), cz]);
-    b("jaw", Some(head), [x(0.12), y(0.22), cz], [x(0.02), y(0.27), cz]);
+    let hips = b("hips", None, at(0.72, 0.0, 0.35), at(0.55, 0.0, 0.33));
+    let spine = b("spine", Some(hips), at(0.55, 0.0, 0.33), at(0.3, 0.0, 0.32));
+    let neck = b("neck", Some(spine), at(0.3, 0.0, 0.32), at(0.16, 0.0, 0.15));
+    let head = b("head", Some(neck), at(0.16, 0.0, 0.15), at(0.0, 0.0, 0.2));
+    b("jaw", Some(head), at(0.12, 0.0, 0.22), at(0.02, 0.0, 0.27));
     let mut prev = hips;
     for i in 0..3 {
         let f0 = 0.72 + i as f32 * 0.093;
-        prev = b(&format!("tail.{i}"), Some(prev), [x(f0), y(0.33 + i as f32 * 0.02), cz], [x(f0 + 0.093), y(0.35 + i as f32 * 0.03), cz]);
+        prev = b(&format!("tail.{i}"), Some(prev), at(f0, 0.0, 0.33 + i as f32 * 0.02), at(f0 + 0.093, 0.0, 0.35 + i as f32 * 0.03));
     }
     for (end, fx, parent) in [("front", 0.3f32, spine), ("back", 0.7, hips)] {
-        for (side, sz) in [("L", -1.0f32), ("R", 1.0)] {
-            let z = cz + sz * half_w;
-            let u = b(&format!("leg_{end}.{side}.0"), Some(parent), [x(fx), y(0.4), z], [x(fx + 0.01), y(0.68), z]);
-            let l = b(&format!("leg_{end}.{side}.1"), Some(u), [x(fx + 0.01), y(0.68), z], [x(fx), y(0.95), z]);
-            b(&format!("paw_{end}.{side}"), Some(l), [x(fx), y(0.95), z], [x(fx - 0.04), y(1.0), z]);
+        for (side, sz) in [("L", 1.0f32), ("R", -1.0)] {
+            let s = sz * half_w;
+            let u = b(&format!("leg_{end}.{side}.0"), Some(parent), at(fx, s, 0.4), at(fx + 0.01, s, 0.68));
+            let l = b(&format!("leg_{end}.{side}.1"), Some(u), at(fx + 0.01, s, 0.68), at(fx, s, 0.95));
+            b(&format!("paw_{end}.{side}"), Some(l), at(fx, s, 0.95), at(fx - 0.04, s, 1.0));
         }
     }
-    centre_joints(mesh, &mut r, ht);
+    centre_joints(mesh, &mut r, ht, fr.left);
     r
 }
 
