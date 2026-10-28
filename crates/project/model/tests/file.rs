@@ -193,3 +193,74 @@ fn file_shape_matches_spec() {
     assert!(v["project"]["sequences"].is_array());
     assert_eq!(v["project"]["sequences"][0]["clips"][0]["source"]["type"], "media");
 }
+
+/// Saves from several threads of one process (the window's autosave and a
+/// save from the menu or an agent) each finish whole: no save fails
+/// because another took its temporary file, and the file is one of them.
+#[test]
+fn saves_from_several_threads_never_clash() {
+    let dir = TempDir::new("threads");
+    let path = dir.0.join("project.json");
+    let payloads: Vec<Vec<u8>> = (0..8).map(|k| format!("{{\"writer\": {k}, \"pad\": \"{}\"}}", "x".repeat(200_000)).into_bytes()).collect();
+    let failures = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|s| {
+        for p in &payloads {
+            let (path, failures) = (&path, &failures);
+            s.spawn(move || {
+                for _ in 0..40 {
+                    if file::write_atomic(path, p).is_err() {
+                        failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+    });
+    assert_eq!(failures.into_inner(), 0, "a save failed");
+    let got = std::fs::read(&path).unwrap();
+    assert!(payloads.contains(&got), "the file is not any one save whole");
+    let left: Vec<_> = std::fs::read_dir(&dir.0).unwrap().flatten().map(|e| e.file_name()).filter(|n| n != "project.json").collect();
+    assert!(left.is_empty(), "temporary files left: {left:?}");
+}
+
+/// A save that expects the file as it was loaded is refused once someone
+/// else saved over it, and says what is on disk now.
+#[test]
+fn a_save_over_someone_elses_is_refused() {
+    let dir = TempDir::new("stamp");
+    let folder = ProjectFolder::create(&dir.0).unwrap();
+    let mut p = Project::default();
+    folder.save(&p).unwrap();
+    let (loaded, stamp) = folder.load_stamped().unwrap();
+    assert!(loaded.project.content_eq(&p));
+    // Another process saves first.
+    let mut theirs = p.clone();
+    theirs.settings.width = 1280;
+    let after_theirs = folder.save_if(&theirs, &Extra::new(), Some(stamp)).unwrap();
+    assert_ne!(after_theirs, stamp);
+    // Ours, still expecting the old file, is refused.
+    p.settings.width = 640;
+    match folder.save_if(&p, &Extra::new(), Some(stamp)) {
+        Err(FileError::Changed { on_disk }) => assert_eq!(on_disk, after_theirs),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert_eq!(folder.load().unwrap().project.settings.width, 1280);
+    // Expecting what is there now, it saves.
+    folder.save_if(&p, &Extra::new(), Some(after_theirs)).unwrap();
+    assert_eq!(folder.load().unwrap().project.settings.width, 640);
+    assert_eq!(folder.stamp(), Some(file::stamp_of(&std::fs::read(folder.project_file()).unwrap())));
+}
+
+/// A project held open by one session is seen as shared by another, and
+/// no longer once the first lets go.
+#[test]
+fn sessions_see_each_other_hold_a_project_open() {
+    let dir = TempDir::new("open");
+    let folder = ProjectFolder::create(&dir.0).unwrap();
+    let mut a = Some(folder.hold_open().unwrap());
+    let mut b = Some(folder.hold_open().unwrap());
+    assert!(folder.open_elsewhere(&mut a), "b has it open");
+    assert!(a.is_some(), "a holds it again after asking");
+    drop(b.take());
+    assert!(!folder.open_elsewhere(&mut a), "only a now");
+    assert!(folder.open_elsewhere(&mut b), "b, which let go, sees a");
+}

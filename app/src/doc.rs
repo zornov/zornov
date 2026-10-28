@@ -46,12 +46,26 @@ pub struct Doc {
     /// The team's rules for this person (reviewer, others' locks): every
     /// edit is checked against them. `None`: nothing limits edits.
     pub guard: Option<crate::collab::team::Guard>,
+    /// The project file as this document last read or wrote it: its stamp
+    /// and the project it held, so a save can tell that someone else saved
+    /// since and take their work in (see `services::project::save`).
+    pub synced: Option<Synced>,
+    /// This process's hold on the project folder (`ProjectFolder::hold_open`),
+    /// so other sessions on the same folder know it is open here.
+    pub open_hold: Option<std::fs::File>,
+}
+
+/// What `project.json` held when this document last loaded or saved it.
+#[derive(Clone)]
+pub struct Synced {
+    pub stamp: u64,
+    pub base: std::sync::Arc<m::Project>,
 }
 
 impl Doc {
     pub fn new(model: m::Project) -> Self {
         let project = std::sync::Arc::new(bridge::view_of(&model, 0));
-        let mut d = Self { model, history: m::History::new(), project, view_time: 0, gesture: None, revision: 0, edits: 0, error: None, folder: None, slot: Default::default(), keyed: Vec::new(), guard: None };
+        let mut d = Self { model, history: m::History::new(), project, view_time: 0, gesture: None, revision: 0, edits: 0, error: None, folder: None, slot: Default::default(), keyed: Vec::new(), guard: None, synced: None, open_hold: None };
         d.index();
         d
     }

@@ -366,5 +366,5 @@ pub fn to_mesh_desc(desc: &WorldDesc, canvas: &Canvas, camera: &CameraDesc, budg
         lights.push(LightDesc { kind: LightKind::Ambient, position: [0.0; 3], direction: [0.0, 1.0, 0.0], colour: [0.0; 3], cone: [0.0, 1.0], radius: 0.0, falloff: 0.0, casts_shadows: false, shadow_darkness: 0.0, sky: None, look: Some(crate::atmosphere::LightLook { atmos: Some(a), ..Default::default() }) });
     }
     let _ = mesh_bounds;
-    MeshDesc { instances, camera: Some(*camera), lights }
+    MeshDesc { instances, camera: Some(*camera), lights, ..Default::default() }
 }

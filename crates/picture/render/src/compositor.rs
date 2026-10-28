@@ -790,6 +790,77 @@ mod tests {
         assert!((p[0] - 0.25).abs() < 1e-6 && (p[2] - 1.0).abs() < 1e-6, "{p:?}");
     }
 
+    fn model(id: u64, order: i32, mesh: studio_mesh::Mesh, at: [f32; 3], rgba: [f32; 4]) -> ClipDesc {
+        let inst = crate::mesh_render::MeshInstance {
+            id,
+            mesh: Arc::new(mesh),
+            key: format!("test model {id}"),
+            world: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+            overrides: crate::mesh_render::MaterialOverride { base_colour: Some(rgba), ..Default::default() },
+            smooth: 1.0,
+            accepts_lights: true,
+            casts_shadows: true,
+            accepts_shadows: true,
+            motion: None,
+            direct: None,
+        };
+        let mut c = ClipDesc::new(id, order, 0, SECOND, SourceDesc::Mesh(crate::mesh_render::MeshDesc { instances: vec![inst], ..Default::default() }));
+        c.placement.position = [at[0], at[1]];
+        c.space = Some(space::Space { z: at[2], ..Default::default() });
+        c
+    }
+
+    fn sun_and_sky() -> ClipDesc {
+        let mut sun = crate::mesh_render::default_lights()[0];
+        sun.sky = Some(crate::sky::SkyDesc::default());
+        ClipDesc::new(90, 9, 0, SECOND, SourceDesc::Light(sun))
+    }
+
+    /// A model, a 2D card over it and another model over that: the world's
+    /// sky is the lowest 3D layer's backdrop, so the upper model draws only
+    /// itself and the card stays visible round it.
+    #[test]
+    fn a_model_above_a_card_brings_no_backdrop_of_its_own() {
+        let mut canvas = Canvas::new(160, 90, 30.0);
+        canvas.background = [0.0, 0.0, 0.0, 1.0];
+        let mut card = solid(2, 1, [1.0, 0.0, 0.0, 1.0]);
+        card.placement.scale = [0.5, 0.5];
+        let scene = StaticScene::new(canvas, SECOND)
+            .with_clip(model(1, 0, studio_mesh::prim::ico_sphere(10.0, 2), [-60.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0]))
+            .with_clip(card)
+            .with_clip(model(3, 2, studio_mesh::prim::ico_sphere(10.0, 2), [60.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.0]))
+            .with_clip(sun_and_sky());
+        let f = compositor().render(&scene, 0, None);
+        // On the card, away from both models: the card, not the sky.
+        let p = f.get(80, 45);
+        assert!(p[0] > 0.9 && p[1] < 0.1 && p[2] < 0.1, "the card is covered: {p:?}");
+        // Outside the card: the lower model's sky.
+        let sky = f.get(5, 5);
+        assert!(sky[2] > sky[0], "the sky behind everything: {sky:?}");
+        // The upper model is drawn.
+        let b = f.get(140, 45);
+        assert!(b[2] > b[0] && b[2] > b[1], "the upper model: {b:?}");
+    }
+
+    /// Models on separate 3D layers are still one world: a model on a
+    /// higher lane that stands behind a nearer one is hidden by it.
+    #[test]
+    fn models_on_split_layers_hide_each_other_by_depth() {
+        let mut canvas = Canvas::new(160, 90, 30.0);
+        canvas.background = [0.0, 0.0, 0.0, 1.0];
+        let mut card = solid(2, 1, [1.0, 0.0, 0.0, 1.0]);
+        card.placement.scale = [0.1, 0.1];
+        card.placement.position = [70.0, 40.0];
+        let scene = StaticScene::new(canvas, SECOND)
+            .with_clip(model(1, 0, studio_mesh::prim::ico_sphere(8.0, 3), [0.0, 0.0, -100.0], [0.0, 1.0, 0.0, 1.0]))
+            .with_clip(card)
+            .with_clip(model(3, 2, studio_mesh::prim::cube([400.0, 240.0, 4.0]), [0.0, 0.0, 200.0], [0.0, 0.0, 1.0, 1.0]));
+        let f = compositor().render(&scene, 0, None);
+        let c = f.get(80, 45);
+        assert!(c[1] > c[2], "the nearer green ball in front of the far blue board: {c:?}");
+        assert!((0..160).any(|x| f.get(x, 45)[2] > 0.5), "the board round it");
+    }
+
     #[test]
     fn nested_scene_renders() {
         let inner = StaticScene::new(Canvas::new(16, 16, 30.0), SECOND).with_clip(solid(1, 0, [0.0, 1.0, 0.0, 1.0]));

@@ -1,0 +1,85 @@
+name: evals
+
+# The agent's own measures, which the build job does not run: the eval
+# harness driven end to end by a scripted brain (no model, no tokens), the
+# 3D quality benchmark, and the math showcase built through the MCP server.
+# Nightly on main and by hand; a pull request that touches the agent, the
+# renderer or the 3D crates runs them too. Each writes what it measured as an
+# artifact, so a regression shows as a number, not only as a red run.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/src/agent/**"
+      - "app/src/physics3d/**"
+      - "crates/picture/render/**"
+      - "crates/3d/**"
+      - ".github/workflows/evals.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+  # No GPU on the runners: every renderer takes its CPU path, on purpose.
+  STUDIO_RENDER_NO_GPU: "1"
+
+jobs:
+  evals:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Make room
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-release
+          save-if: false
+      - name: Build the image
+        run: docker build -t zornov-linux docker
+      - name: Eval smoke, quality bench, math showcase
+        run: |
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git" eval-out
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache/home -e CARGO_TARGET_DIR=/work/target \
+            -e CARGO_INCREMENTAL -e CARGO_PROFILE_DEV_DEBUG -e CARGO_PROFILE_TEST_DEBUG -e CARGO_TERM_COLOR -e STUDIO_RENDER_NO_GPU -e GITHUB_SHA \
+            -e MATH_SHOWCASE_OUT=/work/eval-out/math-showcase \
+            -v "$PWD:/work" \
+            -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
+            -v "$HOME/.cargo/git:/usr/local/cargo/git" \
+            zornov-linux sh -ec '
+              # The eval harness with the scripted brain: a whole crew run
+              # (plan, parallel steps, review, approval) and the scorer,
+              # through the same gate the AI panel and `zornov eval` use.
+              cargo test --release -p studio-app --bin zornov -- agent::eval:: > eval-out/eval-smoke.txt 2>&1 || { cat eval-out/eval-smoke.txt; exit 1; }
+              # The 3D quality benchmark; its summary is the artifact.
+              cargo run --release -p studio-quality --bin studio-quality -- bench --out eval-out/quality-bench --label "${GITHUB_SHA:-local}" --history eval-out/quality-history.jsonl > eval-out/quality-summary.json
+              # The math showcase as an agent builds it, over MCP: replies,
+              # pictures and timings.
+              cargo test --release -p studio-app --bin zornov -- agent::math_showcase::math_showcase --ignored --nocapture > eval-out/math-showcase.txt 2>&1 || { cat eval-out/math-showcase.txt; exit 1; }
+            '
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Eval smoke"; echo '```'; grep -E "test result|FAILED|panicked" eval-out/eval-smoke.txt || true; echo '```'
+            echo "### Quality bench"; echo '```json'; cat eval-out/quality-summary.json 2>/dev/null || echo "(not run)"; echo '```'
+            echo "### Math showcase timings"; echo '```'; cat eval-out/math-showcase/timings.txt 2>/dev/null || echo "(not run)"; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: evals
+          path: eval-out/

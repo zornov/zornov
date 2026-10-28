@@ -53,11 +53,14 @@ pub fn new_custom(name: &str, width: u32, height: u32, fps: f32) -> Doc {
 /// Open a project folder.
 pub fn open(dir: &Path) -> Result<Doc, String> {
     let folder = m::file::ProjectFolder::new(dir);
-    let file = folder.load().map_err(|e| format!("Could not open {}: {e:?}", dir.display()))?;
+    let (file, stamp) = folder.load_stamped().map_err(|e| format!("Could not open {}: {e:?}", dir.display()))?;
     let mut project = file.project;
     folder.resolve_media(&mut project);
     crate::mesh_store::relink(&mut project, dir);
+    let synced = crate::doc::Synced { stamp, base: std::sync::Arc::new(project.clone()) };
     let mut doc = Doc::new(project);
+    doc.synced = Some(synced);
+    doc.open_hold = folder.hold_open().ok();
     restore_history(&mut doc, &folder);
     doc.folder = Some(folder);
     // The team's roles and locks, for whoever is at this computer.
@@ -113,7 +116,12 @@ fn restore_history(doc: &mut Doc, folder: &m::file::ProjectFolder) {
 
 /// Superseded model files go, at most every few minutes (it reads the
 /// history and versions to see what is still referred to).
-fn prune_models(doc: &Doc, root: &Path) {
+fn prune_models(doc: &mut Doc, root: &Path) {
+    // Another session on this folder may point at files this one cannot
+    // see (its unsaved edits, its undo): nothing is judged unused then.
+    if m::file::ProjectFolder::new(root).open_elsewhere(&mut doc.open_hold) {
+        return;
+    }
     static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     if last.is_some_and(|t| t.elapsed().as_secs() < 300) {
@@ -135,13 +143,55 @@ pub fn save(doc: &mut Doc, dir: Option<&Path>) -> Result<PathBuf, String> {
         (None, Some(f)) => f.clone(),
         (None, None) => return Err("Choose where to save the project first".into()),
     };
-    folder.save(&doc.model).map_err(|e| format!("Could not save: {e:?}"))?;
+    save_merging(doc, &folder)?;
     doc.history.mark_saved();
     keep_history(doc, &folder);
     let root = folder.root().to_path_buf();
+    if doc.open_hold.is_none() || doc.folder.as_ref().is_none_or(|f| f.root() != folder.root()) {
+        doc.open_hold = folder.hold_open().ok();
+    }
     prune_models(doc, &root);
     doc.folder = Some(folder);
     Ok(root)
+}
+
+/// Writes the document to `folder`. When someone else saved the project
+/// since this document last read or wrote it (another session on the same
+/// folder, a window and an agent), their work is taken in first, as one
+/// undo step ("Changes saved elsewhere"), and then the whole is saved: the
+/// last save no longer silently wins. Where both changed the same thing
+/// this document's change is kept and `doc.error` says so.
+fn save_merging(doc: &mut Doc, folder: &m::file::ProjectFolder) -> Result<(), String> {
+    let same_folder = doc.folder.as_ref().is_some_and(|f| f.root() == folder.root());
+    let mut expected = doc.synced.as_ref().filter(|_| same_folder).map(|s| s.stamp);
+    for _ in 0..4 {
+        match folder.save_if(&doc.model, &Default::default(), expected) {
+            Ok(stamp) => {
+                doc.synced = Some(crate::doc::Synced { stamp, base: std::sync::Arc::new(doc.model.clone()) });
+                return Ok(());
+            }
+            Err(m::file::FileError::Changed { .. }) => {
+                let (file, stamp) = folder.load_stamped().map_err(|e| format!("Could not read the project saved elsewhere: {e}"))?;
+                let mut theirs = file.project;
+                folder.resolve_media(&mut theirs);
+                crate::mesh_store::relink(&mut theirs, folder.root());
+                let base = doc.synced.as_ref().map(|s| s.base.clone()).unwrap_or_else(|| std::sync::Arc::new(theirs.clone()));
+                let out = crate::collab::merge::three_way(&base, &doc.model, &theirs)?;
+                if !out.merged.content_eq(&doc.model) {
+                    doc.take_in("Changes saved elsewhere", &out.merged)?;
+                }
+                if !out.conflicts.is_empty() {
+                    let kept: Vec<String> = out.conflicts.iter().take(4).map(|c| format!("{} {}", c.what, if c.name.is_empty() { c.id.to_string() } else { c.name.clone() })).collect();
+                    doc.error = Some(format!("The project was also saved elsewhere; both changed {} and this one's change was kept", kept.join(", ")));
+                }
+                // What is on disk now is the common ground for the next save.
+                doc.synced = Some(crate::doc::Synced { stamp, base: std::sync::Arc::new(theirs) });
+                expected = Some(stamp);
+            }
+            Err(e) => return Err(format!("Could not save: {e}")),
+        }
+    }
+    Err("Could not save: the project keeps being saved elsewhere at the same moment; try again".into())
 }
 
 /// Result of importing files into the bin.
@@ -254,6 +304,28 @@ pub(crate) mod tests {
         std::fs::write(&file, text).unwrap();
         let fresh = open(&dir).unwrap();
         assert!(!fresh.can_undo(), "stale history is dropped");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Two sessions on one project folder (two `zornov mcp --project`, or
+    /// a window and an agent): each saves after its edit, and neither
+    /// loses the other's work.
+    #[test]
+    fn two_sessions_on_one_project_keep_each_others_work() {
+        let dir = std::env::temp_dir().join(format!("studio-two-sessions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut a = crate::agent::Session::at(&dir).unwrap();
+        let mut b = crate::agent::Session::at(&dir).unwrap();
+        let card = |c: &str| serde_json::json!({"ops": [{"op": "card", "colour": c, "at": 0, "duration": 2}]});
+        a.run("edit", &card("#ff0000")).unwrap();
+        b.run("edit", &card("#0000ff")).unwrap();
+        // And once more each way: the merged state is what the next save builds on.
+        a.run("edit", &card("#00ff00")).unwrap();
+        let on_disk = open(&dir).unwrap();
+        let cards = on_disk.model.active().clips.iter().filter(|c| !c.is_gap()).count();
+        assert_eq!(cards, 3, "every session's cards are in the saved project");
+        // The session that took in the other's work sees it too.
+        assert_eq!(a.doc.model.active().clips.iter().filter(|c| !c.is_gap()).count(), 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

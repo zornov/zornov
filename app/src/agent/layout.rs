@@ -330,7 +330,7 @@ impl Session {
                     // Each model is its own item: its box seen through the camera.
                     let cam = desc.camera.unwrap_or(camera);
                     for (id, r) in studio_render::mesh_render::screen_rects(desc, &canvas) {
-                        let one = studio_render::mesh_render::MeshDesc { instances: desc.instances.iter().filter(|i| i.id == id).cloned().collect(), camera: desc.camera, lights: Vec::new() };
+                        let one = studio_render::mesh_render::MeshDesc { instances: desc.instances.iter().filter(|i| i.id == id).cloned().collect(), camera: desc.camera, lights: Vec::new(), ..Default::default() };
                         let depth = studio_render::mesh_render::world_bounds(&one).map(|(a, b)| cam.view([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0, (a[2] + b[2]) / 2.0])[2]);
                         let quad = vec![(r[0] - cs[0] / 2.0, r[1] - cs[1] / 2.0), (r[2] - cs[0] / 2.0, r[1] - cs[1] / 2.0), (r[2] - cs[0] / 2.0, r[3] - cs[1] / 2.0), (r[0] - cs[0] / 2.0, r[3] - cs[1] / 2.0)];
                         out.push(Raw { id, object: None, kind: Kind::Model, what: String::new(), name: None, quad, depth, opacity, rotation: 0.0, tilt: None, full: false, transition });

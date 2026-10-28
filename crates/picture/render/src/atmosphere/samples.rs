@@ -27,7 +27,7 @@ impl Scene {
     pub fn new(w: u32, h: u32) -> Scene {
         let canvas = Canvas::new(w, h, 24.0);
         let camera = CameraDesc::default_for(&canvas);
-        Scene { desc: MeshDesc { instances: Vec::new(), camera: Some(camera), lights: Vec::new() }, canvas, next: 1 }
+        Scene { desc: MeshDesc { instances: Vec::new(), camera: Some(camera), lights: Vec::new(), ..Default::default() }, canvas, next: 1 }
     }
 
     pub fn m(&self) -> f32 {

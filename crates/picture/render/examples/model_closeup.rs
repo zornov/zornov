@@ -112,7 +112,7 @@ fn main() {
         motion: None,
         direct: None,
     };
-    let frame = render(&MeshDesc { instances: vec![inst], camera: None, lights: vec![] }, &canvas, (size, size));
+    let frame = render(&MeshDesc { instances: vec![inst], camera: None, lights: vec![], ..Default::default() }, &canvas, (size, size));
     // Over a plain dark backdrop.
     let mut f = frame;
     for p in &mut f.pixels {
