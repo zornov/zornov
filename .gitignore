@@ -157,3 +157,18 @@ node_modules/
 *secret*
 *credentials*
 *.token
+
+# Agent scratch, showcase and test output
+/showcase-bin/
+/showcase-out/
+/showcase-project/
+# Flight-recorder traces (a project's .zornov/agent-trace/, an eval run's
+# TASK/agent-trace/): tool calls and replies, never committed
+agent-trace/
+# Friction reports and live-tap dumps written next to them
+friction-report*.md
+tap*.txt
+# Exported-file QC reports (qc writes <file>.qc.json beside the video)
+*.qc.json
+# Replay copies of a project, if TMPDIR points into the tree
+zornov-replay-*/
