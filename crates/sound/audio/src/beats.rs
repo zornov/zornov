@@ -61,28 +61,23 @@ fn fft(re: &mut [f32], im: &mut [f32]) {
 /// Frame `i` is centred at sample `i * hop`; an attack peaks the envelope
 /// about half a window before the attack itself (see [`LEAD`]).
 pub fn onset_envelope(mono: &[f32], rate: u32) -> (Vec<f32>, f64) {
-    let (env, _, fps) = envelopes(mono, rate);
+    let (env, fps) = envelope(mono, rate);
     (env, fps)
 }
 
 /// Bands the flux is summed over: log-spaced from 30 Hz, so a kick drum
 /// (a few low bins) counts as much as a hi-hat (hundreds of high bins).
 const BANDS: usize = 36;
-/// Bands up to here make the low envelope (kick and bass) that decides
-/// which of two half-beat phases is the beat.
-const LOW_HZ: f64 = 180.0;
-
-/// The onset envelope over every band and over the low bands alone, with
-/// the frame rate: spectral flux of log-compressed band magnitudes (~46 ms
-/// frames, 10 ms hop), half-wave rectified, summed over bands, high-passed
-/// by a moving mean and normalised.
-fn envelopes(mono: &[f32], rate: u32) -> (Vec<f32>, Vec<f32>, f64) {
+/// The onset envelope with its frame rate: spectral flux of log-compressed
+/// band magnitudes (~46 ms frames, 10 ms hop), half-wave rectified, summed
+/// over bands, high-passed by a moving mean and normalised.
+fn envelope(mono: &[f32], rate: u32) -> (Vec<f32>, f64) {
     let rate_f = rate.max(1) as f64;
     let hop = ((rate_f * 0.01).round() as usize).max(1);
     let n = ((rate_f * 0.046) as usize).next_power_of_two().max(64);
     let fps = rate_f / hop as f64;
     if mono.len() < n {
-        return (Vec::new(), Vec::new(), fps);
+        return (Vec::new(), fps);
     }
     let window: Vec<f32> = (0..n).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / n as f32).cos()).collect();
     let bins = n / 2;
@@ -99,10 +94,9 @@ fn envelopes(mono: &[f32], rate: u32) -> (Vec<f32>, Vec<f32>, f64) {
     for b in band_of.iter().flatten() {
         width[*b] += 1;
     }
-    let low_bands = (((LOW_HZ / lo).ln() / (hi / lo).ln() * BANDS as f64).ceil() as usize).clamp(1, BANDS);
     let frames = mono.len() / hop;
     let mut prev = [0f32; BANDS];
-    let (mut env, mut low) = (Vec::with_capacity(frames), Vec::with_capacity(frames));
+    let mut env = Vec::with_capacity(frames);
     let (mut re, mut im) = (vec![0f32; n], vec![0f32; n]);
     for f in 0..frames {
         let centre = f * hop;
@@ -118,25 +112,20 @@ fn envelopes(mono: &[f32], rate: u32) -> (Vec<f32>, Vec<f32>, f64) {
                 power[b] += re[k] * re[k] + im[k] * im[k];
             }
         }
-        let (mut flux, mut flux_low) = (0.0, 0.0);
+        let mut flux = 0.0;
         for b in 0..BANDS {
             if width[b] == 0 {
                 continue;
             }
             let m = (1.0 + 100.0 * (power[b] / width[b] as f32).sqrt()).ln();
             if f > 0 {
-                let d = (m - prev[b]).max(0.0);
-                flux += d;
-                if b < low_bands {
-                    flux_low += d;
-                }
+                flux += (m - prev[b]).max(0.0);
             }
             prev[b] = m;
         }
         env.push(flux);
-        low.push(flux_low);
     }
-    (detrend(&env, fps), detrend(&low, fps), fps)
+    (detrend(&env, fps), fps)
 }
 
 /// Removes the slow trend (~0.4 s moving mean), keeps the rises, normalises.
