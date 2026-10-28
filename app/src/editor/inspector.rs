@@ -409,9 +409,12 @@ pub(crate) fn clip_tabs(kind: ClipKind, generated: Option<m::GeneratorKind>) -> 
                 Some(G::Model) => "Model",
                 _ => "Shape",
             };
+            // A model's own panel (parts, modifiers, materials, UVs,
+            // shading) sits under the Model section; its rigid-body physics
+            // with the other physics, under Animation.
             vec![
-                (first, vec!["clip", "text", "shape", "mograph-template", "mograph-shape", "mograph-text", "model", "world-spec", "sim-settings", "transform", "crop", "space", "mask", "pins"]),
-                ("Animation", vec!["motion", "modifiers", "physics", "drivers", "skeleton", "character3d", "sim3d"]),
+                (first, vec!["clip", "text", "shape", "mograph-template", "mograph-shape", "mograph-text", "model", "model-parts", "model-modifiers", "model-materials", "model-uv", "model-object", "world-spec", "sim-settings", "transform", "crop", "space", "mask", "pins"]),
+                ("Animation", vec!["motion", "modifiers", "physics", "physics3d", "drivers", "skeleton", "character3d", "sim3d"]),
                 ("Adjust", vec!["colour", "effects"]),
                 advanced(&["world3d"]),
             ]
@@ -929,5 +932,37 @@ mod tests {
         }
         assert_eq!(percent_to_db(100.0), 0.0);
         assert!((percent_to_db(200.0) - 12.0).abs() < 1e-4);
+    }
+
+    /// The section kinds a source file draws, read from its `Section::new("…"` calls.
+    fn section_kinds(src: &str) -> Vec<String> {
+        let pat = "Section::new(\"";
+        let mut out = Vec::new();
+        let mut rest = src;
+        while let Some(at) = rest.find(pat) {
+            rest = &rest[at + pat.len()..];
+            if let Some(end) = rest.find('"') {
+                out.push(rest[..end].to_owned());
+            }
+        }
+        out
+    }
+
+    /// Every section a 3D model clip can draw (its own model panel, physics,
+    /// character and simulation) sits in one of the model clip's tabs, so
+    /// the tab filter never hides it for good.
+    #[test]
+    fn every_model_clip_section_is_in_a_tab() {
+        let tabs = clip_tabs(ClipKind::Title, Some(m::GeneratorKind::Model));
+        let shown: Vec<&str> = tabs.iter().flat_map(|t| t.1.iter().copied()).collect();
+        let mut kinds: Vec<String> = Vec::new();
+        kinds.extend(section_kinds(include_str!("model_edit/panel.rs")));
+        kinds.extend(section_kinds(include_str!("body3d.rs")));
+        // The model's own section and the Model arm of the 3D animation sections.
+        kinds.extend(["model", "character3d", "sim3d"].map(String::from));
+        assert!(kinds.len() >= 9, "found only {kinds:?}");
+        for k in &kinds {
+            assert!(shown.contains(&k.as_str()), "model clip section \"{k}\" is in no tab of a model clip, so it never shows");
+        }
     }
 }
