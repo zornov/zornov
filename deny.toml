@@ -52,6 +52,7 @@ exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "studio-encode" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-entitlements" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-fx" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-gpu-device" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-guard" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-h264" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-hevc" },
