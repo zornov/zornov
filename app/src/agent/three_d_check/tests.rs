@@ -369,3 +369,38 @@ fn a_reconstruction_with_holes_floating_pieces_and_smeared_texture_is_named_with
     let k = kinds(&judge(&[good], &lit(), &Words::default()));
     assert!(!k.iter().any(|k| ["3d_holes", "3d_floating_pieces", "3d_smeared_texture"].contains(k)), "{k:?}");
 }
+
+/// A four-legged clay body along z (torso, legs, head), rigged and bound.
+fn clay_animal() -> Mesh {
+    let cap = |a: [f32; 3], b: [f32; 3], r: f32| sdf::Part { a, b, blend: 12.0, ..sdf::Part::new(sdf::Shape::Capsule, [0.0; 3], [r * 2.0; 3]) };
+    let mut parts = vec![sdf::Part::new(sdf::Shape::Ellipsoid, [0.0; 3], [110.0, 90.0, 260.0])];
+    for (x, z) in [(-32.0f32, -80.0f32), (32.0, -80.0), (-32.0, 80.0), (32.0, 80.0)] {
+        parts.push(cap([x, 10.0, z], [x, 120.0, z], 16.0));
+    }
+    parts.push(sdf::Part { blend: 10.0, ..sdf::Part::new(sdf::Shape::Ellipsoid, [0.0, -60.0, -160.0], [60.0, 55.0, 75.0]) });
+    let mut m = sdf::build(&parts, vec![Material::default()], 5.0);
+    studio_mesh::autorig::rig_mesh(&mut m, "quadruped").unwrap();
+    m
+}
+
+#[test]
+fn skin_weights_pulled_across_the_body_are_a_note() {
+    let good = clay_animal();
+    let audit = Info::of(&good).skin.expect("a skinned model is audited");
+    println!("bound: {audit:?}");
+    let p = judge(&[hero(7, "Bear", 0.0, 4.0, &good, true, "bear_good.smodel")], &lit(), &Words::default());
+    assert!(!p.iter().any(|x| x.kind == "3d_skin_weights"), "a fresh bind is clean: {audit:?}");
+    // Every vertex half on the left front leg: the right side is pulled
+    // across, the back of the body by a far bone.
+    let mut bad = good.clone();
+    let mut r = (**bad.rig.as_ref().unwrap()).clone();
+    let leg = r.bone("leg_front.L.0").unwrap() as u16;
+    for (j, w) in r.joints.iter_mut().zip(r.weights.iter_mut()) {
+        j[1] = leg;
+        *w = [0.5, 0.5, 0.0, 0.0];
+    }
+    bad.rig = Some(Arc::new(r));
+    let p = judge(&[hero(7, "Bear", 0.0, 4.0, &bad, true, "bear_bad.smodel")], &lit(), &Words::default());
+    let note = p.iter().find(|x| x.kind == "3d_skin_weights").expect("pulled weights are found");
+    assert!(note.problem.contains("other side") && note.problem.contains("leg_front.L.0") && note.fix.contains("skinning"), "{}", note.problem);
+}

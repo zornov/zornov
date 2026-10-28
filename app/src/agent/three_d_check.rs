@@ -37,7 +37,7 @@ use studio_model as m;
 use studio_quality::hero::{self, Craft};
 
 /// Every kind this critic reports; they all start with `3d_`.
-pub const KINDS: &[&str] = &["3d_no_model", "3d_state_swap", "3d_missing_part", "3d_missing_emissive", "3d_part_static", "3d_primitive", "3d_no_bevel", "3d_faceted", "3d_default_material", "3d_default_light", "3d_flat_light", "3d_no_camera_move", "3d_no_dof", "3d_reference_mismatch", "3d_many_primitives", "3d_character_from_primitives", "3d_hand_keyed_motion", "3d_buried", "3d_floating", "3d_flat_key", "3d_source_no_effect", "3d_flat_source", "3d_air_missing", "3d_blown_highlights", "3d_over_bloom", "3d_crushed_blacks", "3d_muddy_blacks", "3d_no_separation", "3d_holes", "3d_floating_pieces", "3d_smeared_texture", "3d_flat", "3d_extruded", "3d_open", "3d_sunk", "3d_tips"];
+pub const KINDS: &[&str] = &["3d_no_model", "3d_state_swap", "3d_missing_part", "3d_missing_emissive", "3d_part_static", "3d_primitive", "3d_no_bevel", "3d_faceted", "3d_default_material", "3d_default_light", "3d_flat_light", "3d_no_camera_move", "3d_no_dof", "3d_reference_mismatch", "3d_many_primitives", "3d_character_from_primitives", "3d_hand_keyed_motion", "3d_buried", "3d_floating", "3d_flat_key", "3d_source_no_effect", "3d_flat_source", "3d_air_missing", "3d_blown_highlights", "3d_over_bloom", "3d_crushed_blacks", "3d_muddy_blacks", "3d_no_separation", "3d_holes", "3d_floating_pieces", "3d_smeared_texture", "3d_flat", "3d_extruded", "3d_open", "3d_sunk", "3d_tips", "3d_skin_weights"];
 
 /// Kinds the AI may set aside itself, with a line in the notes saying why
 /// (`3d-ok: primitive, no_dof - the brief asks for a flat, low-poly look`).
@@ -57,6 +57,8 @@ pub struct Info {
     pub materials: Vec<String>,
     /// The brightest glow channel over the materials.
     pub glow: f32,
+    /// The skin weights' faults, for a model skinned to bones.
+    pub skin: Option<studio_mesh::autorig::WeightAudit>,
 }
 
 /// What the surface check of a reconstructed model found.
@@ -80,7 +82,7 @@ impl Info {
             let u = studio_quality::uv::analyse(mesh);
             Health { open_edges: t.boundary_edges, floating: t.specks, stretch: u.stretch, spread: u.density_cov }
         });
-        Info { health, craft: hero::measure(mesh), solid: solidity::Solidity::of(mesh), bones: mesh.rig.as_ref().map(|r| r.bones.iter().filter(|b| b.deform).map(|b| b.name.clone()).collect()).unwrap_or_default(), materials: mesh.materials.iter().map(|x| x.name.clone()).collect(), glow: mesh.materials.iter().flat_map(|x| x.emissive).fold(0.0, f32::max) }
+        Info { health, craft: hero::measure(mesh), solid: solidity::Solidity::of(mesh), bones: mesh.rig.as_ref().map(|r| r.bones.iter().filter(|b| b.deform).map(|b| b.name.clone()).collect()).unwrap_or_default(), materials: mesh.materials.iter().map(|x| x.name.clone()).collect(), glow: mesh.materials.iter().flat_map(|x| x.emissive).fold(0.0, f32::max), skin: mesh.rig.as_ref().filter(|r| r.is_skinned()).map(|r| studio_mesh::autorig::audit_weights(mesh, r)) }
     }
 }
 
@@ -350,6 +352,11 @@ pub fn judge(heroes: &[Hero], env: &Env, words: &Words) -> Vec<Problem> {
 
         // A real solid: not a card, a cut-out slab or an open shell.
         out.extend(solidity::notes(h.id, &h.name, at, &h.info.solid));
+
+        // Skin weights that tear or pull across the body when it bends.
+        if let Some(note) = h.info.skin.as_ref().and_then(|a| skin_note(a)) {
+            out.push(Problem { kind: "3d_skin_weights", at, clip: h.id, problem: format!("{label} is skinned badly: {note}"), fix: SKIN_FIX });
+        }
 
         // Primitive: few parts, one material, nothing but a plain outline.
         if c.shells <= 2 && c.materials <= 1 && c.bones == 0 && c.plain_outline() && c.triangles < 150_000 && !h.math {
@@ -742,6 +749,18 @@ fn character_notes(heroes: &[Hero], env: &Env, folded: &mut HashSet<u32>) -> Vec
         }
     }
     out
+}
+
+const SKIN_FIX: &str = "bind the skin again: `rig` with `skinning`: \"smooth\" (weights measured through the solid body, so a limb never pulls the torso it touches); if a bone sits outside the body or on the wrong side, move it (`rig` `bones`) before binding; parts that should move whole go on one bone with `skinning`: \"rigid\" or \"parts\"";
+
+/// The skin audit in words when it is bad enough to see: more than one
+/// vertex in a hundred pulled by a far bone, a bone of the other side or
+/// two unjoined bones, or more than one edge in a hundred where the weights
+/// jump.
+pub(super) fn skin_note(a: &studio_mesh::autorig::WeightAudit) -> Option<String> {
+    let v = a.vertices.max(1);
+    let bad = (a.far + a.cross_side + a.non_adjacent) * 100 > v || a.tears * 100 > v;
+    if bad { a.describe() } else { None }
 }
 
 /// Bones keyed pose by pose where a gait or act would do.
