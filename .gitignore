@@ -157,3 +157,18 @@ node_modules/
 *secret*
 *credentials*
 *.token
+
+# Agent scratch, showcase and test output
+# Where the math film and showcase tests were pointed (MATH_FILM_OUT,
+# MATH_SHOWCASE_OUT): the video, key frames, contact sheets, logs and
+# the saved project.
+/showcase-out/
+# The projects those tests save, should their output go to the root.
+/Math shapes/
+/Math showcase/
+# QC reports written beside an exported file.
+*.qc.json
+*.qc.txt
+# Saved model meshes and baked motion (math shapes that move with t).
+*.smesh
+*.scache
