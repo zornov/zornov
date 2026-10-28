@@ -206,6 +206,13 @@ fn eff_mass(bodies: &[Body], iws: &[[V3; 3]], a: usize, b: Option<usize>, point:
     k
 }
 
+/// Two directions square to the unit `n` and to each other.
+fn plane_axes(n: V3) -> [V3; 2] {
+    let pick = if n[0].abs() < 0.57 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let t1 = normalise(cross(n, pick));
+    [t1, cross(n, t1)]
+}
+
 /// A contact between two bodies (`b` = None for the world).
 struct Contact {
     a: usize,
@@ -219,6 +226,8 @@ struct Contact {
     /// Accumulated impulses (normal, two tangents).
     jn: f32,
     jt: [f32; 2],
+    /// The push out of overlap so far (moves positions only).
+    js: f32,
     target_vn: f32,
 }
 
@@ -285,14 +294,14 @@ impl World {
                 let rel = sub(va, vb);
                 let n = c.normal;
                 let mass_along = |bodies: &[Body], dir: V3| eff_mass(bodies, &iws, a, b, c.point, ra, dir);
-                // Normal: stop approach, bounce, push apart gently.
+                // Normal: stop approach and bounce (the overlap is pushed
+                // out apart, below).
                 let kn = mass_along(&self.bodies, n);
                 if kn <= 1e-12 {
                     continue;
                 }
-                let bias = 0.2 / h * (c.depth - 0.02).max(0.0);
                 let vn = dot(rel, n);
-                let mut dj = (c.target_vn.max(bias) - vn) / kn;
+                let mut dj = (c.target_vn - vn) / kn;
                 let old = c.jn;
                 c.jn = (old + dj).max(0.0);
                 dj = c.jn - old;
@@ -301,36 +310,72 @@ impl World {
                 if let Some(b) = b {
                     self.bodies[b].apply_impulse(c.point, scale(jv, -1.0), &iws[b]);
                 }
-                // Friction in the contact plane, up to μ times the push.
-                let va = self.bodies[a].velocity_at(c.point);
-                let vb = b.map_or([0.0; 3], |b| self.bodies[b].velocity_at(c.point));
-                let rel = sub(va, vb);
-                let vt = sub(rel, scale(n, dot(rel, n)));
-                let speed = length(vt);
-                if speed > 1e-6 {
-                    let t = scale(vt, 1.0 / speed);
-                    let kt = mass_along(&self.bodies, t);
+                // Friction in the contact plane, up to μ times the push:
+                // along two fixed directions, the pair kept inside the
+                // circle of radius μ·jn. (Accumulating one number along
+                // whichever way the slide pointed at each pass mixed
+                // impulses taken along different directions.)
+                let tangents = plane_axes(n);
+                let limit = c.friction * c.jn;
+                let old = c.jt;
+                for (k, t) in tangents.iter().enumerate() {
+                    let va = self.bodies[a].velocity_at(c.point);
+                    let vb = b.map_or([0.0; 3], |b| self.bodies[b].velocity_at(c.point));
+                    let kt = mass_along(&self.bodies, *t);
                     if kt > 1e-12 {
-                        let limit = c.friction * c.jn;
-                        let old = c.jt[0];
-                        c.jt[0] = (old - speed / kt).clamp(-limit, limit);
-                        let dj = c.jt[0] - old;
-                        let jv = scale(t, dj);
-                        self.bodies[a].apply_impulse(c.point, jv, &iws[a]);
-                        if let Some(b) = b {
-                            self.bodies[b].apply_impulse(c.point, scale(jv, -1.0), &iws[b]);
-                        }
+                        c.jt[k] -= dot(sub(va, vb), *t) / kt;
                     }
+                }
+                let mag = (c.jt[0] * c.jt[0] + c.jt[1] * c.jt[1]).sqrt();
+                if mag > limit {
+                    let k = if mag > 0.0 { limit / mag } else { 0.0 };
+                    c.jt = [c.jt[0] * k, c.jt[1] * k];
+                }
+                let jv = add(scale(tangents[0], c.jt[0] - old[0]), scale(tangents[1], c.jt[1] - old[1]));
+                self.bodies[a].apply_impulse(c.point, jv, &iws[a]);
+                if let Some(b) = b {
+                    self.bodies[b].apply_impulse(c.point, scale(jv, -1.0), &iws[b]);
+                }
+            }
+        }
+        // Overlap is pushed out by a separate velocity that moves the
+        // bodies this step and is then forgotten (split impulses):
+        // folded into the real velocity, the push out of a deep landing
+        // threw a bounceless ball 90 px back up.
+        let mut push: Vec<(V3, V3)> = vec![([0.0; 3], [0.0; 3]); self.bodies.len()];
+        for _ in 0..self.iterations {
+            for c in &mut contacts {
+                let (a, b) = (c.a, c.b);
+                let ra = sub(c.point, self.bodies[a].pos);
+                let kn = eff_mass(&self.bodies, &iws, a, b, c.point, ra, c.normal);
+                if kn <= 1e-12 {
+                    continue;
+                }
+                let at = |i: usize, push: &[(V3, V3)]| add(push[i].0, cross(push[i].1, sub(c.point, self.bodies[i].pos)));
+                let vb = b.map_or([0.0; 3], |b| at(b, &push));
+                let vn = dot(sub(at(a, &push), vb), c.normal);
+                let bias = 0.2 / h * (c.depth - 0.02).max(0.0);
+                let old = c.js;
+                c.js = (old + (bias - vn) / kn).max(0.0);
+                let jv = scale(c.normal, c.js - old);
+                for (i, j) in [(Some(a), jv), (b, scale(jv, -1.0))] {
+                    let Some(i) = i else { continue };
+                    let body = &self.bodies[i];
+                    if body.fixed() {
+                        continue;
+                    }
+                    push[i].0 = add(push[i].0, scale(j, body.inv_mass));
+                    push[i].1 = add(push[i].1, mat_vec(&iws[i], cross(sub(c.point, body.pos), j)));
                 }
             }
         }
         // Move, and sleep what has stopped.
-        for b in &mut self.bodies {
+        for (b, (pv, pw)) in self.bodies.iter_mut().zip(&push) {
             if b.fixed() || b.asleep || now < b.wait_until {
                 continue;
             }
-            b.pos = add(b.pos, scale(b.vel, h));
-            let w = b.spin;
+            b.pos = add(b.pos, scale(add(b.vel, *pv), h));
+            let w = add(b.spin, *pw);
             let dq = q_mul([w[0], w[1], w[2], 0.0], b.rot);
             b.rot = q_normalise([b.rot[0] + 0.5 * h * dq[0], b.rot[1] + 0.5 * h * dq[1], b.rot[2] + 0.5 * h * dq[2], b.rot[3] + 0.5 * h * dq[3]]);
             let size = b.spheres.iter().map(|s| length(s.0) + s.1).fold(1.0f32, f32::max);
@@ -419,7 +464,7 @@ impl World {
                     }
                 }
                 for (p, n, depth) in reduce(found) {
-                    out.push(Contact { a: i, b: Some(j), point: p, normal: n, depth, friction: (bi.friction * bj.friction).sqrt(), bounce: bi.bounce.max(bj.bounce), jn: 0.0, jt: [0.0; 2], target_vn: 0.0 });
+                    out.push(Contact { a: i, b: Some(j), point: p, normal: n, depth, friction: (bi.friction * bj.friction).sqrt(), bounce: bi.bounce.max(bj.bounce), jn: 0.0, jt: [0.0; 2], js: 0.0, target_vn: 0.0 });
                 }
             }
         }
@@ -441,7 +486,7 @@ impl World {
                     _ => 0.5,
                 };
                 for (p, n, depth) in reduce(found) {
-                    out.push(Contact { a: i, b: None, point: p, normal: n, depth, friction: (b.friction * fr).sqrt(), bounce: b.bounce, jn: 0.0, jt: [0.0; 2], target_vn: 0.0 });
+                    out.push(Contact { a: i, b: None, point: p, normal: n, depth, friction: (b.friction * fr).sqrt(), bounce: b.bounce, jn: 0.0, jt: [0.0; 2], js: 0.0, target_vn: 0.0 });
                 }
             }
         }
@@ -555,6 +600,33 @@ mod tests {
         assert!((y - (300.0 - 50.0)).abs() < sphere_r + 6.0, "y {y}");
         assert!(lowest < 300.0, "never through the floor: {lowest}");
         assert!(w.bodies[0].asleep, "comes to rest");
+    }
+
+    /// A fast drop with no bounce lands dead: pushing it back out of the
+    /// floor must not throw it up again.
+    #[test]
+    fn a_fast_drop_without_bounce_does_not_hop() {
+        let mut w = World::new([0.0, 980.0, 0.0]);
+        w.colliders.push(Collider::Ground { y: 300.0, friction: 0.6 });
+        let mut ball = clump(&studio_mesh::prim::ico_sphere(25.0, 2), 6, 1.0);
+        ball.bounce = 0.0;
+        ball.pos = [0.0, 300.0 - 26.0 - 40.0, 0.0];
+        ball.vel = [0.0, 6000.0, 0.0];
+        w.bodies.push(ball);
+        // Above where it comes to rest, after first touching the floor
+        // (y is down).
+        let mut landed = false;
+        let mut highest = f32::INFINITY;
+        for _ in 0..90 {
+            w.advance(1.0 / 60.0);
+            let y = w.bodies[0].pos[1];
+            landed |= y > 300.0 - 30.0;
+            if landed {
+                highest = highest.min(y);
+            }
+        }
+        let rise = w.bodies[0].pos[1] - highest;
+        assert!(landed && rise < 2.0, "rose {rise} above its rest after landing");
     }
 
     #[test]
