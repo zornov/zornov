@@ -225,3 +225,30 @@ fn models_placed_around_a_million_triangles_rest_quickly_and_right() {
     let y = place(&mut s, json!({"op": "model", "shape": "cube", "size": 100, "position": [150, 12, -200], "name": "Crate"}), false);
     assert!((42.0..=59.0).contains(&(y + 50.0)), "the crate's underside on the top sheet: {}", y + 50.0);
 }
+
+/// `check` asks of every model whether it would float, sink or tip: a
+/// scene built and simulated per model. Asked again with nothing changed
+/// it answers from what it found, and a change to one model asks again
+/// only what that change can touch.
+#[test]
+fn the_rest_check_is_not_redone_for_an_unchanged_scene() {
+    let mut s = session();
+    floor(&mut s);
+    let ids: Vec<u32> = (0..24).map(|k| add(&mut s, json!({"op": "model", "shape": "cube", "size": 60, "position": [-600 + 50 * k, if k % 2 == 0 { 270 } else { 120 }, (k % 4) * 80], "name": format!("Crate {k}"), "rest": false}))).collect();
+    let time = |s: &Session| {
+        let t = std::time::Instant::now();
+        let f = crate::physics3d::rest::check(&s.doc.model, s.doc.seq(), 0);
+        (f, t.elapsed().as_secs_f64() * 1e3)
+    };
+    let (first, cold) = time(&s);
+    let (again, warm) = time(&s);
+    eprintln!("rest check of {} models: {cold:.0} ms, again unchanged {warm:.1} ms", ids.len());
+    assert_eq!(first, again, "the same answer");
+    assert!(!first.is_empty(), "floating crates are found");
+    assert!(warm < cold / 5.0, "asked again unchanged: {warm:.1} ms vs {cold:.0} ms");
+    // One crate moved: the answer follows.
+    s.edit(&[json!({"op": "set", "clip": ids[1], "y": 270})], "move", false).unwrap();
+    let (moved, _) = time(&s);
+    assert!(first.iter().any(|f| f.clip == ids[1] as u64 && f.kind == "floating"), "crate 1 floated: {first:?}");
+    assert!(moved.iter().all(|f| f.clip != ids[1] as u64), "the crate set on the floor no longer floats: {moved:?}");
+}

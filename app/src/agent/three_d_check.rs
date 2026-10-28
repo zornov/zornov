@@ -894,8 +894,14 @@ impl super::Session {
         moments.dedup_by(|a, b| (*a - *b).abs() < 0.5);
         let mut seen = HashSet::new();
         for t in moments.into_iter().take(3) {
-            let f: Vec<_> = crate::physics3d::rest::check(&self.doc.model, self.doc.model.active_sequence, (t * view::SEC as f64) as i64).into_iter().filter(|f| seen.insert(f.clip)).collect();
+            let (f, left) = crate::physics3d::rest::check_within(&self.doc.model, self.doc.model.active_sequence, (t * view::SEC as f64) as i64, crate::physics3d::rest::budget());
+            let f: Vec<_> = f.into_iter().filter(|f| seen.insert(f.clip)).collect();
             out.extend(solidity::physical_notes(&f, t));
+            // Not silently cut short: what the time allowed is said, and
+            // the next check carries on from there (answers are kept).
+            if left > 0 {
+                out.push(Problem { kind: "3d_check_partial", at: t, clip: 0, problem: format!("{left} models at {t:.1} s were not yet checked for floating, sinking or tipping (time limit)"), fix: "run `check` again: it goes on from where it stopped" });
+            }
         }
         (out, set_aside)
     }

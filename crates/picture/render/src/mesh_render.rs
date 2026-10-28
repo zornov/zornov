@@ -168,19 +168,78 @@ impl MeshDesc {
     }
 }
 
-type MeshCache = Mutex<(HashMap<String, Arc<Mesh>>, Vec<String>)>;
+/// Where the last model pass spent its time, ms (profiling: export and
+/// the benchmarks read it).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StageTimes {
+    /// Placing every model in the world (vertices and normals).
+    pub setup: f64,
+    pub raster: f64,
+    /// Shapes drawn from their formula.
+    pub traced: f64,
+    pub shadows: f64,
+    pub shade: f64,
+    /// Outlines and volumes.
+    pub extras: f64,
+    /// Supersampled pixels down to the target.
+    pub resolve: f64,
+    /// The air and look pass (and clearing a layered pass's empty space).
+    pub air: f64,
+}
 
-fn cache() -> &'static MeshCache {
-    static CACHE: OnceLock<MeshCache> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new((HashMap::new(), Vec::new())))
+fn stage_times() -> &'static Mutex<StageTimes> {
+    static T: OnceLock<Mutex<StageTimes>> = OnceLock::new();
+    T.get_or_init(Default::default)
+}
+
+/// Where the last model pass (of any thread) spent its time.
+pub fn last_stage_times() -> StageTimes {
+    *stage_times().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Models in memory by name, with their size and when each was last used.
+#[derive(Default)]
+struct MeshCache {
+    entries: HashMap<String, (Arc<Mesh>, usize, u64)>,
+    bytes: usize,
+    clock: u64,
+}
+
+fn cache() -> &'static Mutex<MeshCache> {
+    static CACHE: OnceLock<Mutex<MeshCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// How much model data stays in memory: `STUDIO_MESH_CACHE_MB`, or 2 GB.
+/// A budget in bytes, not a count: a project of 150 small models keeps them
+/// all, and a few huge scatters do not crowd out everything else.
+fn mesh_budget() -> usize {
+    static B: OnceLock<usize> = OnceLock::new();
+    *B.get_or_init(|| std::env::var("STUDIO_MESH_CACHE_MB").ok().and_then(|v| v.parse::<usize>().ok()).map_or(2usize << 30, |mb| mb << 20))
+}
+
+/// Model files read from disk so far (tests and benchmarks).
+pub static MESH_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Bytes a mesh holds in memory, roughly.
+pub fn mesh_bytes(m: &Mesh) -> usize {
+    m.positions.len() * 12 + m.normals.len() * 12 + m.uvs.len() * 8 + m.indices.len() * 4 + m.materials.iter().filter_map(|x| x.texture.as_ref()).map(|t| t.rgba.len()).sum::<usize>() + 256
 }
 
 /// Models in memory, by file. Files are named by their content, so one
-/// read stays right; the oldest go first past a few dozen.
+/// read stays right; the least recently drawn go first once the budget is
+/// spent.
 pub fn load(path: &str) -> Option<Arc<Mesh>> {
-    if let Some(m) = cache().lock().unwrap_or_else(|e| e.into_inner()).0.get(path) {
-        return Some(m.clone());
+    {
+        let mut g = cache().lock().unwrap_or_else(|e| e.into_inner());
+        g.clock += 1;
+        let now = g.clock;
+        if let Some(e) = g.entries.get_mut(path) {
+            e.2 = now;
+            return Some(e.0.clone());
+        }
     }
+    MESH_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mesh = Arc::new(studio_mesh::io::load(std::path::Path::new(path)).ok()?);
     remember(path, mesh.clone());
     Some(mesh)
@@ -189,13 +248,22 @@ pub fn load(path: &str) -> Option<Arc<Mesh>> {
 /// Keeps a model under a name of its own (a model being sculpted, before
 /// it is saved), so a layer can show it by that name.
 pub fn remember(name: &str, mesh: Arc<Mesh>) {
+    let size = mesh_bytes(&mesh);
+    let budget = mesh_budget();
     let mut g = cache().lock().unwrap_or_else(|e| e.into_inner());
-    if g.0.insert(name.to_string(), mesh).is_none() {
-        g.1.push(name.to_string());
+    g.clock += 1;
+    let now = g.clock;
+    if let Some((_, old, _)) = g.entries.insert(name.to_string(), (mesh, size, now)) {
+        g.bytes -= old;
     }
-    if g.1.len() > 48 {
-        let old = g.1.remove(0);
-        g.0.remove(&old);
+    g.bytes += size;
+    // The least recently used go until it fits (the newest stays even when
+    // it alone is over: it is about to be drawn).
+    while g.bytes > budget && g.entries.len() > 1 {
+        let Some(oldest) = g.entries.iter().filter(|(k, _)| k.as_str() != name).min_by_key(|(_, e)| e.2).map(|(k, _)| k.clone()) else { break };
+        if let Some((_, b, _)) = g.entries.remove(&oldest) {
+            g.bytes -= b;
+        }
     }
 }
 
@@ -928,6 +996,12 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
         return frame;
     }
     // Two samples a side, unless the target is already huge.
+    let mut times = StageTimes::default();
+    let mut mark = std::time::Instant::now();
+    let mut stamp = |slot: &mut f64| {
+        *slot = mark.elapsed().as_secs_f64() * 1e3;
+        mark = std::time::Instant::now();
+    };
     let ss = if (tw as u64 * th as u64) <= 4_200_000 { 2 } else { 1 };
     let (w, h) = (tw as usize * ss, th as usize * ss);
     let k = tw as f32 / canvas.width.max(1) as f32 * ss as f32;
@@ -961,7 +1035,9 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
     let view = View { position: camera.position, axes: camera.axes, zoom: camera.zoom * k, centre: [w as f32 * 0.5, h as f32 * 0.5], ortho: false };
     // Shapes drawn from their formula are traced, not rasterised.
     let tris = raster_tris(&placed, &meshes, &view, |i| i < held && (i >= drawn || all[i].direct.is_none()));
+    stamp(&mut times.setup);
     let hits = rasterise(&tris, w, h, true);
+    stamp(&mut times.raster);
     let lens = crate::direct::Lens { position: view.position, axes: view.axes, zoom: view.zoom, centre: view.centre };
     let traced: Vec<(usize, [usize; 4], Vec<[f32; 4]>)> = desc
         .instances
@@ -997,10 +1073,12 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
     }
     let casters: Vec<bool> = all.iter().map(|i| i.casts_shadows).collect();
     let bounds = bounds_of(all.iter().copied()).unwrap_or(([0.0; 3], [0.0; 3]));
+    stamp(&mut times.traced);
     let maps: Vec<Option<ShadowMap>> = lights
         .iter()
         .map(|l| if l.casts_shadows && casters.iter().any(|c| *c) { shadow_map(l, &placed, &meshes, &casters, bounds) } else { None })
         .collect();
+    stamp(&mut times.shadows);
     // Shade the visible pixels, band by band.
     let mut big = vec![[0.0f32; 4]; w * h];
     // Normal and wet reflectivity of each pixel's surface, for the air and look pass.
@@ -1115,6 +1193,7 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
         }
     });
     drop(chunks);
+    stamp(&mut times.shade);
     // Ink lines round toon models.
     draw_outlines(&hits, &tris, &placed, &mut big, w, h, k);
     // Smoke and fire in front of what was drawn.
@@ -1122,32 +1201,34 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
         draw_volumes(desc, &view, &lights, sky.as_ref(), irradiance.as_ref(), &depth_px, &mut big, w, h);
     }
     let depth_big: Vec<f32> = depth_px;
+    stamp(&mut times.extras);
     let (mut out, depth, surf) = if ss == 1 {
         (Frame { width: tw, height: th, pixels: big }, depth_big, sbig)
     } else {
+        // Rows in parallel: one thread took 40 ms of a 120 ms 1080p frame.
         let mut out = Frame::new(tw, th);
-        let mut depth = vec![f32::INFINITY; (tw * th) as usize];
-        let mut surf = vec![[0.0f32; 4]; (tw * th) as usize];
-        for y in 0..th as usize {
-            for x in 0..tw as usize {
+        let tw_us = tw as usize;
+        let n = (ss * ss) as f32;
+        studio_media::par::par_rows(&mut out.pixels, tw_us, 8, |y, row| {
+            for (x, px) in row.iter_mut().enumerate() {
                 let mut acc = [0.0f32; 4];
                 for dy in 0..ss {
-                    for dx in 0..ss {
-                        let p = big[(y * ss + dy) * w + x * ss + dx];
+                    let line = &big[(y * ss + dy) * w + x * ss..][..ss];
+                    for p in line {
                         for c in 0..4 {
                             acc[c] += p[c];
                         }
                     }
                 }
-                let n = (ss * ss) as f32;
-                out.pixels[y * tw as usize + x] = acc.map(|v| v / n);
-                let centre = (y * ss + ss / 2) * w + x * ss + ss / 2;
-                depth[y * tw as usize + x] = depth_big[centre];
-                surf[y * tw as usize + x] = sbig[centre];
+                *px = acc.map(|v| v / n);
             }
-        }
+        });
+        let centre = |i: usize| ((i / tw_us) * ss + ss / 2) * w + (i % tw_us) * ss + ss / 2;
+        let depth: Vec<f32> = (0..tw_us * th as usize).map(|i| depth_big[centre(i)]).collect();
+        let surf: Vec<[f32; 4]> = (0..tw_us * th as usize).map(|i| sbig[centre(i)]).collect();
         (out, depth, surf)
     };
+    stamp(&mut times.resolve);
     if lights.iter().any(|l| l.look.is_some()) {
         // A layered pass keeps the air on its own models only: what is empty
         // here shows the passes and layers below, which have theirs.
@@ -1164,6 +1245,8 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
             }
         }
     }
+    stamp(&mut times.air);
+    *stage_times().lock().unwrap_or_else(|e| e.into_inner()) = times;
     out
 }
 
@@ -1373,6 +1456,68 @@ mod tests {
             motion: None,
             direct: None,
         }
+    }
+
+    /// A project with more models than the old cache held (48 by count):
+    /// every frame read all of them from disk again. Drawn twice, the
+    /// second frame reads none.
+    #[test]
+    fn many_models_stay_in_memory_between_frames() {
+        let dir = std::env::temp_dir().join(format!("studio-mesh-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let files: Vec<String> = (0..150)
+            .map(|k| {
+                let mut m = studio_mesh::prim::ico_sphere(10.0 + k as f32, 3);
+                m.materials[0].roughness = k as f32 / 150.0;
+                let p = dir.join(format!("m{k}.smesh"));
+                std::fs::write(&p, studio_mesh::io::to_bytes(&m)).unwrap();
+                p.to_string_lossy().into_owned()
+            })
+            .collect();
+        let frame = || {
+            let t = std::time::Instant::now();
+            for f in &files {
+                assert!(load(f).is_some());
+            }
+            t.elapsed()
+        };
+        let reads = || MESH_READS.load(std::sync::atomic::Ordering::Relaxed);
+        frame();
+        let (r0, t0) = (reads(), std::time::Instant::now());
+        let took = frame();
+        let again = reads() - r0;
+        eprintln!("second frame of 150 models: {again} disk reads, {:.2} ms", took.as_secs_f64() * 1e3);
+        let _ = t0;
+        // Other tests load models at the same time; none of these 150 is read again.
+        assert!(again < 5, "{again} models read from disk again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Where a 1080p frame of a 3D scene goes (`--ignored --nocapture`):
+    /// a ground, a dozen models, the default lights with shadows. The
+    /// export of a 10 s 3D scene is 300 of these.
+    #[test]
+    #[ignore]
+    fn bench_a_1080p_model_frame() {
+        let canvas = Canvas::new(1920, 1080, 30.0);
+        let mut ground = studio_mesh::prim::plane(3000.0, 3000.0, 64);
+        studio_mesh::ops::transform(&mut ground, &studio_mesh::region::Region::All, [0.0, 200.0, 400.0], [0.0; 3], [1.0; 3], [0.0; 3]);
+        let mut instances = vec![instance(ground, [0.0; 3])];
+        for k in 0..12 {
+            let mut i = instance(studio_mesh::prim::ico_sphere(60.0, 5), [-660.0 + 120.0 * k as f32, 140.0, 200.0 + 60.0 * (k % 3) as f32]);
+            i.id = 10 + k;
+            instances.push(i);
+        }
+        let tris: usize = instances.iter().map(|i| i.mesh.triangles()).sum();
+        let desc = MeshDesc { instances, ..Default::default() };
+        let _ = render(&desc, &canvas, (1920, 1080));
+        let n = 3;
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            let _ = render(&desc, &canvas, (1920, 1080));
+        }
+        let per = t.elapsed().as_secs_f64() * 1e3 / n as f64;
+        eprintln!("1080p model frame, {tris} triangles: {per:.0} ms; last stages {:?}", last_stage_times());
     }
 
     #[test]
