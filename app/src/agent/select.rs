@@ -71,7 +71,10 @@ fn one(p: &view::Project, made: &[u32], v: &Value) -> Result<Vec<u32>, String> {
     }
     if let Some(n) = low.strip_prefix('$') {
         let n: usize = n.parse().map_err(|_| format!("\"{s}\": use $1, $2… or $last"))?;
-        return made.get(n.wrapping_sub(1)).map(|&i| vec![i]).ok_or_else(|| format!("\"{s}\": only {} clip(s) were made earlier in this edit", made.len()));
+        // $n counts clips made earlier in this edit, not ops: an op that
+        // makes three clips (a title with its backing, a scene) takes three
+        // numbers, and an op that makes none takes none.
+        return made.get(n.wrapping_sub(1)).map(|&i| vec![i]).ok_or_else(|| format!("\"{s}\": $n counts the clips made earlier in this edit (the nth new clip), not the ops, and only {} were made so far{}; use $last for the newest, or the id from an earlier answer", made.len(), if made.is_empty() { String::new() } else { format!(" ({})", made.iter().enumerate().map(|(i, c)| format!("${} = clip {c}", i + 1)).collect::<Vec<_>>().join(", ")) }));
     }
     if let Some((lane, t)) = low.rsplit_once('@') {
         let t: f64 = t.trim().parse().map_err(|_| format!("\"{s}\": the part after @ is a time in seconds"))?;

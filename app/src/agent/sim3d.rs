@@ -76,8 +76,10 @@ pub(super) fn v3(v: &Value) -> Option<V3> {
     (a.len() == 3).then(|| [a[0].as_f64().unwrap_or(0.0) as f32, a[1].as_f64().unwrap_or(0.0) as f32, a[2].as_f64().unwrap_or(0.0) as f32])
 }
 
+/// A number field, read as `f` in the agent reads them (a quoted number,
+/// or a switch for a strength: `fire: true` is 1).
 pub(super) fn num(op: &Value, k: &str) -> Option<f32> {
-    op.get(k).and_then(Value::as_f64).map(|v| v as f32)
+    super::f(op, k).map(|v| v as f32)
 }
 
 /// A clip by id or by name (exact, then any case).

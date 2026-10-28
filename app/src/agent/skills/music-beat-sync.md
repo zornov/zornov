@@ -10,7 +10,7 @@ tools: listen, analyse, music, catalogue, search, add, place, split, trim, fx_la
 2. `listen` to it: sections (main, peak, low, quiet), drops, breaks, bpm, bar length, beats, energy. Write the beat map in `notes` (time of each section, the first drop, the bar length).
 3. Scout every source clip (`contact_sheet {media}`, `see {media}`) and pick the strongest moment for each slot.
 4. Lay shots in order with durations of 1, 2 or 4 beats, faster in the peaks, slower in the quiet sections; put the film's biggest moment on the first drop.
-5. Hits on drops: `fx_layer` (zoom blur, RGB split, shake, flash) 0.15-0.3 s on the cut, its strength animated to zero; punch-ins by `animate` scale on beats. Riser into the drop: `sfx {kind: "riser", ends_at}`.
+5. Hits on drops: `fx_layer` (zoom blur, RGB split, shake, strobe) 0.15-0.3 s on the cut, its strength animated to zero; a flash is the "Light flash" transition on the cut, or a white `card` 2-4 frames long (there is no flash effect); punch-ins by `animate` scale on beats. Riser into the drop: `sfx {kind: "riser", ends_at}`.
 6. Fit the music to the picture: `music` fits a track to the length with a fade at the end; to shorten a song keep the start and real ending, remove whole bars from the middle and join on matching downbeats with a short crossfade.
 7. Under speech the music dips 10-14 dB (skill sound-design).
 

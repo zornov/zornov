@@ -170,7 +170,7 @@ impl Doc {
             m::EditError::NoHandles(s) => format!("Not enough media: {s}"),
             m::EditError::Invalid(s) => s,
             m::EditError::NotFound(s) => format!("Not found: {s}"),
-            m::EditError::Invariant(v) => format!("Not possible: {v:?}"),
+            m::EditError::Invariant(v) => format!("Not possible: {}", plain(&self.model, &v)),
         });
     }
 
@@ -730,5 +730,27 @@ mod tests {
         assert!(!d.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(999_999), edge: m::Edge::End, delta: SEC, ripple: false }));
         assert!(d.error.is_some());
         assert!(d.model.content_eq(&before));
+    }
+}
+
+/// A broken invariant in words an agent can act on: the clips and lane by
+/// name and time, not `Overlap(150, 186)`.
+fn plain(p: &m::Project, v: &m::Violation) -> String {
+    let secs = |t: m::Micros| format!("{:.2} s", t as f64 / 1e6);
+    let clip = |id: u64| {
+        p.sequences.iter().find_map(|s| s.clip(m::ClipId(id)).map(|c| (s, c))).map_or(format!("clip {id}"), |(s, c)| {
+            let lane = s.lane(c.lane).map_or(format!("lane {}", c.lane.0), |l| if l.name.is_empty() { format!("lane {}", l.id.0) } else { format!("lane {} \"{}\"", l.id.0, l.name) });
+            let name = if c.name.is_empty() { String::new() } else { format!(" \"{}\"", c.name) };
+            format!("clip {id}{name} ({} to {} on {lane})", secs(c.start), secs(c.end()))
+        })
+    };
+    match v {
+        m::Violation::Overlap(a, b) => format!("{} and {} would overlap in time on the same lane; move one to another lane or shorten the first", clip(*a), clip(*b)),
+        m::Violation::SpineNotPacked(c) => format!("the main lane would get a hole or an overlap at {}", clip(*c)),
+        m::Violation::BadTiming(c) => format!("{} would get a zero or negative length, a negative start or a bad speed", clip(*c)),
+        m::Violation::GapOffSpine(c) => format!("{} is a gap and gaps only sit on the main lane", clip(*c)),
+        m::Violation::SourceOutOfRange(c) => format!("{} would use more of its media than the file holds", clip(*c)),
+        m::Violation::BadTrack(c, prop) => format!("{} would get a broken keyframe track for \"{prop}\"", clip(*c)),
+        other => other.to_string(),
     }
 }

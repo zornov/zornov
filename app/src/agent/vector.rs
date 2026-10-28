@@ -16,10 +16,18 @@ use studio_vector_art::Document;
 use studio_vector_art::ops::{self, Context};
 
 impl Session {
+    /// The open project's folder: the one the document was opened from or
+    /// saved to, else the folder the session was started in. (Only the
+    /// session folder was used, so after opening another project vector
+    /// documents still went into the first one.)
+    fn vector_root(&self) -> Option<PathBuf> {
+        self.doc.folder.as_ref().map(|f| f.root().to_path_buf()).or_else(|| self.home.clone())
+    }
+
     /// The folder vector documents live in: the project's `Vector`, or a
     /// scratch folder with no project.
     fn vector_dir(&self) -> PathBuf {
-        match &self.home {
+        match self.vector_root() {
             Some(h) => h.join("Vector"),
             None => std::env::temp_dir().join("studio-vector"),
         }
@@ -28,7 +36,7 @@ impl Session {
     fn vector_path(&self, a: &Value) -> PathBuf {
         let name = a.get("doc").and_then(Value::as_str).unwrap_or("art.svart");
         let p = Path::new(name);
-        let p = if p.is_absolute() { p.to_path_buf() } else if name.contains('/') { self.home.clone().unwrap_or_else(|| self.vector_dir()).join(p) } else { self.vector_dir().join(p) };
+        let p = if p.is_absolute() { p.to_path_buf() } else if name.contains('/') { self.vector_root().unwrap_or_else(|| self.vector_dir()).join(p) } else { self.vector_dir().join(p) };
         if p.extension().is_none() { p.with_extension("svart") } else { p }
     }
 
@@ -52,7 +60,7 @@ impl Session {
             }
             (d, path.clone())
         };
-        let ctx = Context { base_dir: Some(self.home.clone().unwrap_or_else(|| dir.clone())), out_dir: Some(dir.join("renders")) };
+        let ctx = Context { base_dir: Some(self.vector_root().unwrap_or_else(|| dir.clone())), out_dir: Some(dir.join("renders")) };
         let _ = std::fs::create_dir_all(dir.join("renders"));
         let results = match a.get("ops") {
             Some(o) => ops::apply_all(&mut doc, o, &ctx)?,

@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use studio_model as m;
 
 fn dir(kind: &str) -> PathBuf {
-    studio_paths::studio().join("Made").join(kind)
+    studio_paths::made().join(kind)
 }
 
 fn file_name(name: &str) -> String {
@@ -330,6 +330,6 @@ impl Session {
                 })
                 .unwrap_or_default()
         };
-        json!({"moves": list("moves"), "designs": list("designs"), "folder": studio_paths::studio().join("Made").display().to_string()})
+        json!({"moves": list("moves"), "designs": list("designs"), "folder": studio_paths::made().display().to_string()})
     }
 }

@@ -73,6 +73,8 @@ mod anim3d;
 mod wardrobe;
 mod perform;
 mod schema;
+mod field_docs;
+mod accept;
 mod sim3d;
 #[cfg(feature = "render")]
 mod world3d;
@@ -246,6 +248,11 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
             if let Some(r) = skills::for_topic(other, part, full) {
                 return r;
             }
+            // Every op is a topic too (`guide {topic: "act"}` failed).
+            let op = other.strip_prefix("op:").unwrap_or(other).trim();
+            if args::op_fields(op).is_some() && craft_book::topic(other).is_none() {
+                return Ok(op_topic(op));
+            }
             return craft_book::topic(other).or_else(|| section_by_heading(other)).ok_or_else(|| format!("no guide topic \"{other}\"; topics: senses, model, clips, properties, motion, ops, context, habits, shell, all; the craft book: craft (all of it), {}; how to do a kind of work: the skills ({}), `skill {{name}}`", craft_book::names(), skills::names()));
         }
     };
@@ -253,6 +260,34 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
     let rest = &GUIDE[start + heading.len()..];
     let end = rest.find("\n## ").map_or(GUIDE.len(), |i| start + heading.len() + i);
     Ok(GUIDE[start..end].trim().to_owned())
+}
+
+/// An op as a guide topic: what the guides say where they use it (each
+/// paragraph that shows it, at most four), then every field with its
+/// type, units and range.
+fn op_topic(op: &str) -> String {
+    let mut out = format!("## The `{op}` op\n\n");
+    let mut seen = 0;
+    for para in field_docs::paragraphs(op).into_iter().take(4) {
+        out.push_str(para.trim());
+        out.push_str("\n\n");
+        seen += 1;
+    }
+    if seen == 0 {
+        out.push_str("The guides have no worked example of this op yet; its fields are below.\n\n");
+    }
+    let fields = args::op_fields(op).unwrap_or(&[]);
+    out.push_str("Fields (type, units, range, meaning):\n");
+    let doc = field_docs::op_doc(op, fields);
+    if let Some(map) = doc["fields"].as_object() {
+        for (k, v) in map {
+            out.push_str(&format!("- {k}: {}\n", v));
+        }
+    }
+    if let Some(e) = doc.get("example") {
+        out.push_str(&format!("\nExample: {e}\n"));
+    }
+    out
 }
 
 /// The `## ` sections of the guide: (heading line, whole section).
@@ -364,6 +399,9 @@ pub struct Session {
     analysis: analyse::Analysis,
     /// Project mode: the folder every change is saved to.
     pub home: Option<PathBuf>,
+    /// Findings accepted as intended, when there is no project folder to
+    /// keep them in (see accept.rs).
+    accepted: Vec<Value>,
     /// Notes when there is no project folder yet.
     notes: Option<String>,
     /// The production office when there is no project folder yet.
@@ -417,11 +455,98 @@ fn new_clip_end(film_end: view::Time, at: view::Time) -> view::Time {
     if film_end >= at + SEC { film_end } else { at + NEW_SHOT }
 }
 
+/// An effect setting's real name: the obvious other names map (`blur` is
+/// a blur's `radius`, `strength` its `amount`), and a name the effect
+/// does not have is refused with the ones it does, instead of being stored
+/// where nothing reads it.
+fn effect_param_name(kind: &str, k: &str) -> Result<String, String> {
+    let Some(def) = studio_fx::effects::find(kind) else { return Ok(k.to_owned()) };
+    let has = |n: &str| def.params.iter().any(|p| p.id == n);
+    if has(k) {
+        return Ok(k.to_owned());
+    }
+    let alias: &[&str] = match k {
+        "blur" | "size" | "radius_px" => &["radius", "amount", "size"],
+        "strength" | "intensity" | "amount" => &["amount", "intensity", "strength", "mix"],
+        "angle" | "rotation" => &["angle", "rotation"],
+        "colour" | "color" => &["colour", "color"],
+        "centre" | "center" => &["center", "centre"],
+        _ => &[],
+    };
+    if let Some(a) = alias.iter().find(|a| has(a)) {
+        return Ok((*a).to_owned());
+    }
+    let names: Vec<&str> = def.params.iter().map(|p| p.id).collect();
+    let hint = args::closest(k, &names).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
+    Err(format!("{kind} has no setting \"{k}\"{hint}; it has: {}", names.join(", ")))
+}
+
+/// `inspect` narrowed to what was asked: `what` (sections such as
+/// transform, keyframes, effects, on_screen, layout, pose; a name or a
+/// list) and/or `property` (every field of that name, at any depth, by
+/// its path). Everything came back regardless, which buried the answer.
+fn inspect_filter(v: Value, a: &Value) -> Result<Value, String> {
+    let words = |k: &str| -> Vec<String> {
+        match a.get(k) {
+            Some(Value::String(s)) => s.split(',').map(|w| w.trim().to_lowercase()).filter(|w| !w.is_empty()).collect(),
+            Some(Value::Array(l)) => l.iter().filter_map(Value::as_str).map(|w| w.trim().to_lowercase()).collect(),
+            _ => Vec::new(),
+        }
+    };
+    let (what, props) = (words("what"), words("property"));
+    if what.is_empty() && props.is_empty() {
+        return Ok(v);
+    }
+    let all = match v {
+        Value::Object(o) => o,
+        other => return Ok(other),
+    };
+    let sections: Vec<String> = all.keys().cloned().collect();
+    let mut out = serde_json::Map::new();
+    for k in ["id", "clip", "name", "kind"] {
+        if let Some(x) = all.get(k) {
+            out.insert(k.into(), x.clone());
+        }
+    }
+    for w in &what {
+        let hits: Vec<&String> = sections.iter().filter(|k| k.to_lowercase() == *w || k.to_lowercase().contains(w.as_str())).collect();
+        if hits.is_empty() {
+            return Err(format!("inspect has no section \"{w}\"; this clip has: {}", sections.join(", ")));
+        }
+        for k in hits {
+            out.insert(k.clone(), all[k].clone());
+        }
+    }
+    if !props.is_empty() {
+        fn walk(v: &Value, path: &str, props: &[String], found: &mut serde_json::Map<String, Value>) {
+            if let Value::Object(o) = v {
+                for (k, x) in o {
+                    let p = if path.is_empty() { k.clone() } else { format!("{path}.{k}") };
+                    let lk = k.to_lowercase();
+                    if props.iter().any(|w| lk == *w || lk.ends_with(&format!(".{w}")) || p.to_lowercase().ends_with(w.as_str())) {
+                        found.insert(p.clone(), x.clone());
+                    }
+                    walk(x, &p, props, found);
+                }
+            }
+        }
+        let mut found = serde_json::Map::new();
+        walk(&Value::Object(all.clone()), "", &props, &mut found);
+        if found.is_empty() {
+            return Err(format!("no field named {} on this clip; sections: {} (inspect without property shows them all)", props.join(", "), sections.join(", ")));
+        }
+        out.insert("matches".into(), Value::Object(found));
+    }
+    Ok(Value::Object(out))
+}
+
 /// A number field. A number written as a string ("0.5", " 12 ") counts:
-/// models often quote their numbers, and the meaning is not in doubt.
+/// models often quote their numbers, and the meaning is not in doubt. So
+/// does a switch for a strength (`fire: true`, `glow: true`): 1, or 0.
 fn f(v: &Value, k: &str) -> Option<f64> {
     match v.get(k)? {
         Value::String(s) => s.trim().parse::<f64>().ok().filter(|x| x.is_finite()),
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         x => x.as_f64(),
     }
 }
@@ -567,6 +692,7 @@ impl Session {
             frames: render::Frames::default(),
             analysis: analyse::Analysis::default(),
             home: None,
+            accepted: Vec::new(),
             notes: None,
             production: None,
             look_memo: None,
@@ -680,9 +806,13 @@ impl Session {
             }
         }
         if let Some(dir) = home {
-            // `open` / `new_project` replace the session; stay bound.
+            // `open` / `new_project` replace the session; stay bound. After
+            // `open` the session works in the opened project's folder, so
+            // what it writes (vector documents, renders) lands there.
             let switched = matches!(tool, "open" | "new_project");
-            if !switched || tool == "new_project" {
+            if tool == "open" && r.is_ok() {
+                self.home = self.doc.folder.as_ref().map(|f| f.root().to_path_buf());
+            } else if !switched || tool == "new_project" {
                 self.home = Some(dir.clone());
             }
             let changed = (self.doc.history.revision(), self.doc.project.media.len()) != before || tool == "new_project";
@@ -940,6 +1070,61 @@ impl Session {
 
     /// Applies `ops` as one undo step (all or nothing) and reports what
     /// changed. `dry_run` checks the plan and leaves the project as it was.
+    /// A light just added that the renderer will not draw: it lights a
+    /// scene with at most eight lights at once and leaves the rest out
+    /// without a word, so the warning comes at the op that adds the ninth.
+    fn too_many_lights(&self, fresh: &[u32]) -> Option<String> {
+        const MAX_LIGHTS: usize = 8;
+        let seq = self.doc.model.active();
+        let is_light = |c: &m::Clip| c.enabled && matches!(&c.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Light);
+        for &id in fresh {
+            let Some(c) = seq.clip(m::ClipId(id as u64)).filter(|c| is_light(c)) else { continue };
+            let with: Vec<u64> = seq.clips.iter().filter(|o| is_light(o) && o.start < c.end() && o.end() > c.start).map(|o| o.id.0).collect();
+            if with.len() > MAX_LIGHTS {
+                return Some(format!("{} lights now overlap in time with light {id} ({}), and a scene draws at most {MAX_LIGHTS}; the extra ones will not light anything. Delete or shorten some, or turn ambient fill into one light", with.len(), with.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")));
+            }
+        }
+        None
+    }
+
+    /// Sound laid to a character's old motion (footsteps from `foley`, named
+    /// "foley <clip> …") after the motion was driven again: the steps no
+    /// longer land on the feet.
+    fn foley_after_motion(&self, op: &Value) -> Option<String> {
+        let name = op.get("op").and_then(Value::as_str)?;
+        let moves = matches!(name, "act" | "walk" | "mocap" | "retarget" | "throw") || (name == "puppet" && op.get("act").is_some()) || (name == "skeleton" && op.get("act").is_some());
+        if !moves {
+            return None;
+        }
+        let id = op.get("clip").and_then(Value::as_u64)?;
+        let prefix = format!("foley {id} ");
+        let synced: Vec<String> = self.doc.project.clips.iter().filter(|c| c.kind == ClipKind::Audio && c.name.starts_with(&prefix)).map(|c| c.id.to_string()).collect();
+        (!synced.is_empty()).then(|| format!("sound clip(s) {} were laid to clip {id}'s earlier motion and may now be out of step; lay them again with foley {{\"clip\": {id}}} (it replaces them)", synced.join(", ")))
+    }
+
+    /// A flat (2D) title put between 3D layers: it splits the 3D scene in
+    /// two, so the layers above it lose the depth order, light and shadows
+    /// of those below and the frame comes out broken. Refused, with the
+    /// two ways that work.
+    fn text_inside_3d(&self, fresh: &[u32]) -> Option<String> {
+        let seq = self.doc.model.active();
+        let index = |l: m::LaneId| seq.lanes.iter().position(|x| x.id == l).unwrap_or(usize::MAX);
+        for &id in fresh {
+            let Some(c) = seq.clip(m::ClipId(id as u64)) else { continue };
+            if c.transform.three_d || !matches!(&c.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Text) {
+                continue;
+            }
+            let at = index(c.lane);
+            let spatial = |o: &&m::Clip| o.enabled && o.start < c.end() && o.end() > c.start && !o.is_camera_or_light() && (o.transform.three_d || matches!(&o.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Model));
+            let above = seq.clips.iter().filter(spatial).any(|o| index(o.lane) < at);
+            let below = seq.clips.iter().filter(spatial).any(|o| index(o.lane) > at);
+            if above && below {
+                return Some(format!("text clip {id} is a flat 2D title on a lane between 3D layers, which splits the 3D scene and breaks the render. Put it on a lane above every 3D layer to overlay it, or make it part of the scene with text_3d (lettering with depth, lit by the scene)"));
+            }
+        }
+        None
+    }
+
     pub fn edit(&mut self, ops: &[Value], label: &str, dry_run: bool) -> Result<Value, String> {
         // Repeats written out first, so "$1" and "$last" count every clip.
         let ops = &repeat::expand(ops).map_err(|e| format!("{e}. Nothing was changed."))?;
@@ -1005,11 +1190,23 @@ impl Session {
                 self.op(op)
             };
             match r {
-                Ok(n) => {
-                    notes.push(n);
+                Ok(mut n) => {
                     let mut fresh: Vec<&view::Clip> = self.doc.project.clips.iter().filter(|c| !ids_before.contains(&c.id)).collect();
                     fresh.sort_by_key(|c| c.id);
-                    made.extend(fresh.iter().map(|c| c.id));
+                    let fresh: Vec<u32> = fresh.iter().map(|c| c.id).collect();
+                    if let Some(w) = self.too_many_lights(&fresh) {
+                        n.push_str(&format!("; warning: {w}"));
+                    }
+                    if let Some(w) = self.foley_after_motion(op) {
+                        n.push_str(&format!("; warning: {w}"));
+                    }
+                    if let Some(e) = self.text_inside_3d(&fresh) {
+                        self.doc.rollback_batch();
+                        let name = op.get("op").and_then(Value::as_str).unwrap_or("?");
+                        return Err(format!("op {} ({name}) failed: {e}. Nothing was changed.", i + 1));
+                    }
+                    notes.push(n);
+                    made.extend(fresh);
                 }
                 Err(e) => {
                     self.doc.rollback_batch();
@@ -1223,7 +1420,16 @@ impl Session {
                 let mut extra: serde_json::Map<String, Value> = extra.into_iter().filter(|(k, _)| k != "backing" && k != "clips" && !craft::TEXT_MOTION_FIELDS.contains(&k.as_str())).collect();
                 // A colour card or drawn box takes its colour as a property
                 // (so it can be keyed too), not as a title's text colour.
-                let drawn = self.model_clip(id).is_some_and(|mc| matches!(&mc.source, studio_model::ClipSource::Generator(g) if matches!(g.kind, studio_model::GeneratorKind::Solid | studio_model::GeneratorKind::Shape)));
+                // A light's colour too: with intensity in the same op, it
+                // was taken as a title colour and dropped.
+                let drawn = self.model_clip(id).is_some_and(|mc| matches!(&mc.source, studio_model::ClipSource::Generator(g) if matches!(g.kind, studio_model::GeneratorKind::Solid | studio_model::GeneratorKind::Shape | studio_model::GeneratorKind::Light)));
+                // Opacity is percent; a fraction like 0.5 meant half, not 0.5%.
+                if let Some(o) = f(op, "opacity").filter(|o| *o > 0.0 && *o < 1.0) {
+                    return Err(format!("opacity is 0 to 100 (percent), so {o} would be almost invisible; for {}% write {}", (o * 100.0).round(), (o * 100.0).round()));
+                }
+                if op.get("text").is_some() && self.clip(id)?.kind != ClipKind::Title {
+                    return Err(format!("clip {id} is not a title, so \"text\" has nothing to change; for a vector drawing's words use the vector tool's text ops, for a 3D title text_3d"));
+                }
                 if drawn {
                     if let Some(v) = op.get("colour").or_else(|| op.get("color")) {
                         extra.insert("colour".into(), v.clone());
@@ -1361,7 +1567,13 @@ impl Session {
                 }
                 if let Some(Value::Object(params)) = op.get("params") {
                     let cl = clips.clone();
-                    let params: Vec<(String, f32)> = params.iter().filter_map(|(k, v)| v.as_f64().map(|x| (k.clone(), x as f32))).collect();
+                    // Names as the effect calls them (blur: radius).
+                    let kind = clips.first().and_then(|c| self.model_clip(*c)).and_then(|mc| mc.effects.last().map(|e| e.kind.clone())).unwrap_or_default();
+                    let mut named = Vec::new();
+                    for (k, v) in params {
+                        named.push((effect_param_name(&kind, k)?, v.clone()));
+                    }
+                    let params: Vec<(String, f32)> = named.iter().filter_map(|(k, v)| v.as_f64().map(|x| (k.clone(), x as f32))).collect();
                     self.doc.edit("Effect settings", |p| {
                         for c in p.clips.iter_mut().filter(|c| cl.contains(&c.id)) {
                             if let Some(e) = c.effects.last_mut() {
@@ -1641,6 +1853,15 @@ impl Session {
             "music" => self.music(op),
             "transition" => self.transition(op),
             "lane" => self.lane(op),
+            // `effect` with an item from the catalogue adds it, as `apply` does.
+            "effect" if op.get("item").is_some() && op.get("effect").is_none() => {
+                let mut o = op.clone();
+                o["op"] = json!("apply");
+                if let Some(c) = o.as_object_mut().and_then(|m| m.remove("clip")) {
+                    o["clips"] = if c.is_array() { c } else { json!([c]) };
+                }
+                self.op(&o)
+            }
             "effect" => self.effect(op),
             "card" => self.card(op),
             "sfx" => self.sfx(op),
@@ -1894,6 +2115,7 @@ impl Session {
                 if let Some(b) = a.get("brief").and_then(Value::as_str).filter(|b| !b.trim().is_empty()) {
                     self.brief = Some(b.to_owned());
                 }
+                let added = self.take_accepts(a)?;
                 let frames = a.get("frames").and_then(Value::as_bool).unwrap_or(true);
                 let mut v = self.quality(frames);
                 // With fix: Studio mends what it can, then looks again.
@@ -1907,13 +2129,31 @@ impl Session {
                     }
                     v["fixed"] = json!(fixed);
                 }
+                // What was accepted as intended is listed apart, not as a problem.
+                if self.apply_accepted(&mut v, "problems") {
+                    v["ok"] = json!(v["problems"].as_array().is_none_or(|p| p.is_empty()));
+                }
+                if let Some(x) = added {
+                    v["accept_list"] = x;
+                }
                 text(v)
             }
             "review" => {
                 if let Some(b) = a.get("brief").and_then(Value::as_str).filter(|b| !b.trim().is_empty()) {
                     self.brief = Some(b.to_owned());
                 }
-                let v = self.review(a);
+                self.take_accepts(a)?;
+                let mut v = self.review(a);
+                // Notes accepted as intended no longer block the film.
+                if self.apply_accepted(&mut v, "notes") {
+                    let notes = v["notes"].as_array().cloned().unwrap_or_default();
+                    let open3d = notes.iter().filter(|n| n["kind"].as_str().is_some_and(|k| k.starts_with("3d_"))).count();
+                    v["three_d"]["open"] = json!(open3d);
+                    v["ok"] = json!(notes.is_empty());
+                    if notes.is_empty() {
+                        v["verdict"] = json!(format!("nothing open: the rest ({}) was accepted as intended (check accept)", v["accepted"].as_array().map_or(0, Vec::len)));
+                    }
+                }
                 let passed = v["ok"] == true;
                 let mut parts = text(v)?;
                 // The last look before delivering is at full detail: a
@@ -1979,7 +2219,7 @@ impl Session {
                 if let Some(tr) = self.tracking_said(id) {
                     v["tracking"] = tr;
                 }
-                text(v)
+                text(inspect_filter(v, a)?)
             }
             "pick" => text(self.pick(a)?),
             "canvas_layout" => Ok(vec![Content::Text(self.layout_tool(a)?)]),
@@ -2426,6 +2666,52 @@ impl Session {
             }
             #[cfg(feature = "render")]
             "contact_sheet" => {
+                // Exact moments, when given (they were ignored for an even spread).
+                let asked: Option<Vec<f64>> = match a.get("times") {
+                    Some(Value::Array(v)) => {
+                        let t: Vec<f64> = v.iter().filter_map(|x| x.as_f64().or_else(|| x.as_str().and_then(|s| s.trim().parse().ok()))).filter(|t: &f64| t.is_finite() && *t >= 0.0).collect();
+                        if t.is_empty() || t.len() != v.len() {
+                            return Err("times is a list of seconds, e.g. [0.5, 2, 4.25]".into());
+                        }
+                        Some(t.into_iter().take(48).collect())
+                    }
+                    Some(_) => return Err("times is a list of seconds, e.g. [0.5, 2, 4.25]".into()),
+                    None => None,
+                };
+                // Variants: each set of ops tried, seen at one moment, then
+                // taken back; all of them side by side on one sheet.
+                if let Some(vars) = a.get("variants") {
+                    let vars = vars.as_array().filter(|v| !v.is_empty() && v.len() <= 16).ok_or("variants is a list of 1 to 16 variants, each a list of ops (or {\"name\", \"ops\"}), e.g. [[{\"op\": \"set\", \"clip\": 3, \"opacity\": 40}], [{\"op\": \"set\", \"clip\": 3, \"opacity\": 80}]]")?;
+                    let dur = self.doc.project.duration();
+                    let t = asked.as_ref().and_then(|t| t.first()).map(|t| micros(*t)).unwrap_or(dur / 2).clamp(0, (dur - 1).max(0));
+                    let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
+                    let w = w.clamp(256, 3840) as u32;
+                    let cols = render::sheet_columns(vars.len());
+                    let tile_w = ((w - 4 * (cols as u32 - 1)) / cols as u32).max(32);
+                    let (mut tiles, mut names) = (Vec::new(), Vec::new());
+                    for (i, var) in vars.iter().enumerate() {
+                        let ops: Vec<Value> = match var {
+                            Value::Array(o) => o.clone(),
+                            Value::Object(o) if o.contains_key("ops") => o["ops"].as_array().cloned().unwrap_or_default(),
+                            o @ Value::Object(_) => vec![o.clone()],
+                            _ => return Err(format!("variant {}: a list of ops, or {{\"name\", \"ops\"}}", i + 1)),
+                        };
+                        self.doc.begin_batch("Variant");
+                        let mut made: Result<(), String> = Ok(());
+                        for o in &ops {
+                            if let Err(e) = self.op(&args::unwrap_op(o)) {
+                                made = Err(e);
+                                break;
+                            }
+                        }
+                        let img = made.and_then(|()| self.frames.rgba(&self.doc, t, tile_w));
+                        self.doc.rollback_batch();
+                        tiles.push(img.map_err(|e| format!("variant {}: {e}. Nothing was changed", i + 1))?);
+                        names.push(var.get("name").and_then(Value::as_str).map_or_else(|| format!("{}", i + 1), str::to_owned));
+                    }
+                    let sheet = render::tiled(&tiles, cols, tile_w);
+                    return Ok(vec![Content::Jpeg(studio_content::jpeg::encode(&sheet, q)), Content::Text(json!({"variants": names, "t": secs(t), "columns": cols, "note": "each variant was tried and taken back: nothing was changed; apply the one you like with edit"}).to_string())]);
+                }
                 if let Some(mv) = a.get("media") {
                     let mi = self.media_item(mv)?;
                     let len = secs(mi.dur);
@@ -2434,10 +2720,13 @@ impl Session {
                     let n = a.get("count").and_then(Value::as_u64).unwrap_or(12).clamp(1, 48) as usize;
                     let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
                     let w = w.clamp(256, 3840) as u32;
-                    let cols = render::sheet_columns(n);
-                    let tile_w = ((w - 4 * (cols as u32 - 1)) / cols as u32).max(32);
                     let last = (end - 0.05).max(start);
-                    let times: Vec<f64> = (0..n).map(|i| if n == 1 { start } else { start + (last - start) * i as f64 / (n - 1) as f64 }).map(|t| (t * 1000.0).round() / 1000.0).collect();
+                    let times: Vec<f64> = match &asked {
+                        Some(t) => t.iter().map(|t| t.min(last)).collect(),
+                        None => (0..n).map(|i| if n == 1 { start } else { start + (last - start) * i as f64 / (n - 1) as f64 }).map(|t| (t * 1000.0).round() / 1000.0).collect(),
+                    };
+                    let cols = render::sheet_columns(times.len());
+                    let tile_w = ((w - 4 * (cols as u32 - 1)) / cols as u32).max(32);
                     let tiles = render::media_frames(&mi, &times, tile_w)?;
                     let sheet = render::tiled(&tiles, cols, tile_w);
                     return Ok(vec![Content::Jpeg(studio_content::jpeg::encode(&sheet, q)), Content::Text(json!({"media": mi.name, "times": times, "columns": cols, "note": "times are seconds into the file (use them as source_in / source_out with place)"}).to_string())]);
@@ -2448,8 +2737,11 @@ impl Session {
                 let n = a.get("count").and_then(Value::as_u64).unwrap_or(12).clamp(1, 48) as usize;
                 let (w, q) = render::picture_size(a, render::SHEET_WIDTH);
                 let w = w.clamp(256, 3840) as u32;
-                let (jpeg, times) = self.frames.sheet(&self.doc, micros(start), micros(end), n, w, q)?;
-                Ok(vec![Content::Jpeg(jpeg), Content::Text(json!({"times": times, "columns": render::sheet_columns(n)}).to_string())])
+                let (jpeg, times) = match &asked {
+                    Some(t) => self.frames.sheet_at(&self.doc, &t.iter().map(|t| micros(t.min(dur))).collect::<Vec<_>>(), w, q)?,
+                    None => self.frames.sheet(&self.doc, micros(start), micros(end), n, w, q)?,
+                };
+                Ok(vec![Content::Jpeg(jpeg), Content::Text(json!({"times": times, "columns": render::sheet_columns(times.len())}).to_string())])
             }
             #[cfg(feature = "render")]
             "export" => {
@@ -2481,7 +2773,18 @@ impl Session {
                 }
                 if a.get("wait").and_then(Value::as_bool).unwrap_or(true) {
                     let started = std::time::Instant::now();
-                    return match job.wait() {
+                    // MCP clients drop a request after about a minute; a long
+                    // render answers before that with a job to poll.
+                    let limit = std::time::Duration::from_secs_f64(45.0);
+                    let Some(event) = job.wait_for(limit) else {
+                        let id = self.next_export;
+                        self.next_export += 1;
+                        let progress = job.fraction();
+                        let eta = job.eta_secs();
+                        self.exports.push((id, job));
+                        return text(json!({"export": id, "still_rendering": true, "progress": progress, "eta_secs": eta, "path": path.display().to_string(), "rights": rights, "next": format!("the render goes on in the background; call export_status {{\"export\": {id}}} until it says done")}));
+                    };
+                    return match event {
                         services::export::Event::Finished { path } => {
                             let secs_taken = (started.elapsed().as_secs_f64() * 10.0).round() / 10.0;
                             let (s, e) = range.unwrap_or((0, self.doc.project.duration()));

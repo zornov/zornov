@@ -339,18 +339,21 @@ impl Frames {
     /// `n` frames evenly spread over `start..end`, tiled into one JPEG
     /// `width` pixels wide; returns the times (seconds) in reading order.
     pub fn sheet(&mut self, doc: &Doc, start: Time, end: Time, n: usize, width: u32, quality: u8) -> Result<(Vec<u8>, Vec<f64>), String> {
-        let cols = sheet_columns(n);
-        let rows = n.div_ceil(cols);
-        let gap = 4u32;
-        let tile_w = ((width - gap * (cols as u32 - 1)) / cols as u32).max(32);
-        let span = (end - start).max(0);
         // Spread over the range, the last one a frame inside its end.
         let frame = (1e6 / doc.project.fps.max(1.0) as f64) as Time;
         let last = (end - frame).max(start);
         let times: Vec<Time> = (0..n).map(|i| if n == 1 { start } else { start + (last - start) * i as i64 / (n as i64 - 1) }).collect();
-        let _ = span;
+        self.sheet_at(doc, &times, width, quality)
+    }
+
+    /// A sheet of the program at exactly these moments.
+    pub fn sheet_at(&mut self, doc: &Doc, times: &[Time], width: u32, quality: u8) -> Result<(Vec<u8>, Vec<f64>), String> {
+        let n = times.len().max(1);
+        let cols = sheet_columns(n);
+        let gap = 4u32;
+        let tile_w = ((width - gap * (cols as u32 - 1)) / cols as u32).max(32);
         let mut tiles = Vec::with_capacity(n);
-        for &t in &times {
+        for &t in times {
             tiles.push(self.rgba(doc, t, tile_w)?);
         }
         let sheet = tiled(&tiles, cols, tile_w);

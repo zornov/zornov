@@ -133,7 +133,7 @@ pub fn refresh(current: Option<&Path>) -> Result<usize, String> {
             }
         }
         for kind in ["moves", "designs"] {
-            let dir = studio_paths::studio().join("Made").join(kind);
+            let dir = studio_paths::made().join(kind);
             for f in std::fs::read_dir(&dir).map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).collect::<Vec<_>>()).unwrap_or_default() {
                 if changed(d, &f)? {
                     let v: Value = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);

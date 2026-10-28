@@ -18,6 +18,10 @@ use std::collections::HashMap;
 /// Ops whose models are scenery made of many pieces, simulation frames or
 /// lettering, not things to keep and use again.
 const NOT_KEPT_OPS: &[&str] = &["simulate", "text_3d", "physics", "particles", "mograph"];
+/// Ops that only move a model (a walk, a pose): the model itself is the
+/// one already kept, and keeping it again after every take made "Keeper
+/// 23, 24, 25, 26", each up to 88 MB. Saving it on purpose still keeps it.
+const MOTION_OPS: &[&str] = &["act", "pose", "ik", "aim", "retarget", "mocap", "animate", "keyframe", "keys", "throw", "walk", "stand"];
 /// Clips the world builder names for its ground and scattered cover.
 const NOT_KEPT_NAMES: &[&str] = &["Terrain", "Scatter"];
 
@@ -31,7 +35,7 @@ impl Session {
     /// kept (new or changed), for a line in the answer.
     pub(super) fn keep_models(&self, tool: &str, a: &Value, before: &HashMap<u64, String>) -> Vec<String> {
         let ops: Vec<&str> = a.get("ops").and_then(Value::as_array).map(|v| v.iter().filter_map(|o| o.get("op").and_then(Value::as_str)).collect()).unwrap_or_default();
-        if ops.iter().any(|o| NOT_KEPT_OPS.contains(o)) {
+        if ops.iter().any(|o| NOT_KEPT_OPS.contains(o)) || (!ops.is_empty() && ops.iter().all(|o| MOTION_OPS.contains(o))) {
             return Vec::new();
         }
         let mut kept = Vec::new();

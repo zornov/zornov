@@ -45,8 +45,14 @@ lists every op with its fields.
 `"conic"` with `center`, `angle`; stops may be `[offset, colour]`;
 `"space": "oklab"` for even, bright blends), `{"freeform": [[x, y,
 "#c"], …]}`, or `{"swatch": "brand"}` (a global swatch: change it once,
-everything using it follows). Any op that makes art takes `fill`,
-`stroke`, `stroke_width`, `join`, `cap`, `dashes`, `profile` (variable
+everything using it follows). The flat form works too:
+`{"type": "radial", "center": [x, y], "radius": r, "stops": [[0,
+"#fff"], [1, "#0000"]]}` (or `"type": "linear"` with `from`, `to`). The
+full form, as `get` shows a gradient, is `{"type": "gradient", "kind":
+"radial", "c0": {"x", "y"}, "r0": 0, "c1": {"x", "y"}, "r1": r,
+"stops": [{"offset": 0, "color": "#fff"}, …]}`: c0 / r0 the focal
+circle, c1 / r1 the outer one. Any op that makes art takes `fill`,
+`stroke`, `stroke_width`, `join`, `cap`, `dashes`, `dash_offset`, `profile` (variable
 width: taper, taper_both, bulge, pinch, brush), `opacity`, `blend`,
 `effects`, `name`, `parent` (a layer or group id). `fills` / `strokes`
 (lists) stack several in one object: a fill under two strokes makes an

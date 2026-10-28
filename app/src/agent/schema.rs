@@ -9,11 +9,15 @@
 //!   without being run;
 //! * `long`: every op with all its fields, then the raw edits.
 
-use super::{Content, EDIT_SCHEMA, args};
+use super::{Content, EDIT_SCHEMA, args, field_docs};
 use serde_json::{Value, json};
 
 fn fields_of(name: &str) -> Result<Vec<&'static str>, String> {
-    args::op_fields(name).map(|f| f.to_vec()).ok_or_else(|| format!("no op \"{name}\"; ops: {}", super::shell::OPS.join(", ")))
+    args::op_fields(name).map(|f| f.to_vec()).ok_or_else(|| {
+        let all = field_docs::all_ops();
+        let hint = args::closest(name, &all).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
+        format!("no op \"{name}\"{hint}; ops: {}", all.join(", "))
+    })
 }
 
 pub(super) fn edit_schema(a: &Value) -> Result<Vec<Content>, String> {
@@ -32,7 +36,9 @@ pub(super) fn edit_schema(a: &Value) -> Result<Vec<Content>, String> {
         for item in &asked {
             let item = args::unwrap_op(item);
             match &item {
-                Value::String(name) => out.push((name.clone(), json!(fields_of(name)?))),
+                // Each field with its type, units, range and meaning, and
+                // an example call (bare names left agents guessing units).
+                Value::String(name) => out.push((name.clone(), field_docs::op_doc(name, &fields_of(name)?))),
                 Value::Object(o) => {
                     let name = o.get("op").and_then(Value::as_str).ok_or("each entry of ops is an op name or {\"op\": name, ...fields}")?.to_owned();
                     let allowed = fields_of(&name)?;
@@ -61,7 +67,7 @@ pub(super) fn edit_schema(a: &Value) -> Result<Vec<Content>, String> {
     }
     if flag(&["long", "full", "detail", "details", "verbose", "all"]) {
         let mut s = String::from("Edit ops, used inside edit {\"ops\": [{\"op\": name, ...}]} (name: the fields it takes):\n");
-        for op in super::shell::OPS {
+        for op in field_docs::all_ops() {
             if let Some(f) = args::op_fields(op) {
                 s.push_str(&format!("{op}: {}\n", f.join(", ")));
             }
@@ -70,7 +76,7 @@ pub(super) fn edit_schema(a: &Value) -> Result<Vec<Content>, String> {
         s.push_str(EDIT_SCHEMA);
         return Ok(vec![Content::Text(s)]);
     }
-    Ok(vec![Content::Text(EDIT_SCHEMA.to_owned())])
+    Ok(vec![Content::Text(format!("{EDIT_SCHEMA}\n\nOps (edit_schema {{\"op\": name}} gives each field's type, units and range, and an example): {}", field_docs::all_ops().join(", ")))])
 }
 
 #[cfg(test)]
@@ -97,12 +103,21 @@ mod tests {
         assert!(short.starts_with("Raw model edits"), "{short}");
         // `ops` as names: the fields each takes.
         let v: Value = serde_json::from_str(&said(s.run("edit_schema", &json!({"ops": ["keyframe", "keys"]})).unwrap())).unwrap();
-        assert!(v["keyframe"].as_array().unwrap().iter().any(|f| f == "value") && v["keys"].as_array().unwrap().iter().any(|f| f == "remove"), "{v}");
+        assert!(v["keyframe"]["fields"].get("value").is_some() && v["keys"]["fields"].get("remove").is_some(), "{v}");
         // `ops` as one string, and `op` for one.
         let v: Value = serde_json::from_str(&said(s.run("edit_schema", &json!({"ops": "pose, act"})).unwrap())).unwrap();
         assert!(v.get("pose").is_some() && v.get("act").is_some(), "{v}");
         let v: Value = serde_json::from_str(&said(s.run("edit_schema", &json!({"op": "animate"})).unwrap())).unwrap();
-        assert!(v["animate"].as_array().unwrap().iter().any(|f| f == "keys"));
+        assert!(v["animate"]["fields"].get("keys").is_some());
+        // Each field says what it is, in which units; an example comes with it.
+        let v: Value = serde_json::from_str(&said(s.run("edit_schema", &json!({"op": "act"})).unwrap())).unwrap();
+        assert!(v["act"]["fields"]["speed"]["range"].as_str().unwrap().contains("0.1 to 6"), "{v}");
+        assert!(v["act"]["fields"]["at"]["units"].as_str().unwrap().contains("clip"), "{v}");
+        // Ops the dispatcher runs are all listed, motion graphics too.
+        let all = super::field_docs::all_ops();
+        for op in ["chart", "shape", "template", "body", "throw", "build_place", "act"] {
+            assert!(all.contains(&op), "{op} missing from {all:?}");
+        }
         // An op written out is checked, not run.
         let before = s.doc.history.revision();
         let v: Value = serde_json::from_str(&said(s.run("edit_schema", &json!({"ops": [{"op": "keyframe", "clip": 1, "property": "x", "at": 1, "value": "5"}, {"op": "keyframe", "clip": 1, "bogus": 1}]})).unwrap())).unwrap();

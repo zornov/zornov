@@ -68,6 +68,17 @@ pub fn free_space(p: &Path) -> Option<u64> {
     free_at(&at)
 }
 
+/// Refuses a write of `bytes` to `p` that would leave less than 1 GB free
+/// on its disk, with a message that says how much there is (a full disk
+/// otherwise fails halfway through a model or a render).
+pub fn room_for(p: &Path, bytes: u64) -> Result<(), String> {
+    const SPARE: u64 = 1_000_000_000;
+    match free_space(p) {
+        Some(free) if free < bytes.saturating_add(SPARE) => Err(format!("the disk holding {} has {} free and this needs {} plus 1 GB to spare; free some space (project_care {{\"action\": \"health\"}} shows what the project holds) and try again", p.display(), human(free), human(bytes))),
+        _ => Ok(()),
+    }
+}
+
 #[cfg(windows)]
 fn free_at(at: &Path) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;

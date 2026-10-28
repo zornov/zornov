@@ -427,13 +427,28 @@ impl Session {
             let spine = p.spine();
             let ids: Vec<u32> = match a.get("clips") {
                 Some(Value::Array(v)) => v.iter().filter_map(Value::as_u64).map(|x| x as u32).collect(),
+                Some(Value::Number(n)) => n.as_u64().map(|x| x as u32).into_iter().collect(),
                 _ => {
                     let mut cs: Vec<&view::Clip> = p.clips.iter().filter(|c| Some(c.lane) == spine).collect();
                     cs.sort_by_key(|c| c.start);
                     cs.iter().map(|c| c.id).collect()
                 }
             };
-            ids.iter().filter_map(|&id| p.clip(id)).map(|c| (c.start + c.dur / 2, Some(c.id))).collect()
+            let mut moments: Vec<(view::Time, Option<u32>)> = ids.iter().filter_map(|&id| p.clip(id)).map(|c| (c.start + c.dur / 2, Some(c.id))).collect();
+            // Nothing on the main lane (a 3D or vector scene on overlay
+            // lanes): moments spread over the film, not an empty answer.
+            if moments.is_empty() && a.get("clips").is_none() {
+                let len = p.duration();
+                if len <= 0 {
+                    return Err("there is nothing on the timeline to look at".into());
+                }
+                let n = ((len / SEC) as usize).clamp(1, 8);
+                moments = (0..n).map(|i| (len * (2 * i as view::Time + 1) / (2 * n as view::Time), None)).collect();
+            }
+            if moments.is_empty() {
+                return Err("none of those clips exist; give clip ids, or t (a timeline moment in seconds)".into());
+            }
+            moments
         };
         let t0 = std::time::Instant::now();
         let t1 = std::time::Instant::now();

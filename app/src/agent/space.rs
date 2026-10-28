@@ -679,7 +679,7 @@ impl Session {
             note.push_str("; note: ");
             note.push_str(n);
         }
-        let looks: Vec<String> = ["glow", "flare", "beam", "flicker"].iter().filter_map(|k| f(op, k).filter(|v| *v > 0.0).map(|v| format!("{k} {v}"))).chain(op.get("flame").and_then(Value::as_bool).filter(|b| *b).map(|_| "flame".to_owned())).collect();
+        let looks: Vec<String> = ["glow", "flare", "beam", "flicker"].iter().filter_map(|k| f(op, k).filter(|v| *v > 0.0).map(|v| format!("{k} {v}"))).chain(op.get("flame").and_then(|v| v.as_bool().or_else(|| v.as_f64().map(|x| x > 0.0))).filter(|b| *b).map(|_| "flame".to_owned())).collect();
         if !looks.is_empty() {
             note.push_str(&format!("; shows itself: {}", looks.join(", ")));
         }

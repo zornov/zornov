@@ -141,7 +141,7 @@ for long ones) -> read the QC findings, fix, render again -> `bundle`.
 
 ## Reference: tool `export`
 
-Render a file. Presets: Social 1080p, 4K master, Vertical, GIF, Intermediate, PNG sequence, HEVC 10-bit (smooth gradients, hardware), Audio only (M4A), masters (ProRes 422 HQ, ProRes 4444, ProRes Proxy, EXR / DPX / TIFF / PNG 16-bit sequences, DNxHR LB, DNxHR SQ, DNxHR HQ, DNxHR HQX, DNxHR 444: QuickTime with sound and timecode), Lottie (or dotLottie; also any path ending .json or .lottie): a vector animation for the web and apps, its pictures, titles, cards and shapes with their motion baked from Zornov; the reply lists what Lottie cannot hold (video, sound, effects, masks). Waits for the file unless `wait` is false.
+Render a file. Presets: Social 1080p, 4K master, Vertical, GIF, Intermediate, PNG sequence, HEVC 10-bit (smooth gradients, hardware), Audio only (M4A), masters (ProRes 422 HQ, ProRes 4444, ProRes Proxy, EXR / DPX / TIFF / PNG 16-bit sequences, DNxHR LB, DNxHR SQ, DNxHR HQ, DNxHR HQX, DNxHR 444: QuickTime with sound and timecode), Lottie (or dotLottie; also any path ending .json or .lottie): a vector animation for the web and apps, its pictures, titles, cards and shapes with their motion baked from Zornov; the reply lists what Lottie cannot hold (video, sound, effects, masks). Waits for the file unless `wait` is false, for at most 45 seconds: a longer render answers with {"export": id, "still_rendering": true} and goes on in the background; poll export_status {"export": id} until it says done.
 
 ## Reference: tool `queue`
 

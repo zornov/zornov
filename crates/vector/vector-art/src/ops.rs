@@ -209,6 +209,17 @@ fn gradient_common(g: Gradient, spec: &Value) -> Gradient {
 
 /// A paint from any of the accepted forms.
 pub fn paint(v: &Value) -> Result<Paint, String> {
+    // The obvious flat forms: {"type": "radial", "center", "radius",
+    // "stops"} (also "type": "gradient", "kind": "radial" with a centre)
+    // read as {"radial": {…}}; the full form keeps c0, r0, c1, r1.
+    let short = match (s(v, "type"), s(v, "kind")) {
+        (Some(k @ ("linear" | "radial" | "conic")), _) => Some(k),
+        (Some("gradient"), Some(k @ ("linear" | "radial" | "conic"))) if v.get("c0").is_none() && v.get("c1").is_none() && (v.get("center").is_some() || v.get("centre").is_some() || v.get("from").is_some()) => Some(k),
+        _ => None,
+    };
+    if let Some(k) = short {
+        return paint(&json!({ k: v }));
+    }
     if let Some(l) = v.get("linear") {
         let g = Gradient::linear(pt(l, "from").ok_or("linear needs \"from\"")?, pt(l, "to").ok_or("linear needs \"to\"")?, stops(need(l, "stops")?)?);
         return Ok(Paint::gradient(gradient_common(g, l)));
@@ -296,7 +307,7 @@ fn stroke_item(v: &Value, op: &Value) -> Result<Stroke, String> {
     if let Some(d) = spec.get("dashes").or_else(|| op.get("dashes")).and_then(Value::as_array) {
         st.style.dashes = d.iter().filter_map(Value::as_f64).collect();
     }
-    if let Some(o) = f(spec, "dash_offset") {
+    if let Some(o) = f(spec, "dash_offset").or_else(|| f(op, "dash_offset")) {
         st.style.dash_offset = o;
     }
     if let Some(a) = s(spec, "align").or_else(|| s(op, "stroke_align")) {
@@ -606,10 +617,11 @@ pub const OPS: &[(&str, &str)] = &[
     ("artboard", "add one: rect [x,y,w,h], name, background"),
     ("artboard_set", "artboard (name/id/index), rect, name, background"),
     ("layer", "add a layer: name"),
-    ("rect", "x, y, w, h (or rect), radius or radii [tl,tr,br,bl], corners (round/inverted_round/chamfer ×4)"),
+    ("rect", "x, y, w, h (or rect), radius (also rx, corner_radius) or radii [tl,tr,br,bl], corners (round/inverted_round/chamfer ×4)"),
     ("ellipse", "cx, cy, rx, ry (or rect)"),
     ("circle", "cx, cy, r"),
-    ("polygon", "cx, cy, r, sides, rotation"),
+    ("polygon", "cx, cy, r, sides, rotation (degrees)"),
+    ("triangle", "cx, cy, r (or size, the across), rotation (degrees; 0 points up): a polygon with three sides"),
     ("star", "cx, cy, r, inner, points, rotation"),
     ("spiral", "cx, cy, r, decay (%), segments, clockwise"),
     ("arc", "from, to, slope (-100..100), closed"),
@@ -631,7 +643,7 @@ pub const OPS: &[(&str, &str)] = &[
     ("fonts", "the font families available"),
     ("image", "file, x, y, w, h (placed, linked or embed: true)"),
     ("trace", "id (an image object) or file, preset (6 colors, 16 colors, black and white logo, line art, high fidelity photo, flat logo, …), rect"),
-    ("style", "ids, fill, stroke, stroke_width, join, cap, dashes, profile, opacity, blend: sets the top fill/stroke"),
+    ("style", "ids, fill, stroke, stroke_width, join, cap, dashes, dash_offset, profile, opacity, blend: sets the top fill/stroke"),
     ("appearance", "id, appearance {items: [{type: fill|stroke, …}], effects: [...]} replaces the stack"),
     ("add_fill", "id, fill (paint or {paint, opacity, blend}): adds a fill on top"),
     ("add_stroke", "id, stroke, width, …: adds a stroke on top"),
@@ -774,7 +786,9 @@ pub fn apply(doc: &mut Document, v: &Value, ctx: &Context) -> R {
             let r = rect_arg(v).ok_or("rect needs x, y, w, h")?;
             let radii = match v.get("radii").and_then(Value::as_array) {
                 Some(a) if a.len() == 4 => [0, 1, 2, 3].map(|i| a[i].as_f64().unwrap_or(0.0)),
-                _ => [fd(v, "radius", 0.0); 4],
+                // SVG's rx and the obvious names round the corners too
+                // (they were ignored, leaving square corners).
+                _ => [f(v, "radius").or_else(|| f(v, "rx")).or_else(|| f(v, "ry")).or_else(|| f(v, "corner_radius")).or_else(|| f(v, "rounded")).unwrap_or(0.0); 4],
             };
             let corners = v.get("corners").and_then(|c| match c {
                 Value::String(k) => serde_json::from_value(json!(k.replace("inverted_round", "invertedRound"))).ok().map(|k| [k; 4]),
@@ -806,15 +820,22 @@ pub fn apply(doc: &mut Document, v: &Value, ctx: &Context) -> R {
             };
             add_node(doc, v, NodeKind::Shape { shape: LiveShape::Pie { rect: r, start: fd(v, "start", 0.0), end: fd(v, "end", 90.0) } }, default_paint())
         }
-        "polygon" => add_node(
-            doc,
-            v,
-            NodeKind::Shape { shape: LiveShape::Polygon { center: Point::new(fd(v, "cx", 0.0), fd(v, "cy", 0.0)), radius: fd(v, "r", 50.0), sides: fd(v, "sides", 6.0) as u32, rotation: fd(v, "rotation", 0.0) } },
-            default_paint(),
-        ),
+        "polygon" | "triangle" => {
+            // The shape keeps its own turn (editable later); the node is not
+            // turned again on top of it.
+            let sides = if op == "triangle" { 3.0 } else { fd(v, "sides", 6.0) };
+            let rotation = f(v, "rotation").or_else(|| f(v, "rotate")).unwrap_or(0.0);
+            let mut plain = v.clone();
+            if let Some(o) = plain.as_object_mut() {
+                o.remove("rotation");
+                o.remove("rotate");
+            }
+            let r = f(v, "r").or_else(|| f(v, "radius")).or_else(|| f(v, "size").map(|d| d / 2.0)).unwrap_or(50.0);
+            add_node(doc, &plain, NodeKind::Shape { shape: LiveShape::Polygon { center: Point::new(fd(v, "cx", 0.0), fd(v, "cy", 0.0)), radius: r, sides: sides as u32, rotation } }, default_paint())
+        }
         "star" => {
             let c = Point::new(fd(v, "cx", 0.0), fd(v, "cy", 0.0));
-            let r = fd(v, "r", 50.0);
+            let r = f(v, "r").or_else(|| f(v, "radius")).or_else(|| f(v, "size").map(|d| d / 2.0)).unwrap_or(50.0);
             let n = fd(v, "points", 5.0) as u32;
             let shape = match f(v, "inner") {
                 Some(i) => LiveShape::Star { center: c, radius: r, inner: i, points: n, rotation: fd(v, "rotation", 0.0) },
@@ -1788,6 +1809,9 @@ fn restyle(n: &mut Node, v: &Value) -> Result<(), String> {
                 }
                 if let Some(d) = v.get("dashes").and_then(Value::as_array) {
                     st.style.dashes = d.iter().filter_map(Value::as_f64).collect();
+                }
+                if let Some(o) = f(v, "dash_offset") {
+                    st.style.dash_offset = o;
                 }
                 if let Some(p) = v.get("profile") {
                     st.style.profile = profile(p)?;

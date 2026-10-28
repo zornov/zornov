@@ -877,9 +877,19 @@ pub fn record_path(doc: &mut Doc, id: u64, samples: &[(Time, Nav)]) -> Result<us
         g.params.insert("two_node".into(), m::Value::Bool(true));
     }
     let (from, to) = (kept[0].0, kept[kept.len() - 1].0);
-    // A path longer than the camera's clip lengthens it.
+    // A path longer than the camera's clip lengthens it. When that would
+    // run into the next clip on its lane (another camera cut later on),
+    // the camera moves to a lane of its own instead of breaking the edit.
+    let mut new_lane = None;
     if to >= mc.start + mc.duration {
         mc.duration = to - mc.start + frame_of(doc);
+        let end = mc.start + mc.duration;
+        let blocked = doc.model.active().clips.iter().any(|c| c.lane == mc.lane && c.id != mc.id && c.start < end && c.end() > mc.start);
+        if blocked {
+            let lane = doc.alloc_id();
+            new_lane = Some(m::Lane::new(m::LaneId(lane), m::LaneKind::Visual, "Camera"));
+            mc.lane = m::LaneId(lane);
+        }
     }
     for p in ["transform.position", "transform.position_z", "generator.poi", "generator.poi_z"] {
         // The recorded stretch replaces what was keyed there.
@@ -904,7 +914,12 @@ pub fn record_path(doc: &mut Doc, id: u64, samples: &[(Time, Nav)]) -> Result<us
         }
     }
     let seq = doc.seq();
-    if !doc.apply("Record camera path", m::Edit::SetClip { seq, clip: Box::new(mc) }) {
+    let set = m::Edit::SetClip { seq, clip: Box::new(mc) };
+    let edit = match new_lane {
+        Some(lane) => m::Edit::Batch { edits: vec![m::Edit::AddLane { seq, lane, index: Some(0) }, set] },
+        None => set,
+    };
+    if !doc.apply("Record camera path", edit) {
         return Err(doc.error.clone().unwrap_or_else(|| "the path could not be keyed".into()));
     }
     Ok(kept.len())

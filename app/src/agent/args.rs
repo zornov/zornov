@@ -12,6 +12,11 @@ use serde_json::{Map, Value};
 fn aliases(name: &str) -> &'static [(&'static str, &'static str)] {
     match name {
         "frame" => &[("at", "t"), ("time", "t"), ("seconds", "t")],
+        "chart" => &[("color", "colour"), ("type", "kind"), ("values", "data"), ("rows", "data")],
+        "shape" | "text_3d" => &[("color", "colour"), ("shapes", "items"), ("string", "text"), ("kind", "type"), ("shape", "type")],
+        "template" => &[("name_or_id", "id"), ("values", "controls"), ("fields", "controls")],
+        "see" => &[("at", "t"), ("time", "t"), ("seconds", "t"), ("clip", "clips")],
+        "contact_sheet" => &[("at", "times"), ("moments", "times"), ("from", "start"), ("to", "end"), ("frames", "count")],
         "graph" => &[("id", "clip"), ("prop", "property"), ("count", "samples")],
         "scopes" => &[("at", "t"), ("time", "t"), ("seconds", "t"), ("with", "compare"), ("against", "compare")],
         "import" => &[("path", "paths"), ("files", "paths")],
@@ -75,6 +80,15 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
     }
     Some(match op {
         "place" => &["media", "at", "lane", "source_in", "source_out", "duration", "speed", "fit", "x", "y", "volume", "muted", "name"],
+        // Motion graphics: listed so their fields are checked and shown by
+        // edit_schema like every other op's (they were missing from both).
+        "shape" => &["items", "preset", "type", "height", "roundness", "points", "radius", "inner", "stroke", "inputs", "add", "patch", "replace", "lottie", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "opacity", "rotation", "size", "width", "extrude", "side_colour", "colour", "accent", "stroke_width", "path", "speed", "name"],
+        "text_3d" => &["text", "runs", "font", "size", "weight", "italic", "kerning", "letter_spacing", "depth", "bevel", "extrude", "colour", "side_colour", "accent", "opacity", "stroke_width", "clip", "at", "duration", "lane", "behind", "x", "y", "z", "rotation", "name"],
+        "expression" => &["clip", "property", "expr", "driver", "remove"],
+        "time_remap" => &["clip", "expr", "keys", "speed", "remove"],
+        "template" => &["id", "template", "controls", "list", "search", "category", "clip", "at", "duration", "lane", "x", "y", "name"],
+        "chart" => &["kind", "data", "title", "colour", "text", "prefix", "suffix", "decimals", "hole", "total_label", "route", "at", "duration", "x", "y", "name"],
+        "morph" => &["clip", "to", "object", "mask", "at", "duration", "ease"],
         "split" => &["at", "clips"],
         "trim" => &["clip", "start", "end", "ripple"],
         "delete" => &["clips", "ripple"],
@@ -101,7 +115,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "marker" => &["at", "note", "remove", "move"],
         "transition" => &["clip", "item", "duration", "align", "keep_timing", "remove", "params"],
         "lane" => &["action", "lane", "name", "kind", "position", "to"],
-        "effect" => &["clip", "clips", "effect", "remove", "enabled", "params", "move_to"],
+        "effect" => &["clip", "clips", "effect", "remove", "enabled", "params", "move_to", "item", "panel", "duration"],
         "card" => &["colour", "at", "duration", "lane", "width", "height", "x", "y", "opacity", "roundness", "gradient", "angle", "radial", "radius", "shape", "sides", "stroke", "stroke_width", "shadow", "behind"],
         "motion" => &["clip", "clips", "entry", "exit", "loop"],
         "merge" => &["clips", "name"],
@@ -169,7 +183,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "wear" => &["clip", "items", "kind", "item", "type", "what", "wear", "garment", "style", "colour", "color", "colour2", "color2", "trim", "trim_colour", "second_colour", "lining", "material", "fabric", "cloth", "pattern", "fit", "length", "sleeves", "scale", "size", "open", "skin", "name", "detail", "side", "hand", "loose", "physics", "simulate", "remove", "undress", "list", "melanin", "redness", "seed", "density"],
         "hold" => &["clip", "item", "prop", "kit", "name", "size", "colour", "color", "material", "tip", "grip", "hand", "turn", "offset", "flame", "light", "light_intensity", "fingers", "at", "release", "drop"],
         "rig" => &["clip", "template", "bones", "replace", "count", "start", "name", "face", "constraint", "skinning", "rigid", "remove", "list", "bone", "region", "material"],
-        "act" => &["clip", "motion", "mocap", "take", "name", "action", "at", "speed", "offset", "loop", "cycle", "energy", "travel", "duration", "blend_to", "over", "stop", "route", "to", "by", "distance", "face", "turn", "style", "limp", "ground", "near", "pace", "hold", "lead"],
+        "act" => &["clip", "motion", "mocap", "take", "name", "action", "at", "speed", "offset", "loop", "cycle", "energy", "travel", "duration", "blend_to", "over", "stop", "route", "to", "by", "distance", "face", "turn", "style", "limp", "ground", "near", "pace", "speed_px_s", "hold", "lead"],
         "mesh" => &["clip", "steps", "do", "bind", "bone", "levels", "iterations", "strength", "region", "brush", "at", "by", "path", "radius", "symmetry", "keep", "axis", "distance", "amount", "size", "octaves", "seed", "pivot", "scale", "turn", "shape", "detail", "colour", "metallic", "roughness", "emissive", "emissive_strength", "wetness", "opacity", "subsurface", "transmission", "ior", "name", "mode", "with", "parts", "triangles", "angle", "index", "image", "projection", "flip", "count", "offset", "width", "segments", "profile", "select", "edit", "part", "thickness", "depth", "individual", "cuts", "slide", "factor", "toward", "what", "threshold", "percent", "slot", "sides", "compare", "clear", "fill", "point", "normal", "degrees", "turns", "height", "method", "margin", "kind", "smooth", "extend", "edge", "subdivisions", "vertices", "rings", "radius1", "radius2", "major", "minor", "resolution", "x", "y", "add", "remove", "enable", "on", "apply", "set", "to", "move", "smart", "seam", "crease", "direction", "ratio", "assign", "cursor", "view", "faces", "edges", "verts", "all"],
         "light" => &["clip", "type", "at", "duration", "lane", "position", "look_at", "colour", "intensity", "cone_angle", "cone_feather", "radius", "falloff", "shadows", "shadow_darkness", "glow", "flare", "beam", "source_size", "flicker", "flicker_speed", "flame", "flame_height", "flame_width", "flame_tongues", "atmosphere"],
         "atmosphere" => &["clip", "at", "duration", "lane", "preset", "list", "remove", "ground", "fog", "weather", "tonemap", "auto_exposure", "metre", "fog_density", "fog_falloff", "fog_base", "fog_anisotropy", "fog_range", "fog_patchiness", "bloom_strength", "bloom_threshold", "bloom_knee", "bloom_radius", "exposure", "contrast", "saturation", "temperature", "tint", "richness", "shadow_tint_amount", "highlight_tint_amount", "vignette", "grain", "halation", "fringe", "fog_colour", "shadow_tint", "highlight_tint", "reflection", "air_light"],
@@ -222,7 +236,7 @@ fn is_property(k: &str) -> bool {
     k.contains('.') || matches!(k, "z" | "rotation_x" | "rotation_y" | "rotation_z" | "orientation_x" | "orientation_y" | "orientation_z" | "scale_z" | "anchor_z" | "focal_length" | "fov" | "focus_distance" | "aperture" | "blur_level" | "poi_x" | "poi_y" | "poi_z" | "intensity" | "cone_angle" | "cone_feather" | "radius" | "falloff" | "shadow_darkness" | "scale_x" | "scale_y" | "anchor_x" | "anchor_y" | "crop_left" | "crop_right" | "crop_top" | "crop_bottom" | "blend" | "reversed" | "enabled" | "visible" | "flip" | "flip_x" | "flip_y" | "mirror" | "look_strength" | "look_amount" | "width" | "height" | "fill" | "roundness" | "metallic" | "roughness" | "emissive" | "smooth" | "subsurface" | "emissive_strength" | "wetness" | "glow" | "flare" | "beam" | "source_size" | "flicker" | "flicker_speed")
 }
 
-fn closest<'a>(want: &str, among: &[&'a str]) -> Option<&'a str> {
+pub fn closest<'a>(want: &str, among: &[&'a str]) -> Option<&'a str> {
     let d = |a: &str, b: &str| {
         let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
         let mut row: Vec<usize> = (0..=b.len()).collect();

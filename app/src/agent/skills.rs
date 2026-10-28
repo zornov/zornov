@@ -96,6 +96,11 @@ fn parse(src: &str) -> Skill {
     s
 }
 
+/// Every skill file as written (front matter included).
+pub fn texts() -> &'static [&'static str] {
+    FILES
+}
+
 /// All the skills.
 pub fn all() -> &'static [Skill] {
     static ALL: OnceLock<Vec<Skill>> = OnceLock::new();

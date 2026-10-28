@@ -40,7 +40,10 @@ pub fn is_edit(op: &Value, steps: &[Value]) -> bool {
     }
     steps.iter().any(|s| {
         let d = s.get("do").and_then(Value::as_str).unwrap_or("");
-        s.get("select").is_some() || EXTRA.contains(&d) || (tools::find(d).is_some() && !super::models::STEPS.contains(&d))
+        // A smart (patterned) material is baked here, unwrapping a model
+        // with no texture layout; the plain material step ignored it and
+        // still said "material changed".
+        s.get("select").is_some() || EXTRA.contains(&d) || (tools::find(d).is_some() && !super::models::STEPS.contains(&d)) || (d == "material" && s.get("smart").is_some())
     })
 }
 
@@ -481,7 +484,10 @@ fn material_step(a: &mut Asset, part: usize, sel: &mut Selection, s: &Value) -> 
         let l = super::models::linear_colour(c)?;
         def.lobes.emissive = Some([l[0], l[1], l[2]]);
     }
-    def.name = s.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| format!("{} {}", a.parts[part].name, slot + 1));
+    // Without a name the slot keeps the one it has ("Glass", "Handle"):
+    // "Body 3" lost what the slot was, and `check` then missed the part.
+    let existing = a.parts[part].materials.get(slot).filter(|n| !n.is_empty()).cloned().or_else(|| a.parts[part].mesh.materials.get(slot).map(|m| m.name.clone()).filter(|n| !n.is_empty()));
+    def.name = s.get("name").and_then(Value::as_str).map(str::to_owned).or(existing).unwrap_or_else(|| format!("{} {}", a.parts[part].name, slot + 1));
     let mut name = def.name.clone();
     let mut n = 2;
     while a.materials.iter().any(|m| m.name == name) && a.parts[part].materials.get(slot) != Some(&name) {

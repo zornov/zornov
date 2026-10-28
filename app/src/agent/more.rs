@@ -175,6 +175,7 @@ impl Session {
         }
         if let Some(Value::Object(ps)) = op.get("params") {
             for (k, v) in ps {
+                let k = &super::effect_param_name(&e.kind, k)?;
                 let path = format!("effect.{}.{k}", e.id.0);
                 let prop = super::props::Prop { name: k.clone(), paths: vec![path.clone()], conv: super::props::Conv::Raw };
                 let cur = super::props::value_or_default(&mc, &path);
@@ -240,7 +241,17 @@ impl Session {
         let id = self.doc.alloc_id() as u32;
         let rgba = m::Rgba { r: k.r() as f64 / 255.0, g: k.g() as f64 / 255.0, b: k.b() as f64 / 255.0, a: 1.0 };
         // With width / height (pixels) it is a box, not the whole frame.
-        let g = match (f(op, "width"), f(op, "height")) {
+        // A gradient fills the frame: a box the frame's size is the frame;
+        // a smaller one can't take it (it was dropped without a word).
+        let (pw, ph) = (self.doc.project.width as f64, self.doc.project.height as f64);
+        let size = match (f(op, "width"), f(op, "height")) {
+            (w, h) if op.get("gradient").is_some() && w.is_none_or(|w| w >= pw) && h.is_none_or(|h| h >= ph) => (None, None),
+            (w, h) if op.get("gradient").is_some() && (w.is_some() || h.is_some()) => {
+                return Err(format!("a card's gradient fills the whole frame: leave out width and height (or make them {pw} x {ph}); a box with a gradient is a `shape` with a gradient fill or vector art"));
+            }
+            wh => wh,
+        };
+        let g = match size {
             (None, None) => {
                 // A gradient over the whole frame (a backdrop that is not
                 // flat), or one colour.

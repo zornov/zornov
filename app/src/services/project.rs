@@ -111,6 +111,22 @@ fn restore_history(doc: &mut Doc, folder: &m::file::ProjectFolder) {
     }
 }
 
+/// Superseded model files go, at most every few minutes (it reads the
+/// history and versions to see what is still referred to).
+fn prune_models(doc: &Doc, root: &Path) {
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if last.is_some_and(|t| t.elapsed().as_secs() < 300) {
+        return;
+    }
+    *last = Some(std::time::Instant::now());
+    let history = serde_json::to_string(&doc.history.snapshot()).unwrap_or_default();
+    // Without the history in words nothing can be shown unused.
+    if !history.is_empty() {
+        crate::mesh_store::prune(root, &history);
+    }
+}
+
 /// Save to the document's folder, or create `dir` as its folder first.
 /// Returns the folder.
 pub fn save(doc: &mut Doc, dir: Option<&Path>) -> Result<PathBuf, String> {
@@ -123,6 +139,7 @@ pub fn save(doc: &mut Doc, dir: Option<&Path>) -> Result<PathBuf, String> {
     doc.history.mark_saved();
     keep_history(doc, &folder);
     let root = folder.root().to_path_buf();
+    prune_models(doc, &root);
     doc.folder = Some(folder);
     Ok(root)
 }

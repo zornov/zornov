@@ -108,7 +108,13 @@ fn names(table: &[(&str, &[&str])]) -> String {
 }
 
 fn number(key: &str, v: &Value, lo: f64, hi: f64, what: &str) -> Result<f64, String> {
-    let x = v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| format!("{key} is a number ({what}); you gave {v}"))?;
+    let x = match v {
+        Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        v => v.as_f64(),
+    }
+    .filter(|x| x.is_finite())
+    .ok_or_else(|| format!("{key} is a number ({what}); you gave {v}"))?;
     if x < lo || x > hi {
         return Err(format!("{key} {x} is out of range ({what}): write a value from {lo} to {hi}"));
     }
@@ -159,7 +165,7 @@ pub(super) fn set_light_look(op: &Value, p: &mut m::ParamMap, kind: m::LightKind
     scalar(p, "flicker", range("flicker", 0.0, 1.0, "how unsteady the light is: 0.15 a bulb, 0.35 a candle or fire, 0.6 a failing tube; 0 removes it")?);
     scalar(p, "flicker_speed", range("flicker_speed", 0.1, 30.0, "flicker rate in Hz: 6 to 9 for fire")?);
     if let Some(b) = op.get("flame") {
-        let on = b.as_bool().ok_or("flame is true or false: true draws this light as a flame (set flame_height in metres: candle 0.05, torch 0.3, campfire 0.8, bonfire 2.5)")?;
+        let on = b.as_bool().or_else(|| b.as_f64().map(|x| x > 0.0)).ok_or("flame is true or false: true draws this light as a flame (set flame_height in metres: candle 0.05, torch 0.3, campfire 0.8, bonfire 2.5)")?;
         if on {
             put(p, "flame", m::Value::Bool(true));
         } else {
