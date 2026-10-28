@@ -111,7 +111,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.99.1"
       - run: cargo xtask assets-check
 
   windows:
@@ -127,7 +127,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.99.1"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         # One cache per job, saved by main only: pull requests restore it
         # without writing their own, which would push main's out of the 10 GB.
