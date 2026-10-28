@@ -174,6 +174,49 @@ always in the same units:
   `reversed`, `enabled`, `flip` (mirror left-right: true/false; `flip_y`
   upside down), `text`, `style`, `text_size`, `colour`, `name`
 
+## Frames: where and when
+
+Every number has a frame. Getting the frame wrong is the commonest silent
+mistake: the value is accepted and lands somewhere else.
+
+**Space.**
+
+| What | Frame | Units |
+|---|---|---|
+| `x`, `y` of clips, `pick`, `canvas_layout`, comment `region` | the canvas, origin at its centre, y down | px |
+| `z`, `position` [x, y, z], `look_at`, lights, cameras, `viewport` | the 3D scene: canvas centre, y down, z away from the default camera | px |
+| `walk`, `stand`, `world_info`, `build_world` routes | a built world | metres, [x, z] on the ground |
+| `act` `route` / `to` / `by` | the ground under a 3D character | canvas px, [x, z] |
+| 3D `rig` bone heads and tails, `mesh` points, `pose` `reach` | the model's own space before its clip's transform | the model's px |
+| 2D `puppet` / `rig` pins | the layer's own picture | 0..1 across and down, so pins follow a moved, scaled or flipped layer |
+| `picture` ops | the picture | px from the top left |
+| `frame` `region`, `see` / `objects` boxes, `inpaint` `region` | the frame or picture | fractions 0..1 from the top left |
+| `viewport` `pick` / `dolly` `x`, `y` | the view | 0..1 across and down |
+
+`scale`, `opacity`, `crop_*`, `scale_z`, light `intensity` are percent
+(100 = as is); `rotation*` degrees; `volume` dB; `pan` −100…100; material
+finishes (`metallic`, `roughness`, `wetness`) 0..1. An opacity of 0.8 is
+0.8 %, nearly invisible: `animate` refuses keys that are all 0..1.
+
+**Time.**
+
+| What | Counts from | Note |
+|---|---|---|
+| `at`, `t`, `start`, `from`, `to`, `ends_at`, markers, `frame`, `see`, `inspect` `at` | the timeline's start | seconds |
+| keys: `animate` / `keys` / `keyframe` `time`, `puppet` / `pose` keys, `wiggle` `from` / `to` | the clip's own start | `"timeline": true` takes timeline seconds |
+| `pulse` `at` (beats) | the timeline | beats from `listen` / `analyse` go in as they are |
+| `act` `at` | the clip's own start | |
+| `source_in`, `source_out`, `frame` / `contact_sheet` with `media` | the media file's start | seconds into the file |
+
+A clip running 5..8 s on the timeline keyed at `[[0.5, 0], [2.5, 100]]`
+fades in from 5.5 s to 7.5 s; the same with `"timeline": true` is
+`[[5.5, 0], [7.5, 100]]`. A key outside the clip is refused with both
+readings.
+
+**Order.** A lane higher in `summary` draws over the lanes below it, 2D and
+3D alike: put a title lane above the 3D lane (`lane` `move` with `above`),
+or a 3D model covers a card under it. `restack` orders clips on one lane.
+
 ## Motion
 
 `animate` keys any property above, in the same units, and gives you the

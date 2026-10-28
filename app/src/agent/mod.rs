@@ -38,6 +38,8 @@ mod production;
 pub use production::story_of;
 pub use story::script_context;
 mod props;
+mod policy;
+mod inspect_rig;
 mod repeat;
 mod stagger;
 mod drivers;
@@ -193,6 +195,8 @@ mod deliver_tools;
 pub(crate) use deliver_tools::bundle_for_job;
 #[cfg(test)]
 mod fix_tests;
+#[cfg(test)]
+mod api_tests;
 #[cfg(all(test, not(feature = "commerce")))]
 mod commerce_off;
 
@@ -219,6 +223,32 @@ const TOOL_REFERENCE: &str = concat!(include_str!("tool_reference.md"), "\n", in
 pub const GUIDE_CORE: &str = include_str!("guide_core.md");
 /// How to build, dress and give props to a 3D figure (`guide {"topic": "wardrobe"}`).
 pub const GUIDE_CHARACTER: &str = include_str!("guide_character.md");
+
+/// " (did you mean …?)" for an op name that is not one.
+fn op_hint(name: &str) -> String {
+    let guess = match name {
+        "keyframes" | "key" | "tween" => Some("animate"),
+        "position" | "opacity" | "scale" | "rotate" | "transform" => Some("set"),
+        "fade" | "fade_in" | "fade_out" | "volume" => Some("audio"),
+        "text3d" | "title_3d" | "3d_text" => Some("text_3d"),
+        "image" | "video" | "clip" | "media" | "footage" => Some("place"),
+        "remove" | "cut" => Some("delete"),
+        "loop" => Some("repeat"),
+        _ => None,
+    };
+    guess.or_else(|| args::closest(name, &field_docs::all_ops())).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default()
+}
+
+/// " Example: {…}" from the guides for an op whose call was refused.
+fn example_hint(op: &str, error: &str) -> String {
+    if error.contains("e.g.") || error.contains("Example") {
+        return String::new();
+    }
+    match field_docs::example(op).map(|e| e.to_string()).filter(|e| e.len() <= 320) {
+        Some(e) => format!(" Example: {e}"),
+        None => String::new(),
+    }
+}
 
 /// One section of the full guide, by topic word.
 fn guide_topic(topic: &str) -> Result<String, String> {
@@ -248,6 +278,7 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
         "model" | "project" | "lanes" => "## How a project is built",
         "clips" | "references" => "## Talking about clips",
         "properties" | "units" => "## Properties: one vocabulary",
+        "frame_of_reference" | "coordinates" | "coordinate_frames" | "coordinate frames" | "time_base" | "timebase" | "where and when" => "## Frames: where and when",
         "motion" | "animation" | "text" | "made" | "merge" => "## Motion",
         "ops" | "edit" => "## Ops for `edit`",
         "context" | "tokens" => "## Keeping your context small",
@@ -267,7 +298,15 @@ fn guide_topic_with(topic: &str, part: Option<&str>, full: bool) -> Result<Strin
             if args::op_fields(op).is_some() && craft_book::topic(other).is_none() {
                 return Ok(op_topic(op));
             }
-            return craft_book::topic(other).or_else(|| section_by_heading(other)).ok_or_else(|| format!("no guide topic \"{other}\"; topics: senses, model, clips, properties, motion, ops, context, habits, shell, all; the craft book: craft (all of it), {}; how to do a kind of work: the skills ({}), `skill {{name}}`", craft_book::names(), skills::names()));
+            return craft_book::topic(other).or_else(|| section_by_heading(other)).ok_or_else(|| {
+                // Topics, ops and skills: the nearest is named.
+                let mut known: Vec<&str> = vec!["senses", "model", "clips", "properties", "coordinates", "motion", "ops", "context", "habits", "shell", "tools"];
+                known.extend(field_docs::all_ops());
+                let skill_names = skills::names();
+                known.extend(skill_names.split(", "));
+                let hint = args::closest(other, &known).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
+                format!("no guide topic \"{other}\"{hint}; topics: senses, model, clips, properties, coordinates, motion, ops, context, habits, shell, tools, all; any edit op by name (`act`, `build_world`); `capabilities {{query}}` finds what does a job; the craft book: craft (all of it), {}; how to do a kind of work: the skills ({}), `skill {{name}}`", craft_book::names(), skill_names)
+            });
         }
     };
     let start = GUIDE.find(heading).ok_or("that section is missing")?;
@@ -793,6 +832,51 @@ impl Session {
         }
     }
 
+    /// `frame` / `contact_sheet` with `solo`: only those clips drawn (with
+    /// the cameras and lights they are seen by), everything else switched
+    /// off for the look and put back after. Nothing is changed.
+    fn solo_look(&mut self, tool: &str, a: &Value) -> Result<Vec<Content>, String> {
+        let keep = ids(a, "solo");
+        if keep.is_empty() {
+            return Err("solo is a clip id or a list of them, e.g. \"solo\": [12, 14]".into());
+        }
+        if let Some(gone) = keep.iter().find(|id| self.doc.project.clip(**id).is_none()) {
+            return Err(format!("solo: no clip {gone}; summary lists the clips"));
+        }
+        let seq = self.doc.seq();
+        let others: Vec<m::Clip> = self
+            .doc
+            .project
+            .clips
+            .iter()
+            .filter(|c| c.kind != ClipKind::Audio && !keep.contains(&c.id))
+            .filter_map(|c| self.model_clip(c.id))
+            .filter(|mc| mc.enabled && !mc.is_camera_or_light())
+            .collect();
+        let mut b = a.clone();
+        if let Some(o) = b.as_object_mut() {
+            o.remove("solo");
+            if tool == "frame" {
+                o.insert("force".into(), json!(true));
+            }
+        }
+        self.doc.begin_batch("Solo");
+        for mut mc in others {
+            mc.enabled = false;
+            self.doc.apply("Solo", m::Edit::SetClip { seq, clip: Box::new(mc) });
+        }
+        let r = self.call_tool(tool, &b);
+        self.doc.rollback_batch();
+        let mut parts = r?;
+        parts.push(Content::Text(json!({"solo": keep, "note": "only these clips (and the cameras and lights) were drawn; nothing was changed"}).to_string()));
+        Ok(parts)
+    }
+
+    /// The folder the project's policy is kept in.
+    fn policy_home(&self) -> Option<PathBuf> {
+        self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()))
+    }
+
     fn run_inner(&mut self, tool: &str, a: &Value) -> Result<Vec<Content>, String> {
         let home = self.home.clone();
         props::set_canvas(self.doc.project.width as f64, self.doc.project.height as f64);
@@ -814,6 +898,13 @@ impl Session {
         }
         if tool != "edit" {
             select::resolve_refs(&self.doc.project, &[], &mut a)?;
+        }
+        // The project's policy, enforced here whatever the prompt said.
+        if let Some(what) = policy::generative(tool, &a) {
+            let home = self.policy_home();
+            if policy::generation_off(home.as_deref()) {
+                return Err(policy::refusal(&what, home.as_deref()));
+            }
         }
         let models_before = self.model_files();
         let mut r = self.call(tool, &a);
@@ -873,6 +964,44 @@ impl Session {
             "media_count": p.media.len(),
             "can_undo": self.doc.can_undo(),
         })
+    }
+
+    /// `summary` narrowed to a lane, a stretch of time or a kind, and
+    /// capped (a 3D world listed hundreds of clips on every read). Each
+    /// lane says how many clips it holds, so the narrowing can be chosen.
+    fn scope_summary(&self, v: &mut Value, a: &Value) -> Result<(), String> {
+        const SHOWN: usize = 80;
+        let lane = match a.get("lane") {
+            Some(l) => Some(craft::lane_of(&self.doc.project, l, None)? as u64),
+            None => None,
+        };
+        let (from, to) = (f(a, "from"), f(a, "to"));
+        let kind = a.get("kind").and_then(Value::as_str).map(str::to_lowercase);
+        let limit = a.get("limit").and_then(Value::as_u64).map_or(SHOWN, |n| n.clamp(1, 2_000) as usize);
+        let clips = v["clips"].as_array().cloned().unwrap_or_default();
+        let mut counts: BTreeMap<u64, usize> = BTreeMap::new();
+        for c in &clips {
+            *counts.entry(c["lane"].as_u64().unwrap_or(0)).or_default() += 1;
+        }
+        if let Some(lanes) = v["lanes"].as_array_mut() {
+            for l in lanes {
+                l["clips"] = json!(counts.get(&l["id"].as_u64().unwrap_or(0)).copied().unwrap_or(0));
+            }
+        }
+        let num = |c: &Value, k: &str| c.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+        let kept: Vec<Value> = clips
+            .into_iter()
+            .filter(|c| lane.is_none_or(|l| c["lane"].as_u64() == Some(l)))
+            .filter(|c| from.is_none_or(|t| num(c, "start") + num(c, "dur") > t))
+            .filter(|c| to.is_none_or(|t| num(c, "start") < t))
+            .filter(|c| kind.as_deref().is_none_or(|k| c["kind"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(k))))
+            .collect();
+        let total = kept.len();
+        v["clips"] = json!(kept.into_iter().take(limit).collect::<Vec<_>>());
+        if total > limit {
+            v["more"] = json!(format!("{} more clips not listed ({total} match): narrow with lane, from / to or kind, or raise limit", total - limit));
+        }
+        Ok(())
     }
 
     fn clip_line(&self, c: &view::Clip) -> Value {
@@ -1176,7 +1305,7 @@ impl Session {
                 if let Some(allowed) = args::op_fields(&name) {
                     if let Err(e) = args::normalise(&name, &format!("op {} ({name})", i + 1), &mut op, allowed) {
                         self.doc.rollback_batch();
-                        return Err(format!("{e}. Nothing was changed."));
+                        return Err(format!("{e}. Nothing was changed.{}", example_hint(&name, &e)));
                     }
                 }
             }
@@ -1234,7 +1363,7 @@ impl Session {
                 Err(e) => {
                     self.doc.rollback_batch();
                     let name = op.get("op").and_then(Value::as_str).unwrap_or("?");
-                    return Err(format!("op {} ({name}) failed: {}. Nothing was changed.", i + 1, e.trim_end_matches('.')));
+                    return Err(format!("op {} ({name}) failed: {}. Nothing was changed.{}", i + 1, e.trim_end_matches('.'), example_hint(name, &e)));
                 }
             }
         }
@@ -1250,7 +1379,11 @@ impl Session {
         if cuts.as_object().is_some_and(|o| o.values().any(|v| v.as_array().is_some_and(|a| !a.is_empty()))) {
             changed["transitions"] = cuts;
         }
-        Ok(json!({"ok": true, "revision": self.doc.history.revision(), "changed": changed, "notes": notes, "read_back": self.read_back(&named, &prints, &made), "duration": secs(self.doc.project.duration())}))
+        let mut read_back = self.read_back(&named, &prints, &made);
+        if let Some(side) = self.side_effects(&before, &named, &made) {
+            read_back["side_effects"] = side;
+        }
+        Ok(json!({"ok": true, "revision": self.doc.history.revision(), "changed": changed, "notes": notes, "read_back": read_back, "duration": secs(self.doc.project.duration())}))
     }
 
     fn cut_lines(&self) -> Vec<Value> {
@@ -1360,9 +1493,19 @@ impl Session {
                     return Err("delete needs \"clips\"".into());
                 }
                 let cl: Vec<m::ClipId> = clips.iter().map(|&c| m::ClipId(c as u64)).collect();
-                let ripple = op.get("ripple").and_then(Value::as_bool).unwrap_or(true);
+                // The magnetic main lane closes the gap; on other lanes a
+                // delete lifts (a ripple there slid every later sound effect
+                // or overlay out of sync, unasked). `ripple` says otherwise.
+                let spine = self.doc.project.spine();
+                let all_main = clips.iter().all(|&c| self.doc.project.clip(c).is_some_and(|x| Some(x.lane) == spine));
+                let ripple = op.get("ripple").and_then(Value::as_bool).unwrap_or(all_main);
                 let ok = if ripple { self.doc.apply("Delete", m::Edit::RippleDelete { seq, clips: cl }) } else { self.doc.apply("Delete", m::Edit::Lift { seq, clips: cl }) };
-                self.check(ok, &format!("deleted {} clip(s)", clips.len()))
+                let how = match (ripple, op.get("ripple").is_some()) {
+                    (false, false) => " (lifted: off the main lane the gap stays; ripple: true closes it)",
+                    (true, false) => " (the main lane closed the gap)",
+                    _ => "",
+                };
+                self.check(ok, &format!("deleted {} clip(s){how}", clips.len()))
             }
             // Without the linked picture or sound (linked selection off).
             "move" if op.get("linked") == Some(&json!(false)) => self.editorial("move", op),
@@ -1863,9 +2006,26 @@ impl Session {
                 let property = op.get("property").and_then(Value::as_str).ok_or("keyframe needs \"property\"")?.to_owned();
                 let t = f(op, "time").ok_or("keyframe needs \"time\" (seconds into the clip)")?;
                 let value = f(op, "value").ok_or("keyframe needs a numeric \"value\" (a number, or a string holding one)")?;
-                let key = m::Keyframe::new(micros(t), m::Value::Scalar(value), m::Interp::Ease);
-                let ok = self.doc.apply("Keyframe", m::Edit::SetKeyframe { seq, clip: m::ClipId(id), property, key });
-                self.check(ok, "keyframe set")
+                let mc = self.model_clip(id as u32).ok_or_else(|| format!("no clip {id}"))?;
+                // A model path the clip has (transform.opacity, effect.12.amount)
+                // is keyed as it is, in the model's own units, as before.
+                if mc.get_property(&property).is_some() || mc.keyframes.contains_key(&property) {
+                    let key = m::Keyframe::new(micros(t), m::Value::Scalar(value), m::Interp::Ease);
+                    let ok = self.doc.apply("Keyframe", m::Edit::SetKeyframe { seq, clip: m::ClipId(id), property, key });
+                    return self.check(ok, "keyframe set");
+                }
+                // Anything else is a friendly name (scale, opacity, x, rotation,
+                // zoom_blur.amount) in the units `set` and `animate` take:
+                // keyframe used to say "Not found: property `scale`".
+                let prop = props::resolve(&mc, &property)?;
+                for path in &prop.paths {
+                    let now = props::value_or_default(&mc, path);
+                    let v = props::to_model(&prop, path, &json!(value), now.as_ref())?;
+                    let key = m::Keyframe::new(micros(t), v, m::Interp::Ease);
+                    let ok = self.doc.apply("Keyframe", m::Edit::SetKeyframe { seq, clip: m::ClipId(id), property: path.clone(), key });
+                    self.check(ok, "")?;
+                }
+                Ok(format!("keyframe set: {} = {value} at {t}s into clip {id}", prop.name))
             }
             "marker" => self.marker(op),
             "place" => self.place(op),
@@ -2030,7 +2190,7 @@ impl Session {
                 let ok = self.doc.apply("Edit", edit);
                 self.check(ok, "applied")
             }
-            other => Err(format!("unknown op \"{other}\"; ops are place, split, trim, delete, move, set, animate, keys, transition, lane, effect, card, sfx, motion, merge, unmerge, flatten, unflatten, align, distribute, parent, matte, restack, audio, use_move, use_design, stagger, modifier, physics, driver, expression, time_remap, shape, text_3d, template, chart, mask, particles, living, puppet, mask_puppet, corner_pin, three_d, camera, light, parallax, shot, lighting, previs, roll, slide, duplicate, freeze, replace, reorder, group, ungroup, link, copy_look, apply, add, text, fx_layer, detach_audio, unlink, slip, reframe, keyframe, marker, model, mesh, asset, build_place, combine, uncombine, rig, wear, hold, pose, act, simulate, body, joint, drop, throw, push, break, settle, ragdoll, jiggle, bake_physics, physics_world, world, render3d, build_world, edit_world, walk, stand, world_info, shadow, light_match, foreground, raw")),
+            other => Err(format!("unknown op \"{other}\"{}; ops are place, split, trim, delete, move, set, animate, keys, transition, lane, effect, card, sfx, motion, merge, unmerge, flatten, unflatten, align, distribute, parent, matte, restack, audio, use_move, use_design, stagger, modifier, physics, driver, expression, time_remap, shape, text_3d, template, chart, mask, particles, living, puppet, mask_puppet, corner_pin, three_d, camera, light, parallax, shot, lighting, previs, roll, slide, duplicate, freeze, replace, reorder, group, ungroup, link, copy_look, apply, add, text, fx_layer, detach_audio, unlink, slip, reframe, keyframe, marker, model, mesh, asset, build_place, combine, uncombine, rig, wear, hold, pose, act, simulate, body, joint, drop, throw, push, break, settle, ragdoll, jiggle, bake_physics, physics_world, world, render3d, build_world, edit_world, walk, stand, world_info, shadow, light_match, foreground, raw", op_hint(other))),
         }
     }
 
@@ -2084,8 +2244,27 @@ impl Session {
 
     fn call_tool(&mut self, tool: &str, a: &Value) -> Result<Vec<Content>, String> {
         let text = |v: Value| Ok(vec![Content::Text(v.to_string())]);
+        // `every`: a sheet of moments that many seconds apart (the skills
+        // taught it before the sheet had it).
+        if tool == "contact_sheet" && a.get("times").is_none() && let Some(step) = f(a, "every") {
+            let step = step.max(1.0 / 60.0);
+            let end_all = if a.get("media").is_some() { f64::INFINITY } else { secs(self.doc.project.duration()) };
+            let start = f(a, "start").unwrap_or(0.0);
+            let end = f(a, "end").unwrap_or(start + step * 23.0).min(end_all);
+            let times: Vec<f64> = (0..48).map(|i| ((start + step * i as f64) * 1000.0).round() / 1000.0).take_while(|t| *t <= end + 1e-9).collect();
+            let mut b = a.clone();
+            if let Some(o) = b.as_object_mut() {
+                o.remove("every");
+                o.insert("times".into(), json!(times));
+            }
+            return self.call_tool(tool, &b);
+        }
+        if matches!(tool, "frame" | "contact_sheet") && a.get("solo").is_some_and(|v| !v.is_null()) {
+            return self.solo_look(tool, a);
+        }
         match tool {
             "capabilities" => Ok(vec![Content::Text(capabilities::tool(a)?)]),
+            "policy" => Ok(vec![Content::Text(policy::tool(self.policy_home().as_deref(), a)?)]),
             "fonts" => fonts::tool(a),
             "parts_check" => self.parts_check(a),
             "taste" => Ok(vec![Content::Text(taste::tool(self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf())).as_deref(), a)?)]),
@@ -2141,7 +2320,13 @@ impl Session {
                 }
                 let added = self.take_accepts(a)?;
                 let frames = a.get("frames").and_then(Value::as_bool).unwrap_or(true);
+                let began = std::time::Instant::now();
                 let mut v = self.quality(frames);
+                let took = began.elapsed().as_secs_f64();
+                v["took_seconds"] = json!((took * 10.0).round() / 10.0);
+                if frames && took > 20.0 {
+                    v["faster"] = json!("frames: false checks the timeline without looking (seconds, not minutes) while you build; look once more with frames before you finish");
+                }
                 // With fix: Studio mends what it can, then looks again.
                 if a.get("fix").and_then(Value::as_bool).unwrap_or(false) {
                     let probs = v["problems"].as_array().cloned().unwrap_or_default();
@@ -2200,7 +2385,9 @@ impl Session {
                 Some(rev) => text(self.summary_since(rev)),
                 None => {
                     self.snapshot();
-                    text(self.summary())
+                    let mut v = self.summary();
+                    self.scope_summary(&mut v, a)?;
+                    text(v)
                 }
             },
             "inspect" => {
@@ -2231,7 +2418,16 @@ impl Session {
                 if let Some(links) = self.links(id as u64) {
                     v["links"] = links;
                 }
-                // Where the bones, soles, hands and gaze of a rigged character are.
+                // The skeleton itself: bones, constraints, skin.
+                let asks_rig = |k: &str| match a.get(k) {
+                    Some(Value::String(w)) => w.to_lowercase().split(',').any(|x| x.trim() == "rig"),
+                    Some(Value::Array(l)) => l.iter().any(|x| x.as_str().is_some_and(|w| w.eq_ignore_ascii_case("rig"))),
+                    _ => false,
+                };
+                if asks_rig("what") || a.get("rig").and_then(Value::as_bool) == Some(true) {
+                    v["rig"] = self.rig_section(id);
+                }
+                                // Where the bones, soles, hands and gaze of a rigged character are.
                 if a.get("pose").is_some_and(|p| !matches!(p, Value::Bool(false) | Value::Null)) || a.get("bones").is_some() {
                     let mut ask = a.clone();
                     if ask.get("pose").is_none() {
@@ -2800,13 +2996,22 @@ impl Session {
                     // MCP clients drop a request after about a minute; a long
                     // render answers before that with a job to poll.
                     let limit = std::time::Duration::from_secs_f64(45.0);
-                    let Some(event) = job.wait_for(limit) else {
+                    // A render that will plainly take long answers after a
+                    // few seconds instead of holding every other call for 45
+                    // (an agent sat 166 s in one export).
+                    let peek = std::time::Duration::from_secs(4);
+                    let event = match job.wait_for(peek) {
+                        Some(e) => Some(e),
+                        None if job.eta_secs().is_some_and(|e| e > 30.0) => None,
+                        None => job.wait_for(limit - peek),
+                    };
+                    let Some(event) = event else {
                         let id = self.next_export;
                         self.next_export += 1;
                         let progress = job.fraction();
                         let eta = job.eta_secs();
                         self.exports.push((id, job));
-                        return text(json!({"export": id, "still_rendering": true, "progress": progress, "eta_secs": eta, "path": path.display().to_string(), "rights": rights, "next": format!("the render goes on in the background; call export_status {{\"export\": {id}}} until it says done")}));
+                        return text(json!({"export": id, "still_rendering": true, "progress": progress, "eta_secs": eta, "path": path.display().to_string(), "rights": rights, "next": format!("the render goes on in the background while you keep working; export_status {{\"export\": {id}}} says when it is done. For a long render, export {{\"wait\": false}} answers at once")}));
                     };
                     return match event {
                         services::export::Event::Finished { path } => {

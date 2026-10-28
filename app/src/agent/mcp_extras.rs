@@ -33,6 +33,14 @@ use std::time::Duration;
 const SUMMARY: &str = "studio://project/summary";
 const MEDIA: &str = "studio://project/media";
 
+/// Tools that can take minutes in the foreground: with a progress token
+/// their stages are sent as progress while they run.
+const LONG: &[&str] = &["check", "review", "qc", "see", "objects", "listen", "analyse", "deliver", "bundle", "cutdown", "enhance", "download", "edit"];
+
+/// The longest an export with progress holds the server before it answers
+/// with the export to poll.
+const PROGRESS_HOLD: Duration = Duration::from_secs(60);
+
 #[derive(Default)]
 pub struct Link {
     subscribed: BTreeSet<String>,
@@ -51,12 +59,9 @@ pub fn serve_stdio(mut session: Session) {
         Err(e) => eprintln!("zornov mcp: no live tap: {e}"),
     }
     let stdin = std::io::stdin();
-    let out = std::cell::RefCell::new(std::io::stdout().lock());
-    let mut send = |v: &Value| {
-        let mut o = out.borrow_mut();
-        let _ = writeln!(o, "{v}");
-        let _ = o.flush();
-    };
+    // Locked per line, not for the whole session: progress for a long call
+    // is written from its own thread while the call runs.
+    let mut send = |v: &Value| write_line(v);
     for line in stdin.lock().lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
@@ -77,6 +82,49 @@ pub fn serve_stdio(mut session: Session) {
             Err(e) => send(&json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": format!("parse error: {e}")}})),
         }
     }
+}
+
+/// One JSON-RPC line on stdout, whole.
+fn write_line(v: &Value) {
+    let mut o = std::io::stdout().lock();
+    let _ = writeln!(o, "{v}");
+    let _ = o.flush();
+}
+
+/// Runs `call` with a progress the tools report into (`jobs::report`)
+/// and, while it runs, sends `notifications/progress` for `token` when the
+/// stage moves on, or every ten seconds with the time so far, so a client
+/// sees that a minutes-long `check` or `review` is alive and where it is.
+fn with_progress<T>(token: &Value, send: impl Fn(&Value) + Send + 'static, call: impl FnOnce() -> T) -> T {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let progress = Arc::new(super::jobs::Progress::default());
+    super::jobs::install(progress.clone());
+    let done = Arc::new(AtomicBool::new(false));
+    let watcher = {
+        let (progress, done, token) = (progress.clone(), done.clone(), token.clone());
+        std::thread::spawn(move || {
+            let begun = std::time::Instant::now();
+            let (mut last_msg, mut last_at, mut sent) = (String::new(), begun, 0.0_f64);
+            while !done.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(250));
+                let (fraction, msg) = progress.get();
+                if msg == last_msg && last_at.elapsed() < Duration::from_secs(10) {
+                    continue;
+                }
+                // MCP wants progress to grow: the fraction when known, else a step.
+                sent = ((fraction as f64 * 100.0).round()).max(sent + 0.1);
+                let message = format!("{}{:.0} s", if msg.is_empty() { String::new() } else { format!("{msg}, ") }, begun.elapsed().as_secs_f64());
+                send(&json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": sent, "total": 100, "message": message}}));
+                (last_msg, last_at) = (msg, std::time::Instant::now());
+            }
+        })
+    };
+    let r = call();
+    done.store(true, Ordering::SeqCst);
+    let _ = watcher.join();
+    super::jobs::install(Arc::new(super::jobs::Progress::default()));
+    r
 }
 
 fn reply(id: &Value, result: Value) -> Value {
@@ -134,6 +182,8 @@ pub fn answer(session: &mut Session, link: &mut Link, msg: &Value, notify: &mut 
             let token = params["_meta"]["progressToken"].clone();
             let r = if name == "export" && !token.is_null() && args.get("wait").and_then(Value::as_bool) != Some(false) {
                 super::guard::run(&name, || export_with_progress(session, &args, &token, notify))
+            } else if !token.is_null() && LONG.contains(&name.as_str()) {
+                with_progress(&token, write_line, || super::guard::run(&name, || session.run(&name, &args)))
             } else {
                 super::guard::run(&name, || session.run(&name, &args))
             };
@@ -180,6 +230,11 @@ fn export_with_progress(session: &mut Session, args: &Value, token: &Value, noti
         if st["done"] == json!(true) {
             let took = (begun.elapsed().as_secs_f64() * 10.0).round() / 10.0;
             return Ok(vec![super::Content::Text(json!({"ok": true, "path": st["path"], "took_seconds": took, "next": "qc {\"path\": …} checks the file (levels, flashes, black, frozen frames, sound)"}).to_string())]);
+        }
+        // This server answers one call at a time: past a minute the agent
+        // gets the export back to poll, so it can keep working meanwhile.
+        if begun.elapsed() > PROGRESS_HOLD {
+            return Ok(vec![super::Content::Text(json!({"export": id, "still_rendering": true, "progress": st["progress"], "eta_secs": st["eta_secs"], "next": format!("the render goes on in the background; export_status {{\"export\": {id}}} says when it is done (export {{\"wait\": false}} answers at once)")}).to_string())]);
         }
         if let Some(why) = st["failed"].as_str() {
             return Err(format!("export failed: {why}"));

@@ -22,4 +22,4 @@ Zornov is a video editor you drive with tools. The capability map above lists ev
 
 **Report what is true.** Three parts: verified by looking (seen in `frame` or `contact_sheet`), applied but not looked at, and failed or left out. Passing `check` and `review` means no fault was found, not that it looks good. Name every workaround for what it is ("a cross-fade, not a morph").
 
-**`guide` topics** (reference): senses model clips properties motion ops context habits shell tools craft.
+**`guide` topics**: senses model clips properties coordinates motion ops context habits shell tools craft.

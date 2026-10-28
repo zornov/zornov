@@ -111,6 +111,54 @@ impl Session {
         o
     }
 
+    /// What the edit did to clips no op named: removed, cut short, moved
+    /// or put on another lane by a ripple or an overwrite (a `move` and a
+    /// `duplicate` overwrote clips and nobody heard). Clips on the main
+    /// lane that only slid along by a ripple are counted, not listed.
+    /// `None` when nothing else was touched.
+    pub(super) fn side_effects(&self, before: &std::collections::BTreeMap<u32, Value>, named: &[(usize, String, Vec<u32>)], made: &[u32]) -> Option<Value> {
+        let mine: std::collections::HashSet<u32> = named.iter().flat_map(|(_, _, v)| v.iter().copied()).chain(made.iter().copied()).collect();
+        let spine = self.doc.project.spine();
+        let num = |v: &Value, k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+        let mut lines: Vec<String> = Vec::new();
+        let mut slid = 0usize;
+        for (&id, was) in before {
+            if mine.contains(&id) {
+                continue;
+            }
+            let label = format!("clip {id}{}", was.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).map(|n| format!(" ({n})")).unwrap_or_default());
+            let Some(c) = self.doc.project.clip(id) else {
+                lines.push(format!("{label} is gone: it was {:.2}..{:.2}s; an overwrite or ripple took it (undo brings it back)", num(was, "start"), num(was, "start") + num(was, "dur")));
+                continue;
+            };
+            let (s0, d0, s1, d1) = (num(was, "start"), num(was, "dur"), secs(c.start), secs(c.dur));
+            let lane_moved = was.get("lane").and_then(Value::as_u64).is_some_and(|l| l != c.lane as u64);
+            if (d1 - d0).abs() > 1e-3 {
+                lines.push(format!("{label} was cut from {:.2}s to {:.2}s long ({:.2}..{:.2}s now): another clip was laid over it", d0, d1, s1, s1 + d1));
+            } else if lane_moved {
+                lines.push(format!("{label} went to another lane"));
+            } else if (s1 - s0).abs() > 1e-3 {
+                if Some(c.lane) == spine {
+                    slid += 1;
+                } else {
+                    lines.push(format!("{label} moved from {:.2}s to {:.2}s (a ripple)", s0, s1));
+                }
+            }
+        }
+        if lines.is_empty() && slid == 0 {
+            return None;
+        }
+        let more = lines.len().saturating_sub(12);
+        lines.truncate(12);
+        if more > 0 {
+            lines.push(format!("{more} more clips no op named changed too (summary lists them)"));
+        }
+        if slid > 0 {
+            lines.push(format!("{slid} main-lane clip(s) slid along with the ripple, as the magnetic main lane does"));
+        }
+        Some(json!(lines))
+    }
+
     /// What the edit left on the timeline: each named or made clip read
     /// back, and the ops whose clip came out unchanged.
     pub(super) fn read_back(&self, named: &[(usize, String, Vec<u32>)], before: &HashMap<u32, Option<u64>>, made: &[u32]) -> Value {

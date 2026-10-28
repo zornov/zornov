@@ -5,7 +5,7 @@ topics: review, director, lifeless, viewer, repetition, repeated, honesty, hones
 tools: see, frame, contact_sheet, listen, check, review, script, summary, inspect, graph, scopes, notes, undo
 ---
 **Order**
-1. Look across the whole edit: `contact_sheet` for the film, `frame` at the middle of key moments (`every: 0.05` for fast moves, `detail: true` for small text and edges), `see` for a line a shot. Listen where sound matters: `listen {mix: true}`.
+1. Look across the whole edit: `contact_sheet` for the film, `frame` at the middle of key moments (`contact_sheet` with `every: 0.05` over fast moves, `detail: true` for small text and edges), `see` for a line a shot. Listen where sound matters: `listen {mix: true}`.
 2. `check`: gaps, clips past their footage, dark stretches, sound past the picture, clipping, loudness, titles cut off or unreadable, overdoing (`effects_piled`, `transition_every_cut`, `flash_overuse`, `strobing`, `sfx_overuse`, `too_many_fonts`, `palette_sprawl`). Fix each, then check again.
 3. `review`: watches the film as the audience will. Act on every note: one place held (`place_held`), even cuts, cuts mid-sentence or off the beat, gliding characters (`slides`), the same acting everywhere, a spoken thing not shown (`unshown`), no ambience, long still stretches, stiff or jittering motion, faked changes.
 4. Overdoing, frame by frame: one focal point; one or two effects per layer; one or two transition kinds, mostly straight cuts; two fonts; flashes only on the biggest hits; sound effects only where something lands; every line stays long enough to read; it works with the sound off.

@@ -419,7 +419,17 @@ impl Session {
         }
         for (t, _, _) in &keys {
             if *t < -1e-6 || *t > secs(c.dur) + 1e-3 {
-                return Err(format!("key time {:.3}s is outside the clip (0..{:.2}s from its start{})", t + offset, secs(c.dur), if offset > 0.0 { format!("; on the timeline {:.2}..{:.2}s", secs(c.start), secs(c.end())) } else { String::new() }));
+                // Key times count from the clip's start; a time that lands
+                // inside the clip on the timeline was almost surely meant so.
+                let on_timeline = offset == 0.0 && *t >= secs(c.start) - 1e-6 && *t <= secs(c.end()) + 1e-3;
+                let hint = if on_timeline {
+                    format!(". {:.3}s is inside the clip on the timeline ({:.2}..{:.2}s): add \"timeline\": true to give timeline times, or use {:.3}", t, secs(c.start), secs(c.end()), t - secs(c.start))
+                } else if offset == 0.0 {
+                    format!("; key times count from the clip's start (it runs {:.2}..{:.2}s on the timeline; \"timeline\": true takes timeline times)", secs(c.start), secs(c.end()))
+                } else {
+                    String::new()
+                };
+                return Err(format!("key time {:.3}s is outside the clip (0..{:.2}s from its start{}){hint}", t + offset, secs(c.dur), if offset > 0.0 { format!("; on the timeline {:.2}..{:.2}s", secs(c.start), secs(c.end())) } else { String::new() }));
             }
         }
         // Values as the model holds them.

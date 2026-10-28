@@ -255,7 +255,7 @@ pub fn tools() -> Vec<Value> {
         "description": "Procedure by `name` (+`part`). `do`: learn {name, lesson, kind}, confirm/forget {id}.",
         "inputSchema": {"type": "object", "properties": {
             "name": {"type": "string"}, "part": {"type": "string"}, "do": {"type": "string"},
-            "lesson": {"type": "string"}, "id": {"type": "integer"}
+            "lesson": {"type": "string"}, "kind": {"type": "string", "description": "learn: worked, fixed or correction"}, "skill": {"type": "string"}, "id": {"type": "integer"}
         }}
     })]
 }

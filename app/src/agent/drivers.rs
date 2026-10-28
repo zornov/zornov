@@ -34,7 +34,12 @@ fn target(mc: &m::Clip, name: &str) -> Result<Vec<(String, Option<usize>)>, Stri
         return Ok(vec![("transform.position".into(), None)]);
     }
     // A model path as it is (an effect or generator setting, a model
-    // layer's own settings).
+    // layer's own settings), in its own case first: bone names are
+    // `upper_arm.L`, and lower-casing them lost the side.
+    let exact = name.trim();
+    if exact.contains('.') && mc.get_property(exact).is_some() {
+        return Ok(vec![(exact.to_owned(), None)]);
+    }
     if n.contains('.') && mc.get_property(&n).is_some() {
         return Ok(vec![(n, None)]);
     }

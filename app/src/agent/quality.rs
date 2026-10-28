@@ -304,6 +304,7 @@ impl Session {
                 warn("motion_more", None, None, format!("{more} more moves jump or stall the same way"), "fix the ones above, then check again");
             }
         }
+        super::jobs::report(0.2, "check: craft and 3D");
         // Craft: hidden layers, blown-up footage, overdoing.
         for m in super::craft_check::problems(&self.doc.model, &p) {
             warn(m.kind, (m.at > 0.0 || m.clip != 0).then_some(m.at), (m.clip != 0).then_some(m.clip), m.problem, m.fix);
@@ -314,9 +315,11 @@ impl Session {
         }
         // Light, air and look: a lamp that shows nothing, blown or crushed
         // frames, a subject lost in its background.
+        super::jobs::report(0.35, "check: light and look");
         for m in self.look_problems(look) {
             warn(m.kind, (m.at > 0.0 || m.clip != 0).then_some(m.at), (m.clip != 0).then_some(m.clip), m.problem, &m.fix);
         }
+        super::jobs::report(0.5, "check: characters' performances");
         // Characters' performances: sliding feet, broken limbs, gazes that miss.
         for m in self.character_problems() {
             warn(m.kind, Some(m.at), Some(m.clip), m.problem, &m.fix);
@@ -350,6 +353,7 @@ impl Session {
             warn("picture_ends_early", Some(secs(picture_end)), None, format!("the picture ends at {:.2}s but {what} to {:.2}s (black screen)", secs(picture_end), secs(end)), &fix);
         }
 
+        super::jobs::report(0.6, "check: rendering frames to look at");
         // Everything below that is not cached yet, rendered at once in
         // parallel before the checks read it.
         #[cfg(feature = "render")]
@@ -445,6 +449,7 @@ impl Session {
             self.frames.clear_prefetch();
             self.memo_save();
         }
+        super::jobs::report(0.9, "check: facing, framing and staging");
         problems.extend(self.facing_problems());
         problems.extend(self.framing_problems());
         problems.extend(self.staging_problems_seen(look));

@@ -18,7 +18,7 @@ tools: search_media, model, mesh, asset, build_place, combine, uncombine, genera
 8. Edges and detail: bevel about 1 percent of the size with subdivide 1 on each part; detail last (boolean for vents, mirror, array).
 9. Moving parts: a `bone` with its hinge pivot per part, then `pose` and key the bone. A state change is a pose on the same model clip, never a second clip swapped in.
 10. Materials per part (layered names such as painted_metal, glass, wood, skin, or colour/metallic/roughness/transmission); `emissive` for anything that glows.
-11. Light and lens: `lighting` three-point with `shadows` on the key; `camera` with a slow `move` and `dof` on the model; `render3d {mode: "path"}` for finals. For mood, glowing lamps and flames, fog, rain and wet surfaces load `lighting-mood`. Characters: `rig` then `act`/`pose`; cloth, smoke, destruction: `simulate`; landscapes and skies: `world`.
+11. Light and lens: `lighting` three-point with `shadows` on the key; `camera` with a slow `move` and `dof` on the model; `render3d {mode: "path"}` for finals. For mood, glowing lamps and flames, fog, rain and wet surfaces load `lighting-mood`. Characters: `rig` then `act`/`pose` (a walk from A to B is ONE `act` with `motion: "walk"` and a `route` of ground points `[x, z]`: the gait turns and plants its feet, never a slide keyed on x); cloth, hair, smoke, fire, water, destruction: `simulate {kind}`, baked and played back; landscapes and skies: `world`. An implicit or fractal shape that the camera comes close to: `model` `math` with `render: "direct"` (exact at any distance, live with `t`).
 12. Compare against the references from front, side and three-quarter views; fix proportions first, then run `check` and `review` and fix every `3d_` note.
 
 **Checks**
@@ -324,7 +324,7 @@ shape keys already made. Any other model can be rigged with `rig`.
 | `rig` | `clip`; `template` (humanoid, quadruped, chain with `count` + `start`), or `bones` (`[{"name", "parent", "head", "tail"}]`, model px); `face` (shape keys on a head base); `constraint` (`{"kind": "ik", "bone", "chain", "target", "pole"}`, `look_at`, `limit` with `min`/`max` degrees, `copy_rotation` with `from`); `skinning` (`linear`, or `dual_quaternion`: twisted forearms and bent knees keep their volume instead of pinching); `remove`; `list` | bones fitted to the model and the skin bound automatically (each vertex to the bones it can see, smoothed at the joints); or the rig in words |
 | `rig` with `rigid`: true | `bones` as above | each separate piece of the model follows the one bone nearest its middle, whole, with no blending: a lid on its hinge bone, a wheel on its axle; use it for hard objects, the default smooth skin for bodies |
 | `pose` | `clip`, `keys` (`[{"t", "bones", "shapes", "reach", "look_at", "ease"}]`) or one pose's fields with `t`; `ease` smooth, linear, ease, hold | bones in degrees `{"upper_arm.L": [x, y, z]}`, shape keys `{"smile": 1}`, IK `{"hand.R": [x, y, z]}` (false lets go), `look_at` `[x, y, z]` or `{"clip": id}`: keyed at seconds into the clip; Zornov fills in between |
-| `act` | `clip`, `motion` (walk, run, idle, wave, jump, nod, shake_head, talk, dance, sneak) or `mocap` (a .bvh or rigged .glb file; `take`) or `action` (one the model brought); `at`, `speed`, `energy`, `cycle`, `loop`, `travel` (walks carry the layer forward; `duration`), `blend_to` + `over` `[t0, t1]`, `stop` | motion: procedural cycles, motion capture retargeted onto the rig by bone role, a blend from one into another |
+| `act` | `clip`, `motion` (walk, run, idle, wave, jump, nod, shake_head, talk, dance, sneak) or `mocap` (a .bvh or rigged .glb file; `take`) or `action` (one the model brought); `at`, `speed`, `energy`, `cycle`, `loop`, `travel` (walks carry the layer forward; `duration`), `route` `[[x, z], …]` / `to` `[x, z]` / `by` / `distance` (the gait walks the path, turning at each point, feet planted; points may be `{at, pause, face}`), `face`, `speed_px_s`, `style` (weary, proud, sneaky…), `blend_to` + `over` `[t0, t1]`, `stop` | motion: procedural cycles, motion capture retargeted onto the rig by bone role, a blend from one into another |
 
 Bones are named by role: `hips`, `spine`, `chest`, `neck`, `head`,
 `shoulder.L`, `upper_arm.L`, `forearm.L`, `hand.L`, `thigh.L`, `shin.L`,
@@ -349,6 +349,7 @@ the rig and every action.
 
     {"op": "model", "shape": "character", "size": 520, "top": "#7a3b2e", "name": "Hero"}
     {"op": "act", "clip": "Hero", "motion": "walk", "duration": 4}
+    {"op": "act", "clip": "Hero", "motion": "walk", "route": [[0, -400], [300, -600], {"at": [500, -600], "pause": 1, "face": "camera"}], "style": "weary"}
     {"op": "pose", "clip": "Hero", "keys": [{"t": 3.5, "shapes": {"smile": 0}}, {"t": 4, "shapes": {"smile": 1}, "look_at": [200, -180, -600]}]}
     {"op": "act", "clip": "Hero", "mocap": "/path/to/jump.bvh", "at": 4}
     {"op": "rig", "clip": "Rope", "template": "chain", "count": 8, "start": "top"}

@@ -9,8 +9,8 @@ tools: animate, keys, keyframe, set, motion, stagger, modifier, physics, driver,
 2. Presets first for standard entries, exits and loops: `motion` sets `entry`, `exit` and `loop`. Keys (`animate`, `keys`) for a designed move; modifiers (`modifier`: noise, loop, stepped) and `expression` for behaviour that must keep going.
 3. Choose the curve by the job: arrivals start fast and settle (power2_out), exits accelerate away (ease in), never ease in on an entrance; position travels on arcs, other properties do not. Relative values are factors (1.0 is as is).
 4. Many things, one after another: `stagger` (letters 0.03-0.06 s apart, words 0.08-0.15 s, list items 0.3-0.5 s) in reading order. A move you will use again: `save_move` / `save_design`, then `use_move` / `use_design`.
-5. Relationships that must hold whatever happens: `driver` (one property follows another). Falling, bouncing, piling: `physics`.
-6. Check the move itself, not only still frames: `graph` reads the curve (overshoot, kink, hold) and `frame` with `every: 0.05` shows the move; reshape with `keys` (`curve` per key or exact handles).
+5. Relationships that must hold whatever happens: `driver` (one property follows another; `prop("Clip", "rotation")` reads any clip in a formula). One cause for many things (wind through grass and trees, a beat through a crowd): ONE source clip with the motion, every follower a `driver` on it with its own `delay`, so the gust travels. Keys that should repeat: `expression` `loop_out("cycle")` instead of copying keys. Falling, bouncing, piling: `physics`; cloth, hair, smoke in 3D: `simulate`.
+6. Check the move itself, not only still frames: `graph` reads the curve (overshoot, kink, hold) and `contact_sheet` with `every: 0.05` over the move shows it frame by frame; reshape with `keys` (`curve` per key or exact handles).
 
 **Checks**
 - No kink (speed jumping at a key), no accidental hold, no overshoot you did not choose.
@@ -40,7 +40,7 @@ tools: animate, keys, keyframe, set, motion, stagger, modifier, physics, driver,
   move and no kinks; a kink at an inner key looks like a hitch, so ease
   through it (`smooth`) or move the key. Overshoot belongs to arrivals
   (back, elastic), never to a slow drift.
-- Look at the move itself (`contact_sheet` with `every: 0.05` over it);
+- Look at the move itself (`contact_sheet` with `every: 0.05`, `start` and `end` over it);
   `check` reports `motion_snap`, `motion_stall`, `speed_step`.
 
 ## Reference: Procedural motion: modifiers and loops
@@ -79,6 +79,22 @@ tools: animate, keys, keyframe, set, motion, stagger, modifier, physics, driver,
   formula, or drive a parent and key the child.
 - After driving, scrub the source (`frame` at a few moments) and check
   the follower lands where it should at the extremes.
+- **A shared wind field.** Make one hidden source (a card named "Wind",
+  clip 40 here, at opacity 0) and give its rotation slow `modifier` noise (2-6°, 0.3-1
+  per second). Each plant then follows it with a delay that grows with
+  its x, so a gust crosses the frame, and its own share of the sway:
+
+      {"op": "driver", "clip": 41, "property": "rotation", "from": {"clip": 40, "property": "rotation"}, "multiply": 0.8, "delay": 0.1}
+      {"op": "driver", "clip": 42, "property": "rotation", "expr": "prop(\"Wind\", \"rotation\", 0, t - 0.25) * 1.2"}
+
+  3D models sway on `rotation_x` / `rotation_z`; anchor them at the base
+  (`anchor_y` at the bottom) so the ground end stays put. One source means
+  one change re-times the whole field.
+- **Loops of keys.** Key one cycle, then `{"op": "expression", "clip":
+  7, "property": "rotation", "expr": "loop_out(\"pingpong\")"}` (cycle,
+  pingpong, offset, continue); `wiggle(per_second, amount)`, `inertia`,
+  `value_at`, `posterize` are there too (full list: skill
+  titles-typography, part motion graphics).
 
 ## Reference: Physics: drops, bounces, piles
 

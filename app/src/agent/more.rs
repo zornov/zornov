@@ -84,25 +84,49 @@ impl Session {
         Ok(format!("{found} from clip {id} into {next}, {:.2}s{note}", secs(duration)))
     }
 
+    /// Where a lane goes next to another: `above` / `before` (index of
+    /// that lane: drawn over it) or `below` / `after` (just under it).
+    /// `moving` is a lane taken out of the list first. `None` when no
+    /// neighbour was given.
+    fn lane_neighbour(&self, op: &Value, moving: Option<m::LaneId>) -> Result<Option<usize>, String> {
+        let (v, under) = match (op.get("above").or(op.get("before")), op.get("below").or(op.get("after"))) {
+            (Some(v), None) => (v, false),
+            (None, Some(v)) => (v, true),
+            (None, None) => return Ok(None),
+            _ => return Err("give one of above / before or below / after".into()),
+        };
+        let other = m::LaneId(super::craft::lane_of(&self.doc.project, v, None)? as u64);
+        if Some(other) == moving {
+            return Err("a lane cannot go next to itself".into());
+        }
+        let order: Vec<m::LaneId> = self.doc.model.active().lanes.iter().map(|l| l.id).filter(|id| Some(*id) != moving).collect();
+        let i = order.iter().position(|id| *id == other).ok_or("that lane is not in this timeline")?;
+        Ok(Some(if under { i + 1 } else { i }))
+    }
+
     /// `lane`: add, rename, lock, hide, mute, solo, move or remove a lane.
     pub(super) fn lane(&mut self, op: &Value) -> Result<String, String> {
         let action = op.get("action").and_then(Value::as_str).ok_or("lane needs \"action\": add, rename, lock, unlock, hide, show, mute, unmute, solo, unsolo, move, remove")?;
         let seq = self.doc.seq();
         if action == "add" {
             let kind = match op.get("kind").and_then(Value::as_str).unwrap_or("overlay") {
-                "overlay" | "visual" | "picture" => m::LaneKind::Visual,
-                "sound" | "audio" | "music" => m::LaneKind::Audio,
-                other => return Err(format!("kind \"{other}\": overlay or sound")),
+                "overlay" | "visual" | "picture" | "video" | "image" | "title" | "titles" | "3d" | "graphics" => m::LaneKind::Visual,
+                "sound" | "audio" | "music" | "sfx" | "voice" => m::LaneKind::Audio,
+                other => return Err(format!("kind \"{other}\": overlay (pictures, video, titles, 3D) or sound")),
             };
             let id = self.doc.alloc_id();
             let name = op.get("name").and_then(Value::as_str).unwrap_or(if kind == m::LaneKind::Audio { "Sound" } else { "Overlay" }).to_owned();
             let lanes = &self.doc.project.lanes;
-            // Overlays go on top, sound at the bottom, unless told.
-            let index = match op.get("position").and_then(Value::as_str) {
-                Some("top") => 0,
-                Some("bottom") => lanes.len(),
-                _ if kind == m::LaneKind::Audio => lanes.len(),
-                _ => 0,
+            // Next to a lane (above: drawn over it; below: under it), else
+            // overlays go on top and sound at the bottom.
+            let index = match self.lane_neighbour(op, None)? {
+                Some(i) => i,
+                None => match op.get("position").and_then(Value::as_str) {
+                    Some("top") => 0,
+                    Some("bottom") => lanes.len(),
+                    _ if kind == m::LaneKind::Audio => lanes.len(),
+                    _ => 0,
+                },
             };
             let ok = self.doc.apply("Add lane", m::Edit::AddLane { seq, lane: m::Lane::new(m::LaneId(id), kind, name.clone()), index: Some(index) });
             self.check(ok, "")?;
@@ -132,7 +156,15 @@ impl Session {
                 m::Edit::SetLane { seq, lane }
             }
             "move" => {
-                let to = op.get("to").and_then(Value::as_u64).ok_or("move needs \"to\" (0 = top)")? as usize;
+                let to = match self.lane_neighbour(op, Some(lane.id))? {
+                    Some(i) => i,
+                    None => match op.get("to") {
+                        Some(Value::String(w)) if w == "top" => 0,
+                        Some(Value::String(w)) if w == "bottom" => self.doc.model.active().lanes.len().saturating_sub(1),
+                        Some(v) => v.as_u64().ok_or("lane move \"to\" is an index (0 = top), \"top\" or \"bottom\"; or give \"above\" / \"below\" a lane")? as usize,
+                        None => return Err("lane move needs \"above\": lane (drawn over it), \"below\": lane (drawn under it), or \"to\": an index (0 = top), e.g. {\"op\": \"lane\", \"action\": \"move\", \"lane\": \"Titles\", \"above\": \"3D\"}".into()),
+                    },
+                };
                 m::Edit::MoveLane { seq, lane: lane.id, to }
             }
             "remove" => m::Edit::DeleteLane { seq, lane: lane.id },
@@ -376,7 +408,9 @@ impl Session {
             mk.note = op.get("note").and_then(Value::as_str).unwrap_or("").to_owned();
             mk.duration = micros(f(op, "duration").unwrap_or(0.0)).max(0);
             if let Some(c) = op.get("colour").or(op.get("color")).and_then(Value::as_str) {
-                mk.colour = studio_model::editorial::marker_colour(c).ok_or_else(|| format!("marker colour \"{c}\": {}", studio_model::editorial::MARKER_COLOURS.map(|(n, _)| n).join(", ")))?;
+                // A #rrggbb (or any colour name Zornov knows) takes the nearest marker colour.
+                let near = || super::craft::colour(c).and_then(|k| studio_model::editorial::marker_colour(studio_model::editorial::colour_name(m::Rgba::new(k.r() as f64 / 255.0, k.g() as f64 / 255.0, k.b() as f64 / 255.0, 1.0))));
+                mk.colour = studio_model::editorial::marker_colour(c).or_else(near).ok_or_else(|| format!("marker colour \"{c}\": {} or #rrggbb", studio_model::editorial::MARKER_COLOURS.map(|(n, _)| n).join(", ")))?;
             }
             let what = format!("{} marker at {}s", studio_model::editorial::colour_name(mk.colour), f(op, "at").unwrap_or(0.0));
             let ok = self.doc.apply("Marker", m::Edit::AddMarker { seq, clip, marker: mk });

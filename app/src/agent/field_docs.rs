@@ -75,7 +75,7 @@ fn known(op: &str, field: &str) -> Option<(&'static str, &'static str, &'static 
         "scale" => ("number", "percent", "100 = actual size", "size"),
         "opacity" => ("number", "percent", "0 to 100", "how opaque"),
         "volume" => ("number", "dB", "-60 to +12 (0 = as recorded)", "loudness"),
-        "pan" => ("number", "", "-1 left to 1 right", "stereo place"),
+        "pan" => ("number", "percent", "-100 left to 100 right (0 = centre)", "stereo place"),
         "fade_in" | "fade_out" => ("number", "seconds", "0 or more", "fade length"),
         "speed" => ("number", "times", "above 0 (1 = normal)", "playback speed"),
         "colour" | "side_colour" | "accent" | "fill" | "stroke" | "skin" | "top" | "trousers" | "shoes" | "hair" | "fur" | "emissive" => ("string", "#rrggbb or a basic name", "", "a colour"),

@@ -114,7 +114,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "keyframe" => &["clip", "property", "time", "value"],
         "marker" => &["at", "note", "remove", "move"],
         "transition" => &["clip", "item", "duration", "align", "keep_timing", "remove", "params"],
-        "lane" => &["action", "lane", "name", "kind", "position", "to"],
+        "lane" => &["action", "lane", "name", "kind", "position", "to", "above", "below", "before", "after"],
         "effect" => &["clip", "clips", "effect", "remove", "enabled", "params", "move_to", "item", "panel", "duration"],
         "card" => &["colour", "at", "duration", "lane", "width", "height", "x", "y", "opacity", "roundness", "gradient", "angle", "radial", "radius", "shape", "sides", "stroke", "stroke_width", "shadow", "behind"],
         "motion" => &["clip", "clips", "entry", "exit", "loop"],

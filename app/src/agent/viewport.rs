@@ -752,6 +752,7 @@ impl Session {
         }
         vp::save(&self.doc);
         let mut state = self.vp_state(t);
+        scope_objects(&mut state, a, &action);
         if !note.is_empty() {
             state["note"] = json!(note);
         }
@@ -765,9 +766,63 @@ impl Session {
     }
 }
 
+/// Objects listed by default (a world of trees and rocks came back as
+/// hundreds of objects on every move of the eye).
+const OBJECTS_SHOWN: usize = 30;
+
+/// The objects a reply lists: those in `clips` when given; for `get`, the
+/// ones in view first, up to `limit` (`all: true` for every one); after
+/// any other action only the clips it acted on. The rest are counted.
+fn scope_objects(state: &mut Value, a: &Value, action: &str) {
+    let Some(all) = state["objects"].as_array().cloned() else { return };
+    let total = all.len();
+    let wanted: Vec<u64> = match a.get("clips") {
+        Some(Value::Array(v)) => v.iter().filter_map(Value::as_u64).collect(),
+        Some(v) => v.as_u64().into_iter().collect(),
+        None => Vec::new(),
+    };
+    let listed: Vec<Value> = if a.get("all").and_then(Value::as_bool) == Some(true) {
+        all
+    } else if !wanted.is_empty() {
+        all.into_iter().filter(|o| o["id"].as_u64().is_some_and(|id| wanted.contains(&id))).collect()
+    } else if matches!(action, "get" | "read" | "state" | "picture" | "see" | "look_at_view") {
+        let limit = a.get("limit").and_then(Value::as_u64).map_or(OBJECTS_SHOWN, |n| n.clamp(1, 500) as usize);
+        let (mut seen, rest): (Vec<Value>, Vec<Value>) = all.into_iter().partition(|o| o["on_screen"]["in_view"] == json!(true));
+        seen.extend(rest);
+        seen.truncate(limit);
+        seen
+    } else {
+        Vec::new()
+    };
+    if listed.len() < total {
+        state["objects_note"] = json!(format!("{} of {total} objects listed (in view first); viewport {{\"action\": \"get\", \"clips\": [ids]}} for some, \"all\": true for every one", listed.len()));
+    }
+    state["objects"] = json!(listed);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reply_lists_a_few_objects_and_counts_the_rest() {
+        let objs: Vec<Value> = (0..100).map(|i| json!({"id": i, "on_screen": {"in_view": i % 2 == 0}})).collect();
+        let mut st = json!({"objects": objs});
+        scope_objects(&mut st, &json!({}), "get");
+        let o = st["objects"].as_array().unwrap();
+        assert_eq!(o.len(), OBJECTS_SHOWN);
+        assert!(o.iter().all(|x| x["on_screen"]["in_view"] == true), "in view first");
+        assert!(st["objects_note"].as_str().unwrap().contains("of 100"));
+        let mut st = json!({"objects": objs});
+        scope_objects(&mut st, &json!({"clips": [3, 4]}), "move");
+        assert_eq!(st["objects"].as_array().unwrap().len(), 2);
+        let mut st = json!({"objects": objs});
+        scope_objects(&mut st, &json!({}), "orbit");
+        assert!(st["objects"].as_array().unwrap().is_empty(), "moving the eye lists nothing");
+        let mut st = json!({"objects": objs});
+        scope_objects(&mut st, &json!({"all": true}), "get");
+        assert_eq!(st["objects"].as_array().unwrap().len(), 100);
+    }
 
     fn session_with_scene() -> (Session, u64, u64) {
         let mut doc = crate::services::project::new_project(&crate::services::project::CANVASES[0]);

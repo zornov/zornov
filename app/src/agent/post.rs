@@ -68,13 +68,32 @@ fn grade_key_ok(k: &str) -> bool {
         || ["lift", "gamma", "gain", "offset", "shadows", "midtones", "highlights"].iter().any(|w| k.starts_with(&format!("{w}_")) && ["hue", "amount", "luma"].iter().any(|x| k.ends_with(x)))
 }
 
+/// Other names for grade parameters agents reach for (`curve_r` failed a
+/// whole colour task).
+fn grade_alias(k: &str) -> Option<&'static str> {
+    Some(match k {
+        "curve" | "curves" | "curve_rgb" | "curve_luma" | "curve_y" | "master_curve" => "curve_master",
+        "curve_r" | "red_curve" => "curve_red",
+        "curve_g" | "green_curve" => "curve_green",
+        "curve_b" | "blue_curve" => "curve_blue",
+        "white_balance" | "warmth" => "temperature",
+        "sat" => "saturation",
+        _ => return None,
+    })
+}
+
 /// Merges `{name: value | null}` into a parameter map.
 fn merge_params(into: &mut m::ParamMap, given: &Value, check: bool) -> Result<Vec<String>, String> {
     let obj = given.as_object().ok_or("params is an object of name: value")?;
     let mut changed = Vec::new();
     for (k, v) in obj {
+        let k = &grade_alias(k).map_or_else(|| k.clone(), str::to_owned);
         if check && !grade_key_ok(k) {
-            return Err(format!("no grade parameter \"{k}\"; see guide topic post"));
+            let hint = super::args::closest(k, GRADE_KEYS).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
+            return Err(format!(
+                "no grade parameter \"{k}\"{hint}; it takes: {}, cdl_slope / cdl_offset / cdl_power / cdl_sat, hsl_<colour>_<hue|sat|lum>, and wheels as lift_ / gamma_ / gain_ / offset_ / shadows_ / midtones_ / highlights_ + hue | amount | luma. Curves are lists of [in, out] points 0..1, e.g. {{\"curve_red\": [[0, 0], [0.5, 0.45], [1, 1]]}}",
+                GRADE_KEYS.join(", ")
+            ));
         }
         if v.is_null() {
             into.remove(k);

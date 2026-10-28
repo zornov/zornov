@@ -80,6 +80,17 @@ pub fn set_canvas(width: f64, height: f64) {
 /// Resolves a friendly property name on `clip`.
 pub fn resolve(clip: &m::Clip, name: &str) -> Result<Prop, String> {
     let n = norm(name.trim());
+    // Names agents reach for from other editors: `transform.scale`,
+    // `position.x`, `alpha`. Each is the friendly name it means.
+    if let Some(real) = other_name(&n) {
+        return resolve(clip, real).map(|mut p| {
+            p.name = real.to_owned();
+            p
+        });
+    }
+    if n == "transform.position" {
+        return Err(format!("position is two properties on clip {}: x and y (canvas px from the centre, y down); animate also takes \"property\": \"position\" with [t, x, y] keys", clip.id.0));
+    }
     let p = |paths: &[&str], conv| Ok(Prop { name: n.clone(), paths: paths.iter().map(|s| (*s).to_owned()).collect(), conv });
     // A shape layer's inputs by their own names.
     if let m::ClipSource::Generator(g) = &clip.source
@@ -183,10 +194,36 @@ pub fn resolve(clip: &m::Clip, name: &str) -> Result<Prop, String> {
     Ok(Prop { name: n.clone(), paths: vec![format!("effect.{}.{setting}", e.id.0)], conv: Conv::Raw })
 }
 
+/// The friendly name another editor's (or a guessed) name means.
+fn other_name(n: &str) -> Option<&'static str> {
+    Some(match n {
+        "transform.scale" | "scale.xy" | "uniform_scale" => "scale",
+        "transform.scale_x" | "scale.x" => "scale_x",
+        "transform.scale_y" | "scale.y" => "scale_y",
+        "transform.scale_z" | "scale.z" => "scale_z",
+        "transform.opacity" | "alpha" => "opacity",
+        "transform.rotation" | "rotation.z" => "rotation",
+        "rotation.x" | "transform.rotation_x" => "rotation_x",
+        "rotation.y" | "transform.rotation_y" => "rotation_y",
+        "position.x" | "position_x" | "pos_x" | "transform.x" => "x",
+        "position.y" | "position_y" | "pos_y" | "transform.y" => "y",
+        "position.z" | "transform.position_z" | "transform.z" => "z",
+        "anchor.x" | "transform.anchor_x" => "anchor_x",
+        "anchor.y" | "transform.anchor_y" => "anchor_y",
+        "volume_db" | "audio.volume" | "audio.volume_db" => "volume",
+        "audio.pan" => "pan",
+        _ => return None,
+    })
+}
+
+/// The friendly names every clip has (for "did you mean").
+const COMMON: &[&str] = &["x", "y", "z", "scale", "scale_x", "scale_y", "scale_z", "rotation", "rotation_x", "rotation_y", "opacity", "anchor_x", "anchor_y", "anchor_z", "crop_left", "crop_right", "crop_top", "crop_bottom", "volume", "pan", "exposure", "contrast", "saturation", "temperature", "tint", "look_strength"];
+
 fn unknown(clip: &m::Clip, name: &str) -> String {
     let fx: Vec<String> = clip.effects.iter().map(|e| format!("{}.<setting>", effect_name(&e.kind))).collect();
+    let hint = super::args::closest(&norm(name), COMMON).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
     format!(
-        "no property \"{name}\" on clip {}; properties: x, y, z, scale, scale_x, scale_y, scale_z, rotation, rotation_x, rotation_y, orientation_x/y/z, anchor_z, material.<setting>, opacity, crop_left/right/top/bottom, anchor_x, anchor_y, volume, pan, exposure, contrast, saturation, temperature, tint, grade.<name>, generator.<name>{}{}",
+        "no property \"{name}\"{hint} on clip {}; units: x, y, z px from the centre (y down), scale and opacity in percent (100 = as is, 0..100), rotation in degrees, volume in dB; `inspect {{clip, what: \"properties\"}}` lists this clip's own. Properties: x, y, z, scale, scale_x, scale_y, scale_z, rotation, rotation_x, rotation_y, orientation_x/y/z, anchor_z, material.<setting>, opacity, crop_left/right/top/bottom, anchor_x, anchor_y, volume, pan, exposure, contrast, saturation, temperature, tint, grade.<name>, generator.<name>{}{}",
         clip.id.0,
         if fx.is_empty() { String::new() } else { format!(", {}", fx.join(", ")) },
         if clip.masks.is_empty() { String::new() } else { ", mask1.<setting>".into() }
