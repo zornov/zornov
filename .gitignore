@@ -157,3 +157,12 @@ node_modules/
 *secret*
 *credentials*
 *.token
+
+# Agent scratch, showcase and test output
+# Showcase work: the stdio client script and its call files, the scratch
+# project the app writes (project.json, accepted.json, agent-usage.jsonl,
+# Models/, Vector/, media/, music/, sfx/, cache/, backups/), renders, QC
+# sidecars and frame grabs
+/showcase-work/
+# Fallback folder for a showcase's finished mp4 and contact sheet
+/showcase-out/
