@@ -2107,10 +2107,13 @@ pub fn make(desc: &str, seconds: Option<f32>, variant: u64) -> Result<Made, Stri
     };
     let mut layers_by_stage: Vec<Vec<Layer>> = stages.iter().map(|s| layers_of(s)).collect();
     // Qualities said once apply to the whole: "period" and "distant" carry across stages.
-    // Nothing matched: the nearest model, said so.
+    // Nothing matched: the nearest model, said so; words like no model at
+    // all are refused with what exists.
     let mut stand_in = None;
     if layers_by_stage.iter().all(|l| l.is_empty()) {
-        let m = nearest(desc);
+        let Some(m) = nearest(desc) else {
+            return Err(format!("no sound model matches \"{desc}\". Models: {}", catalogue()));
+        };
         let low = desc.to_lowercase();
         layers_by_stage = vec![vec![Layer { kind: m.kind, bed: m.bed, p: Params::read(&low, &low), info: m.name.to_owned() }]];
         stand_in = Some(m.name);
@@ -2224,10 +2227,9 @@ const FAMILIES: &[(&[&str], &str)] = &[
 /// its words are to each model's words, summary and example (near
 /// spellings count), and the family words above; a generic impact when
 /// nothing is alike at all.
-fn nearest(desc: &str) -> &'static ModelInfo {
+fn nearest(desc: &str) -> Option<&'static ModelInfo> {
     let low = desc.to_lowercase();
     let words: Vec<&str> = low.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 3).collect();
-    let by_name = |n: &str| MODELS.iter().find(|m| m.name == n);
     let mut best: Option<(&ModelInfo, f32)> = None;
     for m in MODELS.iter().filter(|m| m.kind != Kind::Animal) {
         let vocab: Vec<&str> = m.words.iter().flat_map(|w| w.split(' ')).chain(m.summary.split(|c: char| !c.is_alphanumeric())).chain(m.example.split(' ')).filter(|w| w.len() >= 3).collect();
@@ -2242,7 +2244,8 @@ fn nearest(desc: &str) -> &'static ModelInfo {
             best = Some((m, score));
         }
     }
-    best.map(|(m, _)| m).or_else(|| by_name("impact")).unwrap_or(&MODELS[0])
+    // One word a model is known by, or said in its summary, at the least.
+    best.filter(|&(_, s)| s >= 0.6).map(|(m, _)| m)
 }
 
 #[cfg(test)]
@@ -2340,5 +2343,12 @@ mod tests {
     fn unknown_words_say_what_exists() {
         let e = make("a quantum flux capacitor", None, 0).unwrap_err();
         assert!(e.contains("footsteps") && e.contains("animals"), "{e}");
+    }
+
+    #[test]
+    fn a_word_near_a_model_gets_that_model() {
+        // A misspelling no model matches outright is near one.
+        let m = make("a basketbal", Some(1.0), 0).unwrap();
+        assert!(m.model.starts_with("bounce"), "{}", m.model);
     }
 }
