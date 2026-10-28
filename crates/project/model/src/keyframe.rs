@@ -423,21 +423,38 @@ impl Track {
             let at = bend.at(p);
             return Some(k0.value.with_components([at[0], at[1], 0.0, 0.0]));
         }
-        let out = match k0.interp {
-            Interp::Hold => return Some(k0.value.clone()),
-            Interp::Linear => lerp4(c0, c1, u),
-            Interp::Ease => lerp4(c0, c1, bezier_progress(u, k0.ease_out, k1.ease_in)),
-            Interp::Curve => lerp4(c0, c1, k0.curve.unwrap_or_default().apply(u)),
-            Interp::Auto => {
-                let mut out = [0.0; 4];
-                for (d, slot) in out.iter_mut().enumerate().take(dims) {
-                    let tangents = clamped_tangents(keys, &comps, d, i);
-                    let h = (k1.time - k0.time) as f64;
-                    *slot = hermite(c0[d], c1[d], tangents.0 * h, tangents.1 * h, u);
+        if k0.interp == Interp::Hold {
+            return Some(k0.value.clone());
+        }
+        let between = |comps: &Window| {
+            let ((c0, _), (c1, _)) = (comps.at(i), comps.at(i + 1));
+            match k0.interp {
+                Interp::Hold | Interp::Linear => lerp4(c0, c1, u),
+                Interp::Ease => lerp4(c0, c1, bezier_progress(u, k0.ease_out, k1.ease_in)),
+                Interp::Curve => lerp4(c0, c1, k0.curve.unwrap_or_default().apply(u)),
+                Interp::Auto => {
+                    let mut out = [0.0; 4];
+                    for (d, slot) in out.iter_mut().enumerate().take(dims) {
+                        let tangents = clamped_tangents(keys, comps, d, i);
+                        let h = (k1.time - k0.time) as f64;
+                        *slot = hermite(c0[d], c1[d], tangents.0 * h, tangents.1 * h, u);
+                    }
+                    out
                 }
-                out
             }
         };
+        let mut out = between(&comps);
+        // Colours whose opacity changes blend as premultiplied colour:
+        // red fading to clear stays red as it fades, where blending the
+        // straight channels dimmed it towards the clear key's black.
+        if matches!(k0.value, Value::Colour(_)) && c0[3] != c1[3] {
+            let pm = between(&comps.premultiplied());
+            if pm[3] > 1e-9 {
+                for k in 0..3 {
+                    out[k] = pm[k] / pm[3];
+                }
+            }
+        }
         Some(k0.value.with_components(out))
     }
 
@@ -841,6 +858,26 @@ mod tests {
         println!("ease key: {per_ease:.0} ns a look; bent path: {per_path:.0} ns a look ({sum})");
     }
 
+    /// A colour fading out keeps its colour: the clear key's channels do
+    /// not pull it towards black.
+    #[test]
+    fn a_colour_fading_to_clear_keeps_its_hue() {
+        let red = Rgba::new(1.0, 0.2, 0.0, 1.0);
+        let clear = Rgba::new(0.0, 0.0, 0.0, 0.0);
+        for interp in [Interp::Linear, Interp::Ease, Interp::Auto] {
+            let tr = Track::new(vec![Keyframe::new(0, red, interp), Keyframe::new(100, clear, Interp::Linear)]);
+            for t in [10, 50, 90] {
+                let c = tr.eval(t).unwrap().as_colour().unwrap();
+                assert!((c.r - 1.0).abs() < 1e-9 && (c.g - 0.2).abs() < 1e-9 && c.b.abs() < 1e-9, "{interp:?} at {t}: {c:?}");
+                assert!(c.a > 0.0 && c.a < 1.0);
+            }
+        }
+        // Same opacity at both ends: the linear-light blend as before.
+        let tr = Track::new(vec![Keyframe::new(0, Rgba::new(1.0, 0.0, 0.0, 0.5), Interp::Linear), Keyframe::new(100, Rgba::new(0.0, 0.0, 1.0, 0.5), Interp::Linear)]);
+        let mid = tr.eval(50).unwrap().as_colour().unwrap();
+        assert!((mid.r - 0.7354).abs() < 1e-3 && (mid.b - 0.7354).abs() < 1e-3 && (mid.a - 0.5).abs() < 1e-12, "{mid:?}");
+    }
+
     #[test]
     fn colour_interpolates_in_linear_light() {
         let tr = Track::new(vec![Keyframe::new(0, Rgba::BLACK, Interp::Linear), Keyframe::new(100, Rgba::WHITE, Interp::Linear)]);
@@ -1005,5 +1042,11 @@ struct Window {
 impl Window {
     fn at(&self, j: usize) -> ([f64; 4], usize) {
         self.comps[j - self.lo]
+    }
+
+    /// The same keys with the first three channels times the fourth
+    /// (colours as premultiplied linear light).
+    fn premultiplied(&self) -> Window {
+        Window { lo: self.lo, comps: self.comps.map(|(c, n)| ([c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]], n)) }
     }
 }
