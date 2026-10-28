@@ -423,6 +423,24 @@ pub fn walk(w: &Walk, seed: u64) -> (Stereo, Vec<f32>) {
     (out, times)
 }
 
+/// Steps on the times a gait gives (foot contacts, seconds), alternating
+/// left and right; surface, shoe, weight and force come from `w`
+/// (`steps` and `pace` are not used). Each step varies a little in strength.
+pub fn walk_at(w: &Walk, contacts: &[f32], seed: u64) -> Stereo {
+    let mut rng = Rng::new(seed ^ 0xF007);
+    let times: Vec<f32> = contacts.iter().copied().filter(|t| t.is_finite() && *t >= 0.0).collect();
+    let end = times.iter().copied().fold(0.0f32, f32::max);
+    let mut out = Stereo::silent(if times.is_empty() { 1 } else { frames(end + 0.7) });
+    let mut mood = 0.0f32;
+    for (i, &t) in times.iter().enumerate() {
+        mood = mood * 0.7 + rng.signed() * 0.3;
+        let force = (w.force * (1.0 + 0.2 * mood) * rng.range(0.9, 1.05)).clamp(0.1, 1.0);
+        let s = step(w.surface, w.shoe, w.weight, force, &mut rng);
+        out.add_mono(&s, frames(t), 1.0, if i % 2 == 0 { -0.12 } else { 0.12 });
+    }
+    out
+}
+
 /// A body landing from a hop on four padded feet: the fore feet, then the
 /// hind feet together a moment later, heavier, with the whole body's weight
 /// behind them. `weight` 0..1, `force` 0..1.
@@ -485,5 +503,23 @@ mod tests {
         assert_eq!(Surface::parse("walking on a wooden floor"), Some(Surface::Wood));
         assert_eq!(Surface::parse("crunching through snow"), Some(Surface::Snow));
         assert_eq!(Shoe::parse("a woman in heels"), Some(Shoe::Heel));
+    }
+
+    /// Steps placed on contact times (from a gait) land on those times.
+    #[test]
+    fn steps_land_on_the_contact_times_given() {
+        let w = Walk { surface: Surface::Gravel, shoe: Shoe::Boot, steps: 0, pace: 2.0, weight: 0.7, force: 0.8, four_feet: false };
+        let contacts = [0.30, 0.95, 1.40, 2.20];
+        let a = walk_at(&w, &contacts, 4);
+        let b = walk_at(&w, &contacts, 4);
+        assert_eq!(a, b, "same contacts and seed, same sound");
+        assert!(a.peak() > 0.05 && a.l.iter().all(|v| v.is_finite()));
+        // Silent before the first contact, and each contact opens a step.
+        assert!(a.l[..frames(0.29)].iter().all(|v| v.abs() < 1e-6));
+        for t in contacts {
+            let i = frames(t);
+            assert!(a.l[i..i + frames(0.05)].iter().any(|v| v.abs() > 0.01), "nothing at {t}");
+        }
+        assert!(walk_at(&w, &[], 4).peak() == 0.0);
     }
 }
