@@ -25,8 +25,8 @@
 //! mesh was modelled in.
 //!
 //! The method is the textbook one (forward kinematics, linear blend
-//! skinning, analytic two-bone IK with a pole, cyclic coordinate descent
-//! for longer chains); no engine's code is copied.
+//! skinning, analytic two-bone IK with a pole, FABRIK with a pole for
+//! longer chains); no engine's code is copied.
 
 use crate::{Mesh, V3, add, cross, dot, length, normalise, scale, sub};
 use std::collections::HashMap;
@@ -830,18 +830,27 @@ impl Rig {
             set_world_rot(local, &world, b, rot_b);
             return;
         }
-        // Longer chains: cyclic coordinate descent from the tip back.
-        for _ in 0..24 {
-            for &i in ids.iter().rev() {
-                let world = self.forward(local);
-                let end = tail_of(&world);
-                if length(sub(end, goal)) < 0.05 {
-                    return;
-                }
-                let at = world[i].pos;
-                let turn = q_from_to(sub(end, at), sub(goal, at));
-                set_world_rot(local, &world, i, q_mul(turn, world[i].rot));
-            }
+        // Longer chains: FABRIK on the joints (`studio_rig::ik::fabrik`),
+        // the middle joints leaning toward the pole when there is one; then
+        // each bone, root first, turned so its next joint lands where the
+        // solve put it.
+        let world = self.forward(local);
+        let mut joints: Vec<[f64; 3]> = ids.iter().map(|&i| world[i].pos.map(f64::from)).collect();
+        joints.push(tail_of(&world).map(f64::from));
+        // A chain lying straight has no bend for FABRIK to grow from: it
+        // folds into a zig-zag. Start it on an arc bowed toward the pole.
+        if let Some(p) = pole {
+            arc_start(&mut joints, goal.map(f64::from), p.map(f64::from));
+        }
+        studio_rig::ik::fabrik(&mut joints, goal.map(f64::from), pole.map(|p| p.map(f64::from)), studio_rig::ik::Reach::default(), 0.01, 64);
+        let target: Vec<V3> = joints.iter().map(|j| j.map(|x| x as f32)).collect();
+        for k in 0..ids.len() {
+            let world = self.forward(local);
+            let i = ids[k];
+            let at = world[i].pos;
+            let next_now = if k + 1 < ids.len() { world[ids[k + 1]].pos } else { tail_of(&world) };
+            let turn = q_from_to(sub(next_now, at), sub(target[k + 1], at));
+            set_world_rot(local, &world, i, q_mul(turn, world[i].rot));
         }
     }
 
@@ -1103,6 +1112,59 @@ impl PointGrid {
     }
 }
 
+/// Lays a nearly straight chain of `joints` (root first) on a circle from
+/// its root toward `goal`, bowed toward `pole`, each link a chord of its
+/// own length; a chain already bent (more than 2 % of its length off the
+/// line from root to tip) is left as it is.
+fn arc_start(joints: &mut [[f64; 3]], goal: [f64; 3], pole: [f64; 3]) {
+    use studio_rig::v;
+    let n = joints.len();
+    if n < 3 {
+        return;
+    }
+    let lens: Vec<f64> = joints.windows(2).map(|w| v::dist(w[0], w[1])).collect();
+    let total: f64 = lens.iter().sum();
+    let root = joints[0];
+    let line = v::norm(v::sub(joints[n - 1], root));
+    if v::len(line) < 0.5 || joints.iter().any(|j| v::len(v::across(v::sub(*j, root), line)) > 0.02 * total) {
+        return;
+    }
+    let c = v::dist(root, goal).min(total * 0.999);
+    let u = v::norm(v::sub(goal, root));
+    let w = v::norm(v::across(v::sub(pole, root), u));
+    if c < 1e-9 || v::len(u) < 0.5 || v::len(w) < 0.5 {
+        return;
+    }
+    // A circle through the joints, each link a chord of its own length:
+    // the radius whose chords add up to an arc from the root to the goal.
+    let turn = |r: f64| lens.iter().map(|l| 2.0 * (l / (2.0 * r)).min(1.0).asin()).sum::<f64>();
+    let chord = |r: f64| {
+        let t = turn(r);
+        if t >= std::f64::consts::TAU { 0.0 } else { 2.0 * r * (t / 2.0).sin() }
+    };
+    let longest = lens.iter().copied().fold(0.0, f64::max);
+    let (mut lo, mut hi) = (longest / 2.0 * 1.0001, total * 1e3);
+    // Folded as far as the links allow, the chord may still be too long:
+    // then that tightest circle.
+    let r = if chord(lo) >= c {
+        lo
+    } else {
+        for _ in 0..80 {
+            let mid = 0.5 * (lo + hi);
+            if chord(mid) < c { lo = mid } else { hi = mid }
+        }
+        0.5 * (lo + hi)
+    };
+    let th = turn(r);
+    let centre = v::sub(v::add(root, v::scale(u, r * (th / 2.0).sin())), v::scale(w, r * (th / 2.0).cos()));
+    let mut phi = 0.0;
+    for i in 1..n {
+        phi += 2.0 * (lens[i - 1] / (2.0 * r)).min(1.0).asin();
+        let a = th / 2.0 - phi;
+        joints[i] = v::add(centre, v::add(v::scale(u, -r * a.sin()), v::scale(w, r * a.cos())));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1213,6 +1275,27 @@ mod tests {
         let posed = h.evaluate(&PoseInput::default());
         let d = normalise(sub(h.bone_lines(&posed)[0].1, [0.0; 3]));
         assert!(close(d, normalise([1.0, -1.0, 0.0]), 1e-3), "{d:?}");
+    }
+
+    #[test]
+    fn a_long_chain_bends_toward_its_pole() {
+        // Four bones straight down (y down), the goal pulled up close to
+        // the root so the chain must fold; the pole says which way.
+        for pole_z in [200.0f32, -200.0] {
+            let mut r = Rig::default();
+            for i in 0..4 {
+                r.bones.push(Bone::new(format!("tail.{i}"), if i == 0 { None } else { Some(i - 1) }, [0.0, i as f32 * 40.0, 0.0], [0.0, (i + 1) as f32 * 40.0, 0.0]));
+            }
+            r.constraints.push(Constraint::Ik { name: "reach".into(), bone: 3, chain: 4, target: Target::Point([0.0, 90.0, 0.0]), pole: Some([0.0, 80.0, pole_z]), influence: 1.0 });
+            let posed = r.evaluate(&PoseInput::default());
+            let lines = r.bone_lines(&posed);
+            assert!(close(lines[3].1, [0.0, 90.0, 0.0], 1.0), "tip reaches: {:?}", lines[3].1);
+            // The middle joints lean the pole's way, and the bones keep their length.
+            for k in 1..4 {
+                assert!(lines[k].0[2] * pole_z.signum() > 5.0, "joint {k} toward the pole at z {pole_z}: {:?}", lines[k].0);
+                assert!((length(sub(lines[k].1, lines[k].0)) - 40.0).abs() < 0.5);
+            }
+        }
     }
 
     #[test]
