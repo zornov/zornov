@@ -163,16 +163,16 @@ impl StudioApp {
                 }
             }
         };
-        match folder.save(&self.doc.model) {
-            Ok(()) => {
-                self.doc.history.mark_saved();
-                let root = folder.root().to_path_buf();
-                self.doc.folder = Some(folder);
+        // Through the project service: a save over work someone else saved
+        // meanwhile takes that work in first (see `services::project::save`).
+        let target = (self.doc.folder.as_ref().map(|f| f.root()) != Some(folder.root())).then(|| folder.root().to_path_buf());
+        match crate::services::project::save(&mut self.doc, target.as_deref()) {
+            Ok(root) => {
                 self.remember(&root);
                 kit::push(ctx, crate::i18n::tf(format!("Saved {}", self.doc.project.name)), None, Some(Icon::CheckCircle));
             }
             Err(e) => {
-                kit::push(ctx, crate::i18n::tf(format!("Could not save: {e:?}")), None, Some(Icon::Warning));
+                kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
             }
         }
     }
@@ -181,11 +181,15 @@ impl StudioApp {
     pub fn open_folder(&mut self, ctx: &egui::Context, path: Option<PathBuf>) {
         let Some(dir) = path.or_else(|| rfd::FileDialog::new().set_title("Open project").pick_folder()) else { return };
         let folder = m::file::ProjectFolder::new(&dir);
-        match folder.load() {
-            Ok(file) => {
+        match folder.load_stamped() {
+            Ok((file, stamp)) => {
                 let mut project = file.project;
                 folder.resolve_media(&mut project);
+                let base = std::sync::Arc::new(project.clone());
                 self.open_model(project);
+                // What the file held: a later save that finds it changed
+                // (an agent saved meanwhile) takes that work in first.
+                self.doc.synced = Some(crate::doc::Synced { stamp, base });
                 self.doc.folder = Some(folder);
                 self.remember(&dir);
             }
@@ -300,14 +304,26 @@ impl StudioApp {
         // A save writing in the background finished.
         if let Some((saved_rev, rx)) = &self.autosaving {
             match rx.try_recv() {
-                Ok(ok) => {
+                Ok(done) => {
                     let saved_rev = *saved_rev;
                     self.autosaving = None;
-                    if ok {
-                        self.doc.history.mark_saved_at(saved_rev);
-                        if let Some(root) = self.doc.folder.as_ref().map(|f| f.root().to_path_buf()) {
-                            self.remember(&root);
+                    match done {
+                        Autosaved::Saved(synced) => {
+                            self.doc.synced = Some(synced);
+                            self.doc.history.mark_saved_at(saved_rev);
+                            if let Some(root) = self.doc.folder.as_ref().map(|f| f.root().to_path_buf()) {
+                                self.remember(&root);
+                            }
                         }
+                        // Someone else (an agent's session) saved the
+                        // project meanwhile: take their work in and save
+                        // the whole, here, rather than write over it.
+                        Autosaved::Changed => {
+                            if crate::services::project::save(&mut self.doc, None).is_ok() {
+                                self.doc.history.mark_saved();
+                            }
+                        }
+                        Autosaved::Failed => {}
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
@@ -321,10 +337,16 @@ impl StudioApp {
             if self.autosave.due(now) {
                 self.autosave.mark_done();
                 let (folder, model, rev, keep) = (folder.clone(), self.doc.model.clone(), rev, self.autosave.keep);
+                let expected = self.doc.synced.as_ref().map(|s| s.stamp);
                 let (tx, rx) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
                     let backed_up = studio_model::file::autosave::write_backup(&folder, &model, std::time::SystemTime::now(), keep).is_ok();
-                    let _ = tx.send(backed_up && folder.save(&model).is_ok());
+                    let done = match backed_up.then(|| folder.save_if(&model, &Default::default(), expected)) {
+                        Some(Ok(stamp)) => Autosaved::Saved(crate::doc::Synced { stamp, base: std::sync::Arc::new(model) }),
+                        Some(Err(m::file::FileError::Changed { .. })) => Autosaved::Changed,
+                        _ => Autosaved::Failed,
+                    };
+                    let _ = tx.send(done);
                 });
                 self.autosaving = Some((rev, rx));
             }
@@ -393,4 +415,14 @@ pub fn write_once(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> std::io::R
     std::fs::create_dir_all(dir)?;
     std::fs::write(&path, bytes)?;
     Ok(path)
+}
+
+/// How an autosave written in the background went.
+pub enum Autosaved {
+    /// Written: the file as it now is.
+    Saved(crate::doc::Synced),
+    /// Someone else saved the project since; nothing was written.
+    Changed,
+    /// The backup or the save failed.
+    Failed,
 }

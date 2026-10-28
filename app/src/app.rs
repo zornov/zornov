@@ -161,8 +161,8 @@ pub struct StudioApp {
     pub render: Option<editor::render_view::RenderView>,
     pub autosave_rev: u64,
     /// An autosave writing in the background: the history revision it
-    /// saved, and whether it worked when it is done.
-    pub autosaving: Option<(u64, std::sync::mpsc::Receiver<bool>)>,
+    /// saved, and how it went when it is done.
+    pub autosaving: Option<(u64, std::sync::mpsc::Receiver<crate::files::Autosaved>)>,
     /// The project folder the Start screen last heard of.
     pub remembered: Option<std::path::PathBuf>,
     /// The toast offering "Show in Finder" for a finished export.

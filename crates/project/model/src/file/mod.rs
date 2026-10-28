@@ -74,6 +74,12 @@ pub enum FileError {
     Migration(String),
     /// The project breaks an invariant (the file was edited by hand or damaged).
     Invalid(Violation),
+    /// Someone else saved the project since it was loaded (another window,
+    /// another agent's session): the save was refused, nothing was
+    /// written. `on_disk` is the [`stamp_of`] the file has now.
+    Changed {
+        on_disk: u64,
+    },
 }
 
 impl fmt::Display for FileError {
@@ -85,6 +91,7 @@ impl fmt::Display for FileError {
             FileError::TooNew { found, supported } => write!(f, "project was saved by a newer Zornov (format {found}; this version reads up to {supported})"),
             FileError::Migration(e) => write!(f, "could not upgrade the project: {e}"),
             FileError::Invalid(v) => write!(f, "project is damaged: {v}"),
+            FileError::Changed { .. } => write!(f, "the project was saved by someone else since it was opened"),
         }
     }
 }
@@ -134,13 +141,25 @@ pub fn from_json(text: &str) -> Result<ProjectFile, FileError> {
     Ok(file)
 }
 
+/// What a saved project file is, to tell whether it changed: FNV-1a over
+/// its bytes (stable across runs and builds).
+pub fn stamp_of(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x0100_0000_01b3))
+}
+
 /// Writes `bytes` to `path` atomically: the data goes to a temporary file
 /// in the same folder, is flushed to disk, and then renamed over `path`.
 /// Readers see either the old file or the new one, never a torn write.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let name = path.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name"))?;
-    let tmp = dir.join(format!(".{}.tmp-{}", name.to_string_lossy(), std::process::id()));
+    // A name of its own per write: a name per process let two threads of
+    // one process (the window's autosave and a save from the menu or an
+    // agent) write into one temporary file and rename it from under each
+    // other.
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{}.tmp-{}-{n}", name.to_string_lossy(), std::process::id()));
     let result = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -220,13 +239,82 @@ impl ProjectFolder {
         self.save_with(project, &Extra::new())
     }
 
+    /// Saves `project` only if `project.json` is still the file `expected`
+    /// names (its [`stamp_of`] when it was loaded or last saved by the
+    /// caller); `None` saves whatever is there. Returns the new file's
+    /// stamp. Savers in other processes and threads take turns through a
+    /// lock beside the file, so a check and its write are one step: two
+    /// sessions on one project cannot both save over the same version, and
+    /// the second learns of the first ([`FileError::Changed`]).
+    pub fn save_if(&self, project: &Project, extra: &Extra, expected: Option<u64>) -> Result<u64, FileError> {
+        std::fs::create_dir_all(&self.root)?;
+        let _turn = self.lock()?;
+        if let Some(want) = expected
+            && let Some(now) = self.stamp()
+            && now != want
+        {
+            return Err(FileError::Changed { on_disk: now });
+        }
+        let bytes = to_json(&self.document(project, extra)).into_bytes();
+        write_atomic(&self.project_file(), &bytes)?;
+        Ok(stamp_of(&bytes))
+    }
+
+    /// The [`stamp_of`] `project.json` as it is now; `None` when there is
+    /// none (not saved yet) or it cannot be read.
+    pub fn stamp(&self) -> Option<u64> {
+        std::fs::read(self.project_file()).ok().map(|b| stamp_of(&b))
+    }
+
+    /// An exclusive hold on this folder's saves (released when dropped):
+    /// `.project.lock`, locked by the operating system, so a process that
+    /// dies lets go of it.
+    pub fn lock(&self) -> std::io::Result<std::fs::File> {
+        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join(".project.lock"))?;
+        f.lock()?;
+        Ok(f)
+    }
+
+    /// Says this process has the project open, until the file returned is
+    /// dropped (a shared hold on `.project.open`; the operating system lets
+    /// go of it when the process ends, however it ends).
+    pub fn hold_open(&self) -> std::io::Result<std::fs::File> {
+        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join(".project.open"))?;
+        f.lock_shared()?;
+        Ok(f)
+    }
+
+    /// Whether another process has the project open too (see
+    /// [`ProjectFolder::hold_open`]); `mine` is this process's hold, let go
+    /// of for the moment of asking and taken again. Clean-ups that judge
+    /// what is unused from this process's view alone (superseded model
+    /// files) must not run while it is shared.
+    pub fn open_elsewhere(&self, mine: &mut Option<std::fs::File>) -> bool {
+        *mine = None;
+        let Ok(f) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join(".project.open")) else { return true };
+        let alone = f.try_lock().is_ok();
+        let _ = f.unlock();
+        if f.lock_shared().is_ok() {
+            *mine = Some(f);
+        }
+        !alone
+    }
+
     /// Loads `project.json`, upgrading and checking it, and re-finds media
     /// that moved together with the folder.
     pub fn load(&self) -> Result<ProjectFile, FileError> {
-        let text = std::fs::read_to_string(self.project_file())?;
+        Ok(self.load_stamped()?.0)
+    }
+
+    /// [`ProjectFolder::load`], with the [`stamp_of`] the bytes it read (to
+    /// hand to [`ProjectFolder::save_if`]).
+    pub fn load_stamped(&self) -> Result<(ProjectFile, u64), FileError> {
+        let bytes = std::fs::read(self.project_file())?;
+        let stamp = stamp_of(&bytes);
+        let text = String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut file = from_json(&text)?;
         self.resolve_media(&mut file.project);
-        Ok(file)
+        Ok((file, stamp))
     }
 
     /// The document that [`ProjectFolder::save_with`] writes: media items

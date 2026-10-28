@@ -36,7 +36,9 @@ pub fn save(doc: &Doc, mesh: &Mesh) -> Result<String, String> {
             std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
         }
         crate::safety::room_for(&path, bytes.len() as u64)?;
-        std::fs::write(&path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        // Whole or not at all: the name says what the content is, so a
+        // file cut short by a crash would be trusted for ever after.
+        m::file::write_atomic(&path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(path.to_string_lossy().into_owned())
 }
@@ -108,7 +110,7 @@ pub fn save_source(doc: &Doc, asset: &studio_modeling::asset::Asset) -> Result<S
         if let Some(d) = path.parent() {
             std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
         }
-        std::fs::write(&path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        m::file::write_atomic(&path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(path.to_string_lossy().into_owned())
 }
