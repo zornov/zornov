@@ -435,6 +435,9 @@ pub struct GpuContext {
     pub queue: wgpu::Queue,
     /// Adapter name, for the about box and the benchmark table.
     pub adapter_name: String,
+    /// A software adapter (llvmpipe, WARP): right pictures at CPU speed, so
+    /// frame times say nothing about a GPU.
+    pub software: bool,
     pipelines: Pipelines,
     /// Held from pushing an error scope to popping it: the device is shared
     /// by every thread, and wgpu's scopes must pop in the order they were
@@ -482,12 +485,16 @@ impl GpuContext {
             ..Default::default()
         }))
         .ok()?;
-        GpuContext::from_device(device, queue, info.name)
+        GpuContext::build(device, queue, info.name, info.device_type == wgpu::DeviceType::Cpu)
     }
 
     /// Wraps an existing device (the application shares egui's). `None` if
     /// a shader does not compile on it.
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue, adapter_name: String) -> Option<Arc<GpuContext>> {
+        GpuContext::build(device, queue, adapter_name, false)
+    }
+
+    fn build(device: wgpu::Device, queue: wgpu::Queue, adapter_name: String, software: bool) -> Option<Arc<GpuContext>> {
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let pipelines = Pipelines::new(&device);
         let err = pollster::block_on(scope.pop());
@@ -495,7 +502,7 @@ impl GpuContext {
             eprintln!("studio-render: GPU pipelines unavailable: {e}");
             return None;
         }
-        Some(Arc::new(GpuContext { device, queue, adapter_name, pipelines, scopes: Mutex::new(()) }))
+        Some(Arc::new(GpuContext { device, queue, adapter_name, software, pipelines, scopes: Mutex::new(()) }))
     }
 }
 
