@@ -78,7 +78,25 @@ pub fn build(name: &str, size: f32, seed: u64) -> Result<Asset, String> {
             let mut sp = crate::places::Spec::new(name, crate::places::Style::Classical);
             sp.size = s;
             sp.seed = seed;
-            return crate::places::build(&sp);
+            let mut place = crate::places::build(&sp)?;
+            // The generators build storeys and bays at their real size, so a size
+            // under one storey or one bay came back full size. Scale the place to
+            // the size along the measure its kit names: a facade's height, the
+            // length (or a room's width) of the rest, all along x.
+            let axis = if name == "facade" { 1 } else { 0 };
+            let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+            for p in &place.parts {
+                let (a, b) = p.mesh.bounds();
+                lo = lo.min(a[axis]);
+                hi = hi.max(b[axis]);
+            }
+            if hi > lo {
+                let k = s / (hi - lo);
+                for p in &mut place.parts {
+                    p.mesh.map_positions(|v| [v[0] * k, v[1] * k, v[2] * k]);
+                }
+            }
+            return Ok(place);
         }
         "rock" | "boulder" => {
             let mut p = prim::quad_sphere(s * 0.5, 12);
