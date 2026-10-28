@@ -4,13 +4,16 @@
 //! Where spoken lines and described sounds come from.
 //!
 //! Narration is made by one of: the Mac's own voices, Fish Audio,
-//! ElevenLabs or OpenAI; sounds described in words come from ElevenLabs.
+//! ElevenLabs or OpenAI; sounds described in words come from ElevenLabs
+//! when its key is saved, and from Zornov's own models otherwise
+//! (`synth::described_sfx`).
 //! The choice lives in `~/Movies/Studio/voice-services.json`, shared by the
 //! window, the `zornov` command line and every agent, and every line goes
 //! through [`speak`], so a choice made in Settings holds for all of them.
 //!
-//! Nothing falls back silently: when the chosen service fails, the line
-//! fails and says why. The Mac voices can also be switched off outright
+//! Nothing falls back silently: when the chosen service cannot speak, a Mac
+//! voice says the line and the reply says so ([`speak_with`]); with the Mac
+//! voices off, the line fails and says why. They can be switched off outright
 //! (Settings, or `STUDIO_NO_SYSTEM_VOICE=1` in the environment, which
 //! wins over the file): then no agent can speak with them, even by asking
 //! for one by name.

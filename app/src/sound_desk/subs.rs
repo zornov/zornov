@@ -94,7 +94,7 @@ pub fn transcribe(project: &m::Project, language: Option<&str>, translate: bool)
     }
     let mono: Vec<f32> = chans[0].iter().zip(&chans[1]).map(|(a, b)| 0.5 * (a + b)).collect();
     let store = studio_ai::store::ModelStore::default();
-    let whisper = Whisper::load_best(&store).map_err(|e| format!("{e} (Settings ▸ AI ▸ Models installs Whisper)"))?;
+    let whisper = Whisper::load_best(&store).map_err(|e| format!("{e} (Settings ▸ Models installs Whisper)"))?;
     let opts = TranscribeOptions { language: language.map(base_lang).map(str::to_owned), task: if translate { Task::Translate } else { Task::Transcribe }, word_timestamps: !translate };
     let tr = whisper.transcribe(&mono, crate::sound_bridge::RATE, &opts, &studio_ai::jobs::JobCtx::detached()).map_err(|e| e.to_string())?;
     let mut words: Vec<Word> = tr.words().map(|w| Word::new(w.text.trim(), w.start as f32, w.end as f32)).filter(|w| !w.text.is_empty()).collect();
