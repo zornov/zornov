@@ -702,6 +702,7 @@ impl Session {
         let short = self.doc.project.width.min(self.doc.project.height) as f32;
         let mut moving: Option<super::math_shapes::Moving> = None;
         let mut math_said: Option<Value> = None;
+        let mut native_frame: Option<super::anim3d::Frame> = None;
         let mut recipe: Option<studio_mesh::math::field::Recipe> = None;
         let direct = match op.get("render").and_then(Value::as_str) {
             None | Some("mesh") => false,
@@ -719,7 +720,19 @@ impl Session {
                 let path = self.input_file(file)?;
                 let file = path.to_string_lossy().into_owned();
                 let file = file.as_str();
-                let got = crate::mesh_store::read_model(&path, fit)?;
+                // Read at its own size first: the numbers a rig written in
+                // the file's units needs are its centre and scale.
+                let mut got = crate::mesh_store::read_model(&path, 0.0)?;
+                {
+                    let (lo, hi) = got.mesh.bounds();
+                    let big = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]);
+                    let k = if fit > 0.0 && big > 1e-6 { fit / big } else { 1.0 };
+                    let c = studio_mesh::scale(studio_mesh::add(lo, hi), 0.5);
+                    native_frame = Some(super::anim3d::Frame { formula: false, centre: c.map(f64::from), scale: [k; 3] });
+                    if fit > 0.0 {
+                        ops::centre_and_fit(&mut got.mesh, fit);
+                    }
+                }
                 let n = op.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or("Model").to_owned());
                 if got.mesh.triangles() > MAX_TRIANGLES {
                     let mut m = got.mesh;
@@ -807,6 +820,16 @@ impl Session {
             }
         }
         let mut said = self.place_model(op, &mesh, what, notes)?;
+        let frame = native_frame.or_else(|| math_said.as_ref().and_then(|m| super::anim3d::Frame::from_json(&m["frame"])));
+        if let Some(f) = frame {
+            let id = self.doc.project.clips.iter().map(|c| c.id).max().unwrap_or(0) as u32;
+            if let Some(mut mc) = self.model_clip(id) {
+                super::anim3d::set_frame(&mut mc, &f);
+                let seq = self.doc.seq();
+                let ok = self.doc.apply("Model frame", m::Edit::SetClip { seq, clip: Box::new(mc) });
+                self.check(ok, "")?;
+            }
+        }
         if let Some(m) = math_said {
             let id = self.doc.project.clips.iter().map(|c| c.id).max().unwrap_or(0) as u32;
             let how = self.keep_math(id, m["kind"].as_str().unwrap_or("math"), recipe.as_ref(), direct)?;
