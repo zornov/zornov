@@ -503,6 +503,13 @@ impl eframe::App for StudioApp {
             Screen::Gallery => gallery::show(self, ui),
             Screen::Paint => screens::paint::show(self, ui),
         }
+        if self.screen == Screen::Editor && self.overlay == Overlay::None {
+            editor::drop_hint(&ctx);
+            self.take_dropped_files(&ctx);
+        } else {
+            // Nowhere to drop: the files are not kept for later.
+            ctx.input_mut(|i| i.raw.dropped_files.clear());
+        }
         match self.overlay {
             Overlay::Export => screens::export::show(self, &ctx),
             Overlay::Settings => screens::settings::show(self, &ctx),

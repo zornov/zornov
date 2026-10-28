@@ -278,6 +278,27 @@ impl StudioApp {
         self.import_paths(ctx, &paths);
     }
 
+    /// Files dragged in from the desktop and dropped anywhere on the
+    /// editor (the Library among it): what Import media takes is imported
+    /// (media into the bin, models as 3D layers); anything else is named
+    /// and left. Taken once: a panel that wants a drop of its own (Story,
+    /// for scripts) takes it first.
+    pub fn take_dropped_files(&mut self, ctx: &egui::Context) {
+        let files: Vec<PathBuf> = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files)).iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect();
+        if files.is_empty() {
+            return;
+        }
+        let (take, refuse): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|p| importable(p));
+        if let Some(first) = refuse.first() {
+            let name = first.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let more = if refuse.len() > 1 { crate::i18n::tf(format!(" (and {} more)", refuse.len() - 1)) } else { String::new() };
+            kit::push(ctx, crate::i18n::tf(format!("Zornov cannot import {name}{more}: drop video, pictures, sound, Lottie or 3D models")), None, Some(Icon::Warning));
+        }
+        if !take.is_empty() {
+            self.import_paths(ctx, &take);
+        }
+    }
+
     /// Add files to the bin; returns the new media ids.
     pub fn import_paths(&mut self, ctx: &egui::Context, paths: &[PathBuf]) -> Vec<u32> {
         // 3D model files become model layers, not bin items.
@@ -458,6 +479,48 @@ pub enum Autosaved {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct Dropped(PathBuf);
+    impl egui::DroppedFile for Dropped {
+        fn path(&self) -> &Path {
+            &self.0
+        }
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            std::fs::read(&self.0).map_err(|e| e.to_string())
+        }
+    }
+
+    /// Files dragged in from the desktop are imported by type: a picture
+    /// into the bin, a model as a 3D layer; anything else is named and left.
+    #[test]
+    fn files_dropped_on_the_window_are_imported_by_type() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        app.doc = crate::agent::Session::new(crate::services::project::new_custom("Drop", 640, 360, 30.0)).doc;
+        let dir = std::env::temp_dir().join(format!("studio-window-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pic = dir.join("red.png");
+        std::fs::write(&pic, studio_media::png::encode(&studio_media::RgbaImage { width: 2, height: 2, pixels: vec![255, 0, 0, 255].repeat(4) })).unwrap();
+        let model = dir.join("tri.obj");
+        std::fs::write(&model, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        let other = dir.join("notes.docx");
+        std::fs::write(&other, b"PK").unwrap();
+        let files = [pic, model, other];
+        let dropped_files = files.iter().map(|p| std::sync::Arc::new(Dropped(p.clone())) as std::sync::Arc<dyn egui::DroppedFile + Send + Sync>).collect();
+        let (media, clips) = (app.doc.project.media.len(), app.doc.model.active().clips.len());
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), time: Some(1.0), dropped_files, ..Default::default() };
+        crate::editor::test_frame(&ctx, input, |ui| app.take_dropped_files(ui.ctx()));
+        assert_eq!(app.doc.project.media.len(), media + 1, "the picture is in the bin");
+        let models = app.doc.model.active().clips.iter().filter(|c| crate::mesh_store::file_of(c).is_some()).count();
+        assert_eq!((app.doc.model.active().clips.len(), models), (clips + 1, 1), "the model is a 3D layer");
+        // Taken once: the next frame imports nothing again.
+        crate::editor::test_frame(&ctx, egui::RawInput { time: Some(2.0), ..Default::default() }, |ui| app.take_dropped_files(ui.ctx()));
+        assert_eq!(app.doc.project.media.len(), media + 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// File ▸ Import media offers what the decoders and importers read:
     /// WebM and MKV (converted), TIFF, EXR and DPX stills, every model file.

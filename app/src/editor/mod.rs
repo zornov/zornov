@@ -702,6 +702,20 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+/// An outline over the editor and a word while files from the desktop are
+/// dragged over it (they are imported when dropped).
+pub fn drop_hint(ctx: &egui::Context) {
+    if ctx.input(|i| i.raw.hovered_files.is_empty()) {
+        return;
+    }
+    let t = theme::tokens(ctx);
+    let r = ctx.content_rect().shrink(6.0);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("window-drop")));
+    p.rect_filled(r, CornerRadius::same(theme::radius::CARD), t.accent_soft.gamma_multiply(0.35));
+    p.rect_stroke(r, CornerRadius::same(theme::radius::CARD), egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    p.text(r.center(), egui::Align2::CENTER_CENTER, crate::i18n::shown("Drop to import"), theme::body_medium(), t.accent);
+}
+
 /// Fill colour for a clip kind.
 pub fn clip_fill(t: &theme::Tokens, kind: ClipKind) -> egui::Color32 {
     match kind {
