@@ -165,6 +165,26 @@ A release:
    download buttons and [Terminal and headless use](terminal.md#claude-desktop)
    link to `releases/latest/download/<that name>`, so they start the download
    straight away and keep working for every new version.
+5. List the new version in the official MCP Registry, which MCP clients and
+   directories read. `server.json` at the root of the repository is the
+   listing, `com.zornov/zornov`; point it at this release's versioned
+   extension and its checksum, check it and publish it:
+
+   ```bash
+   V=X.Y.Z
+   SHA=$(shasum -a 256 dist/release/Zornov-$V.mcpb | cut -d' ' -f1)
+   jq --arg v "$V" --arg sha "$SHA" '.version = $v
+     | .packages[0].identifier = "https://github.com/zornov/zornov/releases/download/v\($v)/Zornov-\($v).mcpb"
+     | .packages[0].fileSha256 = $sha' server.json > server.json.new && mv server.json.new server.json
+   mcp-publisher validate
+   mcp-publisher login dns --domain zornov.com --private-key "$($(brew --prefix openssl@3)/bin/openssl pkey -in mcp-registry.pem -noout -text | grep -A3 priv: | tail -n +2 | tr -d ' :\n')"
+   mcp-publisher publish
+   ```
+
+   Run `cargo xtask assets-lock` and commit the updated `server.json` and
+   `assets.lock`. The registry keeps every version; it
+   holds only this metadata, and clients download the extension from the
+   release and check its hash.
 
 Secrets the release workflow reads:
 
@@ -175,6 +195,23 @@ Secrets the release workflow reads:
 | `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER` | only for the optional hosted macOS build |
 
 Nothing is pushed or published by the workflow.
+
+## One-time setup: the MCP Registry
+
+The registry proves that `com.zornov/*` names belong to us through a key
+whose public half is a TXT record on zornov.com. Once, with OpenSSL 3
+(`brew install openssl@3`; macOS's own LibreSSL has no Ed25519):
+
+```bash
+OPENSSL=$(brew --prefix openssl@3)/bin/openssl
+$OPENSSL genpkey -algorithm Ed25519 -out mcp-registry.pem
+echo "zornov.com. IN TXT \"v=MCPv1; k=ed25519; p=$($OPENSSL pkey -in mcp-registry.pem -pubout -outform DER | tail -c 32 | base64)\""
+```
+
+Add that TXT record at the apex of zornov.com (not a subdomain) and check it
+with `dig TXT zornov.com +short`. Keep `mcp-registry.pem` with the other
+signing keys, outside the repository (`*.pem` is ignored by git). `mcp-publisher`
+comes from `brew install mcp-publisher`.
 
 ## Crash reports
 

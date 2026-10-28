@@ -28,7 +28,7 @@
   <sub>1,344 keyframes in one edit, made in Zornov.</sub>
 </p>
 
-Zornov is a free, open-source film studio. Edit, grade, animate puppets, build 3D worlds, compose the score and deliver, all in one app. An AI director can work on the same timeline while you do, and you can take over anywhere.
+Zornov™ is a free, open-source film studio. Edit, grade, animate puppets, build 3D worlds, compose the score and deliver, all in one app. An AI director can work on the same timeline while you do, and you can take over anywhere.
 
 Every tool the window has is also one call away for AI assistants. Claude, Codex or any client that speaks MCP can open a project, cut it, light it, score it, look at the frames, check its own work and export, with the same tools you use.
 
@@ -291,4 +291,4 @@ Zornov is open source under the **GNU Affero General Public License v3.0 or late
 
 For products or services that can't follow the AGPL, Zornov is also available under a **commercial licence** from Ashrox LLC; see [`LICENSING.md`](LICENSING.md).
 
-Copyright 2026 Ashrox LLC and contributors. Third-party credits are in [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md), and model licences are in [`docs/models.md`](docs/models.md). The films above use public-domain footage from NASA, the Library of Congress (Carol M. Highsmith) and Wikimedia Commons contributors.
+Copyright 2026 Ashrox LLC and contributors. Zornov™ and the Zornov logo are trademarks of Ashrox LLC; see [Trademarks](GOVERNANCE.md#trademarks). Third-party credits are in [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md), and model licences are in [`docs/models.md`](docs/models.md). The films above use public-domain footage from NASA, the Library of Congress (Carol M. Highsmith) and Wikimedia Commons contributors.

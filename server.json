@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.zornov/zornov",
+  "description": "Edit video with Zornov: cut, animate, model in 3D, light, score, check and export",
+  "repository": {
+    "url": "https://github.com/zornov/zornov",
+    "source": "github"
+  },
+  "websiteUrl": "https://zornov.com",
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/zornov/zornov/releases/download/v0.1.1/Zornov-0.1.1.mcpb",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

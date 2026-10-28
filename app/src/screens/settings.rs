@@ -918,6 +918,7 @@ fn about(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
     ui.add_space(4.0);
     ui.label(egui::RichText::new(crate::i18n::shown("Library content shows its own source and licence in each item's info.")).font(theme::caption()).color(t.text_2));
+    ui.label(egui::RichText::new(crate::i18n::shown("Zornov™ is a trademark of Ashrox LLC.")).font(theme::caption()).color(t.text_2));
 }
 
 #[cfg(all(test, not(feature = "commerce")))]

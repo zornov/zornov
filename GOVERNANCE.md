@@ -47,9 +47,9 @@ over the project's direction, releases, licence or name.
 
 ## Trademarks
 
-"Zornov" as the name of this project, and its logos, are used by Ashrox LLC
-to identify official releases. The source code licence does not grant rights
-to them.
+Zornov™ and the Zornov logos are trademarks of Ashrox LLC, used to identify
+its official releases and services. The source code licence does not grant
+rights to them.
 
 You may use the name to refer to the project truthfully, for example "a
 plugin for Zornov" or "based on Zornov". Please do not use the name or logos
