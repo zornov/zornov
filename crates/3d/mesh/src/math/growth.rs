@@ -84,6 +84,9 @@ impl Default for Turtle {
 pub struct Branch {
     pub points: Vec<[f64; 3]>,
     pub radii: Vec<f64>,
+    /// The branch it forks from and the index of the point there (`None`
+    /// for the trunk, or a branch begun after a move without drawing).
+    pub parent: Option<(usize, usize)>,
 }
 
 /// A leaf: where, which way the branch heads there, its side and its size.
@@ -131,9 +134,11 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
         w: f64,
         step: f64,
         branch: Option<usize>,
+        /// Where a branch begun from here forks from.
+        from: Option<(usize, usize)>,
     }
     let a = how.angle.to_radians();
-    let mut st = State { p: [0.0; 3], h: [0.0, 0.0, 1.0], l: [1.0, 0.0, 0.0], u: [0.0, 1.0, 0.0], w: how.width, step: how.step, branch: None };
+    let mut st = State { p: [0.0; 3], h: [0.0, 0.0, 1.0], l: [1.0, 0.0, 0.0], u: [0.0, 1.0, 0.0], w: how.width, step: how.step, branch: None, from: None };
     let mut stack: Vec<State> = Vec::new();
     let mut out = Grown::default();
     let mut points = 0usize;
@@ -157,7 +162,7 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
                 let b = match st.branch {
                     Some(b) => b,
                     None => {
-                        out.branches.push(Branch { points: vec![st.p], radii: vec![st.w] });
+                        out.branches.push(Branch { points: vec![st.p], radii: vec![st.w], parent: st.from });
                         points += 1;
                         st.branch = Some(out.branches.len() - 1);
                         out.branches.len() - 1
@@ -171,6 +176,7 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
             'f' => {
                 st.p = [0, 1, 2].map(|i| st.p[i] + st.h[i] * st.step);
                 st.branch = None;
+                st.from = None;
             }
             '+' => (st.h, st.l) = (rot(st.h, st.u, a), rot(st.l, st.u, a)),
             '-' => (st.h, st.l) = (rot(st.h, st.u, -a), rot(st.l, st.u, -a)),
@@ -186,6 +192,9 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
                 }
                 st.w *= how.taper;
                 st.step *= how.shrink;
+                if let Some(b) = st.branch {
+                    st.from = Some((b, out.branches[b].points.len() - 1));
+                }
                 st.branch = None;
             }
             ']' => {
@@ -197,8 +206,71 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
             _ => {}
         }
     }
+    // Branches too short to draw go, and the forks are renumbered.
+    let mut new_index = vec![None; out.branches.len()];
+    let mut n = 0;
+    for (i, b) in out.branches.iter().enumerate() {
+        if b.points.len() >= 2 {
+            new_index[i] = Some(n);
+            n += 1;
+        }
+    }
     out.branches.retain(|b| b.points.len() >= 2);
+    for b in &mut out.branches {
+        b.parent = b.parent.and_then(|(p, k)| new_index[p].map(|q| (q, k)));
+    }
     out
+}
+
+/// Radii by the pipe model (Shinozaki's; da Vinci's rule for `exponent`
+/// 2): every point of a branch is as thick as the wood it carries, its
+/// radius to the `exponent` in proportion to the length of all the
+/// branches beyond it (its own way to the tip and every branch forking
+/// further out). So each branch tapers once, smoothly, from base to tip;
+/// at a fork the parent's section is the sum of its children's (r^e =
+/// Σ r_i^e); and the trunk's base is `trunk` thick. A tip keeps the
+/// thickness of one step's wood. Radii per branch, per point.
+pub fn pipe_radii(g: &Grown, trunk: f64, exponent: f64) -> Vec<Vec<f64>> {
+    let e = exponent.clamp(1.5, 4.0);
+    let d = |a: [f64; 3], b: [f64; 3]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+    let n = g.branches.len();
+    // Children by where they fork.
+    let mut kids: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    for (c, b) in g.branches.iter().enumerate() {
+        if let Some((p, k)) = b.parent
+            && p < n
+            && p != c
+        {
+            kids[p].push((k, c));
+        }
+    }
+    let steps: Vec<f64> = g.branches.iter().flat_map(|b| b.points.windows(2).map(|w| d(w[0], w[1]))).filter(|x| *x > 0.0).collect();
+    let tip_wood = if steps.is_empty() { 1.0 } else { steps.iter().sum::<f64>() / steps.len() as f64 };
+    // Wood beyond each point, children first (a child always comes after
+    // its parent in the list; a parent at or after its child, which the
+    // turtle never makes, is taken as bare).
+    let mut beyond: Vec<Vec<f64>> = vec![Vec::new(); n];
+    for b in (0..n).rev() {
+        let pts = &g.branches[b].points;
+        let mut w = vec![0.0; pts.len()];
+        let mut acc = 0.0;
+        for k in (0..pts.len()).rev() {
+            if k + 1 < pts.len() {
+                acc += d(pts[k], pts[k + 1]);
+            }
+            for &(at, c) in &kids[b] {
+                if at == k && c > b {
+                    acc += beyond[c].first().copied().unwrap_or(0.0) + tip_wood;
+                }
+            }
+            w[k] = acc;
+        }
+        beyond[b] = w;
+    }
+    // The heaviest root is the trunk.
+    let root = (0..n).filter(|&b| g.branches[b].parent.is_none()).max_by(|&a, &b| beyond[a].first().unwrap_or(&0.0).total_cmp(beyond[b].first().unwrap_or(&0.0))).unwrap_or(0);
+    let c = trunk / (beyond.get(root).and_then(|w| w.first()).copied().unwrap_or(0.0) + tip_wood).powf(1.0 / e);
+    beyond.iter().map(|w| w.iter().map(|x| c * (x + tip_wood).powf(1.0 / e)).collect()).collect()
 }
 
 /// A named L-system with how its turtle draws.
@@ -396,6 +468,54 @@ mod tests {
             let g = turtle(&s, &p.turtle);
             assert!(g.branches.len() > 3 && !g.capped, "{}", p.name);
         }
+    }
+
+    #[test]
+    fn branches_know_where_they_fork_from() {
+        let g = turtle("F[+F[-F]F]F", &Turtle { angle: 30.0, ..Turtle::default() });
+        // The trunk, the side branch from its first point, and the twig
+        // from the side branch's first point.
+        assert_eq!(g.branches.len(), 3);
+        assert_eq!(g.branches[0].parent, None);
+        assert_eq!(g.branches[1].parent, Some((0, 1)));
+        assert_eq!(g.branches[2].parent, Some((1, 1)));
+        // Moving without drawing starts a branch of its own.
+        assert_eq!(turtle("F[fF]", &Turtle::default()).branches[1].parent, None);
+    }
+
+    #[test]
+    fn pipe_radii_taper_once_and_keep_the_pipe_rule_at_forks() {
+        let tree = plant("tree").unwrap();
+        let (s, _) = expand(&tree.system(), 4, 1);
+        let g = turtle(&s, &tree.turtle);
+        let r = pipe_radii(&g, 0.22, 2.0);
+        assert!((r[0][0] - 0.22).abs() < 1e-9, "the trunk's base is the width: {}", r[0][0]);
+        for (b, br) in g.branches.iter().enumerate() {
+            // One continuous taper: never thicker toward the tip.
+            assert!(r[b].windows(2).all(|w| w[1] <= w[0] + 1e-12), "branch {b} thickens: {:?}", r[b]);
+            assert!(r[b].iter().all(|x| *x > 0.0));
+            if let Some((p, k)) = br.parent {
+                // A child is no thicker than its parent where it forks…
+                assert!(r[b][0] <= r[p][k] + 1e-12);
+                // …and the parent just before the fork carries both: the
+                // pipe rule r^2 = r_child^2 + r_on^2, to within a step's
+                // taper.
+                if k + 1 < r[p].len() && k > 0 {
+                    let before = r[p][k - 1].powi(2);
+                    let after = r[p][k + 1].powi(2) + r[b][0].powi(2);
+                    assert!(before >= after * 0.98, "branch {b} at {p}:{k}: {before} vs {after}");
+                }
+            }
+        }
+        // The turtle's radii taper twice at a fork (`!` then `[`): a first
+        // child of the trunk is under half its parent; the pipe model keeps
+        // it near 1/sqrt(2) of the parent at that fork for an even split.
+        let first = g.branches.iter().position(|b| b.parent.is_some_and(|(p, _)| p == 0)).unwrap();
+        let (p, k) = g.branches[first].parent.unwrap();
+        let turtle_ratio = g.branches[first].radii[0] / g.branches[p].radii[k];
+        let pipe_ratio = r[first][0] / r[p][k];
+        println!("first fork: turtle {turtle_ratio:.3}, pipe {pipe_ratio:.3}");
+        assert!(turtle_ratio < 0.55 && pipe_ratio > 0.3 && pipe_ratio < 0.8, "turtle {turtle_ratio}, pipe {pipe_ratio}");
     }
 
     #[test]

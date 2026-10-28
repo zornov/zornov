@@ -82,7 +82,7 @@ impl Kind {
             Kind::Parametric => &["parametric", "preset", "coords", "u", "v", "resolution", "thickness", "cut", "morph", "t", "bake"],
             Kind::Tube => &["tube", "preset", "u", "radius", "sides", "resolution", "t", "bake"],
             Kind::Height => &["height", "preset", "bounds", "resolution", "depth", "t", "bake"],
-            Kind::Plant => &["lsystem", "preset", "axiom", "rules", "iterations", "angle", "width", "taper", "shrink", "droop", "seed", "sides", "leaves", "leaf_colour"],
+            Kind::Plant => &["lsystem", "preset", "axiom", "rules", "iterations", "angle", "width", "taper", "shrink", "droop", "seed", "sides", "leaves", "leaf_colour", "radii", "pipe"],
             Kind::Phyllo => &["phyllotaxis", "preset", "count", "angle", "seed_size", "core", "seed_colour", "core_colour"],
             Kind::Attractor => &["attractor", "preset", "steps", "dt", "start", "skip", "radius", "sides", "every"],
         }
@@ -592,6 +592,12 @@ fn tube(o: &Map<String, Value>, preset: Option<&str>, given: &[(String, f64)], f
     Ok(Made { mesh: built.mesh, name: titled(preset.unwrap_or("Tube")), said, moving, recipe: None })
 }
 
+/// Sides round a tube `radius_px` thick on screen: about one every 4 px of
+/// its rim, 5 for a twig up to 24 for a trunk.
+fn tube_sides(radius_px: f64) -> usize {
+    ((std::f64::consts::TAU * radius_px / 4.0).ceil() as usize).clamp(5, 24)
+}
+
 fn bounds3(p: &[[f64; 3]]) -> ([f64; 3], [f64; 3]) {
     let mut lo = [f64::INFINITY; 3];
     let mut hi = [f64::NEG_INFINITY; 3];
@@ -727,15 +733,24 @@ fn plant(o: &Map<String, Value>, preset: Option<&str>, given: &[(String, f64)], 
     if grown.branches.is_empty() {
         return Err("the L-system drew nothing (no F or G steps in what it grew)".into());
     }
-    let sides = pick("sides").map_or(6, |v| v as usize).clamp(3, 16);
+    // Radii: the pipe model by default (one smooth taper per branch, a
+    // fork's section shared by its children); "radii": "turtle" keeps the
+    // turtle's own (thinned by `taper` at every `!` and `[`).
+    let radii: Vec<Vec<f64>> = match o.get("radii").and_then(Value::as_str).unwrap_or("pipe") {
+        "pipe" | "da_vinci" => growth::pipe_radii(&grown, how.width, pick("pipe").unwrap_or(2.0)),
+        "turtle" => grown.branches.iter().map(|b| b.radii.clone()).collect(),
+        other => return Err(format!("radii is \"pipe\" (smooth taper, forks share the parent's section) or \"turtle\" (thinned at every ! and [), not \"{other}\"")),
+    };
+    let fixed_sides = pick("sides").map(|v| (v as usize).clamp(3, 32));
     // Every branch a tube; then leaves.
     let all: Vec<[f64; 3]> = grown.branches.iter().flat_map(|b| b.points.iter().copied()).collect();
     let (lo, hi) = bounds3(&all);
-    let (place, _) = placer(lo, hi, fit);
+    let (place, px_per_unit) = placer(lo, hi, fit);
     let mut mesh = Mesh::default();
     let bark = material("Bark", [96, 70, 48], 0.85);
-    for b in &grown.branches {
-        let sheet = surface::tube(&b.points, &b.radii, sides);
+    for (b, r) in grown.branches.iter().zip(&radii) {
+        let sides = fixed_sides.unwrap_or_else(|| tube_sides(r.first().copied().unwrap_or(0.0) * px_per_unit as f64));
+        let sheet = surface::tube(&b.points, r, sides);
         let built = surface::build(&sheet, &place, 0.0, None);
         studio_mesh::ops::merge(&mut mesh, &built.mesh);
     }
@@ -769,7 +784,7 @@ fn plant(o: &Map<String, Value>, preset: Option<&str>, given: &[(String, f64)], 
     }
     // Fitted again, leaves and bark thickness and all.
     math::fit(&mut mesh, fit);
-    let said = json!({"kind": "lsystem", "preset": preset, "symbols": s.len(), "capped": capped || grown.capped, "branches": grown.branches.len(), "leaves": if leaves { grown.leaves.len().min(20_000) } else { 0 }, "iterations": iterations, "angle": how.angle});
+    let said = json!({"kind": "lsystem", "preset": preset, "radii": o.get("radii").and_then(Value::as_str).unwrap_or("pipe"), "symbols": s.len(), "capped": capped || grown.capped, "branches": grown.branches.len(), "leaves": if leaves { grown.leaves.len().min(20_000) } else { 0 }, "iterations": iterations, "angle": how.angle});
     Ok(Made { mesh, name: titled(preset.unwrap_or("Plant")), said, moving: None, recipe: None })
 }
 
@@ -1277,6 +1292,31 @@ mod tests {
 
     fn last(s: &Session) -> u32 {
         s.doc.project.clips.iter().map(|c| c.id).max().unwrap()
+    }
+
+    #[test]
+    fn tubes_get_sides_by_their_size_on_screen() {
+        assert_eq!(tube_sides(0.5), 5);
+        assert_eq!(tube_sides(8.0), 13);
+        assert_eq!(tube_sides(40.0), 24);
+        // A tree's trunk is rounder than its twigs, and the pipe radii
+        // keep a fork's children no thicker than the branch they leave.
+        let tree = make(&json!({"lsystem": "tree", "iterations": 4}), Fit::Largest(400.0), 4).unwrap();
+        assert_eq!(tree.said["radii"], "pipe");
+        // At 400 px the trunk (0.22 of a 10-step tree) is near 9 px thick:
+        // a dozen sides or more; the thinnest twigs get five.
+        let tp = growth::plant("tree").unwrap();
+        let (s, _) = growth::expand(&tp.system(), 4, 1);
+        let g = growth::turtle(&s, &tp.turtle);
+        let r = growth::pipe_radii(&g, tp.turtle.width, 2.0);
+        let all: Vec<[f64; 3]> = g.branches.iter().flat_map(|b| b.points.iter().copied()).collect();
+        let (lo, hi) = bounds3(&all);
+        let (_, k) = placer(lo, hi, Fit::Largest(400.0));
+        let trunk = tube_sides(r[0][0] * k as f64);
+        let twig = r.iter().map(|x| tube_sides(x[0] * k as f64)).min().unwrap();
+        println!("tree at 400 px: trunk {trunk} sides, thinnest twig {twig}");
+        assert!(trunk >= 10 && twig <= 6 && trunk > twig, "trunk {trunk}, twig {twig}");
+        assert!(make(&json!({"lsystem": "tree", "radii": "fat"}), Fit::Largest(400.0), 4).is_err());
     }
 
     #[test]
