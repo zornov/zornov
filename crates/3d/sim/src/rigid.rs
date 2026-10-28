@@ -232,17 +232,26 @@ pub struct World {
     /// Seconds per solver step.
     pub step: f32,
     pub iterations: usize,
+    /// Time asked for but not yet stepped (less than one step): a frame
+    /// that is not a whole number of steps (1/25 s is 9.6 of them) carries
+    /// the rest to the next, so the world keeps the clock's pace.
+    owed: f64,
 }
 
 impl World {
     pub fn new(gravity: V3) -> World {
-        World { bodies: Vec::new(), colliders: Vec::new(), gravity, time: 0.0, step: 1.0 / 240.0, iterations: 12 }
+        World { bodies: Vec::new(), colliders: Vec::new(), gravity, time: 0.0, step: 1.0 / 240.0, iterations: 12, owed: 0.0 }
     }
 
-    /// Runs `seconds` forward.
+    /// Runs `seconds` forward, in whole solver steps; what is left over
+    /// is run with the next call.
     pub fn advance(&mut self, seconds: f32) {
-        let n = (seconds / self.step).round().max(1.0) as usize;
-        for _ in 0..n {
+        let step = f64::from(self.step.max(1e-6));
+        self.owed += f64::from(seconds.max(0.0));
+        // A hair of slack so 1/30 s at 240 a second is 8 steps, not 7.
+        let n = (self.owed / step + 1e-6).floor();
+        self.owed = (self.owed - n * step).max(0.0);
+        for _ in 0..n as usize {
             self.substep(self.step);
         }
     }
@@ -546,6 +555,21 @@ mod tests {
         assert!((y - (300.0 - 50.0)).abs() < sphere_r + 6.0, "y {y}");
         assert!(lowest < 300.0, "never through the floor: {lowest}");
         assert!(w.bodies[0].asleep, "comes to rest");
+    }
+
+    #[test]
+    fn frames_that_are_not_whole_steps_keep_the_clock() {
+        // 25 frames a second is 9.6 steps of 1/240 s each: rounding every
+        // frame to 10 ran the world 4% fast.
+        for fps in [25.0f32, 50.0, 29.97, 23.976, 30.0] {
+            let mut w = World::new([0.0, 980.0, 0.0]);
+            let frames = (fps * 4.0).round() as usize;
+            for _ in 0..frames {
+                w.advance(1.0 / fps);
+            }
+            let want = frames as f32 / fps;
+            assert!((w.time - want).abs() <= w.step * 1.01, "{fps} fps: {} s stepped for {want} s", w.time);
+        }
     }
 
     #[test]

@@ -338,6 +338,9 @@ pub struct World {
     pub touching: Vec<(usize, usize)>,
     /// Body pairs that never collide (parts of one ragdoll that overlap).
     pub ignore: std::collections::HashSet<(usize, usize)>,
+    /// Time asked of [`World::advance`] but not yet stepped (under one
+    /// step), carried to the next call.
+    owed: f64,
 }
 
 impl World {
@@ -357,8 +360,14 @@ impl World {
 
     /// Runs `seconds` forward in whole steps.
     pub fn advance(&mut self, seconds: f32) {
-        let n = (seconds / self.settings.dt).round().max(1.0) as usize;
-        for _ in 0..n {
+        // Whole steps, the rest carried: 1/25 s is 4.8 steps of 1/120 s,
+        // and rounding each frame to 5 ran the world 4% fast (at 50 a
+        // second, 2.4 rounded to 2 ran it 17% slow).
+        let dt = f64::from(self.settings.dt.max(1e-6));
+        self.owed += f64::from(seconds.max(0.0));
+        let n = (self.owed / dt + 1e-6).floor();
+        self.owed = (self.owed - n * dt).max(0.0);
+        for _ in 0..n as usize {
             self.step();
         }
     }

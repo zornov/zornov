@@ -29,6 +29,19 @@ fn tilt(b: &Body) -> f32 {
 }
 
 #[test]
+fn advancing_by_frames_keeps_the_clock_at_any_frame_rate() {
+    for fps in [25.0f32, 50.0, 29.97, 24.0] {
+        let mut w = world();
+        let frames = (fps * 3.0).round() as usize;
+        for _ in 0..frames {
+            w.advance(1.0 / fps);
+        }
+        let want = frames as f32 / fps;
+        assert!((w.time - want).abs() <= w.settings.dt * 1.01, "{fps} fps: {} s stepped for {want} s", w.time);
+    }
+}
+
+#[test]
 fn a_box_falls_and_rests_on_the_ground_then_sleeps() {
     let mut w = world();
     let b = boxy(&mut w, [0.25; 3], [0.0, -2.0, 0.0], "wood");
