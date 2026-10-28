@@ -71,7 +71,7 @@ Every film here was edited, animated, scored and exported in Zornov, from public
 
 ### Models made in Zornov
 
-<img alt="Forty-five 3D models made in Zornov: characters with hair and clothes, roosters, a fisherman, a lighthouse, art deco streets, galleries, a porch, a phone, extruded 3D titles, chrome and amber props, and shapes from mathematics such as a gyroid lattice, a Mandelbulb, a torus knot, a seashell, a Möbius strip, a grown tree, a pine cone, a strange attractor and a twisted ribbon" src="docs/images/models.webp" width="100%">
+<img alt="Forty-two 3D models made in Zornov: characters with hair and clothes, a fisherman, a lighthouse, art deco streets, galleries, a porch, a phone, extruded 3D titles, chrome and amber props, and shapes from mathematics such as a gyroid lattice, a Mandelbulb, a torus knot, a seashell, a Möbius strip, a grown tree, a pine cone, a strange attractor, a twisted ribbon and a rose curve" src="docs/images/models.webp" width="100%">
 
 <sub>Every one modelled, dressed or grown in Zornov, many by an AI assistant driving its tools through MCP.</sub>
 
