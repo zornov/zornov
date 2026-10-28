@@ -11,6 +11,57 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+/// The reason keys written to one moment come out as one.
+pub(super) const SAME_MOMENT: &str = "landed on the same moment as another and merged";
+
+/// What a write did to the keys it was given: how many were written, how
+/// many the tracks hold, and what became of the rest. A write op's reply
+/// says all three, never only the count it was asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct KeyTally {
+    pub written: usize,
+    pub kept: usize,
+    /// (how many, why), in the order they were lost.
+    pub dropped: Vec<(usize, String)>,
+}
+
+impl KeyTally {
+    pub fn new(written: usize) -> Self {
+        Self { written, kept: written, dropped: Vec::new() }
+    }
+
+    /// `n` of the keys never reached the tracks, for `why`.
+    pub fn lose(&mut self, n: usize, why: &str) {
+        if n > 0 {
+            self.kept = self.kept.saturating_sub(n);
+            self.dropped.push((n, why.to_owned()));
+        }
+    }
+
+    /// The tracks hold `stored` keys: whatever is missing from what was
+    /// still expected is put down to `why`.
+    pub fn settle(&mut self, stored: usize, why: &str) {
+        self.lose(self.kept.saturating_sub(stored), why);
+    }
+
+    pub fn dropped_total(&self) -> usize {
+        self.dropped.iter().map(|d| d.0).sum()
+    }
+
+    /// "N keys" when nothing was lost, else "K of N keys kept, D dropped (a; b)".
+    pub fn say(&self) -> String {
+        if self.dropped_total() == 0 {
+            return format!("{} keys", self.written);
+        }
+        let why: Vec<String> = self.dropped.iter().map(|(n, w)| format!("{n} {w}")).collect();
+        format!("{} of {} keys kept, {} dropped ({})", self.kept, self.written, self.dropped_total(), why.join("; "))
+    }
+
+    pub fn json(&self) -> Value {
+        json!({"written": self.written, "kept": self.kept, "dropped": self.dropped_total(), "why": self.dropped.iter().map(|(n, w)| json!({"keys": n, "reason": w})).collect::<Vec<_>>()})
+    }
+}
+
 /// An id sent as a number or as digits in a string ("8"): agents send both.
 pub fn as_id(v: &Value) -> Option<u64> {
     v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().trim_start_matches('#').parse::<u64>().ok()))
@@ -542,16 +593,20 @@ impl Session {
         Ok(format!("{} on {name} of clip {id}", self.keys_kept(id, &prop.paths, keys.len())))
     }
 
-    /// "N keys", or "K of N keys kept (…)" when the stored tracks hold
-    /// fewer than were asked for: keys on the same moment merge, and the
-    /// reply must say so rather than echo the request.
+    /// What a write of `asked` keys left on the tracks of `paths`: keys on
+    /// the same moment merge, and the reply must say so rather than echo
+    /// the request.
     fn keys_kept(&self, id: u32, paths: &[String], asked: usize) -> String {
-        let kept = self.model_clip(id).map_or(0, |c| paths.iter().filter_map(|p| c.keyframes.get(p)).map(|t| t.keys.len()).min().unwrap_or(0));
-        if kept < asked {
-            format!("{kept} of {asked} keys kept ({} landed on the same moment as another and merged)", asked - kept)
-        } else {
-            format!("{asked} keys")
-        }
+        let mut tally = KeyTally::new(asked);
+        tally.settle(self.model_clip(id).map_or(0, |c| paths.iter().filter_map(|p| c.keyframes.get(p)).map(|t| t.keys.len()).min().unwrap_or(0)), SAME_MOMENT);
+        tally.say()
+    }
+
+    /// How many keys the stored track(s) of `property` on clip `id` hold.
+    pub(super) fn keys_on(&self, id: u32, property: &str) -> usize {
+        let Some(c) = self.model_clip(id) else { return 0 };
+        let Ok(prop) = super::props::resolve(&c, property) else { return 0 };
+        prop.paths.iter().filter_map(|p| c.keyframes.get(p)).map(|t| t.keys.len()).min().unwrap_or(0)
     }
 
     /// `animate` `speed`: a speed ramp inside one clip, keys of playback
@@ -1095,8 +1150,19 @@ mod tests {
         let r = s.edit(&[json!({"op": "animate", "clip": id, "property": "x", "formula": "sqrt(t - 1) * 100"})], "f", false).unwrap();
         let kept = most_keys(&s, id);
         let said = notes(&r);
-        assert!(said.contains(&format!("{kept} keys")), "{said}");
+        assert!(said.contains(&format!("{kept} of")) && said.contains("dropped"), "{said}");
         assert!(said.contains("undefined, skipped"), "{said}");
+    }
+
+    #[test]
+    fn a_tally_says_written_kept_and_dropped() {
+        let mut t = KeyTally::new(10);
+        assert_eq!(t.say(), "10 keys");
+        t.lose(2, "undefined");
+        t.settle(7, SAME_MOMENT);
+        assert_eq!((t.written, t.kept, t.dropped_total()), (10, 7, 3));
+        assert!(t.say().starts_with("7 of 10 keys kept, 3 dropped (2 undefined; 1 landed"), "{}", t.say());
+        assert_eq!(t.json()["dropped"], 3);
     }
 
     /// Agents send ids as strings ("8") as often as numbers.
