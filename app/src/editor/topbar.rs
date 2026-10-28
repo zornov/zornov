@@ -24,7 +24,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     // then text buttons for Layout and Settings.
     let mut right = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)));
     right.spacing_mut().item_spacing.x = 6.0;
-    let export_btn = Button::primary("Export").compact().shortcut("⌘E").show(&mut right);
+    let key = |id: &str| crate::keymap::hint(&app.prefs, id);
+    let (export_keys, settings_keys, home_keys) = (key("export"), key("settings"), key("all-projects"));
+    let export_btn = Button::primary("Export").compact().shortcut(&export_keys).show(&mut right);
     crate::onboarding::note_target(&ctx, "export", export_btn.rect);
     if export_btn.clicked() {
         app.overlay = Overlay::Export;
@@ -34,7 +36,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     if lresp.clicked() {
         kit::toggle_open(&ctx, layout_id);
     }
-    if Button::secondary("Settings").compact().shortcut("⌘,").show(&mut right).clicked() {
+    if Button::secondary("Settings").compact().shortcut(&settings_keys).show(&mut right).clicked() {
         app.overlay = Overlay::Settings;
     }
     if Button::secondary("Paint").compact().shortcut("⇧⌘P").show(&mut right).clicked() {
@@ -55,7 +57,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
     bar.spacing_mut().item_spacing.x = 4.0;
 
-    if IconButton::new(Icon::House, "All projects").shortcut("⇧⌘H").show(&mut bar).clicked() {
+    if IconButton::new(Icon::House, "All projects").shortcut(&home_keys).show(&mut bar).clicked() {
         app.screen = Screen::Start;
     }
     bar.add_space(2.0);
@@ -238,19 +240,21 @@ fn project_name(app: &mut StudioApp, ui: &mut egui::Ui, max_w: f32, with_status:
 
 struct Item {
     label: &'static str,
-    shortcut: &'static str,
+    /// Its keys: an action's from the keymap, or a fixed key.
+    shortcut: String,
     icon: Option<Icon>,
     enabled: bool,
     action: fn() -> Option<Action>,
 }
 
-fn item(label: &'static str, shortcut: &'static str, icon: Option<Icon>, enabled: bool, action: fn() -> Option<Action>) -> Option<Item> {
-    Some(Item { label, shortcut, icon, enabled, action })
+fn item(label: &'static str, shortcut: &str, icon: Option<Icon>, enabled: bool, action: fn() -> Option<Action>) -> Option<Item> {
+    Some(Item { label, shortcut: shortcut.to_owned(), icon, enabled, action })
 }
 
 fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
     let sel = !app.editor.selection.is_empty();
     let d = &app.doc;
+    let k = |id: &str| crate::keymap::hint(&app.prefs, id);
     vec![
         ("File", vec![
             item("Open…", "⌘O", Some(Icon::FolderOpen), true, || Some(Action::Open)),
@@ -263,28 +267,28 @@ fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
             item("Import script…", "", None, true, || Some(Action::ImportScript)),
             None,
             item("Export OpenTimelineIO…", "", None, true, || Some(Action::ExportOtio)),
-            item("Export…", "⌘E", Some(Icon::Export), true, || Some(Action::Export)),
+            item("Export…", &k("export"), Some(Icon::Export), true, || Some(Action::Export)),
         ]),
         ("Edit", vec![
-            item("Undo", "⌘Z", Some(Icon::ArrowUUpLeft), d.can_undo(), || Some(Action::Undo)),
-            item("Redo", "⇧⌘Z", Some(Icon::ArrowUUpRight), d.can_redo(), || Some(Action::Redo)),
+            item("Undo", &k("undo"), Some(Icon::ArrowUUpLeft), d.can_undo(), || Some(Action::Undo)),
+            item("Redo", &k("redo"), Some(Icon::ArrowUUpRight), d.can_redo(), || Some(Action::Redo)),
             None,
-            item("Select all", "⌘A", None, true, || Some(Action::SelectAll)),
-            item("Duplicate", "⌘D", Some(Icon::Copy), sel, || Some(Action::Duplicate)),
-            item("Delete", "⌫", Some(Icon::Trash), sel, || Some(Action::Delete)),
+            item("Select all", &k("select-all"), None, true, || Some(Action::SelectAll)),
+            item("Duplicate", &k("duplicate"), Some(Icon::Copy), sel, || Some(Action::Duplicate)),
+            item("Delete", &k("delete"), Some(Icon::Trash), sel, || Some(Action::Delete)),
         ]),
         ("Clip", vec![
-            item("Split at playhead", "S", Some(Icon::Scissors), true, || Some(Action::Split)),
-            item("Add marker", "M", Some(Icon::Flag), true, || Some(Action::Marker)),
+            item("Split at playhead", &k("split"), Some(Icon::Scissors), true, || Some(Action::Split)),
+            item("Add marker", &k("marker"), Some(Icon::Flag), true, || Some(Action::Marker)),
             None,
-            item("Set in point", "I", None, true, || Some(Action::RangeIn)),
-            item("Set out point", "O", None, true, || Some(Action::RangeOut)),
-            item("Clear range", "⌥X", None, d.project.range.is_some(), || Some(Action::ClearRange)),
+            item("Set in point", &k("in"), None, true, || Some(Action::RangeIn)),
+            item("Set out point", &k("out"), None, true, || Some(Action::RangeOut)),
+            item("Clear range", &k("clear-range"), None, d.project.range.is_some(), || Some(Action::ClearRange)),
         ]),
         ("View", vec![
-            item("Zoom in", "⌘=", Some(Icon::MagnifyingGlassPlus), true, || Some(Action::ZoomIn)),
-            item("Zoom out", "⌘-", Some(Icon::MagnifyingGlassMinus), true, || Some(Action::ZoomOut)),
-            item("Fit sequence", "⇧Z", Some(Icon::ArrowsOutLineHorizontal), true, || Some(Action::Fit)),
+            item("Zoom in", &k("zoom-in"), Some(Icon::MagnifyingGlassPlus), true, || Some(Action::ZoomIn)),
+            item("Zoom out", &k("zoom-out"), Some(Icon::MagnifyingGlassMinus), true, || Some(Action::ZoomOut)),
+            item("Fit sequence", &k("fit"), Some(Icon::ArrowsOutLineHorizontal), true, || Some(Action::Fit)),
         ]),
         ("Help", vec![
             item("Search help", "F1", Some(Icon::Question), true, || Some(Action::Help)),
@@ -328,7 +332,7 @@ fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], panels: &[(crate:
                 Some(it) => {
                     let mut m = MenuItem::new(it.label).enabled(it.enabled);
                     if !it.shortcut.is_empty() {
-                        m = m.shortcut(it.shortcut);
+                        m = m.shortcut(&it.shortcut);
                     }
                     m = match it.icon {
                         Some(i) => m.icon(i),

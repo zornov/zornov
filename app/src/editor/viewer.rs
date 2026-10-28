@@ -450,6 +450,11 @@ pub fn active_guides(ed: &EditorState, ctx: &egui::Context) -> Vec<crate::agent:
     g
 }
 
+/// The viewer's Overlays menu (its keys open it from anywhere in the editor).
+pub(crate) fn overlays_id() -> egui::Id {
+    egui::Id::unique("viewer-overlays")
+}
+
 fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
     let bar = Rect::from_min_size(r.min + Vec2::new(12.0, 4.0), Vec2::new(r.width() - 20.0, TOOLBAR_H - 8.0));
@@ -459,6 +464,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     bui.add_space(10.0);
     // The buttons scroll sideways when the viewer is narrower than they
     // are, leaving the picture's size and rate their room at the end.
+    let (overlays_keys, before_after_keys) = (crate::keymap::hint(&app.prefs, "overlays"), crate::keymap::hint(&app.prefs, "before-after"));
     let proj = &app.doc.project;
     let info = format!("{} × {} · {} fps", proj.width, proj.height, proj.fps);
     let info_w = kit::text_width(&bui, &info, theme::caption()) + 8.0;
@@ -470,9 +476,9 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
             if let Some(i) = kit::menu_button(bui, "viewer-zoom", zi, &ZOOM_NAMES, 84.0, None) {
                 ed.zoom = ZOOMS[i];
             }
-            let overlay_id = egui::Id::unique("viewer-overlays");
+            let overlay_id = overlays_id();
             let any = ed.safe_area || ed.thirds || more_guides(bui.ctx()) != MoreGuides::default();
-            let resp = IconButton::new(Icon::FrameCorners, "Overlays").shortcut("⇧O").active(any || kit::is_open(bui.ctx(), overlay_id)).show(bui);
+            let resp = IconButton::new(Icon::FrameCorners, "Overlays").shortcut(&overlays_keys).active(any || kit::is_open(bui.ctx(), overlay_id)).show(bui);
             if resp.clicked() {
                 kit::toggle_open(bui.ctx(), overlay_id);
             }
@@ -503,7 +509,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(MORE_GUIDES), more));
                 }
             });
-            if IconButton::new(Icon::SquareSplitHorizontal, "Before / after").shortcut("\\").active(ed.before_after).show(bui).clicked() {
+            if IconButton::new(Icon::SquareSplitHorizontal, "Before / after").shortcut(&before_after_keys).active(ed.before_after).show(bui).clicked() {
                 ed.before_after = !ed.before_after;
             }
             // Camera tools, cameras and lights.
@@ -562,6 +568,8 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
 
 fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
+    let key = |id: &str| crate::keymap::hint(&app.prefs, id);
+    let (back_keys, play_keys, fwd_keys, full_keys) = (key("frame-back"), key("play"), key("frame-fwd"), key("fullscreen"));
     let proj = &app.doc.project;
     let fps = proj.fps;
     let dur = crate::services::transport::duration(&app.doc);
@@ -592,7 +600,7 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
     let mut mui = ui.new_child(egui::UiBuilder::new().max_rect(mid).layout(egui::Layout::left_to_right(egui::Align::Center)));
     mui.spacing_mut().item_spacing.x = 4.0;
-    if IconButton::new(Icon::CaretLeft, "Previous frame").shortcut("←").show(&mut mui).clicked() {
+    if IconButton::new(Icon::CaretLeft, "Previous frame").shortcut(&back_keys).show(&mut mui).clicked() {
         ed.playhead = (ed.playhead - frame).max(0);
         ed.playing = false;
     }
@@ -604,10 +612,10 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
     let playing = ed.playing;
     presp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, if playing { "Pause" } else { "Play" }));
-    if kit::tip(presp, if ed.playing { "Pause" } else { "Play" }, Some("Space")).clicked() {
+    if kit::tip(presp, if ed.playing { "Pause" } else { "Play" }, Some(&play_keys)).clicked() {
         toggle_play(ed);
     }
-    if IconButton::new(Icon::CaretRight, "Next frame").shortcut("→").show(&mut mui).clicked() {
+    if IconButton::new(Icon::CaretRight, "Next frame").shortcut(&fwd_keys).show(&mut mui).clicked() {
         ed.playhead += frame;
         ed.playing = false;
     }
@@ -616,7 +624,7 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let right = Rect::from_min_max(egui::pos2(mid.right() + 8.0, bar.top()), bar.max);
     let mut rui = ui.new_child(egui::UiBuilder::new().max_rect(right).layout(egui::Layout::right_to_left(egui::Align::Center)));
     rui.spacing_mut().item_spacing.x = 2.0;
-    if IconButton::new(if ed.fullscreen { Icon::CornersIn } else { Icon::CornersOut }, if ed.fullscreen { "Exit full screen" } else { "Full screen" }).shortcut("F").show(&mut rui).clicked() {
+    if IconButton::new(if ed.fullscreen { Icon::CornersIn } else { Icon::CornersOut }, if ed.fullscreen { "Exit full screen" } else { "Full screen" }).shortcut(&full_keys).show(&mut rui).clicked() {
         ed.fullscreen = !ed.fullscreen;
     }
     if r.width() >= 520.0 {

@@ -134,7 +134,7 @@ impl<'a> MenuItem<'a> {
         self
     }
     pub fn shortcut(mut self, s: &'a str) -> Self {
-        self.shortcut = Some(s);
+        self.shortcut = Some(s).filter(|s| !s.is_empty());
         self
     }
     pub fn checked(mut self, c: bool) -> Self {

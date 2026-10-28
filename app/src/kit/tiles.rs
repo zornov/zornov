@@ -223,7 +223,7 @@ fn add_button(ui: &mut Ui, rect: Rect, id: egui::Id) -> Response {
     let p = ui.painter();
     p.circle_filled(rect.center(), 12.0, theme::mix(t.accent, Color32::WHITE, 0.1 * st.hover));
     icons::paint(p, rect, Icon::Plus, 14.0, t.on_accent());
-    tip(resp, "Add to timeline", Some("E"))
+    tip(resp, "Add to timeline", None)
 }
 
 /// Mask the four corners of `rect` with `bg` so the content looks rounded

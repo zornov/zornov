@@ -80,8 +80,9 @@ impl<'a> Button<'a> {
         self.forced = Some(f);
         self
     }
+    /// The keys shown in its tooltip (none when empty: an action with no keys).
     pub fn shortcut(mut self, s: &'a str) -> Self {
-        self.shortcut = Some(s);
+        self.shortcut = Some(s).filter(|s| !s.is_empty());
         self
     }
 
@@ -198,8 +199,9 @@ impl<'a> IconButton<'a> {
             filled: false,
         }
     }
+    /// The keys shown in its tooltip (none when empty: an action with no keys).
     pub fn shortcut(mut self, s: &'a str) -> Self {
-        self.shortcut = Some(s);
+        self.shortcut = Some(s).filter(|s| !s.is_empty());
         self
     }
     pub fn active(mut self, a: bool) -> Self {

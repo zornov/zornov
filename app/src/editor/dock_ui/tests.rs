@@ -311,7 +311,9 @@ fn the_ai_editor_is_a_panel_the_rail_opens() {
     let mut d = Drive::new(big());
     assert!(!d.h.app.editor.dock.contains(Panel::Ai), "not docked until asked for");
     // ⌘K: the AI editor opens as a tab with the Library, input focused.
-    d.step(vec![Event::Key { key: Key::K, physical_key: Some(Key::K), pressed: true, repeat: false, modifiers: Modifiers::COMMAND }]);
+    // (The modifiers this platform's keyboard sends for ⌘: Cmd on a Mac, Ctrl elsewhere.)
+    let cmd = crate::keymap::parse("⌘K").unwrap().modifiers;
+    d.step(vec![Event::Key { key: Key::K, physical_key: Some(Key::K), pressed: true, repeat: false, modifiers: cmd }]);
     d.frames(2);
     let tree = &d.h.app.editor.dock;
     assert!(tree.is_showing(Panel::Ai) && tree.find(Panel::Ai) == tree.find(Panel::Library));
