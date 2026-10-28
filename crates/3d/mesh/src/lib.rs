@@ -54,6 +54,7 @@ pub mod rig;
 pub mod rigfit;
 pub mod sdf;
 pub mod seal;
+pub mod solid;
 pub mod species;
 pub mod terrain;
 pub mod wear;
