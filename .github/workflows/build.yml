@@ -89,6 +89,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        # As v6 did: uv from GitHub Releases, and a pruned cache.
+        with:
+          download-from-astral-mirror: false
+          prune-cache: true
       - name: zizmor
         run: uvx zizmor==1.31.1 --min-severity medium --format github .github/workflows
       - name: actionlint
