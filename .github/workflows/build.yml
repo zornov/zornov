@@ -14,10 +14,23 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch or pull request replaces the run in progress.
+# A newer push to a pull request replaces its run in progress. Runs on main
+# finish (a newer one waits), because only main saves the build caches: if
+# each push cancelled the last, no run would ever save one and every build
+# would start cold.
 concurrency:
   group: build-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# The free runners for a public repository have no limit on minutes but 10 GB
+# of cache for the whole repository and about 14 GB of free disk on Linux.
+# These keep the builds inside both: no incremental files (CI never rebuilds
+# in place) and no debug info in test builds.
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_TERM_COLOR: always
 
 jobs:
   changes:
@@ -112,6 +125,12 @@ jobs:
         with:
           toolchain: "1.99.0"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        # One cache per job, saved by main only: pull requests restore it
+        # without writing their own, which would push main's out of the 10 GB.
+        with:
+          shared-key: windows-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Test
         run: cargo test --release --workspace
       - name: Tests left the test data untouched
@@ -132,33 +151,69 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
+      - name: Make room
+        # The image and an optimised build of the workspace do not fit in the
+        # runner's free disk; these preinstalled toolchains are not used here.
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - name: Build the image
         run: docker build -t zornov-linux docker
-      - name: Lint, test, check the test data, package
-        # Clippy fails on its errors only; its warnings are being fixed over
-        # time and do not fail the build. clippy.toml allows unwrap, expect
-        # and panic in tests.
+      - name: Test, check the test data, package
         run: |
           mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache/home -e CARGO_TARGET_DIR=/work/target \
+            -e CARGO_INCREMENTAL -e CARGO_PROFILE_DEV_DEBUG -e CARGO_PROFILE_TEST_DEBUG -e CARGO_TERM_COLOR \
             -v "$PWD:/work" \
             -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
             -v "$HOME/.cargo/git:/usr/local/cargo/git" \
-            zornov-linux sh -c 'cargo clippy --workspace --all-targets && cargo test --release --workspace && cargo xtask assets-check && cargo xtask package-linux'
+            zornov-linux sh -c 'cargo test --release --workspace && cargo xtask assets-check && cargo xtask package-linux'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zornov-Linux
           path: dist/*.tar.gz
 
+  clippy:
+    # Clippy on its own runner, beside the Linux tests rather than before
+    # them. It fails on its errors only; its warnings are being fixed over time
+    # and do not fail the build. clippy.toml allows unwrap, expect and panic in
+    # tests. A check build is small, so it has its own cache.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-clippy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      - name: Build the image
+        run: docker build -t zornov-linux docker
+      - name: Clippy
+        run: |
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache/home -e CARGO_TARGET_DIR=/work/target \
+            -e CARGO_INCREMENTAL -e CARGO_PROFILE_DEV_DEBUG -e CARGO_PROFILE_TEST_DEBUG -e CARGO_TERM_COLOR \
+            -v "$PWD:/work" \
+            -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
+            -v "$HOME/.cargo/git:/usr/local/cargo/git" \
+            zornov-linux cargo clippy --workspace --all-targets
+
   ci-ok:
     # The one required check: green when every job above passed or was skipped
     # on purpose (documentation only). A cancelled run was replaced by a newer
     # one, so it warns instead of failing.
-    needs: [changes, deny, workflows, assets, windows, linux]
+    needs: [changes, deny, workflows, assets, windows, linux, clippy]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
