@@ -57,6 +57,7 @@ pub mod seal;
 pub mod solid;
 pub mod species;
 pub mod terrain;
+pub mod treerig;
 pub mod wear;
 
 pub type V3 = [f32; 3];
