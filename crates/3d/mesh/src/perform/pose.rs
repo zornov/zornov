@@ -84,10 +84,37 @@ pub fn layer(rig: &Rig, times: &[f32], base: &dyn Fn(f32) -> Vec<BonePose>, pose
     out
 }
 
-/// Keeps the keys a line cannot stand in for (Ramer-Douglas-Peucker).
+/// Keeps the keys a curve cannot stand in for: lines first
+/// (Ramer-Douglas-Peucker), then the curve the keys are played on. They
+/// become smooth ([`studio_model::Interp::Auto`]) keys, which ease into
+/// every key that turns or stops, so a straight ramp kept as two keys
+/// played as an S up to a unit away from the samples; each sample the
+/// played curve misses by more than `tol` is kept as well, the worst
+/// first, until none does.
 pub fn simplify(t: &[f32], v: &[f32], tol: f32) -> Vec<(f32, f32)> {
     let cols = [v.to_vec()];
-    keep_indices(t, &cols, tol).into_iter().map(|i| (t[i], v[i])).collect()
+    let mut keep = keep_indices(t, &cols, tol);
+    let us = |s: f32| (f64::from(s) * 1e6).round() as studio_model::time::Micros;
+    let ordered = t.windows(2).all(|w| us(w[1]) > us(w[0]));
+    while ordered && keep.len() < t.len() {
+        let track = studio_model::Track::new(keep.iter().map(|&i| studio_model::Keyframe::new(us(t[i]), f64::from(v[i]), studio_model::Interp::Auto)).collect());
+        let mut worst = (tol, None);
+        for (i, (&ti, &vi)) in t.iter().zip(v).enumerate() {
+            let played = track.eval(us(ti)).and_then(|x| x.as_f64()).unwrap_or(f64::from(vi));
+            let miss = (played - f64::from(vi)).abs() as f32;
+            if miss > worst.0 {
+                worst = (miss, Some(i));
+            }
+        }
+        match worst.1 {
+            Some(i) => {
+                let at = keep.partition_point(|&k| k < i);
+                keep.insert(at, i);
+            }
+            None => break,
+        }
+    }
+    keep.into_iter().map(|i| (t[i], v[i])).collect()
 }
 
 /// The indices of the samples that matter when several values (a point's
@@ -693,6 +720,24 @@ mod tests {
                 assert!(hips_now < dot(s0.head(body.hips), body.up) - 20.0, "pose {which}: the hips come down");
             }
         }
+    }
+
+    /// Thinned keys are played as smooth (Auto) keys, so every sample must
+    /// sit within the tolerance of that curve, not of straight lines.
+    #[test]
+    fn thinned_keys_fit_the_curve_they_are_played_on() {
+        let times: Vec<f32> = (0..=60).map(|i| i as f32 / 30.0).collect();
+        // A straight ramp up, a hold, a sharp dip and a wobble.
+        let vals: Vec<f32> = times.iter().map(|&t| if t < 0.5 { 20.0 * t } else if t < 1.0 { 10.0 } else if t < 1.2 { 10.0 - 40.0 * (t - 1.0) } else { 2.0 + (t * 9.0).sin() }).collect();
+        let tol = 0.3;
+        let keys = simplify(&times, &vals, tol);
+        let us = |t: f32| (f64::from(t) * 1e6).round() as i64;
+        let track = studio_model::Track::new(keys.iter().map(|&(t, v)| studio_model::Keyframe::new(us(t), f64::from(v), studio_model::Interp::Auto)).collect());
+        for (&t, &v) in times.iter().zip(&vals) {
+            let got = track.eval(us(t)).unwrap().as_f64().unwrap();
+            assert!((got - f64::from(v)).abs() <= f64::from(tol) + 1e-4, "at {t}: played {got}, sampled {v}");
+        }
+        assert!(keys.len() < times.len() / 2, "{} keys", keys.len());
     }
 
     #[test]

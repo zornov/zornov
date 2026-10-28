@@ -64,7 +64,8 @@ pub struct Turtle {
     pub step: f64,
     /// Radius of the trunk.
     pub width: f64,
-    /// Radius kept at each branch (`[`) and `!`.
+    /// Radius kept at each `!`, and at each branch (`[`) not already
+    /// thinned by a `!` before it.
     pub taper: f64,
     /// Step length kept at each branch.
     pub shrink: f64,
@@ -131,9 +132,12 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
         w: f64,
         step: f64,
         branch: Option<usize>,
+        /// A `!` has thinned the limb since it last drew: the forks that
+        /// follow are already thinner and `[` does not thin them again.
+        thinned: bool,
     }
     let a = how.angle.to_radians();
-    let mut st = State { p: [0.0; 3], h: [0.0, 0.0, 1.0], l: [1.0, 0.0, 0.0], u: [0.0, 1.0, 0.0], w: how.width, step: how.step, branch: None };
+    let mut st = State { p: [0.0; 3], h: [0.0, 0.0, 1.0], l: [1.0, 0.0, 0.0], u: [0.0, 1.0, 0.0], w: how.width, step: how.step, branch: None, thinned: false };
     let mut stack: Vec<State> = Vec::new();
     let mut out = Grown::default();
     let mut points = 0usize;
@@ -145,13 +149,18 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
                     break;
                 }
                 if how.droop != 0.0 {
-                    // Lean the heading towards straight down a little.
+                    // Lean the heading towards straight down a little,
+                    // never past it (a hanging limb turned the same angle
+                    // every step swung from side to side of straight
+                    // down), nor past straight up when it lifts.
                     let down = [0.0, 0.0, -1.0];
                     let tilt = unit([st.h[1] * down[2] - st.h[2] * down[1], st.h[2] * down[0] - st.h[0] * down[2], st.h[0] * down[1] - st.h[1] * down[0]]);
                     if tilt.iter().all(|x| x.is_finite()) && tilt.iter().any(|x| x.abs() > 1e-9) {
-                        st.h = unit(rot(st.h, tilt, how.droop * 0.1));
-                        st.l = unit(rot(st.l, tilt, how.droop * 0.1));
-                        st.u = unit(rot(st.u, tilt, how.droop * 0.1));
+                        let to_down = (-st.h[2]).clamp(-1.0, 1.0).acos();
+                        let turn = if how.droop > 0.0 { (how.droop * 0.1).min(to_down) } else { (how.droop * 0.1).max(to_down - std::f64::consts::PI) };
+                        st.h = unit(rot(st.h, tilt, turn));
+                        st.l = unit(rot(st.l, tilt, turn));
+                        st.u = unit(rot(st.u, tilt, turn));
                     }
                 }
                 let b = match st.branch {
@@ -167,6 +176,7 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
                 out.branches[b].points.push(st.p);
                 out.branches[b].radii.push(st.w);
                 points += 1;
+                st.thinned = false;
             }
             'f' => {
                 st.p = [0, 1, 2].map(|i| st.p[i] + st.h[i] * st.step);
@@ -179,12 +189,21 @@ pub fn turtle(s: &str, how: &Turtle) -> Grown {
             '\\' => (st.l, st.u) = (rot(st.l, st.h, a), rot(st.u, st.h, a)),
             '/' => (st.l, st.u) = (rot(st.l, st.h, -a), rot(st.u, st.h, -a)),
             '|' => (st.h, st.l) = (rot(st.h, st.u, std::f64::consts::PI), rot(st.l, st.u, std::f64::consts::PI)),
-            '!' => st.w *= how.taper,
+            '!' => {
+                st.w *= how.taper;
+                st.thinned = true;
+            }
             '[' => {
                 if stack.len() < 256 {
                     stack.push(st);
                 }
-                st.w *= how.taper;
+                // One taper a fork: `![…][…]` (the tree's rule) thinned
+                // each generation by taper² before, so twigs came out a
+                // fiftieth of the trunk six forks up.
+                if !st.thinned {
+                    st.w *= how.taper;
+                }
+                st.thinned = false;
                 st.step *= how.shrink;
                 st.branch = None;
             }
@@ -395,6 +414,27 @@ mod tests {
             let (s, _) = expand(&p.system(), p.iterations, 1);
             let g = turtle(&s, &p.turtle);
             assert!(g.branches.len() > 3 && !g.capped, "{}", p.name);
+        }
+    }
+
+    #[test]
+    fn a_fork_thins_once_and_a_hanging_limb_hangs_straight() {
+        let how = Turtle { taper: 0.5, ..Turtle::default() };
+        let w = how.width;
+        let side = |s: &str| turtle(s, &how).branches[1].radii[1];
+        // `[` alone, `!` alone and `!` then `[`: each one taper.
+        assert!((side("F[F]") - w * 0.5).abs() < 1e-12);
+        assert!((side("F![F]") - w * 0.5).abs() < 1e-12, "{}", side("F![F]"));
+        assert!((side("F![F][F]") - w * 0.5).abs() < 1e-12);
+        assert!((turtle("F!F", &how).branches[0].radii[2] - w * 0.5).abs() < 1e-12);
+        // Two `!` are two tapers; a step between `!` and `[` lets `[`
+        // thin again.
+        assert!((side("F!![F]") - w * 0.25).abs() < 1e-12);
+        assert!((turtle("F!F[F]", &how).branches[1].radii[1] - w * 0.25).abs() < 1e-12);
+        // Pitched straight down and drooping: it stays straight down.
+        let g = turtle("&&&&FFFFFF", &Turtle { angle: 45.0, droop: 0.4, ..Turtle::default() });
+        for p in &g.branches[0].points[1..] {
+            assert!(p[0].abs() < 1e-9 && p[1].abs() < 1e-9, "{p:?}");
         }
     }
 

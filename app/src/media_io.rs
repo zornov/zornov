@@ -69,7 +69,7 @@ pub fn probe(path: &Path) -> Result<Probe, String> {
         return Ok(Probe {
             kind: m::MediaKind::Video,
             duration: Some((anim.duration() * 1e6).round() as m::Micros),
-            video: Some(m::VideoInfo { codec: "lottie".into(), width: w, height: h, frame_rate: Some({ let fps = anim.fps; if (fps - fps.round()).abs() < 0.02 { m::FrameRate { num: fps.round() as u32, den: 1 } } else { m::FrameRate { num: (fps * 1001.0).round() as u32, den: 1001 } } }), rotation: 0, has_alpha: true, colour: Default::default() }),
+            video: Some(m::VideoInfo { codec: "lottie".into(), width: w, height: h, frame_rate: Some(m::FrameRate::from_f64(anim.fps, 0.02)), rotation: 0, has_alpha: true, colour: Default::default() }),
             audio: None,
             container: "lottie".into(),
         });
@@ -113,7 +113,7 @@ pub fn probe(path: &Path) -> Result<Probe, String> {
                     _ => "other",
                 };
                 let fps = if t.duration_secs > 0.0 { t.samples.len() as f64 / t.duration_secs } else { 30.0 };
-                let rate = if (fps - fps.round()).abs() < 0.02 { m::FrameRate { num: fps.round() as u32, den: 1 } } else { m::FrameRate { num: (fps * 1001.0).round() as u32, den: 1001 } };
+                let rate = m::FrameRate::from_f64(fps, 0.02);
                 video = Some(m::VideoInfo { codec: codec.into(), width: t.width, height: t.height, frame_rate: Some(rate), rotation: t.rotation as u32, has_alpha: false, colour: Default::default() });
             }
             studio_mp4::demux::TrackKind::Audio if audio.is_none() => {

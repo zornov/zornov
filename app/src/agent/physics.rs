@@ -116,6 +116,8 @@ struct Contact {
     depth: f64,
     pn: f64,
     pt: f64,
+    /// The push out of overlap so far (moves positions only).
+    ps: f64,
     bounce_to: f64,
 }
 
@@ -149,12 +151,57 @@ impl World {
         }
         for _ in 0..12 {
             for c in &mut contacts {
-                self.solve(c, h);
+                self.solve(c);
             }
         }
-        for b in self.bodies.iter_mut().filter(|b| b.inv_mass > 0.0) {
-            b.pos = add(b.pos, mul(b.vel, h));
-            b.angle += b.spin * h;
+        // Overlap is pushed out by a separate velocity that moves the
+        // bodies this step and is then forgotten (split impulses, as in
+        // Bullet and Box2D): folded into the real velocity, the push out
+        // of a deep landing threw a bounceless ball 20 px back up.
+        let mut push = vec![([0.0, 0.0], 0.0); self.bodies.len()];
+        for _ in 0..12 {
+            for c in &mut contacts {
+                self.separate(c, h, &mut push);
+            }
+        }
+        for (b, (pv, pw)) in self.bodies.iter_mut().zip(&push).filter(|(b, _)| b.inv_mass > 0.0) {
+            b.pos = add(b.pos, mul(add(b.vel, *pv), h));
+            b.angle += (b.spin + pw) * h;
+        }
+    }
+
+    /// How hard the contact is to move along `d` (inverse effective mass).
+    fn eff(&self, c: &Contact, d: V) -> f64 {
+        let ra = sub(c.point, self.bodies[c.a].pos);
+        let (ima, iia) = (self.bodies[c.a].inv_mass, self.bodies[c.a].inv_inertia);
+        let kb = c.b.map_or(0.0, |b| {
+            let rb = sub(c.point, self.bodies[b].pos);
+            self.bodies[b].inv_mass + self.bodies[b].inv_inertia * cross(rb, d).powi(2)
+        });
+        ima + iia * cross(ra, d).powi(2) + kb
+    }
+
+    /// One pass of the push out of overlap, on the separating velocities.
+    fn separate(&self, c: &mut Contact, h: f64, push: &mut [(V, f64)]) {
+        let kn = self.eff(c, c.normal);
+        if kn <= 0.0 {
+            return;
+        }
+        let at = |i: usize, push: &[(V, f64)]| add(push[i].0, cross_sv(push[i].1, sub(c.point, self.bodies[i].pos)));
+        let vb = c.b.map_or([0.0, 0.0], |b| at(b, push));
+        let vn = dot(sub(vb, at(c.a, push)), c.normal);
+        let bias = 0.2 / h * (c.depth - 0.5).max(0.0);
+        let old = c.ps;
+        c.ps = (old + (bias - vn) / kn).max(0.0);
+        let imp = mul(c.normal, c.ps - old);
+        let mut give = |i: usize, imp: V| {
+            let b = &self.bodies[i];
+            push[i].0 = add(push[i].0, mul(imp, b.inv_mass));
+            push[i].1 += b.inv_inertia * cross(sub(c.point, b.pos), imp);
+        };
+        give(c.a, mul(imp, -1.0));
+        if let Some(b) = c.b {
+            give(b, imp);
         }
     }
 
@@ -177,25 +224,16 @@ impl World {
         b.spin += b.inv_inertia * cross(sub(p, b.pos), imp);
     }
 
-    fn solve(&mut self, c: &mut Contact, h: f64) {
-        let ra = sub(c.point, self.bodies[c.a].pos);
-        let rb = c.b.map(|b| sub(c.point, self.bodies[b].pos));
-        let (ima, iia) = (self.bodies[c.a].inv_mass, self.bodies[c.a].inv_inertia);
-        let (imb, iib) = c.b.map_or((0.0, 0.0), |b| (self.bodies[b].inv_mass, self.bodies[b].inv_inertia));
-        let k = |d: V| {
-            let ka = ima + iia * cross(ra, d).powi(2);
-            let kb = rb.map_or(0.0, |rb| imb + iib * cross(rb, d).powi(2));
-            ka + kb
-        };
+    fn solve(&mut self, c: &mut Contact) {
         let n = c.normal;
-        let kn = k(n);
+        let kn = self.eff(c, n);
         if kn <= 0.0 {
             return;
         }
-        // Normal: stop them closing, push out what overlaps, bounce.
+        // Normal: stop them closing, bounce (the overlap is pushed out
+        // apart, in `separate`).
         let vn = dot(self.relative_velocity(c), n);
-        let bias = 0.2 / h * (c.depth - 0.5).max(0.0);
-        let want = (bias.max(c.bounce_to)) - vn;
+        let want = c.bounce_to - vn;
         let d = want / kn;
         let old = c.pn;
         c.pn = (old + d).max(0.0);
@@ -206,7 +244,7 @@ impl World {
         }
         // Friction, at most `friction` times the normal push.
         let t = [-n[1], n[0]];
-        let kt = k(t);
+        let kt = self.eff(c, t);
         if kt <= 0.0 {
             return;
         }
@@ -223,7 +261,7 @@ impl World {
 
     fn contacts(&self) -> Vec<Contact> {
         let mut out = Vec::new();
-        let mk = |a, b, normal, point, depth| Contact { a, b, normal, point, depth, pn: 0.0, pt: 0.0, bounce_to: 0.0 };
+        let mk = |a, b, normal, point, depth| Contact { a, b, normal, point, depth, pn: 0.0, pt: 0.0, ps: 0.0, bounce_to: 0.0 };
         for (i, b) in self.bodies.iter().enumerate() {
             if b.inv_mass == 0.0 {
                 continue;
@@ -583,6 +621,31 @@ mod tests {
         assert!((b.pos[1] - 275.0).abs() < 2.0, "rests on the floor: {:?}", b.pos);
         assert!(lowest < 285.0, "never sank far into it: {lowest}");
         assert!(b.angle.abs() < 0.01 && len(b.vel) < 5.0);
+    }
+
+    /// A fast drop with no bounce lands dead: pushing it back out of the
+    /// floor must not throw it up again.
+    #[test]
+    fn a_fast_drop_without_bounce_does_not_hop() {
+        for shape in [Shape::Box([50.0, 25.0]), Shape::Circle(30.0)] {
+            let mut w = World { bodies: vec![Body::new([0.0, -3000.0], 0.0, shape, false)], planes: vec![Plane { normal: [0.0, -1.0], offset: -300.0 }], gravity: 2000.0, bounce: 0.0, friction: 0.5 };
+            let rest = 300.0 - match shape {
+                Shape::Box([_, hh]) => hh,
+                Shape::Circle(r) => r,
+            };
+            let mut landed = false;
+            let mut highest_after = f64::INFINITY;
+            for _ in 0..120 {
+                w.step(1.0 / 30.0, 8);
+                let y = w.bodies[0].pos[1];
+                landed |= y > rest - 1.0;
+                if landed {
+                    highest_after = highest_after.min(y);
+                }
+            }
+            assert!(landed && rest - highest_after < 3.0, "{shape:?} rose {:.1} px after landing", rest - highest_after);
+            assert!((w.bodies[0].pos[1] - rest).abs() < 2.0, "{shape:?} rests at {:?}", w.bodies[0].pos);
+        }
     }
 
     #[test]

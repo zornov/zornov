@@ -526,7 +526,8 @@ impl VideoOut {
         if let Some(d) = file.parent() {
             std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
         }
-        let (num, den) = if (fps - fps.round()).abs() < 0.01 { (fps.round() as u32, 1) } else { ((fps * 1001.0).round() as u32, 1001) };
+        let rate = studio_model::time::FrameRate::from_f64(fps, 0.01);
+        let (num, den) = (rate.num, rate.den);
         let mut cfg = h264::Config::new(w, h, num, den);
         cfg.bitrate_kbps = ((w * h) as f64 * fps * 0.25 / 1000.0).clamp(2_000.0, 80_000.0) as u32;
         let enc = h264::Encoder::new(cfg).map_err(|e| e.to_string())?;

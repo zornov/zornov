@@ -703,7 +703,8 @@ fn run_dcp(doc: &Doc, spec: &JobSpec, plan: &Plan, watch: &Watch) -> Result<Outc
 }
 
 fn rate_of(fps: f64) -> (u32, u32) {
-    if (fps - fps.round()).abs() < 1e-3 { (fps.round() as u32, 1) } else { ((fps * 1001.0).round() as u32, 1001) }
+    let r = studio_model::time::FrameRate::from_f64(fps, 1e-3);
+    (r.num, r.den)
 }
 
 fn run_imf(doc: &Doc, spec: &JobSpec, plan: &Plan, watch: &Watch) -> Result<Outcome, String> {

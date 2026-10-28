@@ -149,7 +149,8 @@ pub fn run(j: &SlowJob, ctx: &JobCtx) -> Result<InterpEngine, String> {
     let (w, h) = (j.size.0 as u32, j.size.1 as u32);
     // The footage's own frame rate, so frame k·i of the new file is frame i.
     let fps = j.footage.fps;
-    let (num, den) = if (fps - fps.round()).abs() < 0.01 { (fps.round() as u32, 1) } else { ((fps * 1001.0).round() as u32, 1001) };
+    let rate = m::time::FrameRate::from_f64(fps, 0.01);
+    let (num, den) = (rate.num, rate.den);
     let mut cfg = h264::Config::new(w, h, num, den);
     cfg.bitrate_kbps = ((w * h) as f64 * fps * 0.25 / 1000.0).clamp(2_000.0, 60_000.0) as u32;
     let mut enc = h264::Encoder::new(cfg).map_err(|e| e.to_string())?;
