@@ -12,6 +12,11 @@
 //! pixel: the raster pass keeps the nearest triangle and where on it the
 //! pixel landed, and the shading pass reads only those.
 //!
+//! A layer can ask for toon shading instead ([`Toon`]): cel shading in two
+//! or three hard bands with a shadow colour of its own, a rim light, hard
+//! highlights and ink outlines round its silhouette and where it passes in
+//! front of itself (screen-space, drawn outside the nearer surface).
+//!
 //! The CPU version is the only one; the GPU compositor uploads its result.
 
 use crate::frame::Frame;
@@ -40,6 +45,35 @@ pub struct MaterialOverride {
     /// over them): above 1 a glow is brighter than white, so it blooms
     /// (a neon tube 4-8, a lit window 2-4, a bulb 6-10).
     pub emissive_strength: Option<f32>,
+    /// Toon (cel) shading with ink outlines instead of physical shading.
+    pub toon: Option<Toon>,
+}
+
+/// Cel shading: the light in hard bands, a colour for the shadow, a rim of
+/// light round the edge and ink lines.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Toon {
+    /// 2 (light and shadow) or 3 (with a middle tone).
+    pub bands: u8,
+    /// Linear RGB the shadow side is multiplied by (a cool tint reads as
+    /// animation; grey as print).
+    pub shadow: V3,
+    /// Where the light turns to shadow, 0–1 of the light falling on it.
+    pub threshold: f32,
+    /// Rim light strength (0 none) and colour.
+    pub rim: f32,
+    pub rim_colour: V3,
+    /// Hard highlights on glossy surfaces (hair, eyes).
+    pub highlights: bool,
+    /// Ink line width in canvas px (0 none) and its linear RGB.
+    pub outline: f32,
+    pub outline_colour: V3,
+}
+
+impl Default for Toon {
+    fn default() -> Toon {
+        Toon { bands: 2, shadow: [0.55, 0.5, 0.68], threshold: 0.35, rim: 0.35, rim_colour: [1.0, 0.97, 0.92], highlights: true, outline: 2.0, outline_colour: [0.04, 0.03, 0.05] }
+    }
 }
 
 impl MaterialOverride {
@@ -249,6 +283,7 @@ struct Placed {
     smooth: f32,
     lit: bool,
     accepts_shadows: bool,
+    toon: Option<Toon>,
 }
 
 /// A triangle in a target's pixels, with what it was cut from.
@@ -651,6 +686,134 @@ fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Toon shading: how much light falls on the point (by its lights and
+/// shadows) cut into hard bands, the shadow side in the toon's shadow
+/// colour, a hard highlight and a rim of light.
+fn shade_toon(t: &Toon, s: &Mat, base: [f32; 3], p: V3, n: V3, eye: V3, lights: &[LightDesc], shadow: &mut dyn FnMut(usize, V3) -> f32) -> V3 {
+    let v = normalise(sub(eye, p));
+    let n = if dot(n, v) < 0.0 { scale(n, -1.0) } else { n };
+    let mut light = 0.0f32;
+    let mut colour = [0.0f32; 3];
+    let mut weight = 0.0f32;
+    let mut ambient = 0.0f32;
+    let mut glint = 0.0f32;
+    for (i, l) in lights.iter().enumerate() {
+        let lum = (0.2126 * l.colour[0] + 0.7152 * l.colour[1] + 0.0722 * l.colour[2]).max(0.0);
+        if l.kind == LightKind::Ambient {
+            ambient += lum;
+            continue;
+        }
+        let (to, mut atten) = if l.kind == LightKind::Parallel {
+            (scale(normalise(l.direction), -1.0), 1.0)
+        } else {
+            let d = sub(l.position, p);
+            let dist = length(d);
+            let f = if l.falloff > 0.0 { 1.0 - smoothstep(l.radius, l.radius + l.falloff, dist) } else { 1.0 };
+            (scale(d, 1.0 / dist.max(1e-6)), f)
+        };
+        if l.kind == LightKind::Spot {
+            atten *= smoothstep(l.cone[0], l.cone[1], dot(scale(to, -1.0), l.direction));
+        }
+        let ndl = dot(n, to);
+        if ndl <= 0.0 || atten <= 0.0 {
+            continue;
+        }
+        let lit = if l.casts_shadows { shadow(i, to) } else { 1.0 };
+        let k = ndl * atten * lit * lum;
+        light += k;
+        if lum > 0.0 {
+            colour = add(colour, scale(l.colour, atten / lum));
+            weight += atten;
+        }
+        let h = normalise(add(to, v));
+        let shine = (2.0 / (s.roughness.clamp(0.05, 1.0).powi(4)) - 2.0).clamp(4.0, 400.0);
+        glint = glint.max(dot(n, h).max(0.0).powf(shine) * lit * atten);
+    }
+    let tint: V3 = if weight > 0.0 { scale(colour, 1.0 / weight) } else { [1.0; 3] };
+    // The light against what lights it fully, in hard steps (a narrow
+    // smoothstep so the edge is clean, not stair-stepped).
+    let total = (light / (light + ambient * 0.5).max(1e-4) * (light + ambient).min(1.5)).clamp(0.0, 1.5);
+    let e = 0.02;
+    let k = match t.bands {
+        0..=2 => smoothstep(t.threshold - e, t.threshold + e, total),
+        _ => 0.5 * smoothstep(t.threshold * 0.5 - e, t.threshold * 0.5 + e, total) + 0.5 * smoothstep(t.threshold * 1.6 - e, t.threshold * 1.6 + e, total),
+    };
+    let bright = (light + ambient).clamp(0.6, 1.2);
+    let mut out: V3 = std::array::from_fn(|c| {
+        let lit = base[c] * tint[c] * bright;
+        let dark = base[c] * t.shadow[c] * bright.min(1.0);
+        dark + (lit - dark) * k
+    });
+    if t.highlights && s.roughness < 0.65 {
+        let g = smoothstep(0.55, 0.6, glint) * (1.0 - s.roughness) * 0.6;
+        out = add(out, [g; 3]);
+    }
+    if t.rim > 0.0 {
+        let fres = 1.0 - dot(n, v).clamp(0.0, 1.0);
+        let r = smoothstep(0.62, 0.66, fres) * t.rim * (0.4 + 0.6 * k);
+        out = add(out, scale(t.rim_colour, r));
+    }
+    add(out, s.emissive)
+}
+
+/// Ink lines: wherever a toon surface with an outline is in front of
+/// something farther (or of nothing), the farther pixels within the line's
+/// width take the ink, so the line sits just outside the nearer surface.
+fn draw_outlines(hits: &[Hit], tris: &[RasterTri], placed: &[Placed], out: &mut [[f32; 4]], w: usize, h: usize, px_scale: f32) {
+    if !placed.iter().any(|p| p.toon.is_some_and(|t| t.outline > 0.0)) {
+        return;
+    }
+    let toon_at = |i: usize| -> Option<Toon> {
+        let hit = hits[i];
+        if hit.tri == u32::MAX {
+            return None;
+        }
+        placed[tris[hit.tri as usize].inst as usize].toon.filter(|t| t.outline > 0.0)
+    };
+    let farther = |a: Hit, b: Hit| b.tri == u32::MAX || b.depth > a.depth * 1.004 + 1e-3;
+    // The near side of every edge: a toon pixel next to something farther.
+    let mut stamps: Vec<(usize, Toon)> = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let Some(t) = toon_at(i) else { continue };
+            let a = hits[i];
+            let edge = [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dy)| {
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                nx >= 0 && ny >= 0 && (nx as usize) < w && (ny as usize) < h && farther(a, hits[ny as usize * w + nx as usize])
+            });
+            if edge {
+                stamps.push((i, t));
+            }
+        }
+    }
+    let mut inked = vec![false; w * h];
+    for (i, t) in stamps {
+        let r = (t.outline * px_scale * 0.5).max(0.5);
+        let ri = r.ceil() as i32;
+        let (x0, y0) = ((i % w) as i32, (i / w) as i32);
+        let a = hits[i];
+        for dy in -ri..=ri {
+            for dx in -ri..=ri {
+                if (dx * dx + dy * dy) as f32 > r * r {
+                    continue;
+                }
+                let (x, y) = (x0 + dx, y0 + dy);
+                if x < 0 || y < 0 || x as usize >= w || y as usize >= h {
+                    continue;
+                }
+                let j = y as usize * w + x as usize;
+                if inked[j] || !(j == i || farther(a, hits[j])) {
+                    continue;
+                }
+                inked[j] = true;
+                let c = t.outline_colour;
+                out[j] = [c[0], c[1], c[2], 1.0];
+            }
+        }
+    }
+}
+
 fn surfaces(mesh: &Mesh, o: &MaterialOverride) -> Vec<Surface> {
     let mut list: Vec<Surface> = mesh
         .materials
@@ -689,8 +852,9 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
     if desc.instances.is_empty() {
         return Frame::new(tw, th);
     }
-    // Final renders with bouncing light, when the camera asks for them.
-    if let Some(settings) = desc.camera.and_then(|c| c.trace) {
+    // Final renders with bouncing light, when the camera asks for them (a
+    // toon look is drawn here: bands and ink, not bounced light).
+    if let Some(settings) = desc.camera.and_then(|c| c.trace).filter(|_| !desc.instances.iter().any(|i| i.overrides.toon.is_some())) {
         let passes = crate::trace::render(desc, canvas, (tw, th), &settings);
         let mut frame = passes.beauty;
         if desc.lights.iter().any(|l| l.look.is_some()) {
@@ -737,6 +901,7 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                 smooth: inst.smooth.clamp(0.0, 1.0),
                 lit: inst.accepts_lights,
                 accepts_shadows: inst.accepts_shadows,
+                toon: inst.overrides.toon,
             }
         })
         .collect();
@@ -825,7 +990,10 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                                 (Some(m), true) => 1.0 - lights[li].shadow_darkness * (1.0 - m.lit(p, n, to)),
                                 _ => 1.0,
                             };
-                            shade(&mat, [base[0], base[1], base[2]], p, n, camera.position, &lights, env, &mut sh)
+                            match &pl.toon {
+                                Some(t) => shade_toon(t, &mat, [base[0], base[1], base[2]], p, n, camera.position, &lights, &mut sh),
+                                None => shade(&mat, [base[0], base[1], base[2]], p, n, camera.position, &lights, env, &mut sh),
+                            }
                         } else {
                             [base[0] + mat.emissive[0], base[1] + mat.emissive[1], base[2] + mat.emissive[2]]
                         };
@@ -846,6 +1014,8 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
         }
     });
     drop(chunks);
+    // Ink lines round toon models.
+    draw_outlines(&hits, &tris, &placed, &mut big, w, h, k);
     // Smoke and fire in front of what was drawn.
     if desc.instances.iter().any(|i| i.mesh.volume.is_some()) {
         let depth: Vec<f32> = hits.iter().map(|h| h.depth).collect();

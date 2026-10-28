@@ -151,7 +151,54 @@ fn apply_fog(col: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
     return mix(col, fc, f);
 }
 
+// Cel shading: the light falling on the point (sun with its shadow, and
+// the lamps) cut into two or three hard bands, the shadow side a cool tint
+// of the colour lit by the sky alone, a rim of light at the edge.
+fn shade_toon(s: Surface, ao: f32) -> vec3<f32> {
+    let v = normalize(fr.eye.xyz - s.pos);
+    let n = s.n;
+    let l = fr.sun_dir.xyz;
+    let sunc = fr.sun_colour.rgb;
+    var light = 0.0;
+    if (fr.sun_colour.w > 0.0) {
+        let ndl = max(dot(n, l), 0.0);
+        light = ndl * sun_shadow(s.pos, n, ndl, s.frag);
+    }
+    var lamps = vec3<f32>(0.0);
+    for (var i = 0u; i < fr.counts.x; i++) {
+        let lt = fr.lights[i];
+        let d = lt.pos_range.xyz - s.pos;
+        let d2 = max(dot(d, d), 0.01);
+        let dist = sqrt(d2);
+        let w = clamp(1.0 - pow(dist / lt.pos_range.w, 4.0), 0.0, 1.0);
+        if (w <= 0.0) { continue; }
+        let ld = d / dist;
+        var att = w * w / (d2 + 0.25);
+        if (lt.dir_cone.w > 0.0) {
+            att *= smoothstep(lt.dir_cone.w, mix(lt.dir_cone.w, 1.0, 0.35), dot(-ld, lt.dir_cone.xyz));
+        }
+        let k = max(dot(n, ld), 0.0) * att;
+        light += min(k * luma(lt.colour.rgb), 1.0);
+        lamps += lt.colour.rgb * step(0.05, k) * att;
+    }
+    let e = 0.02;
+    var band = smoothstep(0.3 - e, 0.3 + e, light);
+    if (fr.flags.w > 2.5) {
+        band = 0.5 * smoothstep(0.12 - e, 0.12 + e, light) + 0.5 * smoothstep(0.55 - e, 0.55 + e, light);
+    }
+    let irr = sh_irradiance(n) * mix(1.0, ao, 0.5);
+    let lit = s.albedo * (sunc + irr + lamps);
+    let dark = s.albedo * (irr + sunc * 0.12) * vec3<f32>(0.8, 0.77, 0.95);
+    var out = mix(dark, lit, band);
+    let fres = 1.0 - clamp(dot(n, v), 0.0, 1.0);
+    out += (sunc + irr) * smoothstep(0.62, 0.66, fres) * 0.3 * (0.4 + 0.6 * band) * s.albedo;
+    return out + s.emissive;
+}
+
 fn shade(s: Surface, ao: f32, ao_sun: f32) -> vec3<f32> {
+    if (fr.flags.w > 1.5) {
+        return shade_toon(s, ao);
+    }
     let v = normalize(fr.eye.xyz - s.pos);
     let n = s.n;
     let ndv = max(dot(n, v), 1e-3);

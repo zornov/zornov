@@ -99,11 +99,15 @@ pub struct Garment {
     /// A hanging part left out for simulation: its mesh, the points along its
     /// top that stay on the body.
     pub loose: Option<Mesh>,
+    /// How far (px) the skin under it is drawn in when it is put on, so a
+    /// tight garment never shows skin through it in a pose; 0 leaves the
+    /// body as it is.
+    pub tuck: f32,
 }
 
 impl Garment {
     pub fn new(name: &str, kind: &str) -> Garment {
-        Garment { name: name.into(), kind: kind.into(), mesh: Mesh::default(), joints: Vec::new(), weights: Vec::new(), notes: Vec::new(), loose: None }
+        Garment { name: name.into(), kind: kind.into(), mesh: Mesh::default(), joints: Vec::new(), weights: Vec::new(), notes: Vec::new(), loose: None, tuck: 0.0 }
     }
 
     pub fn material(&mut self, m: Material) -> u32 {
@@ -167,6 +171,20 @@ struct Fit<'a> {
 fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// Where `p` (on the triangle's plane) falls in triangle `t`, as weights of
+/// its corners that sum to 1.
+fn barycentric(p: V3, t: [V3; 3]) -> [f32; 3] {
+    let (e0, e1, e2) = (sub(t[1], t[0]), sub(t[2], t[0]), sub(p, t[0]));
+    let (d00, d01, d11, d20, d21) = (dot(e0, e0), dot(e0, e1), dot(e1, e1), dot(e2, e0), dot(e2, e1));
+    let den = d00 * d11 - d01 * d01;
+    if den.abs() < 1e-12 {
+        return [1.0, 0.0, 0.0];
+    }
+    let v = ((d11 * d20 - d01 * d21) / den).clamp(0.0, 1.0);
+    let w = ((d00 * d21 - d01 * d20) / den).clamp(0.0, 1.0 - v);
+    [1.0 - v - w, v, w]
 }
 
 impl<'a> Fit<'a> {
@@ -258,17 +276,58 @@ impl<'a> Fit<'a> {
         if n < 4.0 { [self.rig.bones.first().map_or(0.0, |b| b.head[0]), y, 0.0] } else { scale(acc, 1.0 / n) }
     }
 
-    /// Skin weights copied from the body vertex nearest each point.
+    /// Skin weights of the body at the point of its surface nearest each
+    /// point: the three corners of that triangle blended by where the point
+    /// falls in it, so cloth bends exactly as the skin under it does (the
+    /// nearest vertex alone is used when no surface is close).
     fn weights_for(&self, positions: &[V3]) -> (Vec<[u16; 4]>, Vec<[f32; 4]>) {
         let rig = self.rig;
         let mut j = Vec::with_capacity(positions.len());
         let mut w = Vec::with_capacity(positions.len());
         for p in positions {
+            if let Some((q, tri, _)) = self.bvh.nearest(*p, self.h * 0.15) {
+                let c = self.mesh.tri(tri as usize);
+                let bary = barycentric(q, [self.mesh.positions[c[0]], self.mesh.positions[c[1]], self.mesh.positions[c[2]]]);
+                let mut acc: Vec<(u16, f32)> = Vec::with_capacity(12);
+                for (k, &v) in c.iter().enumerate() {
+                    for s in 0..4 {
+                        let x = rig.weights[v][s] * bary[k];
+                        if x <= 0.0 {
+                            continue;
+                        }
+                        match acc.iter_mut().find(|e| e.0 == rig.joints[v][s]) {
+                            Some(e) => e.1 += x,
+                            None => acc.push((rig.joints[v][s], x)),
+                        }
+                    }
+                }
+                acc.sort_by(|a, b| b.1.total_cmp(&a.1));
+                acc.truncate(4);
+                let total: f32 = acc.iter().map(|e| e.1).sum();
+                if total > 1e-6 {
+                    let (mut jj, mut ww) = ([0u16; 4], [0.0f32; 4]);
+                    for (k, (b, x)) in acc.iter().enumerate() {
+                        jj[k] = *b;
+                        ww[k] = x / total;
+                    }
+                    j.push(jj);
+                    w.push(ww);
+                    continue;
+                }
+            }
             let i = self.grid.nearest(&self.mesh.positions, *p);
             j.push(rig.joints[i]);
             w.push(rig.weights[i]);
         }
         (j, w)
+    }
+
+    /// A bone of an arm, a hand or a finger.
+    fn on_arm(&self, bone: usize) -> bool {
+        self.rig.bones.get(bone).is_some_and(|b| {
+            let n = b.name.to_ascii_lowercase();
+            n.contains("arm") || ["shoulder", "hand", "grip", "thumb", "index", "middle", "ring", "pinky"].iter().any(|k| n.starts_with(k))
+        })
     }
 
     fn rigid_weights(&self, n: usize, bone: usize) -> (Vec<[u16; 4]>, Vec<[f32; 4]>) {
@@ -609,52 +668,62 @@ fn smooth_weights(m: &Mesh, j: &mut [[u16; 4]], w: &mut [[f32; 4]], iters: usize
     }
 }
 
-/// Gives the open edges of a surface thickness: a flange of `thick` px
-/// running inward from every open edge.
+/// Gives a sheet thickness: a second surface `thick` px inside it, facing
+/// the other way, joined to it along every open edge, so the garment is a
+/// closed solid (a hem, a cuff or a brim has a real edge and nothing shows
+/// through from behind). The materials stay as they were.
 fn add_rim(mut m: Mesh, mut j: Vec<[u16; 4]>, mut w: Vec<[f32; 4]>, thick: f32) -> (Mesh, Vec<[u16; 4]>, Vec<[f32; 4]>) {
-    if thick <= 1e-4 {
+    if thick <= 1e-4 || m.triangles() == 0 {
         return (m, j, w);
     }
     let (ids, _) = m.position_ids();
-    let mut count: std::collections::HashMap<(u32, u32), (u32, usize)> = Default::default();
+    let mut count: std::collections::HashMap<(u32, u32), u32> = Default::default();
     for t in 0..m.triangles() {
         let c = m.tri(t);
         for k in 0..3 {
-            let (a, b) = (c[k], c[(k + 1) % 3]);
-            let key = (ids[a].min(ids[b]), ids[a].max(ids[b]));
-            let e = count.entry(key).or_insert((0, t));
-            e.0 += 1;
-            e.1 = t;
+            let (a, b) = (ids[c[k]], ids[c[(k + 1) % 3]]);
+            *count.entry((a.min(b), a.max(b))).or_default() += 1;
         }
     }
-    let mut inner: std::collections::HashMap<u32, u32> = Default::default();
-    let mut quads = Vec::new();
-    for t in 0..m.triangles() {
+    let n = m.positions.len();
+    let tris = m.triangles();
+    let mut mats = m.tri_materials();
+    if m.normals.len() != n {
+        m.normals.resize(n, [0.0; 3]);
+        crate::ops::smooth_normals_in_place(&mut m);
+    }
+    if m.uvs.len() != n {
+        m.uvs.resize(n, [0.0; 2]);
+    }
+    // The inner surface: every vertex again, moved in along its normal.
+    for v in 0..n {
+        let nv = m.normals[v];
+        m.positions.push(sub(m.positions[v], scale(nv, thick)));
+        m.normals.push(scale(nv, -1.0));
+        m.uvs.push(m.uvs[v]);
+        j.push(j[v]);
+        w.push(w[v]);
+    }
+    let n32 = n as u32;
+    for t in 0..tris {
+        let c = m.tri(t);
+        m.indices.extend_from_slice(&[c[0] as u32 + n32, c[2] as u32 + n32, c[1] as u32 + n32]);
+        mats.push(mats[t]);
+    }
+    // The edge between them, along every open edge.
+    for t in 0..tris {
         let c = m.tri(t);
         for k in 0..3 {
             let (a, b) = (c[k], c[(k + 1) % 3]);
-            let key = (ids[a].min(ids[b]), ids[a].max(ids[b]));
-            if count[&key].0 != 1 {
+            if ids[a] == ids[b] || count[&(ids[a].min(ids[b]), ids[a].max(ids[b]))] != 1 {
                 continue;
             }
-            quads.push((a as u32, b as u32, m.normals[a], m.normals[b]));
+            let (a, b) = (a as u32, b as u32);
+            m.indices.extend_from_slice(&[b, a, a + n32, b, a + n32, b + n32]);
+            mats.push(mats[t]);
+            mats.push(mats[t]);
         }
     }
-    for (a, b, na, nb) in quads {
-        let mut copy = |v: u32, n: V3, m: &mut Mesh, j: &mut Vec<[u16; 4]>, w: &mut Vec<[f32; 4]>| -> u32 {
-            *inner.entry(v).or_insert_with(|| {
-                m.positions.push(sub(m.positions[v as usize], scale(n, thick)));
-                m.normals.push(n);
-                m.uvs.push(m.uvs[v as usize]);
-                j.push(j[v as usize]);
-                w.push(w[v as usize]);
-                (m.positions.len() - 1) as u32
-            })
-        };
-        let (ia, ib) = (copy(a, na, &mut m, &mut j, &mut w), copy(b, nb, &mut m, &mut j, &mut w));
-        m.indices.extend_from_slice(&[a, ia, ib, a, ib, b]);
-    }
-    let mats = vec![0u32; m.triangles()];
     m.regroup(&mats);
     (m, j, w)
 }
@@ -726,13 +795,37 @@ fn title(s: &str) -> String {
     c.next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + c.as_str())
 }
 
-/// Joins to the body, names the materials, fits UV tiles.
+/// Makes a garment ready to join the body: every piece a closed solid
+/// (small holes capped, open sheets given an inside), every vertex clear of
+/// the skin, and how far a tight one draws the skin in under it.
 fn finish(f: &Fit, spec: &Spec, g: &mut Garment) {
     crate::ops::smooth_normals_in_place(&mut g.mesh);
     if g.mesh.uvs.len() != g.mesh.positions.len() {
         g.mesh.uvs.resize(g.mesh.positions.len(), [0.0; 2]);
     }
-    let _ = (f, spec);
+    // Patterns laid on flat panels, not smeared where the projection turns.
+    panel_uvs(g);
+    // Buttons, buckles, the ends of a band: small holes are capped.
+    crate::seal::close_holes(&mut g.mesh, 0.04 * f.h, |_| true);
+    // A sheet still open (a brim, a cape) gets an inside of its own.
+    if crate::seal::open_edges(&g.mesh) > 0 {
+        let mesh = std::mem::take(&mut g.mesh);
+        let (m, j, w) = add_rim(mesh, std::mem::take(&mut g.joints), std::mem::take(&mut g.weights), 0.0025 * f.h);
+        g.mesh = m;
+        g.joints = j;
+        g.weights = w;
+    }
+    // Nothing under the skin: cloth that bends with the body is kept a
+    // little off it everywhere (hard pieces ride where they were made).
+    let bends = g.weights.iter().any(|w| w[1] > 0.01);
+    if bends {
+        f.keep_clear(&mut g.mesh, 0.0025 * f.h);
+    }
+    // Close-fitting cloth draws the skin under it in a little.
+    let tight = spec.fit < 0.9 || matches!(lc(&spec.style).as_str(), "leggings" | "tights" | "tank" | "singlet" | "bodysuit" | "catsuit" | "wetsuit" | "gloves");
+    if bends && matches!(g.kind.as_str(), "shirt" | "jacket" | "coat" | "trousers" | "dress" | "gloves" | "shoes" | "armour") {
+        g.tuck = if tight { 0.004 * f.h } else { 0.0015 * f.h };
+    }
 }
 
 
@@ -813,7 +906,9 @@ impl<'a> Fit<'a> {
         let (e1, e2) = perp(axis);
         let dir = add(scale(e1, a.cos()), scale(e2, a.sin()));
         let c = self.along(b, t);
-        Self::reach_in(&self.bvh, c, dir, self.h * 0.3).unwrap_or(self.h * 0.02)
+        // The first surface going out from the bone: the limb's own, not a
+        // thigh or a hip the arm hangs beside.
+        self.bvh.ray(c, dir, 0.0, self.h * 0.1).map_or_else(|| Self::reach_in(&self.bvh, c, dir, self.h * 0.06).unwrap_or(self.h * 0.02), |hit| hit.t)
     }
 
     /// The y of a hem named in words, or a fraction from the shoulders to the floor.
@@ -863,7 +958,7 @@ fn cloth(f: &Fit, spec: &Spec, g_name: &str, default_material: &str, default_col
         .or_else(|| fabric::material(default_material, Some(colour), spec.colour2, spec.pattern, 128))
         .unwrap_or_default();
     m.name = g_name.to_string();
-    (m, fabric::tile_px(&name, f.h))
+    (m, fabric::repeat_px(&name, spec.pattern, f.h))
 }
 
 /// A plain material for trim.
@@ -1391,7 +1486,9 @@ impl<'a> Fit<'a> {
                 if w[k][q] > 0.0 {
                     acc.push((j[k][q], w[k][q] * a));
                 }
-                if bw[k][q] > 0.0 {
+                // A hand hanging by the hip is nearer than the hip itself:
+                // a skirt never follows the arms.
+                if bw[k][q] > 0.0 && !self.on_arm(bj[k][q] as usize) {
                     match acc.iter_mut().find(|e| e.0 == bj[k][q]) {
                         Some(e) => e.1 += bw[k][q] * (1.0 - a),
                         None => acc.push((bj[k][q], bw[k][q] * (1.0 - a))),
@@ -2399,7 +2496,240 @@ pub fn attach(body: &mut Mesh, g: &Garment) -> Result<std::ops::Range<usize>, St
     rig.weights.extend_from_slice(&g.weights);
     body.regroup(&mats);
     body.rig = Some(std::sync::Arc::new(rig));
+    if g.tuck > 0.0 {
+        tuck_skin(body, n0, g.tuck);
+    }
+    if g.kind == "hat" {
+        tuck_hair(body);
+    }
     Ok(n0..body.positions.len())
+}
+
+/// The axis a normal mostly faces along (0 x, 1 y, 2 z).
+fn main_axis(n: V3) -> usize {
+    let a = n.map(f32::abs);
+    if a[0] >= a[1] && a[0] >= a[2] { 0 } else if a[1] >= a[2] { 1 } else { 2 }
+}
+
+fn project(p: V3, axis: usize) -> [f32; 2] {
+    match axis {
+        0 => [p[2], p[1]],
+        1 => [p[0], p[2]],
+        _ => [p[0], p[1]],
+    }
+}
+
+/// Texture coordinates for a garment cut as panels, the way cloth is: each
+/// triangle is projected along the axis its face looks along (smoothed so
+/// panels are whole, not speckled), and a vertex where two panels meet is
+/// split so each panel keeps its own coordinates. A per-vertex projection
+/// smears a pattern across every triangle that straddles a turn; panels
+/// meet at a clean seam instead. The scale is the one the garment was
+/// given (by [`Fit::uvs`]).
+fn panel_uvs(g: &mut Garment) {
+    let m = &mut g.mesh;
+    let n = m.positions.len();
+    if n == 0 || m.uvs.len() != n || !m.materials.iter().any(|x| x.texture.is_some()) {
+        return;
+    }
+    // The scale the coordinates already have.
+    let mut ks: Vec<f32> = (0..n)
+        .filter_map(|v| {
+            let q = project(m.positions[v], main_axis(m.normals.get(v).copied().unwrap_or([0.0, 0.0, 1.0])));
+            let (lq, lu) = ((q[0] * q[0] + q[1] * q[1]).sqrt(), (m.uvs[v][0].powi(2) + m.uvs[v][1].powi(2)).sqrt());
+            (lq > 1.0 && lu > 1e-6).then_some(lu / lq)
+        })
+        .collect();
+    if ks.len() < 8 {
+        return;
+    }
+    ks.sort_by(f32::total_cmp);
+    let k = ks[ks.len() / 2];
+    // Each triangle's panel, then smoothed: a triangle takes the panel most
+    // of its neighbours have.
+    let tris = m.triangles();
+    let mut axis: Vec<usize> = (0..tris).map(|t| main_axis(m.face_normal(t))).collect();
+    let (ids, unique) = m.position_ids();
+    let mut at: Vec<Vec<u32>> = vec![Vec::new(); unique.len()];
+    for t in 0..tris {
+        for v in m.tri(t) {
+            at[ids[v] as usize].push(t as u32);
+        }
+    }
+    for _ in 0..3 {
+        let prev = axis.clone();
+        for t in 0..tris {
+            let mut votes = [0usize; 3];
+            for v in m.tri(t) {
+                for &o in &at[ids[v] as usize] {
+                    votes[prev[o as usize]] += 1;
+                }
+            }
+            let best = (0..3).max_by_key(|&a| votes[a]).unwrap_or(prev[t]);
+            if votes[best] > votes[prev[t]] * 3 / 2 {
+                axis[t] = best;
+            }
+        }
+    }
+    // Split corners shared by panels.
+    let mut copy: std::collections::HashMap<(usize, usize), u32> = Default::default();
+    let mut owner: Vec<Option<usize>> = vec![None; n];
+    for t in 0..tris {
+        for c in 0..3 {
+            let v = m.indices[3 * t + c] as usize;
+            let a = axis[t];
+            let idx = match owner[v] {
+                None => {
+                    owner[v] = Some(a);
+                    v as u32
+                }
+                Some(o) if o == a => v as u32,
+                Some(_) => *copy.entry((v, a)).or_insert_with(|| {
+                    m.positions.push(m.positions[v]);
+                    m.normals.push(m.normals.get(v).copied().unwrap_or([0.0; 3]));
+                    m.uvs.push([0.0; 2]);
+                    g.joints.push(g.joints.get(v).copied().unwrap_or([0; 4]));
+                    g.weights.push(g.weights.get(v).copied().unwrap_or([1.0, 0.0, 0.0, 0.0]));
+                    (m.positions.len() - 1) as u32
+                }),
+            };
+            m.indices[3 * t + c] = idx;
+        }
+    }
+    for t in 0..tris {
+        for v in m.tri(t) {
+            let q = project(m.positions[v], axis[t]);
+            m.uvs[v] = [q[0] * k, q[1] * k];
+        }
+    }
+}
+
+/// Draws the skin in by `by` px wherever the garment just put on (the
+/// vertices from `from` on) lies over it, so the skin stays inside the
+/// cloth when the body bends.
+fn tuck_skin(body: &mut Mesh, from: usize, by: f32) {
+    let Some(skin) = body.materials.iter().position(|m| m.name == "Skin") else { return };
+    let skin = skin as u32;
+    let mats = body.tri_materials();
+    let mut on_skin = vec![false; from];
+    let mut cloth = Vec::new();
+    for t in 0..body.triangles() {
+        let c = body.tri(t);
+        if c.iter().all(|&v| v >= from) {
+            cloth.push(c.map(|v| body.positions[v]));
+        } else if mats[t] == skin {
+            for v in c {
+                if v < from {
+                    on_skin[v] = true;
+                }
+            }
+        }
+    }
+    if cloth.is_empty() {
+        return;
+    }
+    let bvh = Bvh::new(cloth);
+    let reach = by * 6.0 + 0.012 * (body.bounds().1[1] - body.bounds().0[1]);
+    for v in 0..from {
+        if !on_skin[v] {
+            continue;
+        }
+        let (p, n) = (body.positions[v], body.normals.get(v).copied().unwrap_or([0.0; 3]));
+        if dot(n, n) < 0.5 {
+            continue;
+        }
+        // Only where the cloth is straight out from the skin (not past a hem).
+        if let Some((q, _, d)) = bvh.nearest(p, reach)
+            && d > 1e-4
+            && dot(scale(sub(q, p), 1.0 / d), n) > 0.75
+        {
+            body.positions[v] = sub(p, scale(n, by));
+        }
+    }
+}
+
+/// Whether a material is hair (sculpted or cards) worn on the head.
+pub fn is_hair_material(name: &str) -> bool {
+    let n = name.trim().to_ascii_lowercase();
+    ["hair", "fringe", "bangs", "ponytail", "pigtail", "twin tail", "bun", "locks", "wig"].iter().any(|w| n == *w || n.starts_with(&format!("{w} ")) || n.starts_with(&format!("{w}:")))
+}
+
+/// Where a worn hat comes down to on the head, in the head's own units (y
+/// down, see [`scalp`]): the lowest point of the hard pieces riding on the
+/// head bone above the brows. None when no hat is worn.
+pub fn hat_line(body: &Mesh, sc: &Scalp) -> Option<f32> {
+    let rig = body.rig.as_deref()?;
+    let (o, s) = (sc.frame.origin, sc.frame.size);
+    let mats = body.tri_materials();
+    let own = |n: &str| matches!(n, "Skin" | "Lips" | "Eye white" | "Iris" | "Pupil" | "Brow" | "Cornea" | "Upper lid" | "Lower lid" | "Lashes" | "Teeth" | "Gums" | "Tongue" | "Mouth" | "Ears" | "Nose" | "Fur") || is_hair_material(n);
+    let rigid_head = |v: usize| rig.joints.get(v).is_some_and(|j| j[0] as usize == sc.head_bone) && rig.weights.get(v).is_some_and(|w| w[0] > 0.98);
+    let mut line: Option<f32> = None;
+    let mut found = 0;
+    for t in 0..body.triangles() {
+        let name = body.materials.get(mats[t] as usize).map_or("", |m| m.name.as_str());
+        if own(name) {
+            continue;
+        }
+        let c = body.tri(t);
+        if !c.iter().all(|&v| rigid_head(v)) {
+            continue;
+        }
+        let p = scale(sub(body.centroid(t), o), 1.0 / s);
+        // Above the brows and round the skull (glasses sit lower and in front).
+        if p[1] > -0.12 || length(sub(p, [0.0, -0.13, 0.07])) > 0.9 {
+            continue;
+        }
+        found += 1;
+        line = Some(line.map_or(p[1], |l: f32| l.max(p[1])));
+    }
+    if found < 8 {
+        return None;
+    }
+    line
+}
+
+/// Hair under a hat stays under it: what would come through the crown is
+/// pressed down to the skull above the hat line (a soft band below it), so
+/// a beanie or a fedora sits on the hair instead of being pierced by it.
+/// Returns how many hair vertices moved.
+pub fn tuck_hair(body: &mut Mesh) -> usize {
+    let Ok(sc) = scalp(body) else { return 0 };
+    let Some(line) = hat_line(body, &sc) else { return 0 };
+    let (o, s) = (sc.frame.origin, sc.frame.size);
+    let mats = body.tri_materials();
+    let mut hair = vec![false; body.positions.len()];
+    for t in 0..body.triangles() {
+        if body.materials.get(mats[t] as usize).is_some_and(|m| is_hair_material(&m.name)) {
+            for v in body.tri(t) {
+                hair[v] = true;
+            }
+        }
+    }
+    // The skull: the head base's cranium, with a hair's breadth on it.
+    let centre = [0.0, -0.13, 0.07];
+    let radii = [0.355, 0.415, 0.445];
+    let mut moved = 0;
+    for v in 0..body.positions.len() {
+        if !hair[v] {
+            continue;
+        }
+        let p = scale(sub(body.positions[v], o), 1.0 / s);
+        // Fully pressed above the line, fading out over a band below it.
+        let k = 1.0 - smoothstep(line - 0.02, line + 0.05, p[1]);
+        if k <= 0.0 {
+            continue;
+        }
+        let d = sub(p, centre);
+        let q = ((d[0] / radii[0]).powi(2) + (d[1] / radii[1]).powi(2) + (d[2] / radii[2]).powi(2)).sqrt();
+        if q <= 1.0 {
+            continue;
+        }
+        let onto = add(centre, scale(d, 1.0 / q));
+        let to = lerp(p, onto, k);
+        body.positions[v] = add(o, scale(to, s));
+        moved += 1;
+    }
+    moved
 }
 
 /// Takes off what was put on under `name`: every material called that

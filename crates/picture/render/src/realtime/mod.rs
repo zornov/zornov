@@ -69,6 +69,9 @@ pub struct Options {
     /// A look from outside the world (a project's scene look): over its own.
     /// Exposure (stops), bloom, occlusion, saturation, vignette.
     pub look: Option<[f32; 5]>,
+    /// Toon (cel) shading in this many hard bands (2 or 3); 0 shades
+    /// physically.
+    pub toon: u8,
 }
 
 /// The walker's body, drawn when the camera is behind it.
@@ -85,7 +88,7 @@ pub struct Avatar {
 
 impl Options {
     pub fn new(width: u32, height: u32) -> Options {
-        Options { width, height, quality: Quality::Balanced, time: 0.0, refine: false, max_refine: 48, sky_time: None, avatar: None, fog: None, look: None }
+        Options { width, height, quality: Quality::Balanced, time: 0.0, refine: false, max_refine: 48, sky_time: None, avatar: None, fog: None, look: None, toon: 0 }
     }
 }
 
@@ -720,6 +723,7 @@ impl Renderer {
         let mut fu = fu;
         fu.flags[1] = look.saturation;
         fu.flags[2] = look.vignette;
+        fu.flags[3] = if o.toon >= 2 { o.toon.min(3) as f32 } else { 0.0 };
         let _ = first_cascade;
         Ok(Prepared {
             lists,

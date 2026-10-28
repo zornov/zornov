@@ -1966,6 +1966,7 @@ impl Session {
             "mesh" => self.mesh(op),
             "rig" => self.rig(op),
             "wear" => self.wear(op),
+            "shading" | "toon" => self.shading_op(op),
             "hold" => self.hold(op),
             "act" => self.act(op),
             "simulate" => self.simulate(op),

@@ -94,6 +94,17 @@ impl LayerMap {
         self.from_source(self.geo.content_point(u, v))
     }
 
+    /// A point given in the drawing's own pixels (its top-left corner is
+    /// 0, 0; before the crop), in layer coordinates.
+    pub fn drawing(&self, x: f32, y: f32) -> m::Vec2 {
+        self.from_source(Vec2::new(x, y))
+    }
+
+    /// The drawing's own size in pixels (before the crop).
+    pub fn drawing_size(&self) -> Vec2 {
+        self.geo.source()
+    }
+
     /// The layer's picture size in source pixels (after crop): what the
     /// renderer bends in.
     pub fn pixels(&self) -> Vec2 {
@@ -899,7 +910,7 @@ mod tests {
         let mut s = crate::agent::Session::new(doc);
         s.edit(
             &[
-                serde_json::json!({"op": "puppet", "clip": id, "pins": [[-100, 0], [100, 0], {"at": [0, 0], "kind": "bend", "rotate": 20}], "pin": 2, "keys": [[0, [100, 0]], [1, [100, -60]]]}),
+                serde_json::json!({"op": "puppet", "clip": id, "space": "canvas", "pins": [[-100, 0], [100, 0], {"at": [0, 0], "kind": "bend", "rotate": 20}], "pin": 2, "keys": [[0, [100, 0]], [1, [100, -60]]]}),
                 serde_json::json!({"op": "corner_pin", "clip": id, "skew": 10}),
                 serde_json::json!({"op": "mask", "clip": id, "shape": "ellipse"}),
                 serde_json::json!({"op": "mask_puppet", "clip": id, "pins": [[-40, 0], [40, 0]], "pin": 1, "to": [-80, 10]}),

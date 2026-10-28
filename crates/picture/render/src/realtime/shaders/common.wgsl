@@ -43,7 +43,8 @@ struct Frame {
     jitter: vec4<f32>,
     // Reflection pass: plane (n, d) whose negative side is discarded.
     clip: vec4<f32>,
-    // x 1 in the mirrored pass (winding flips), y saturation, z vignette.
+    // x 1 in the mirrored pass (winding flips), y saturation, z vignette,
+    // w toon bands (0 physical shading, 2 or 3 cel bands).
     flags: vec4<f32>,
     counts: vec4<u32>,
     lights: array<Light, 16>,

@@ -8,7 +8,8 @@
 //!   front and a back, with an outline that is not a plain rectangle (a
 //!   picture pushed back into a slab, not a form);
 //! - open: edges with only one face (a shell you can see into, a single
-//!   sided plane, holes);
+//!   sided plane, holes), not counting sheets that are thin by nature
+//!   (eyelids, lashes, corneas, hair cards);
 //!
 //! and from the scene: things floating above what is under them, sunk into
 //! it, or standing where they would tip over.
@@ -35,10 +36,16 @@ impl Solidity {
         let mut size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
         size.sort_by(|a, b| b.total_cmp(a));
         let thin = if size[0] > 1e-6 { size[2] / size[0] } else { 0.0 };
-        // Open edges, with corners welded.
+        // Open edges, with corners welded; sheets that are thin by nature
+        // (eyelids, lashes, corneas, hair cards) are left out.
         let (ids, _) = mesh.position_ids();
+        let mats = mesh.tri_materials();
+        let sheet: Vec<bool> = mesh.materials.iter().map(|m| studio_mesh::seal::thin_by_nature(&m.name)).collect();
         let mut count: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
         for t in 0..mesh.triangles() {
+            if sheet.get(mats[t] as usize).copied().unwrap_or(false) {
+                continue;
+            }
             let c = mesh.tri(t);
             let v = [ids[c[0]], ids[c[1]], ids[c[2]]];
             for (a, b) in [(v[0], v[1]), (v[1], v[2]), (v[2], v[0])] {

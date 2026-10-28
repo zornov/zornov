@@ -10,7 +10,9 @@
 //! parameters read from the words around it (distance, size, speed, count,
 //! material, era). Several sounds in one description are layered into one
 //! passage; "then" puts them in order. Every call with a different `variant`
-//! makes a different take.
+//! makes a different take. A description no model's words match is given
+//! the nearest model (by its words, its summary and near spellings), and
+//! the reply says which.
 
 use crate::animal;
 use crate::dsp::*;
@@ -84,6 +86,9 @@ pub enum Kind {
     Paper,
     Cloth,
     Sizzle,
+    Bounce,
+    Squeak,
+    Pop,
 }
 
 /// A model on offer.
@@ -119,8 +124,8 @@ pub const MODELS: &[ModelInfo] = &[
     m!("scrape", &["scrape", "scraping", "drag", "dragging", "scratch", "scratching", "grind", "grinding", "screech", "squeak", "squeaking", "rasp", "friction", "scuff"], "chair scraping on a floor", "stick-slip friction", Kind::Scrape, false),
     m!("creak", &["creak", "creaks", "creaking", "creaky", "groan", "hinge"], "door creaking open", "a slow hinge or timber", Kind::Creak, false),
     m!("pour", &["pour", "pouring", "poured", "stream", "trickle", "flowing", "running water", "tap water", "faucet", "gurgle", "gushing", "water"], "water pouring", "liquid running, made of bubbles", Kind::Pour, true),
-    m!("drip", &["drip", "drips", "dripping", "droplet", "drop of water", "leak", "leaking"], "water dripping", "single drops with irregular spacing", Kind::Drip, false),
-    m!("splash", &["splash", "splashes", "dive", "plunge", "plop", "dunk"], "a big splash", "water struck", Kind::Splash, false),
+    m!("drip", &["drip", "drips", "dripping", "droplet", "drop of water", "leak", "leaking", "plink", "cave drip", "tap dripping", "sink drip"], "water dripping", "single drops: a basin, a cave, a tap, a bucket", Kind::Drip, false),
+    m!("splash", &["splash", "splashes", "dive", "plunge", "plop", "dunk", "cannonball", "belly flop", "kerplunk", "pebble in water", "stone in water", "paddle", "oar", "jumps in", "falls in"], "a big splash", "water struck: a pebble's plop to a cannonball", Kind::Splash, false),
     m!("bubbles", &["bubble", "bubbles", "bubbling", "boil", "boiling", "simmer", "simmering", "cauldron", "fizz", "fizzing"], "pot boiling", "bubbles rising and bursting", Kind::Bubbles, true),
     m!("rain", &["rain", "raining", "rainfall", "drizzle", "downpour", "shower", "raindrops"], "rain on a window", "rain: a hiss of drops with ticks", Kind::Rain, true),
     m!("wind", &["wind", "windy", "gust", "gusts", "breeze", "howl", "howling", "gale", "blizzard", "draught"], "wind howling", "gusting air through a resonant space", Kind::Wind, true),
@@ -143,10 +148,10 @@ pub const MODELS: &[ModelInfo] = &[
     m!("phone", &["phone", "ringing", "telephone", "ringtone", "phone ringing", "rings"], "old phone ringing", "a bell telephone or a modern ring", Kind::Phone, false),
     m!("heartbeat", &["heartbeat", "heart", "pulse", "heart beating"], "heartbeat", "lub-dub", Kind::Heartbeat, true),
     m!("breath", &["breath", "breathing", "breathes", "gasp", "panting", "sigh", "exhale", "inhale", "snoring", "snore"], "heavy breathing", "air in and out", Kind::Breath, true),
-    m!("whoosh", &["whoosh", "swoosh", "swish", "swing", "sweep", "fast movement", "transition", "swipe"], "a whoosh", "air moved past: a swept band of noise", Kind::Whoosh, false),
+    m!("whoosh", &["whoosh", "woosh", "swoosh", "swish", "swing", "sweep", "fast movement", "transition", "swipe", "whip", "zoom past", "flies past", "sword swing", "punch whoosh"], "a whoosh", "air moved past: a swept band of noise", Kind::Whoosh, false),
     m!("riser", &["riser", "rise", "buildup", "build-up", "build up", "tension riser", "uplifter", "swell", "sweep up"], "synth riser with a tail", "a rising sweep to a peak, then a tail", Kind::Riser, false),
     m!("boom", &["boom", "sub drop", "impact boom", "cinematic hit", "stinger", "drop"], "cinematic boom", "a low drop with a long tail", Kind::Boom, false),
-    m!("ui", &["beep", "blip", "ding", "chime", "notification", "ui", "pop", "alert", "ping", "bleep", "error sound", "success sound", "confirm", "bloop", "boop"], "notification ding", "interface sounds", Kind::Ui, false),
+    m!("ui", &["beep", "blip", "ding", "chime", "notification", "ui", "pop", "alert", "ping", "bleep", "error sound", "success sound", "confirm", "bloop", "boop", "ui click", "menu click", "interface", "app sound", "mouse click", "tap sound", "digital click", "select sound", "hover sound"], "notification ding", "interface sounds: clicks, taps, blips, pops, chimes, alerts", Kind::Ui, false),
     m!("footsteps", &["footsteps", "footstep", "steps", "walking", "walks", "walk", "running", "runs", "tiptoe", "tiptoeing", "marching", "stomping", "treading", "pacing", "strolling", "sneaking", "footfalls", "jogging"], "footsteps on gravel", "foot falls on a surface, each different", Kind::Steps, false),
     m!("thunder", &["thunder", "thunderclap", "lightning", "rumble", "rumbling"], "distant thunder", "a crack and a rolling rumble", Kind::Thunder, false),
     m!("explosion", &["explosion", "explode", "explodes", "blast", "detonation", "bomb", "grenade", "dynamite"], "an explosion", "a blast, a boom and debris", Kind::Explosion, false),
@@ -157,6 +162,9 @@ pub const MODELS: &[ModelInfo] = &[
     m!("glass", &["glass", "glasses", "clink", "toast", "shatter", "shattering", "breaking glass", "bottle", "window breaks", "cheers", "wine glass"], "glasses clinking", "glass struck, or broken", Kind::Glass, false),
     m!("paper", &["paper", "papers", "rustle", "rustling", "crumple", "crumpling", "page", "pages turning", "leaves rustling", "newspaper", "foil", "wrapper"], "paper rustling", "crumpled sheets", Kind::Paper, false),
     m!("cloth", &["cloth", "fabric", "clothes", "cloak", "coat", "fabric rustle", "cloth rustle", "sleeve", "jacket", "dress rustling", "bedsheets"], "cloth rustling", "fabric moving", Kind::Cloth, false),
+    m!("bounce", &["bounce", "bouncing", "bouncy", "ball", "basketball", "tennis ball", "ping pong", "ping-pong", "table tennis", "dribble", "dribbling", "rubber ball", "super ball", "boing", "rebound"], "rubber ball bouncing", "a ball bouncing to rest: rubber, basketball, tennis or ping-pong (dribbling keeps the height)", Kind::Bounce, false),
+    m!("squeak", &["squeaky toy", "squeak toy", "rubber duck", "rubber ducky", "dog toy", "squeaker", "chew toy", "squeeze toy", "squeaky", "toy squeak"], "rubber duck squeak", "a squeezed rubber toy's squeal, out and back in", Kind::Squeak, false),
+    m!("pop", &["balloon", "cork", "champagne", "bubble wrap", "bubblewrap", "popcorn", "pop gun", "popgun", "popping", "burst", "bursts", "uncork", "bottle opening"], "balloon pop", "pops: a balloon bursting, a cork drawn, bubble wrap, popcorn", Kind::Pop, false),
     m!("sizzle", &["sizzle", "sizzling", "frying", "fry", "bacon", "pan", "sear", "searing", "grill", "barbecue"], "bacon sizzling", "hot fat popping", Kind::Sizzle, true),
     m!("animal", &[], "a dog barking", "an animal voice: see the animals list", Kind::Animal, false),
 ];
@@ -626,20 +634,41 @@ fn mk_pour(rng: &mut Rng, p: &Params, stereo: &mut Stereo) {
 }
 
 fn mk_drip(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
-    let count = p.count.unwrap_or(((dur * 1.3) as usize).max(1)).clamp(1, 40);
+    // Where it drips: a cave's slow drops ringing in the rock, a tap's
+    // steady ones into a steel sink, a bucket's hollow plunk, a basin's plink.
+    let tx = &p.text;
+    let (lo, hi, gap, ring_k, ring_tau, ring_g, echo) = if tx.contains("cave") || tx.contains("cavern") || tx.contains("tunnel") || tx.contains("sewer") {
+        (900.0, 1800.0, (0.9, 2.2), 0.5, 0.25, 0.25, true)
+    } else if tx.contains("tap") || tx.contains("faucet") || tx.contains("sink") {
+        (1800.0, 2600.0, (0.55, 0.65), 0.42, 0.35, 0.3, false)
+    } else if tx.contains("bucket") || tx.contains("pail") || tx.contains("pot") {
+        (500.0, 900.0, (0.4, 1.1), 0.8, 0.12, 0.35, false)
+    } else if tx.contains("leak") || tx.contains("fast") {
+        (1600.0, 3200.0, (0.12, 0.35), 0.5, 0.1, 0.12, false)
+    } else {
+        (1600.0, 3200.0, (0.35, 1.3), 0.5, 0.1, 0.12, false)
+    };
+    let count = p.count.unwrap_or(((dur / (0.5 * (gap.0 + gap.1))).ceil() as usize).max(1)).clamp(1, 60);
     let mut out = vec![0.0; frames(dur.max(0.4))];
     let mut t = 0.02;
     for _ in 0..count {
-        let hz = rng.range(1600.0, 3200.0) * (1.2 - 0.4 * p.size);
+        let hz = rng.range(lo, hi) * (1.2 - 0.4 * p.size);
         let _r6 = rng.range(0.012, 0.03);
         let b = bubble(rng, hz, _r6);
         put(&mut out, &b, t, rng.range(0.5, 1.0));
         let tap = click(rng, 3500.0, 1.0, 0.002);
         put(&mut out, &tap, t, 0.2);
-        // The plink of the drop landing in a basin carries on a little.
-        let ring = struck(hz * 0.5, &[(1.0, 0.4, 0.1)], 1.0, 0.3);
-        put(&mut out, &ring, t + 0.002, 0.12);
-        t += rng.range(0.35, 1.3);
+        // The plink of the drop landing carries on a little.
+        let ring = struck(hz * ring_k, &[(1.0, 0.4, ring_tau)], 1.0, ring_tau * 4.0);
+        put(&mut out, &ring, t + 0.002, ring_g);
+        // A cave answers back.
+        if echo {
+            for (k, g) in [(0.11f32, 0.35f32), (0.23, 0.2), (0.37, 0.1)] {
+                let e = low_pass(&b, 2500.0, 0.6);
+                put(&mut out, &e, t + k, g);
+            }
+        }
+        t += rng.range(gap.0, gap.1);
         if t > dur - 0.2 {
             break;
         }
@@ -648,7 +677,19 @@ fn mk_drip(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
 }
 
 fn mk_splash(rng: &mut Rng, p: &Params, dur: f32, stereo: &mut Stereo) {
-    let big = 0.3 + 0.7 * p.size;
+    // A pebble's plop, a paddle, a body jumping in, a cannonball.
+    let tx = &p.text;
+    let big = if tx.contains("pebble") || tx.contains("plop") || tx.contains("stone in") || tx.contains("kerplunk") {
+        0.12
+    } else if tx.contains("paddle") || tx.contains("oar") {
+        0.3
+    } else if tx.contains("cannonball") || tx.contains("belly flop") || tx.contains("bellyflop") {
+        1.0
+    } else if tx.contains("jump") || tx.contains("dive") || tx.contains("falls in") {
+        0.8
+    } else {
+        0.3 + 0.7 * p.size
+    };
     let len = (0.4 + 1.2 * big).max(dur.min(2.0));
     let n = frames(len);
     let (mut a, mut b) = (Svf::new(), Svf::new());
@@ -857,7 +898,7 @@ fn mk_hooves(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
     let mut k = 0usize;
     while t < dur - 0.1 {
         let hz = match surf {
-            Surface::Stone | Surface::Tile | Surface::Metal => rng.range(900.0, 1500.0),
+            Surface::Stone | Surface::Tile | Surface::Metal | Surface::WetStone => rng.range(900.0, 1500.0),
             _ => rng.range(300.0, 600.0),
         };
         let hit = struck(hz, &[(1.0, 1.0, 0.025), (2.7, 0.4, 0.012)], 1.0, 0.12);
@@ -1291,6 +1332,153 @@ fn mk_boom(rng: &mut Rng, p: &Params, dur: f32) -> Stereo {
     send
 }
 
+/// A ball bouncing: each landing a struck body (a rubber ball's hollow
+/// pock, a basketball's boom with the floor's thump, a tennis ball's
+/// thock, a ping-pong ball's tick), the gaps and the force shrinking by the
+/// ball's bounciness until it rests; dribbling keeps the height.
+fn mk_bounce(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
+    const BASKET: &[Mode3] = &[(1.0, 1.0, 0.09), (1.9, 0.45, 0.05), (3.1, 0.2, 0.03)];
+    const PINGPONG: &[Mode3] = &[(1.0, 1.0, 0.008), (1.6, 0.5, 0.005)];
+    const TENNIS: &[Mode3] = &[(1.0, 1.0, 0.02), (2.3, 0.4, 0.01)];
+    const SUPER: &[Mode3] = &[(1.0, 1.0, 0.03), (2.6, 0.4, 0.015)];
+    const RUBBER: &[Mode3] = &[(1.0, 1.0, 0.035), (2.2, 0.35, 0.02), (3.7, 0.12, 0.01)];
+    let t = &p.text;
+    let dribble = t.contains("dribbl");
+    // (pitch, modes, bounciness, first gap, how much floor is heard)
+    let (hz, modes, e, gap0, floor): (f32, &[Mode3], f32, f32, f32) = if t.contains("basketball") || dribble {
+        (rng.range(95.0, 120.0), BASKET, 0.76, 0.62, 1.0)
+    } else if t.contains("ping pong") || t.contains("ping-pong") || t.contains("table tennis") {
+        (rng.range(2300.0, 2900.0), PINGPONG, 0.88, 0.32, 0.0)
+    } else if t.contains("tennis") {
+        (rng.range(700.0, 950.0), TENNIS, 0.72, 0.5, 0.3)
+    } else if t.contains("super") || t.contains("bouncy") || t.contains("boing") {
+        (rng.range(500.0, 700.0), SUPER, 0.9, 0.45, 0.2)
+    } else {
+        (rng.range(260.0, 380.0) * (1.3 - 0.6 * p.size), RUBBER, 0.78, 0.5, 0.5)
+    };
+    let n = p.count.unwrap_or(if dribble { 8 } else { 16 }).clamp(1, 60);
+    let mut out = vec![0.0; frames(dur.max(1.0))];
+    let (mut at, mut gap) = (0.02f32, gap0 * (0.7 + 0.6 * p.size));
+    let mut force = 0.6 + 0.4 * p.intensity;
+    for k in 0..n {
+        if at > dur - 0.05 {
+            break;
+        }
+        // A softer landing flattens the ball less: a touch higher.
+        let f = hz * (1.0 + 0.05 * k as f32 / n as f32) * rng.range(0.98, 1.02);
+        let mut hit = struck(f, modes, 1.0, 0.4);
+        let c = click(rng, (f * 6.0).min(9000.0), 1.0, 0.002);
+        mix_into(&mut hit, &c, 0, 0.35);
+        if floor > 0.0 {
+            let fl = struck(rng.range(140.0, 200.0), &[(1.0, 1.0, 0.05), (2.4, 0.3, 0.03)], 1.0, 0.3);
+            mix_into(&mut hit, &fl, 0, 0.4 * floor);
+        }
+        put(&mut out, &hit, at, force);
+        if dribble {
+            at += gap0 * rng.range(0.95, 1.05);
+            force = (0.6 + 0.4 * p.intensity) * rng.range(0.85, 1.0);
+        } else {
+            at += gap;
+            gap *= e;
+            force *= e;
+            if gap < 0.02 {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// A squeezed rubber toy: air forced through its reed, a bright buzzy
+/// squeal rising with the squeeze, then a lower one as it fills again.
+fn mk_squeak(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
+    let squeezes = p.count.unwrap_or(2).clamp(1, 12);
+    let base = rng.range(1300.0, 1900.0) * (1.25 - 0.5 * p.size);
+    let len = 0.16 + 0.1 * (1.0 - p.speed);
+    let mut out = vec![0.0; frames(dur.max(squeezes as f32 * (len * 1.8 + 0.25)))];
+    let mut at = 0.02;
+    for _ in 0..squeezes {
+        for (k, l) in [(1.0f32, len), (0.72, len * 0.8)] {
+            let jitter = rng.range(0.95, 1.05);
+            let mut ph = 0.0f32;
+            let mut f = Svf::new();
+            let n = frames(l);
+            let s: Vec<f32> = (0..n)
+                .map(|i| {
+                    let u = i as f32 / n as f32;
+                    let tt = i as f32 / SR;
+                    let env = (PI * u).sin().powf(0.6);
+                    let hz = base * k * jitter * (0.85 + 0.3 * u) * (1.0 + 0.02 * (TAU * 28.0 * tt).sin());
+                    ph += TAU * hz / SR;
+                    let w = ph.sin() + 0.5 * (2.0 * ph).sin() + 0.25 * (3.0 * ph).sin();
+                    (f.at(w + rng.signed() * 0.15, hz * 2.0, 1.5).bp * 0.6 + w * 0.5) * env
+                })
+                .collect();
+            put(&mut out, &s, at, 0.8);
+            at += l + 0.03;
+        }
+        at += 0.12 + 0.2 * (1.0 - p.speed);
+    }
+    out
+}
+
+/// Pops: a balloon bursting (a sharp crack of noise on a low thump and a
+/// short room), a cork drawn (a hollow falling "thoop", then fizz), bubble
+/// wrap or popcorn (many small pops at random), or one round pop.
+fn mk_pop(rng: &mut Rng, p: &Params, dur: f32) -> Vec<f32> {
+    let t = &p.text;
+    let mut out = vec![0.0; frames(dur.max(0.6))];
+    let glide = |rng: &mut Rng, from: f32, to: f32, len: f32, noise: f32| -> Vec<f32> {
+        let mut ph = 0.0f32;
+        (0..frames(len)).map(|i| {
+            let u = i as f32 / SR;
+            ph += TAU * (to + (from - to) * (-u / (len * 0.3)).exp()) / SR;
+            (ph.sin() + noise * rng.signed()) * smooth(u, 0.001) * (-u / (len * 0.35)).exp()
+        }).collect()
+    };
+    if t.contains("balloon") || t.contains("burst") {
+        let n = frames(0.3);
+        let mut f = Svf::new();
+        let crack: Vec<f32> = (0..n).map(|i| {
+            let u = i as f32 / SR;
+            f.at(rng.signed(), 2500.0, 0.5).hp * (-u / 0.01).exp() * 1.4 + rng.signed() * 0.2 * (-u / 0.08).exp()
+        }).collect();
+        put(&mut out, &crack, 0.0, 1.0);
+        let thump = struck(rng.range(70.0, 95.0) * (1.4 - 0.6 * p.size), &[(1.0, 1.0, 0.06)], 1.0, 0.3);
+        put(&mut out, &thump, 0.0, 0.6);
+    } else if t.contains("cork") || t.contains("champagne") || t.contains("bottle") {
+        let thoop = glide(rng, 700.0, 260.0, 0.09, 0.15);
+        put(&mut out, &thoop, 0.0, 1.0);
+        // Fizz: bubbles thinning out.
+        let mut tt = 0.08f32;
+        while tt < dur.max(1.5) - 0.05 {
+            let hz = rng.range(2500.0, 6000.0);
+            let b = bubble(rng, hz, 0.004);
+            put(&mut out, &b, tt, 0.15 * (-(tt - 0.08) / 0.8).exp());
+            tt += rng.range(0.004, 0.03) * (1.0 + 4.0 * tt);
+        }
+    } else if t.contains("bubble") || t.contains("popcorn") {
+        let corn = t.contains("popcorn");
+        let n = p.count.unwrap_or(if corn { 28 } else { 12 }).clamp(1, 120);
+        let span = dur.max(1.0) - 0.15;
+        for k in 0..n {
+            // Popcorn starts slowly, crowds the middle, thins at the end.
+            let x = if corn { 0.5 + 0.5 * (PI * (rng.unit() - 0.5)).sin() } else { (k as f32 + rng.unit()) / n as f32 };
+            let hz = if corn { rng.range(600.0, 1500.0) } else { rng.range(1500.0, 4000.0) };
+            let mut c = click(rng, hz, 0.9, 0.0015);
+            let body = struck(hz * 0.25, &[(1.0, 1.0, if corn { 0.02 } else { 0.008 })], 1.0, 0.06);
+            mix_into(&mut c, &body, 0, if corn { 0.8 } else { 0.4 });
+            put(&mut out, &c, 0.05 + x * span, rng.range(0.5, 1.0));
+        }
+    } else {
+        let pop = glide(rng, 900.0 * (1.3 - 0.6 * p.size), 200.0, 0.08, 0.05);
+        put(&mut out, &pop, 0.0, 1.0);
+        let c = click(rng, 3000.0, 1.0, 0.0015);
+        put(&mut out, &c, 0.0, 0.4);
+    }
+    out
+}
+
 fn mk_ui(rng: &mut Rng, p: &Params) -> Vec<f32> {
     let t = &p.text;
     let shift = rng.range(0.94, 1.08);
@@ -1331,6 +1519,12 @@ fn mk_ui(rng: &mut Rng, p: &Params) -> Vec<f32> {
     } else if t.contains("blip") || t.contains("bleep") {
         put(&mut out, &tone(1200.0, 0.06, 2), 0.0, 0.7);
         put(&mut out, &tone(1700.0, 0.08, 2), 0.08, 0.7);
+    } else if t.contains("click") || t.contains("tap") || t.contains("select") || t.contains("hover") {
+        // A crisp interface tick: a short bright click on a tiny body.
+        let tick = click(rng, 3800.0 * shift, 1.4, 0.0012);
+        put(&mut out, &tick, 0.0, 1.0);
+        put(&mut out, &tone(if t.contains("hover") { 1500.0 } else { 2400.0 }, 0.025, 0), 0.0, 0.35);
+        out.truncate(frames(0.15));
     } else {
         put(&mut out, &tone(1000.0, 0.15, 0), 0.0, 0.8);
     }
@@ -1579,12 +1773,15 @@ fn natural(kind: Kind, p: &Params) -> f32 {
         Kind::Zap => 0.5,
         Kind::Glass => 1.2,
         Kind::Paper | Kind::Cloth => 1.8,
+        Kind::Bounce => if p.text.contains("dribbl") { 4.0 } else { 3.0 },
+        Kind::Squeak => 0.4 + 0.55 * p.count.unwrap_or(2) as f32,
+        Kind::Pop => if p.text.contains("popcorn") { 5.0 } else if p.text.contains("bubble") { 3.0 } else if p.text.contains("cork") || p.text.contains("champagne") || p.text.contains("bottle") { 2.2 } else { 1.0 },
     }
 }
 
 /// Sounds that happen once and keep their own length however long the passage is.
 fn one_shot(kind: Kind) -> bool {
-    matches!(kind, Kind::Impact | Kind::Click | Kind::Lock | Kind::Door | Kind::Camera | Kind::Ui | Kind::Glass | Kind::Gunshot | Kind::Splash | Kind::Match | Kind::Lighter | Kind::Ignite | Kind::Horn | Kind::Creak | Kind::Scrape | Kind::Paper | Kind::Cloth)
+    matches!(kind, Kind::Impact | Kind::Click | Kind::Lock | Kind::Door | Kind::Camera | Kind::Ui | Kind::Glass | Kind::Gunshot | Kind::Splash | Kind::Match | Kind::Lighter | Kind::Ignite | Kind::Horn | Kind::Creak | Kind::Scrape | Kind::Paper | Kind::Cloth | Kind::Bounce | Kind::Squeak | Kind::Pop)
 }
 
 struct Layer {
@@ -1697,6 +1894,18 @@ fn layers_of(desc: &str) -> Vec<Layer> {
     }
     if has(Kind::Machine) && has(Kind::Servo) {
         drop.push(Kind::Machine);
+    }
+    if has(Kind::Bounce) {
+        drop.extend([Kind::Impact, Kind::Steps]);
+    }
+    if has(Kind::Squeak) {
+        drop.extend([Kind::Scrape, Kind::Animal]);
+    }
+    if has(Kind::Pop) {
+        drop.extend([Kind::Ui, Kind::Impact, Kind::Explosion, Kind::Glass]);
+    }
+    if has(Kind::Ui) && ["ui", "interface", "menu", "app", "digital", "mouse", "hover", "select"].iter().any(|w| has_word(&lower, w)) {
+        drop.push(Kind::Click);
     }
     hits.retain(|h| !drop.contains(&h.1));
     hits.sort_by_key(|h| h.0);
@@ -1855,6 +2064,9 @@ fn build(layer: &Layer, dur: f32, seed: u64) -> (Stereo, Option<f32>) {
         Kind::Paper => mk_paper_cloth(&mut rng, false, &mut st, p.intensity),
         Kind::Cloth => mk_paper_cloth(&mut rng, true, &mut st, p.intensity),
         Kind::Sizzle => mk_sizzle(&mut rng, &mut st),
+        Kind::Bounce => st = Stereo::from_mono(&mk_bounce(&mut rng, p, dur)),
+        Kind::Squeak => st = Stereo::from_mono(&mk_squeak(&mut rng, p, dur)),
+        Kind::Pop => st = Stereo::from_mono(&mk_pop(&mut rng, p, dur)),
     }
     if p.dist > 0.0 && !matches!(layer.kind, Kind::Traffic | Kind::Passby) {
         distance(&mut st.l, p.dist);
@@ -1895,8 +2107,13 @@ pub fn make(desc: &str, seconds: Option<f32>, variant: u64) -> Result<Made, Stri
     };
     let mut layers_by_stage: Vec<Vec<Layer>> = stages.iter().map(|s| layers_of(s)).collect();
     // Qualities said once apply to the whole: "period" and "distant" carry across stages.
+    // Nothing matched: the nearest model, said so.
+    let mut stand_in = None;
     if layers_by_stage.iter().all(|l| l.is_empty()) {
-        return Err(format!("no sound model matches \"{desc}\". Models: {}", catalogue()));
+        let m = nearest(desc);
+        let low = desc.to_lowercase();
+        layers_by_stage = vec![vec![Layer { kind: m.kind, bed: m.bed, p: Params::read(&low, &low), info: m.name.to_owned() }]];
+        stand_in = Some(m.name);
     }
     layers_by_stage.retain(|l| !l.is_empty());
     let seed = variant.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ desc.bytes().fold(7u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
@@ -1947,7 +2164,85 @@ pub fn make(desc: &str, seconds: Option<f32>, variant: u64) -> Result<Made, Stri
     let p = out.peak().max(1e-6);
     out.scale((if any_event { 0.85 } else { 0.4 }) / p);
     out.edges(0.01);
-    Ok(Made { audio: out, model: names.join(" + "), anchor })
+    let model = match stand_in {
+        Some(n) => format!("{n} (no model is made for \"{desc}\"; this is the nearest: say it with that model's words for more control, or describe what it is made of and how it is struck)"),
+        None => names.join(" + "),
+    };
+    Ok(Made { audio: out, model, anchor })
+}
+
+/// How alike two words are, 0..1: the same, one the start of the other,
+/// or one or two letters apart.
+fn word_likeness(a: &str, b: &str) -> f32 {
+    if a == b {
+        return 1.0;
+    }
+    let (la, lb) = (a.chars().count(), b.chars().count());
+    if la >= 4 && lb >= 4 && (a.starts_with(b) || b.starts_with(a)) {
+        return 0.8;
+    }
+    if la.min(lb) < 4 || la.abs_diff(lb) > 2 {
+        return 0.0;
+    }
+    // Edit distance, small words only.
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + usize::from(a[i - 1] != b[j - 1]));
+        }
+        prev = cur;
+    }
+    match prev[b.len()] {
+        1 => 0.7,
+        2 if la >= 6 => 0.45,
+        _ => 0.0,
+    }
+}
+
+/// Sound words that name a family more than a model, and the model of
+/// that family to stand in.
+const FAMILIES: &[(&[&str], &str)] = &[
+    (&["hit", "strike", "struck", "smack", "thwack", "wham", "pow", "clonk", "klunk", "donk", "boink", "thock"], "impact"),
+    (&["metal", "metallic", "steel", "iron", "anvil", "pipe", "sword", "clash"], "impact"),
+    (&["rubber", "spring", "springy", "elastic", "jelly", "boing"], "bounce"),
+    (&["toy", "duck", "squish", "squeeze"], "squeak"),
+    (&["water", "wet", "liquid", "slosh", "gulp", "glug", "swim"], "splash"),
+    (&["air", "swing", "fly", "flying", "throw", "thrown", "fast"], "whoosh"),
+    (&["digital", "screen", "game", "computer", "menu", "button", "tap", "coin", "pickup", "level"], "ui"),
+    (&["fabric", "clothing", "move", "movement", "rustle", "shuffle"], "cloth"),
+    (&["walk", "foot", "feet", "shoe", "shoes", "boot", "stomp", "tread"], "footsteps"),
+    (&["glassy", "crystal", "ice", "ceramic", "porcelain", "chink"], "glass"),
+    (&["burst", "crackle", "snap", "crack"], "pop"),
+    (&["motor", "drill", "saw", "blender", "vacuum", "hairdryer", "washing"], "machine"),
+    (&["scary", "horror", "tension", "suspense", "build"], "riser"),
+    (&["magic", "sparkle", "spell", "fairy", "shimmer", "twinkle"], "zap"),
+];
+
+/// The model nearest a description no model's words match: by how alike
+/// its words are to each model's words, summary and example (near
+/// spellings count), and the family words above; a generic impact when
+/// nothing is alike at all.
+fn nearest(desc: &str) -> &'static ModelInfo {
+    let low = desc.to_lowercase();
+    let words: Vec<&str> = low.split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 3).collect();
+    let by_name = |n: &str| MODELS.iter().find(|m| m.name == n);
+    let mut best: Option<(&ModelInfo, f32)> = None;
+    for m in MODELS.iter().filter(|m| m.kind != Kind::Animal) {
+        let vocab: Vec<&str> = m.words.iter().flat_map(|w| w.split(' ')).chain(m.summary.split(|c: char| !c.is_alphanumeric())).chain(m.example.split(' ')).filter(|w| w.len() >= 3).collect();
+        let mut score = 0.0f32;
+        for w in &words {
+            let own = m.words.iter().flat_map(|x| x.split(' ')).map(|v| word_likeness(w, v)).fold(0.0, f32::max);
+            let said = vocab.iter().map(|v| word_likeness(w, v) * 0.6).fold(0.0, f32::max);
+            let family = FAMILIES.iter().filter(|(ws, name)| *name == m.name && ws.contains(w)).count() as f32 * 0.9;
+            score += own.max(said).max(family);
+        }
+        if score > 0.0 && best.is_none_or(|(_, s)| score > s) {
+            best = Some((m, score));
+        }
+    }
+    best.map(|(m, _)| m).or_else(|| by_name("impact")).unwrap_or(&MODELS[0])
 }
 
 #[cfg(test)]

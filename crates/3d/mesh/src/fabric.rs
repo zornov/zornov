@@ -9,8 +9,13 @@
 //! texture carrying the colour, so a coat reads as wool and not as a flat
 //! grey shell.
 //!
-//! A pattern (`stripes`, `pinstripe`, `check`, `plaid`) goes over any cloth
-//! in a second colour.
+//! A pattern (`stripes`, `pinstripe`, `check`, `plaid`, `dots`) goes over
+//! any cloth in a second colour, at the size it has on real clothes (a
+//! gingham check about 1.5% of the wearer's height, a tartan repeat about
+//! 9%), with the weave repeating inside it at its own finer size, so a
+//! pattern never shrinks to the weave's scale and breaks up into blotches.
+//! The weave and its mottling are kept faint: cloth reads as cloth, not as
+//! camouflage.
 
 use crate::{Material, Texture, srgb_to_linear};
 
@@ -29,6 +34,18 @@ pub enum Pattern {
 }
 
 impl Pattern {
+    /// One repeat of the pattern as a fraction of the wearer's height.
+    fn repeat(self) -> f32 {
+        match self {
+            Pattern::None => 0.0,
+            Pattern::Stripes => 0.035,
+            Pattern::Pinstripe => 0.022,
+            Pattern::Check => 0.03,
+            Pattern::Plaid => 0.09,
+            Pattern::Dots => 0.03,
+        }
+    }
+
     pub fn parse(s: &str) -> Option<Pattern> {
         Some(match s.trim().to_ascii_lowercase().as_str() {
             "" | "none" | "plain" | "solid" => Pattern::None,
@@ -143,8 +160,11 @@ pub fn material(name: &str, colour: Option<[u8; 3]>, second: Option<[u8; 3]>, pa
         return Some(m);
     }
     let second = second.unwrap_or([(colour[0] as f32 * 0.55) as u8, (colour[1] as f32 * 0.55) as u8, (colour[2] as f32 * 0.55) as u8]);
-    let n = size.clamp(16, 512);
-    m.texture = Some(texture(&sp, colour, second, pattern, n));
+    let weaves = weaves_per_repeat(&sp, pattern);
+    // Whole weave tiles of a size the noise tiles in (a multiple of 8).
+    let wn = ((size * if weaves > 1 { 2 } else { 1 }).clamp(16, 512) / weaves / 8 * 8).max(8);
+    let n = wn * weaves;
+    m.texture = Some(texture(&sp, colour, second, pattern, n, weaves));
     m.base_colour = [1.0, 1.0, 1.0, 1.0];
     Some(m)
 }
@@ -155,34 +175,55 @@ pub fn tile_px(name: &str, figure_px: f32) -> f32 {
     spec(name).map_or(8.0, |s| s.tile) * figure_px / 400.0 * 4.0
 }
 
-fn texture(sp: &Spec, base: [u8; 3], second: [u8; 3], pattern: Pattern, n: usize) -> Texture {
+/// How many weave tiles one repeat of the pattern holds (1 without one).
+fn weaves_per_repeat(sp: &Spec, pattern: Pattern) -> usize {
+    if pattern == Pattern::None {
+        return 1;
+    }
+    // The weave's tile is `tile / 100` of the figure's height.
+    ((pattern.repeat() * 100.0 / sp.tile).round() as usize).clamp(1, 8)
+}
+
+/// Texture repeat length (model px) of a material with a pattern on a
+/// figure `figure_px` tall: one repeat of the pattern (a whole number of
+/// weave tiles), or the weave's own tile when plain.
+pub fn repeat_px(name: &str, pattern: Pattern, figure_px: f32) -> f32 {
+    let weaves = spec(name).map_or(1, |s| weaves_per_repeat(&s, pattern));
+    tile_px(name, figure_px) * weaves as f32
+}
+
+fn texture(sp: &Spec, base: [u8; 3], second: [u8; 3], pattern: Pattern, n: usize, weaves: usize) -> Texture {
     let mut rgba = vec![255u8; n * n * 4];
-    let p = n as i32;
+    // The weave tiles `weaves` times across the texture; the pattern once.
+    let wn = n / weaves.max(1);
+    let p = wn as i32;
     for y in 0..n {
         for x in 0..n {
-            let (fx, fy) = (x as f32, y as f32);
+            let (px, py) = (x as f32, y as f32);
+            let (fx, fy) = ((x % wn) as f32, (y % wn) as f32);
+            let n_w = wn;
             // The weave: a brightness factor around 1.
             let w = match sp.weave {
                 Weave::None => 1.0,
                 Weave::Plain => {
                     let c = 8.0;
-                    let a = ((fx * c / n as f32 * std::f32::consts::TAU).sin() * (fy * c / n as f32 * std::f32::consts::TAU).sin()).signum();
+                    let a = ((fx * c / n_w as f32 * std::f32::consts::TAU).sin() * (fy * c / n_w as f32 * std::f32::consts::TAU).sin()).signum();
                     1.0 + 0.5 * sp.grain * a * 0.6
                 }
                 Weave::Twill => {
                     let c = 16.0;
-                    let d = ((fx + fy) * c / n as f32 * std::f32::consts::TAU / 2.0).sin();
+                    let d = ((fx + fy) * c / n_w as f32 * std::f32::consts::TAU / 2.0).sin();
                     1.0 + sp.grain * 0.5 * d
                 }
                 Weave::Herringbone => {
                     let c = 16.0;
-                    let flip = if ((fx * 4.0 / n as f32) as i32) % 2 == 0 { 1.0 } else { -1.0 };
-                    let d = ((fx * flip + fy) * c / n as f32 * std::f32::consts::TAU / 2.0).sin();
+                    let flip = if ((fx * 4.0 / n_w as f32) as i32) % 2 == 0 { 1.0 } else { -1.0 };
+                    let d = ((fx * flip + fy) * c / n_w as f32 * std::f32::consts::TAU / 2.0).sin();
                     1.0 + sp.grain * 0.5 * d
                 }
                 Weave::Knit => {
                     // Columns of V stitches.
-                    let (cx, cy) = (n as f32 / 8.0, n as f32 / 10.0);
+                    let (cx, cy) = (n_w as f32 / 8.0, n_w as f32 / 10.0);
                     let u = (fx % cx) / cx - 0.5;
                     let v = (fy % cy) / cy;
                     let d = (u.abs() * 1.6 - v).abs();
@@ -191,7 +232,7 @@ fn texture(sp: &Spec, base: [u8; 3], second: [u8; 3], pattern: Pattern, n: usize
                 Weave::Cells => {
                     // Grain of cells: the distance to the nearest of a jittered grid of points.
                     let g = 14;
-                    let (gx, gy) = (fx / n as f32 * g as f32, fy / n as f32 * g as f32);
+                    let (gx, gy) = (fx / n_w as f32 * g as f32, fy / n_w as f32 * g as f32);
                     let (ix, iy) = (gx.floor() as i32, gy.floor() as i32);
                     let mut best = 9.0f32;
                     for dy in -1..=1 {
@@ -206,25 +247,29 @@ fn texture(sp: &Spec, base: [u8; 3], second: [u8; 3], pattern: Pattern, n: usize
                 }
                 Weave::Fuzz => 1.0 + sp.grain * (noise(fx / 2.0, fy / 2.0, p / 2, 1) - 0.5) * 2.0,
             };
-            // Soft mottling over everything.
-            let mott = 1.0 + 0.5 * sp.grain * (noise(fx / 8.0, fy / 8.0, p / 8, 5) - 0.5);
-            // The pattern picks between the two colours.
+            // Faint, fine mottling over everything (never patches).
+            let mott = 1.0 + 0.2 * sp.grain * (noise(fx / 4.0, fy / 4.0, p / 4, 5) - 0.5);
+            let w = 1.0 + (w - 1.0) * 0.6;
+            // The pattern picks between the two colours, over the whole texture.
+            let (fx, fy) = (px, py);
             let pick = match pattern {
                 Pattern::None => 0.0,
-                Pattern::Stripes => if ((fx * 6.0 / n as f32) as i32) % 2 == 0 { 0.0 } else { 1.0 },
-                Pattern::Pinstripe => if (fx * 8.0 / n as f32).fract() < 0.1 { 1.0 } else { 0.0 },
+                // One repeat across the texture: a stripe and its gap, one
+                // pinstripe, two by two checks, one tartan sett, one dot.
+                Pattern::Stripes => if ((fx * 2.0 / n as f32) as i32) % 2 == 0 { 0.0 } else { 1.0 },
+                Pattern::Pinstripe => if (fx / n as f32).fract() < 0.08 { 1.0 } else { 0.0 },
                 Pattern::Check => {
-                    let (a, b) = (((fx * 4.0 / n as f32) as i32) % 2, ((fy * 4.0 / n as f32) as i32) % 2);
+                    let (a, b) = (((fx * 2.0 / n as f32) as i32) % 2, ((fy * 2.0 / n as f32) as i32) % 2);
                     if a == b { 0.0 } else { 1.0 }
                 }
                 Pattern::Plaid => {
-                    let a: f32 = if (fx * 4.0 / n as f32).fract() < 0.28 { 0.7 } else { 0.0 };
-                    let b: f32 = if (fy * 4.0 / n as f32).fract() < 0.28 { 0.7 } else { 0.0 };
-                    (a + b).min(1.0f32).max(if (fx * 16.0 / n as f32).fract() < 0.12 || (fy * 16.0 / n as f32).fract() < 0.12 { 0.9 } else { 0.0 })
+                    let a: f32 = if (fx / n as f32).fract() < 0.28 { 0.6 } else { 0.0 };
+                    let b: f32 = if (fy / n as f32).fract() < 0.28 { 0.6 } else { 0.0 };
+                    (a + b).min(1.0f32).max(if (fx * 4.0 / n as f32).fract() < 0.06 || (fy * 4.0 / n as f32).fract() < 0.06 { 0.85 } else { 0.0 })
                 }
                 Pattern::Dots => {
-                    let (cx, cy) = ((fx * 5.0 / n as f32).fract() - 0.5, (fy * 5.0 / n as f32).fract() - 0.5);
-                    if cx * cx + cy * cy < 0.045 { 1.0 } else { 0.0 }
+                    let (cx, cy) = ((fx / n as f32).fract() - 0.5, (fy / n as f32).fract() - 0.5);
+                    if cx * cx + cy * cy < 0.04 { 1.0 } else { 0.0 }
                 }
             };
             let i = (y * n + x) * 4;

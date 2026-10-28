@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Instruments, made by synthesis: plucked strings by physical modelling
-//! (a tuned delay loop), a struck-string additive piano, FM electric piano,
+//! (a tuned delay loop; electric guitars through a pickup, an amp and, for
+//! the distorted one, two clipping stages and a speaker cabinet), a
+//! struck-string additive piano, detuned saw stacks, chip squares, FM electric piano,
 //! drawbar organ, source-and-filter winds, brass and bowed strings, analogue
 //! style synths, modal bells and mallets, and a drum kit. Every note is
 //! rendered mono and peak-normalised, then scaled by its velocity, so the
@@ -64,12 +66,20 @@ pub enum Inst {
     Marimba,
     /// Vibraphone.
     Vibraphone,
+    /// Electric guitar, clean through an amp.
+    ElectricGuitar,
+    /// Electric guitar through overdrive into a speaker cabinet.
+    DistortedGuitar,
+    /// A stack of detuned saws (trance, synthwave, big-room leads).
+    SuperSaw,
+    /// An 8-bit square-wave voice.
+    Chip,
 }
 
 impl Inst {
     /// Every instrument.
-    pub const ALL: [Inst; 25] = [
-        Inst::Piano, Inst::ElectricPiano, Inst::Organ, Inst::Guitar, Inst::NylonGuitar, Inst::Harp, Inst::UprightBass, Inst::ElectricBass, Inst::SynthBass, Inst::Sax, Inst::Trumpet, Inst::Trombone, Inst::Horn, Inst::Flute, Inst::Clarinet, Inst::Violin, Inst::Cello, Inst::Strings, Inst::Pad, Inst::Choir, Inst::SynthLead, Inst::SynthPluck, Inst::Bell, Inst::Marimba, Inst::Vibraphone,
+    pub const ALL: [Inst; 29] = [
+        Inst::Piano, Inst::ElectricPiano, Inst::Organ, Inst::Guitar, Inst::NylonGuitar, Inst::Harp, Inst::UprightBass, Inst::ElectricBass, Inst::SynthBass, Inst::Sax, Inst::Trumpet, Inst::Trombone, Inst::Horn, Inst::Flute, Inst::Clarinet, Inst::Violin, Inst::Cello, Inst::Strings, Inst::Pad, Inst::Choir, Inst::SynthLead, Inst::SynthPluck, Inst::Bell, Inst::Marimba, Inst::Vibraphone, Inst::ElectricGuitar, Inst::DistortedGuitar, Inst::SuperSaw, Inst::Chip,
     ];
 
     /// The name the AI and the replies use.
@@ -100,14 +110,29 @@ impl Inst {
             Inst::Bell => "bells",
             Inst::Marimba => "marimba",
             Inst::Vibraphone => "vibraphone",
+            Inst::ElectricGuitar => "electric guitar",
+            Inst::DistortedGuitar => "distorted electric guitar",
+            Inst::SuperSaw => "supersaw",
+            Inst::Chip => "chip square",
         }
     }
 
     /// An instrument from words ("sax", "double bass", "fiddle"…).
     pub fn parse(text: &str) -> Option<Inst> {
         let t = format!(" {} ", text.to_lowercase().replace(['-', ',', '.'], " "));
-        let has = |w: &str| t.contains(&format!(" {w} "));
-        Some(if has("sax") || has("saxophone") || has("sax solo") {
+        // A word or its plural ("guitars", "synths").
+        let has = |w: &str| t.contains(&format!(" {w} ")) || t.contains(&format!(" {w}s "));
+        let guitarish = has("guitar") || has("riff") || has("lead guitar") || has("rhythm guitar") || has("axe");
+        let dirty = ["distorted", "distortion", "overdrive", "overdriven", "fuzz", "fuzzy", "crunchy", "crunch", "heavy", "gritty", "dirty", "shred", "shredding", "metal", "chugging", "chug", "high gain"].iter().any(|w| has(w));
+        Some(if (guitarish && dirty) || has("power chord") || has("palm muted") || has("palm mute") || has("shred") {
+            Inst::DistortedGuitar
+        } else if has("electric guitar") || has("clean guitar") || has("strat") || has("stratocaster") || has("telecaster") || has("les paul") || has("jangly guitar") || has("surf guitar") || (guitarish && ["electric", "clean", "jangly", "twangy", "surf", "funky"].iter().any(|w| has(w))) {
+            Inst::ElectricGuitar
+        } else if has("supersaw") || has("super saw") || has("saw synth") || has("saw lead") || has("detuned saw") || has("trance synth") {
+            Inst::SuperSaw
+        } else if has("8 bit") || has("chiptune") || has("chip tune") || has("square wave") || has("nes") || has("gameboy") || has("game boy") || has("retro game") {
+            Inst::Chip
+        } else if has("sax") || has("saxophone") || has("sax solo") {
             Inst::Sax
         } else if has("double bass") || has("upright bass") || has("upright") || has("contrabass") || has("stand up bass") {
             Inst::UprightBass
@@ -179,6 +204,9 @@ impl Inst {
             Inst::Strings | Inst::Pad | Inst::Choir => (36, 88),
             Inst::SynthLead | Inst::SynthPluck => (48, 96),
             Inst::Bell | Inst::Marimba | Inst::Vibraphone => (48, 96),
+            Inst::ElectricGuitar | Inst::DistortedGuitar => (40, 88),
+            Inst::SuperSaw => (36, 96),
+            Inst::Chip => (48, 96),
         }
     }
 }
@@ -263,6 +291,10 @@ pub fn render_note(inst: Inst, midi: f32, hold: f32, vel: f32, rng: &mut Rng) ->
         Inst::Bell => modal(hz, hold, &[(1.0, 1.0, 2.2), (2.76, 0.6, 1.4), (5.4, 0.4, 0.8), (8.93, 0.25, 0.4)], 0.0, 0.0),
         Inst::Marimba => modal(hz, hold, &[(1.0, 1.0, 0.45), (3.93, 0.35, 0.09), (9.2, 0.12, 0.03)], 0.0, 0.07),
         Inst::Vibraphone => modal(hz, hold, &[(1.0, 1.0, 3.0), (4.0, 0.3, 1.0), (10.0, 0.1, 0.3)], 4.5, 0.25),
+        Inst::ElectricGuitar => electric(hz, hold, vel, rng, false),
+        Inst::DistortedGuitar => electric(hz, hold, vel, rng, true),
+        Inst::SuperSaw => supersaw(hz, hold, vel, rng),
+        Inst::Chip => chip(hz, hold, vel),
     };
     finish(x, vel)
 }
@@ -284,6 +316,7 @@ const STEEL: StringSpec = StringSpec { bright: 0.62, t60: 3.0, pos: 0.16, body: 
 const NYLON: StringSpec = StringSpec { bright: 0.38, t60: 2.4, pos: 0.2, body: &[(110.0, 6.0, 0.6), (215.0, 6.0, 0.3)], thump: (140.0, 0.01, 0.12), damp: 0.1 };
 const HARP: StringSpec = StringSpec { bright: 0.7, t60: 4.5, pos: 0.12, body: &[(180.0, 5.0, 0.3)], thump: (200.0, 0.006, 0.05), damp: 0.25 };
 const UPRIGHT: StringSpec = StringSpec { bright: 0.22, t60: 1.6, pos: 0.17, body: &[(68.0, 5.0, 1.2), (112.0, 6.0, 0.7), (190.0, 5.0, 0.3)], thump: (95.0, 0.03, 0.45), damp: 0.07 };
+const ELECTRIC: StringSpec = StringSpec { bright: 0.58, t60: 4.5, pos: 0.11, body: &[(1400.0, 1.6, 0.12)], thump: (120.0, 0.006, 0.03), damp: 0.07 };
 const EBASS: StringSpec = StringSpec { bright: 0.42, t60: 2.8, pos: 0.26, body: &[(80.0, 4.0, 0.4)], thump: (100.0, 0.01, 0.12), damp: 0.06 };
 
 fn string(hz: f32, hold: f32, vel: f32, rng: &mut Rng, s: &StringSpec) -> Vec<f32> {
@@ -310,6 +343,60 @@ fn string(hz: f32, hold: f32, vel: f32, rng: &mut Rng, s: &StringSpec) -> Vec<f3
         }
         let rel = if t > hold { (-(t - hold) / s.damp).exp() } else { 1.0 };
         *o = y * rel;
+    }
+    out
+}
+
+/// An electric guitar: the string heard through a magnetic pickup (no
+/// wood, a low cut), then a clean amp; or, `drive`, two clipping stages
+/// (a soft overdrive, then a harder asymmetric one for the crunch), a mid
+/// push and a speaker cabinet's band, which also sustains the note.
+fn electric(hz: f32, hold: f32, vel: f32, rng: &mut Rng, drive: bool) -> Vec<f32> {
+    let x = high_pass(&string(hz, hold, vel, rng, &ELECTRIC), 85.0, 0.7);
+    if !drive {
+        return low_pass(&x, 6000.0, 0.7);
+    }
+    let g = 10.0 + 16.0 * vel;
+    let bias = 0.12f32;
+    let y: Vec<f32> = x.iter().map(|v| {
+        let a = (v * g).tanh();
+        (a * 2.2 + bias).tanh() - bias.tanh()
+    }).collect();
+    let mid = band_pass(&y, 900.0, 0.9);
+    let mut cab = low_pass(&high_pass(&y, 100.0, 0.7), 4300.0, 0.9);
+    mix_into(&mut cab, &mid, 0, 0.35);
+    cab
+}
+
+/// Seven saws a few cents apart through a filter that opens with the note.
+fn supersaw(hz: f32, hold: f32, vel: f32, rng: &mut Rng) -> Vec<f32> {
+    let rel = 0.25;
+    let len = frames(hold + release_len(rel));
+    let detune = [0.0f32, 7.0, -7.0, 15.0, -15.0, 24.0, -24.0];
+    let mut saws: Vec<Saw> = detune.iter().map(|_| Saw::at(rng.unit())).collect();
+    let mut f = Svf::new();
+    let mut out = vec![0.0; len];
+    for (i, o) in out.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        let env = asr(t, hold, 0.012, rel);
+        let src: f32 = saws.iter_mut().zip(detune).map(|(s, c)| s.tick(hz * cents(c))).sum::<f32>() / 3.0;
+        let cut = hz * 3.0 + (2500.0 + 5000.0 * vel) * (0.4 + 0.6 * (-t / 0.6).exp());
+        *o = f.at(src, cut.min(16_000.0), 0.9).lp * env;
+    }
+    out
+}
+
+/// A square wave stepped to sixteen levels, as an 8-bit sound chip makes it.
+fn chip(hz: f32, hold: f32, vel: f32) -> Vec<f32> {
+    let rel = 0.05;
+    let len = frames(hold + release_len(rel));
+    let mut p = Pulse::at(0.0);
+    let mut out = vec![0.0; len];
+    for (i, o) in out.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        let env = asr(t, hold, 0.002, rel) * (0.75 + 0.25 * (-t / 0.2).exp());
+        let x = p.tick(hz * cents(vibrato(t, 6.0, 15.0, 0.25)), if vel > 0.7 { 0.25 } else { 0.5 });
+        *o = ((x * env * 8.0).round() / 8.0) * 0.8;
     }
     out
 }

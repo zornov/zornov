@@ -602,7 +602,7 @@ mod tests {
         let mut s = crate::agent::Session::new(doc);
         s.edit(
             &[
-                serde_json::json!({"op": "puppet", "clip": id, "pins": [[-100, 0], [100, 0]], "pin": 2, "to": [100, -40]}),
+                serde_json::json!({"op": "puppet", "clip": id, "space": "canvas", "pins": [[-100, 0], [100, 0]], "pin": 2, "to": [100, -40]}),
                 serde_json::json!({"op": "scissor", "clip": id, "cuts": [{"name": "split", "path": [[0, -90], [0, 90]], "fill": "auto"}]}),
             ],
             "cuts",

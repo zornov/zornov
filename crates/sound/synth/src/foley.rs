@@ -37,11 +37,13 @@ pub enum Surface {
     Carpet,
     /// Tile.
     Tile,
+    /// Wet pavement: stone with a film of water.
+    WetStone,
 }
 
 impl Surface {
     /// Every surface.
-    pub const ALL: [Surface; 13] = [Surface::Grass, Surface::Leaves, Surface::Dirt, Surface::Gravel, Surface::Stone, Surface::Wood, Surface::Snow, Surface::Sand, Surface::Mud, Surface::Water, Surface::Metal, Surface::Carpet, Surface::Tile];
+    pub const ALL: [Surface; 14] = [Surface::Grass, Surface::Leaves, Surface::Dirt, Surface::Gravel, Surface::Stone, Surface::Wood, Surface::Snow, Surface::Sand, Surface::Mud, Surface::Water, Surface::Metal, Surface::Carpet, Surface::Tile, Surface::WetStone];
 
     /// The name.
     pub fn name(self) -> &'static str {
@@ -59,6 +61,7 @@ impl Surface {
             Surface::Metal => "metal",
             Surface::Carpet => "carpet",
             Surface::Tile => "tile",
+            Surface::WetStone => "wet pavement",
         }
     }
 
@@ -66,7 +69,9 @@ impl Surface {
     pub fn parse(text: &str) -> Option<Surface> {
         let t = format!(" {} ", text.to_lowercase().replace([',', '.'], " "));
         let has = |ws: &[&str]| ws.iter().any(|w| t.contains(&format!(" {w} ")) || t.contains(&format!(" {w}s ")));
-        Some(if has(&["gravel", "pebble", "pebbles", "shingle", "rubble", "stones", "driveway"]) {
+        Some(if has(&["wet pavement", "wet road", "wet street", "wet asphalt", "wet concrete", "wet sidewalk", "wet stone", "wet cobbles", "wet cobblestones", "rain-soaked", "rainy street", "rainy pavement", "slick pavement"]) {
+            Surface::WetStone
+        } else if has(&["gravel", "pebble", "pebbles", "shingle", "rubble", "stones", "driveway"]) {
             Surface::Gravel
         } else if has(&["leaves", "leaf", "twigs", "twig", "forest floor", "undergrowth", "brush", "autumn"]) {
             Surface::Leaves
@@ -184,7 +189,7 @@ fn impact(surface: Surface, shoe: Shoe, weight: f32, force: f32, heel: bool, rng
         * match surface {
             Surface::Carpet => 0.6,
             // On a hard floor the foot is heard in the floor's own ring, not as a thud.
-            Surface::Stone | Surface::Tile | Surface::Metal => 0.4,
+            Surface::Stone | Surface::Tile | Surface::Metal | Surface::WetStone => 0.4,
             Surface::Wood => 0.55,
             _ => 1.0,
         };
@@ -280,6 +285,24 @@ fn impact(surface: Surface, shoe: Shoe, weight: f32, force: f32, heel: bool, rng
             s
         }
         Surface::Carpet => burst(rng, 0.1, 320.0, 1.6, 0.03),
+        Surface::WetStone => {
+            // The stone's tap, a slap through the film of water and a few
+            // small splashes off the sole.
+            let mut s = burst(rng, 0.03, if matches!(shoe, Shoe::Heel) { 3000.0 } else { 1700.0 }, 1.3, 0.004);
+            let slap = burst(rng, 0.12, 2600.0, 0.6, 0.035);
+            mix_into(&mut s, &slap, 0, 0.55);
+            for k in 0..3 {
+                let hz = rng.range(900.0, 2600.0);
+                let mut ph = 0.0f32;
+                let b: Vec<f32> = (0..frames(0.04)).map(|i| {
+                    let t = i as f32 / SR;
+                    ph += std::f32::consts::TAU * hz * (1.0 + 5.0 * t) / SR;
+                    ph.sin() * (-t / 0.01).exp()
+                }).collect();
+                mix_into(&mut s, &b, frames(0.008 + k as f32 * 0.02 * rng.unit()), 0.3);
+            }
+            s
+        }
     };
     let tex_gain = match shoe {
         Shoe::Boot => 1.0,
@@ -289,7 +312,7 @@ fn impact(surface: Surface, shoe: Shoe, weight: f32, force: f32, heel: bool, rng
     } * (0.4 + 0.9 * force);
     mix_into(&mut out, &tex, 0, tex_gain);
     // A hard heel clicks on anything hard.
-    if shoe == Shoe::Heel && matches!(surface, Surface::Stone | Surface::Tile | Surface::Wood | Surface::Metal) {
+    if shoe == Shoe::Heel && matches!(surface, Surface::Stone | Surface::Tile | Surface::Wood | Surface::Metal | Surface::WetStone) {
         let hz = rng.range(2800.0, 4200.0);
         let c = burst(rng, 0.012, hz, 2.0, 0.002);
         mix_into(&mut out, &c, 0, 0.9 * force);

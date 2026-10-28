@@ -305,6 +305,17 @@ pub(super) fn rig(kind: &str, s: &Shape, right: bool) -> Result<Vec<Value>, Stri
         "bird" | "rooster" | "chicken" => Some(0.72),
         _ => None,
     };
+    // Arms get a shoulder and an elbow above each hand, so a swing turns
+    // the arm at the shoulder and bends it at the elbow.
+    if matches!(kind, "biped" | "person" | "human" | "character") {
+        let hands: Vec<(String, (usize, usize))> = pins.iter().filter(|(n, _)| n.contains("hand")).filter_map(|(n, p)| p.map(|p| (n.replace("_hand", ""), p))).collect();
+        let sy = y0 as f64 + 0.27 * bh;
+        for (side, (hx, hy)) in hands {
+            let sx = hx as f64 + (cx - hx as f64) * 0.55;
+            joints.push((format!("{side}_shoulder"), s.snap(sx, sy)));
+            joints.push((format!("{side}_elbow"), s.snap((sx + hx as f64) / 2.0, (sy + hy as f64) / 2.0)));
+        }
+    }
     if let Some(hv) = hip {
         let feet: Vec<(String, (usize, usize))> = pins.iter().filter(|(n, _)| n.contains("foot") || n.contains("feet")).filter_map(|(n, p)| p.map(|p| (n.replace("_foot", "").replace("feet", ""), p))).collect();
         let hy = y0 as f64 + hv * bh;
@@ -364,6 +375,7 @@ enum Part {
     Head,
     Body,
     Hand(bool),
+    Elbow(bool),
     Hip(bool),
     Knee(bool),
     Foot(bool),
@@ -379,6 +391,8 @@ fn part(name: &str) -> Part {
     let front = n.contains("front") || n.contains("right");
     if n.contains("head") || n.contains("face") || n.contains("beak") {
         Part::Head
+    } else if n.contains("elbow") || n.contains("forearm") {
+        Part::Elbow(front)
     } else if n.contains("hand") || n.contains("arm") || n.contains("wing") {
         Part::Hand(front)
     } else if n.contains("knee") || n.contains("shin") {
@@ -395,7 +409,7 @@ fn part(name: &str) -> Part {
         Part::Edge
     } else if n.contains("base") || n.contains("root") || n.contains("ground") {
         Part::Base
-    } else if ["body", "chest", "back", "hips", "middle", "torso", "belly"].iter().any(|b| n.contains(b)) {
+    } else if ["body", "chest", "back", "hips", "middle", "torso", "belly", "shoulder", "neck"].iter().any(|b| n.contains(b)) {
         Part::Body
     } else {
         Part::Other
@@ -414,32 +428,73 @@ fn once(act: &str) -> bool {
     matches!(act, "surprise")
 }
 
-/// A step cycle: feet lift and reach forward in turn, knees follow at
-/// half the reach, the body bobs twice a stride.
+/// A step cycle. Each foot is planted for 60% of the stride, sliding back
+/// under the body at an even pace (so on a travelling layer it stays put on
+/// the ground), then swings forward for 40% in a lifted arc and lands; the
+/// knee leads the swing forward and up; the hands swing against the feet,
+/// the elbows half as far; the body is lowest as a foot lands and highest
+/// as the legs pass, twice a stride, and the head and shoulders ride it.
 fn gait(p: Part, t: f64, period: f64, reach: f64, lift: f64, bob: f64, crouch: f64) -> (f64, f64) {
-    let step = |front: bool| {
-        let ph = TAU * (t / period + if front { 0.0 } else { 0.5 });
-        (reach * ph.sin(), lift * ph.sin().max(0.0))
-    };
-    let b = bob * (TAU * t / (period / 2.0)).sin().abs() - crouch;
-    match p {
-        Part::Foot(front) => step(front),
-        Part::Knee(front) => {
-            let (f, u) = step(front);
-            (0.55 * f, 0.7 * u + 0.5 * b)
+    let pi = std::f64::consts::PI;
+    // (forward, up, how far into the swing 0..1..0)
+    let step = |front: bool| -> (f64, f64, f64) {
+        let u = (t / period + if front { 0.0 } else { 0.5 }).rem_euclid(1.0);
+        if u < 0.6 {
+            (reach * (1.0 - 2.0 * u / 0.6), 0.0, 0.0)
+        } else {
+            let s = (u - 0.6) / 0.4;
+            let e = 0.5 - 0.5 * (pi * s).cos();
+            (reach * (2.0 * e - 1.0), lift * (pi * s).sin(), (pi * s).sin())
         }
-        Part::Hand(front) => (0.6 * reach * (TAU * (t / period + if front { 0.5 } else { 0.0 })).sin(), b),
-        Part::Head => (0.16 * reach * (TAU * t / (period / 2.0)).sin(), b + 0.006 - 0.5 * crouch),
+    };
+    let b = -bob * (TAU * 2.0 * t / period).cos() - crouch;
+    // A hand is forward when the other side's foot is.
+    let swing = |front: bool| 0.75 * reach * (TAU * (t / period + if front { 0.5 } else { 0.0 })).cos();
+    match p {
+        Part::Foot(front) => {
+            let (f, u, _) = step(front);
+            (f, u)
+        }
+        Part::Knee(front) => {
+            let (f, u, sw) = step(front);
+            (0.5 * f + 0.3 * reach * sw, 0.55 * u + 0.25 * lift * sw + 0.5 * b)
+        }
+        Part::Hand(front) => {
+            let x = swing(front);
+            (x, b + 0.12 * x.abs())
+        }
+        Part::Elbow(front) => (0.45 * swing(front), b + 0.04 * swing(front).abs()),
+        Part::Head => (0.1 * reach + 0.04 * reach * (TAU * 2.0 * t / period).sin(), 0.85 * b + 0.006 - 0.5 * crouch),
         Part::Tail => (-0.2 * reach * (TAU * t / period).sin(), b),
         Part::Base | Part::Edge | Part::Top => (0.0, 0.0),
         _ => (0.0, b),
     }
 }
 
+/// How fast (layer heights a second) a planted foot slides back under the
+/// body in a gait at `speed`: the pace a layer travels at for its feet to
+/// stay still on the ground.
+pub(in crate::agent) fn planted_pace(act: &str, speed: f64) -> Option<f64> {
+    let (period, reach) = match act {
+        "walk" => (0.9, 0.12),
+        "run" => (0.5, 0.16),
+        "sneak" => (1.4, 0.06),
+        _ => return None,
+    };
+    Some(2.0 * reach / (0.6 * period) * speed)
+}
+
 /// How far pin `name` sits from rest at `t` seconds into `act`, as
 /// `(forward, up)` in heights of the layer. `speed` scales the tempo.
 fn offset(act: &str, name: &str, t: f64, speed: f64) -> (f64, f64) {
     let p = part(name);
+    // Outside a gait an elbow goes half as far as its hand.
+    if let Part::Elbow(front) = p
+        && !matches!(act, "walk" | "run" | "sneak")
+    {
+        let (f, u) = offset(act, if front { "front_hand" } else { "back_hand" }, t, speed);
+        return (0.5 * f, 0.5 * u);
+    }
     let t = t * speed;
     let wave = |period: f64| (TAU * t / period).sin();
     let pi = std::f64::consts::PI;
@@ -584,9 +639,9 @@ fn offset(act: &str, name: &str, t: f64, speed: f64) -> (f64, f64) {
                 _ => (0.0, lift - 0.015 * squash),
             }
         }
-        "walk" => gait(p, t, 0.9, 0.05, 0.045, 0.012, 0.0),
-        "run" => gait(p, t, 0.5, 0.08, 0.07, 0.025, 0.01),
-        "sneak" => gait(p, t, 1.4, 0.04, 0.02, 0.004, 0.03),
+        "walk" => gait(p, t, 0.9, 0.12, 0.07, 0.018, 0.0),
+        "run" => gait(p, t, 0.5, 0.16, 0.11, 0.032, 0.015),
+        "sneak" => gait(p, t, 1.4, 0.06, 0.035, 0.006, 0.035),
         "swim" => match p {
             Part::Tail => (0.0, 0.05 * wave(1.1)),
             Part::Body => (0.0, -0.012 * wave(1.1)),

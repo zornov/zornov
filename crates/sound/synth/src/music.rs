@@ -145,6 +145,9 @@ pub struct Plan {
     pub peak: f32,
     /// Notes written.
     pub notes: usize,
+    /// What the brief asked for that was made with something near it, or
+    /// could not be made, in words for the reply.
+    pub unmet: Vec<String>,
 }
 
 impl Plan {
@@ -165,7 +168,7 @@ impl Plan {
             self.lufs,
             self.peak,
             if cues.is_empty() { String::new() } else { format!("; {}", cues.join(", ")) }
-        )
+        ) + &if self.unmet.is_empty() { String::new() } else { format!("; from the brief: {}", self.unmet.join("; ")) }
     }
 }
 
@@ -641,6 +644,34 @@ fn gen_comp(cx: &Ctx, kind: Comp, enter: f32, rng: &mut Rng) -> Vec<Ev> {
                     }
                 }
             }
+            Comp::Power => {
+                let r = c.root_at(40);
+                let shape = [r, r + if c.q == Q::Dim || c.q == Q::Hdim7 { 6 } else { 7 }, r + 12];
+                let strike = |out: &mut Vec<Ev>, o: f64, d: f64, v: f32| {
+                    for (j, n) in shape.iter().enumerate() {
+                        let mut ev = note(b0 + o, d, *n, v);
+                        ev.nudge = j as f32 * 0.004;
+                        out.push(ev);
+                    }
+                };
+                if e < 0.65 {
+                    // Palm-muted eighths with an accent on the beat.
+                    let mut k = 0;
+                    while (k as f64) * 0.5 < m {
+                        let accent = k % 4 == 0 || rng.chance(0.15);
+                        strike(&mut out, k as f64 * 0.5, if accent { 0.38 } else { 0.2 }, vb * if accent { 1.0 } else { 0.78 });
+                        k += 1;
+                    }
+                } else {
+                    // Open, ringing chords pushed ahead of the beat, chugs between.
+                    strike(&mut out, 0.0, 1.4, vb + 0.08);
+                    strike(&mut out, 1.5, 0.9, vb);
+                    for o in [2.5, 3.0] {
+                        strike(&mut out, o, 0.22, vb * 0.8);
+                    }
+                    strike(&mut out, 3.5, 0.5, vb + 0.04);
+                }
+            }
             Comp::OomPah => {
                 let low = c.root_at(38);
                 let v = c.stack(c.root_at(55), 3);
@@ -1041,6 +1072,86 @@ fn gen_drums(cx: &Ctx, beat: Beat, enter: f32, rng: &mut Rng) -> Vec<Ev> {
                     h(3.5, Drum::Rim, 0.3);
                 }
             }
+            Beat::Drive => {
+                for o in [0.0, 1.5, 2.0, 2.5] {
+                    h(o, Drum::Kick, if o == 0.0 { 0.95 } else { 0.75 });
+                }
+                if e > 0.75 {
+                    h(3.5, Drum::Kick, 0.6);
+                }
+                h(1.0, Drum::Snare, 0.95);
+                h(3.0, Drum::Snare, 0.95);
+                // Eighth hats in the verse, the ride's bell when it lifts.
+                let cym = if e > 0.7 { Drum::Ride } else { Drum::HatClosed };
+                for k in 0..8 {
+                    h(k as f64 * 0.5, cym, if k % 2 == 0 { 0.55 } else { 0.4 });
+                }
+                if (bar % 4 == 0 && e > 0.4) || (bar % 2 == 0 && e > 0.8) {
+                    h(0.0, Drum::Crash, 0.75);
+                }
+            }
+            Beat::Metal => {
+                if e > 0.6 {
+                    for k in 0..16 {
+                        h(k as f64 * 0.25, Drum::Kick, if k % 4 == 0 { 0.9 } else { 0.7 });
+                    }
+                } else {
+                    for k in 0..8 {
+                        h(k as f64 * 0.5, Drum::Kick, if k % 2 == 0 { 0.9 } else { 0.7 });
+                    }
+                }
+                h(1.0, Drum::Snare, 1.0);
+                h(3.0, Drum::Snare, 1.0);
+                for o in [0.0, 1.0, 2.0, 3.0] {
+                    h(o, if e > 0.7 { Drum::Ride } else { Drum::HatClosed }, 0.55);
+                }
+                if bar % 2 == 0 || e > 0.85 {
+                    h(0.0, Drum::Crash, 0.8);
+                }
+            }
+            Beat::Trap => {
+                for o in [0.0, 0.75, 2.5] {
+                    h(o, Drum::Kick808, 0.95);
+                }
+                if bar % 2 == 1 {
+                    h(3.25, Drum::Kick808, 0.7);
+                }
+                h(2.0, Drum::Snare, 0.85);
+                h(2.0, Drum::Clap, 0.6);
+                for k in 0..8 {
+                    h(k as f64 * 0.5, Drum::HatClosed, if k % 2 == 0 { 0.45 } else { 0.32 });
+                }
+                // A roll into the next bar: sixteenths, then thirty-seconds.
+                if e > 0.35 && rng.chance(0.6) {
+                    let start = [1.0, 3.0][rng.below(2)];
+                    for k in 0..4 {
+                        h(start + 0.5 + k as f64 * 0.125, Drum::HatClosed, 0.3 + 0.05 * k as f32);
+                    }
+                }
+                if bar % 4 == 3 {
+                    h(3.5, Drum::HatOpen, 0.4);
+                }
+            }
+            Beat::Breakbeat => {
+                h(0.0, Drum::Kick, 0.95);
+                h(2.5, Drum::Kick, 0.85);
+                if bar % 2 == 1 {
+                    h(1.75, Drum::Kick, 0.6);
+                }
+                h(1.0, Drum::Snare, 0.95);
+                h(3.0, Drum::Snare, 0.95);
+                for o in [1.75, 3.25, 3.75] {
+                    if rng.chance(0.5) {
+                        h(o, Drum::Snare, 0.22);
+                    }
+                }
+                for k in 0..8 {
+                    h(k as f64 * 0.5, if e > 0.7 { Drum::Ride } else { Drum::HatClosed }, if k % 2 == 0 { 0.45 } else { 0.35 });
+                }
+                if bar % 8 == 0 && e > 0.5 {
+                    h(0.0, Drum::Crash, 0.6);
+                }
+            }
         }
         // A fill into what comes next.
         if cx.fills[bar] && beat != Beat::None {
@@ -1060,9 +1171,9 @@ fn gen_drums(cx: &Ctx, beat: Beat, enter: f32, rng: &mut Rng) -> Vec<Ev> {
 
 fn class_of(inst: Inst) -> u8 {
     match inst {
-        Inst::Sax | Inst::Trumpet | Inst::Trombone | Inst::Horn | Inst::Flute | Inst::Clarinet | Inst::Violin | Inst::SynthLead => 0,
+        Inst::Sax | Inst::Trumpet | Inst::Trombone | Inst::Horn | Inst::Flute | Inst::Clarinet | Inst::Violin | Inst::SynthLead | Inst::SuperSaw | Inst::Chip => 0,
         Inst::UprightBass | Inst::ElectricBass | Inst::SynthBass | Inst::Cello => 1,
-        Inst::Piano | Inst::ElectricPiano | Inst::Organ | Inst::Guitar | Inst::NylonGuitar | Inst::Harp => 2,
+        Inst::Piano | Inst::ElectricPiano | Inst::Organ | Inst::Guitar | Inst::NylonGuitar | Inst::Harp | Inst::ElectricGuitar | Inst::DistortedGuitar => 2,
         Inst::Strings | Inst::Pad | Inst::Choir => 3,
         Inst::SynthPluck => 4,
         Inst::Bell | Inst::Marimba | Inst::Vibraphone => 5,
@@ -1105,6 +1216,34 @@ pub fn named_instruments(text: &str, extra: &[String]) -> Vec<Inst> {
         }
     }
     let mut out: Vec<Inst> = found.into_iter().map(|(_, i)| i).collect();
+    // Timbre words anywhere in the brief turn a plain guitar electric
+    // ("guitars, heavily distorted"), and an orchestra is its sections.
+    let all = format!(" {} ", words.join(" "));
+    let said = |w: &str| all.contains(&format!(" {w} ")) || all.contains(&format!(" {w}s "));
+    let dirty = ["distorted", "distortion", "overdrive", "overdriven", "fuzz", "crunchy", "heavy", "gritty", "dirty", "shred", "chugging", "high-gain"].iter().any(|w| said(w));
+    let electric = ["electric", "clean", "jangly", "twangy", "surf", "funky"].iter().any(|w| said(w));
+    for i in out.iter_mut() {
+        if *i == Inst::Guitar && dirty {
+            *i = Inst::DistortedGuitar;
+        } else if *i == Inst::Guitar && electric {
+            *i = Inst::ElectricGuitar;
+        }
+    }
+    if said("orchestra") || said("orchestral") || said("symphonic") || said("full orchestra") {
+        for i in [Inst::Strings, Inst::Horn, Inst::Flute] {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    if said("brass section") || said("horn section") {
+        for i in [Inst::Trumpet, Inst::Trombone] {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    out.dedup();
     for e in extra {
         if let Some(inst) = Inst::parse(e) {
             if !out.contains(&inst) {
@@ -1118,6 +1257,16 @@ pub fn named_instruments(text: &str, extra: &[String]) -> Vec<Inst> {
 fn arrange(style: &Style, named: &[Inst], text: &str) -> Vec<Layer> {
     let mut layers: Vec<Layer> = style.layers.to_vec();
     let t = format!(" {} ", text.to_lowercase());
+    // An electric guitar asked for is every guitar of the band: the
+    // style's acoustic rhythm and lead both plug in.
+    if let Some(&g) = named.iter().find(|i| matches!(i, Inst::ElectricGuitar | Inst::DistortedGuitar)) {
+        for l in layers.iter_mut().filter(|l| matches!(l.inst, Inst::Guitar | Inst::ElectricGuitar | Inst::DistortedGuitar)) {
+            l.inst = g;
+            if let Role::Comp(_) = l.role {
+                l.role = Role::Comp(if g == Inst::DistortedGuitar { Comp::Power } else { Comp::Strum });
+            }
+        }
+    }
     let bass_word = t.contains(" bass ") && !named.iter().any(|i| class_of(*i) == 1);
     let mut want: Vec<Inst> = named.to_vec();
     if bass_word {
@@ -1134,14 +1283,16 @@ fn arrange(style: &Style, named: &[Inst], text: &str) -> Vec<Layer> {
         if let Some(l) = layers.iter_mut().find(|l| layer_class(l.role) == cls && !named.contains(&l.inst)) {
             l.inst = inst;
             l.enter = l.enter.min(0.3);
-            if let Role::Comp(Comp::Strum) = l.role {
-                if !matches!(inst, Inst::Guitar | Inst::NylonGuitar) {
+            if let Role::Comp(Comp::Strum | Comp::Power) = l.role {
+                if !matches!(inst, Inst::Guitar | Inst::NylonGuitar | Inst::ElectricGuitar | Inst::DistortedGuitar) {
                     l.role = Role::Comp(Comp::Block);
                 }
             }
-            if let Role::Comp(Comp::Jazz | Comp::Block) = l.role {
-                if matches!(inst, Inst::Guitar | Inst::NylonGuitar) {
+            if let Role::Comp(Comp::Jazz | Comp::Block | Comp::Strum) = l.role {
+                if matches!(inst, Inst::Guitar | Inst::NylonGuitar | Inst::ElectricGuitar) {
                     l.role = Role::Comp(Comp::Strum);
+                } else if inst == Inst::DistortedGuitar {
+                    l.role = Role::Comp(Comp::Power);
                 }
             }
             continue;
@@ -1149,7 +1300,12 @@ fn arrange(style: &Style, named: &[Inst], text: &str) -> Vec<Layer> {
         let role = match cls {
             0 => Role::Lead,
             1 => Role::Bass(Bass::RootFifth),
-            2 => Role::Comp(if matches!(inst, Inst::Guitar | Inst::NylonGuitar) { Comp::Picking } else { Comp::Block }),
+            2 => Role::Comp(match inst {
+                Inst::DistortedGuitar => Comp::Power,
+                Inst::ElectricGuitar => Comp::Strum,
+                Inst::Guitar | Inst::NylonGuitar => Comp::Picking,
+                _ => Comp::Block,
+            }),
             3 => Role::Pad,
             4 => Role::Arp,
             _ => Role::Sparse,
@@ -1187,7 +1343,8 @@ pub fn compose(spec: &MusicSpec) -> Result<Piece, String> {
     }
     let mut rng = Rng::new(spec.seed);
     let text = format!("{} {}", spec.description, spec.instruments.join(" "));
-    let style = find_style(&text).unwrap_or_else(|| style_named("cinematic").unwrap());
+    let found_style = find_style(&text);
+    let style = found_style.unwrap_or_else(|| style_named("cinematic").unwrap());
     let mood = mood_of(&text);
     let minor = mood.minor.unwrap_or_else(|| matches!(style.name, "dark") || (style.name == "jazz" && text.to_lowercase().contains("noir")));
     let key = match spec.key.as_deref().and_then(|k| Key::parse(k, if minor { style.minor_mode } else { style.major_mode })) {
@@ -1427,7 +1584,7 @@ pub fn compose(spec: &MusicSpec) -> Result<Piece, String> {
     if beat_kind != Beat::None && final_beat > 0.0 {
         let d = match style.name {
             "jazz" | "lofi" => Some(Drum::Ride),
-            "rock" | "pop" | "electronic" | "cinematic" => Some(Drum::Crash),
+            "rock" | "pop" | "electronic" | "cinematic" | "jrock" | "metal" | "punk" | "dnb" | "synthwave" => Some(Drum::Crash),
             "dark" => Some(Drum::Taiko),
             _ => None,
         };
@@ -1533,11 +1690,35 @@ pub fn compose(spec: &MusicSpec) -> Result<Piece, String> {
         }
     }
 
+    // Effects the brief names: more or less room, an echo, record crackle.
+    let fx = Effects::of(&text);
     // Mix: dry plus the room, then loudness and a clean ending.
     let wet = level::reverb(&send, style.room);
-    let wet_gain = style.wet * 0.9 * if style.name == "dark" { 1.2 } else { 1.0 };
+    let wet_gain = style.wet * 0.9 * if style.name == "dark" { 1.2 } else { 1.0 } * fx.room;
     let mut mix = dry;
     mix.add_at(&wet, 0, wet_gain);
+    if fx.echo {
+        // A dotted-eighth echo, each repeat softer and darker.
+        let gap = frames((0.75 * 60.0 / bpm) as f32);
+        let mut prev = send.clone();
+        for k in 1..=4 {
+            prev = Stereo { l: crate::dsp::low_pass(&prev.r, 5000.0, 0.7), r: crate::dsp::low_pass(&prev.l, 5000.0, 0.7) };
+            mix.add_at(&prev, gap * k, 0.42f32.powi(k as i32));
+        }
+    }
+    if fx.crackle {
+        let mut cr = rng.fork(4242);
+        for i in 0..n {
+            if cr.chance(40.0 / crate::dsp::SR) {
+                let a = cr.range(0.004, 0.03);
+                mix.l[i] += a * cr.signed();
+                mix.r[i] += a * cr.signed();
+            }
+            let hiss = 0.0015 * cr.signed();
+            mix.l[i] += hiss;
+            mix.r[i] += hiss;
+        }
+    }
     level::high_pass(&mut mix, 28.0);
     let (lufs, _) = level::master(&mut mix, spec.lufs as f64);
     mix.edges(0.2_f32.min(tail as f32 * 0.5).max(0.05));
@@ -1569,9 +1750,76 @@ pub fn compose(spec: &MusicSpec) -> Result<Piece, String> {
         lufs: lufs as f32,
         peak,
         notes: notes_written,
+        unmet: unmet_requests(&text, found_style.is_some(), &layers),
     };
     let _ = (cx.minor, &cx.cue_beats);
     Ok(Piece { audio: mix, plan })
+}
+
+/// Sound-shaping words in a brief.
+struct Effects {
+    /// Multiplies the reverb.
+    room: f32,
+    echo: bool,
+    crackle: bool,
+}
+
+impl Effects {
+    fn of(text: &str) -> Effects {
+        let t = format!(" {} ", text.to_lowercase().replace([',', '.', ';', '-'], " "));
+        let has = |w: &str| t.contains(&format!(" {w} "));
+        let room = if ["reverb", "reverby", "cavernous", "spacious", "washed", "wet", "huge room", "cathedral", "ethereal"].iter().any(|w| has(w)) {
+            1.5
+        } else if ["dry", "tight", "close miked", "intimate", "upfront"].iter().any(|w| has(w)) {
+            0.5
+        } else {
+            1.0
+        };
+        Effects { room, echo: ["echo", "echoes", "delay", "delayed", "dub"].iter().any(|w| has(w)), crackle: ["vinyl", "crackle", "crackling", "record crackle", "dusty"].iter().any(|w| has(w)) }
+    }
+}
+
+/// What the brief asked for that the band could not play as asked: an
+/// instrument made with the nearest one, one there is nothing like, an
+/// effect not made, or no genre at all. Each in a few words.
+fn unmet_requests(text: &str, genre_named: bool, layers: &[Layer]) -> Vec<String> {
+    let t = format!(" {} ", text.to_lowercase().replace([',', '.', ';', '(', ')', '/'], " "));
+    let has = |w: &str| t.contains(&format!(" {w} ")) || t.contains(&format!(" {w}s "));
+    let mut out = Vec::new();
+    const NEAR: &[(&[&str], &str)] = &[
+        (&["banjo", "mandolin", "ukulele", "bouzouki"], "acoustic guitar"),
+        (&["tuba", "euphonium"], "trombone"),
+        (&["oboe", "bassoon", "cor anglais"], "clarinet"),
+        (&["viola"], "cello"),
+        (&["piccolo", "recorder", "tin whistle", "pan flute", "shakuhachi"], "flute"),
+        (&["cornet", "flugelhorn"], "trumpet"),
+        (&["xylophone"], "marimba"),
+        (&["celesta", "glockenspiel", "music box"], "bells"),
+        (&["rhodes", "wurlitzer"], "electric piano"),
+        (&["harpsichord", "clavinet"], "piano"),
+        (&["vocals", "singer", "singing", "vocal"], "a wordless choir (sing makes sung parts with words)"),
+        (&["808"], "synth bass"),
+        (&["koto", "guzheng", "zither"], "harp"),
+    ];
+    for (words, near) in NEAR {
+        if let Some(w) = words.iter().find(|w| has(w)) {
+            out.push(format!("{w} played by the {near}"));
+        }
+    }
+    const NONE: &[&str] = &["sitar", "shamisen", "erhu", "pipa", "bagpipes", "accordion", "harmonica", "steel drums", "steel pan", "theremin", "tabla", "didgeridoo", "kalimba", "ocarina", "dulcimer", "taiko ensemble", "lyrics", "rap", "rapping", "autotune", "turntable", "scratching", "talkbox", "vocoder", "sidechain", "bitcrushed", "tape wobble", "wah"];
+    let missing: Vec<&str> = NONE.iter().copied().filter(|w| has(w) && !(*w == "rap" && (has("rap beat") || has("trap")))).collect();
+    if !missing.is_empty() {
+        out.push(format!("not made (no model for it): {}", missing.join(", ")));
+    }
+    // A timbre asked for that no part carries.
+    let dirty = ["distorted", "distortion", "overdrive", "overdriven", "fuzz", "crunchy"].iter().any(|w| has(w));
+    if dirty && !layers.iter().any(|l| l.inst == Inst::DistortedGuitar) {
+        out.push("distortion asked for, but no guitar is in this arrangement: name \"distorted guitars\"".into());
+    }
+    if !genre_named {
+        out.push("no genre named, so a cinematic score was written (name one: rock, j-rock, metal, punk, jazz, folk, lofi, trap, dnb, electronic, synthwave, chiptune, ambient, pop, playful, piano, dark)".into());
+    }
+    out
 }
 
 fn map_beat(map: &TimeMap, t: f64) -> f64 {

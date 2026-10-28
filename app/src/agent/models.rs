@@ -130,7 +130,71 @@ fn bind_of(before: &Mesh, step: &Value, adds: bool) -> Result<studio_mesh::rigfi
 }
 
 fn is_character(shape: &str) -> bool {
-    matches!(shape, "character" | "person" | "human" | "mannequin" | "figure" | "body" | "humanoid" | "baby" | "toddler" | "child" | "kid" | "teen" | "elder" | "toon" | "chibi" | "heroic")
+    matches!(shape, "character" | "person" | "human" | "mannequin" | "figure" | "body" | "humanoid" | "baby" | "toddler" | "child" | "kid" | "teen" | "elder" | "toon" | "chibi" | "heroic" | "anime" | "manga" | "anime_chibi")
+}
+
+/// Whether a model op asks for the anime or toon look of a character.
+fn wants_toon_look(op: &Value) -> bool {
+    let word = |k: &str| op.get(k).and_then(Value::as_str).map(str::to_ascii_lowercase);
+    is_character(op.get("shape").and_then(Value::as_str).unwrap_or("")) && [word("style"), word("preset"), word("shape")].iter().flatten().any(|w| matches!(w.as_str(), "anime" | "manga" | "anime_chibi" | "toon" | "cartoon" | "cel"))
+}
+
+/// The toon shading a model clip is drawn with, as its generator params:
+/// `shading` ("toon", "cel", "anime", "flat", or "physical" to turn it off;
+/// or `{"style", "bands", "outline", "outline_colour", "shadow_colour",
+/// "rim", "rim_colour", "highlights"}`), and the same keys flat on the op
+/// (`outline` is the ink line width in px, or false for none).
+pub(super) fn shading_params(op: &Value, default_toon: bool) -> Result<Vec<(String, m::Value)>, String> {
+    let colour = |v: &Value, k: &str| -> Result<m::Value, String> {
+        let s = v.as_str().ok_or_else(|| format!("{k} is a colour (#rrggbb or a name)"))?;
+        let c = super::craft::colour(s).ok_or_else(|| format!("{k}: colour \"{s}\" is not #rrggbb or a basic name"))?;
+        Ok(m::Value::Colour(m::Rgba::new(c.r() as f64 / 255.0, c.g() as f64 / 255.0, c.b() as f64 / 255.0, 1.0)))
+    };
+    let obj = op.get("shading").and_then(Value::as_object);
+    let get = |k: &str| obj.and_then(|o| o.get(k)).or_else(|| op.get(k));
+    let style = match op.get("shading") {
+        Some(Value::String(s)) => Some(s.to_ascii_lowercase()),
+        Some(Value::Object(o)) => Some(o.get("style").and_then(Value::as_str).unwrap_or("toon").to_ascii_lowercase()),
+        Some(Value::Bool(true)) => Some("toon".into()),
+        Some(Value::Bool(false)) => Some("physical".into()),
+        Some(_) => return Err("shading is \"toon\" (also cel, anime, flat) or \"physical\", or {\"style\": \"toon\", \"bands\": 2, \"outline\": 2, \"outline_colour\": \"#1a1418\", \"shadow_colour\": \"#8c80b0\", \"rim\": 0.35}".into()),
+        None if default_toon => Some("toon".into()),
+        None => None,
+    };
+    let Some(style) = style else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    match style.as_str() {
+        "toon" | "cel" | "anime" | "cartoon" | "flat" => out.push(("shading".to_string(), m::Value::Text(if style == "flat" { "flat".into() } else { "toon".into() }))),
+        "physical" | "pbr" | "realistic" | "off" | "none" => {
+            out.push(("shading".to_string(), m::Value::Text(String::new())));
+            return Ok(out);
+        }
+        other => return Err(format!("shading \"{other}\": toon, cel, anime, flat or physical")),
+    }
+    if let Some(b) = get("bands").or_else(|| get("toon_bands")) {
+        let n = b.as_f64().ok_or("bands is 2 or 3")?;
+        out.push(("toon_bands".into(), m::Value::Scalar(n.clamp(2.0, 3.0))));
+    }
+    match get("outline") {
+        Some(Value::Bool(false)) => out.push(("outline".into(), m::Value::Scalar(0.0))),
+        Some(Value::Bool(true)) | None => {}
+        Some(v) => out.push(("outline".into(), m::Value::Scalar(v.as_f64().ok_or("outline is the ink line width in px (0 or false for none)")?.clamp(0.0, 40.0)))),
+    }
+    for k in ["outline_colour", "shadow_colour", "rim_colour"] {
+        if let Some(v) = get(k).or_else(|| get(k.replace("colour", "color").as_str())) {
+            out.push((k.to_string(), colour(v, k)?));
+        }
+    }
+    if let Some(v) = get("rim") {
+        out.push(("rim".into(), m::Value::Scalar(v.as_f64().or(v.as_bool().map(|b| if b { 0.35 } else { 0.0 })).ok_or("rim is 0 to 2 (or false)")?)));
+    }
+    if let Some(v) = get("highlights").and_then(Value::as_bool) {
+        out.push(("highlights".into(), m::Value::Bool(v)));
+    }
+    if let Some(v) = get("threshold").and_then(Value::as_f64) {
+        out.push(("toon_threshold".into(), m::Value::Scalar(v.clamp(0.0, 1.0))));
+    }
+    Ok(out)
 }
 
 /// A rigged character `size` px tall. Any figure: `preset` (baby, toddler,
@@ -140,11 +204,16 @@ fn is_character(shape: &str) -> bool {
 /// shouldered, full hipped; or masculine, feminine), `build` (slim … heavy or a number),
 /// `shoulders`, `hips`, `legs`, `arms`, `neck`, `hands`, `head_size`, `face`,
 /// `dressed` (false: bare, to be dressed with `wear`), the colours `skin`,
-/// `top`, `trousers`, `shoes`, `hair` (the brows), `detail`.
+/// `top`, `trousers`, `shoes`, `detail`. A figure is born with sculpted hair
+/// that is its own, not the outfit's (`dressed: false` keeps it): `hair` is
+/// its colour (and the brows'), a style word, `false` for none, or
+/// `{"style", "colour", "strands", "length"}`; `hairstyle` picks the style.
 fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
     use studio_mesh::character::Build;
     let shape = op.get("shape").and_then(Value::as_str).unwrap_or("");
-    let preset = op.get("preset").and_then(Value::as_str).or(Build::preset(shape).map(|_| shape));
+    // `style: "anime"` with no preset starts from the anime proportions.
+    let anime_style = matches!(op.get("style").and_then(Value::as_str).map(str::to_ascii_lowercase).as_deref(), Some("anime" | "manga"));
+    let preset = op.get("preset").and_then(Value::as_str).or(Build::preset(shape).map(|_| shape)).or(anime_style.then_some("anime"));
     let mut b = match preset {
         Some(p) => Build::preset(p).ok_or_else(|| format!("preset \"{p}\": {}", Build::PRESETS))?,
         None => Build::default(),
@@ -159,10 +228,38 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
     if let Some(c) = srgb("skin")?.or(srgb("colour")?) {
         b.skin = c;
     }
-    for (k, slot) in [("top", &mut b.top), ("trousers", &mut b.trousers), ("shoes", &mut b.shoes), ("hair", &mut b.hair)] {
+    for (k, slot) in [("top", &mut b.top), ("trousers", &mut b.trousers), ("shoes", &mut b.shoes)] {
         if let Some(c) = srgb(k)? {
             *slot = c;
         }
+    }
+    // Hair: a colour, a style, false, or both in an object.
+    let mut hair_style = ["hairstyle", "hair_style"].iter().find_map(|k| op.get(*k).and_then(Value::as_str)).map(str::to_string);
+    let mut hair_strands = false;
+    let mut hair_length = 1.0f32;
+    let mut hair_on = true;
+    let hair_colour = |w: &str| super::craft::colour(w).map(|c| [c.r(), c.g(), c.b()]);
+    match op.get("hair") {
+        Some(Value::Bool(on)) => hair_on = *on,
+        Some(Value::String(w)) => match hair_colour(w.as_str()) {
+            Some(c) => b.hair = c,
+            None if studio_modeling::hairdo::knows(w) || matches!(w.as_str(), "bald" | "none") => hair_style = Some(w.clone()),
+            None => return Err(format!("hair \"{w}\": a colour (#rrggbb or a name), a style ({}), or false", studio_modeling::hairdo::STYLES)),
+        },
+        Some(Value::Object(o)) => {
+            if let Some(w) = o.get("colour").or_else(|| o.get("color")).and_then(Value::as_str) {
+                b.hair = hair_colour(w).ok_or_else(|| format!("hair colour \"{w}\" is not #rrggbb or a basic name"))?;
+            }
+            if let Some(w) = o.get("style").and_then(Value::as_str) {
+                hair_style = Some(w.to_string());
+            }
+            hair_strands = o.get("strands").and_then(Value::as_bool).unwrap_or(false);
+            hair_length = o.get("length").and_then(Value::as_f64).map_or(1.0, |x| x as f32);
+        }
+        _ => {}
+    }
+    if matches!(hair_style.as_deref(), Some("bald" | "none")) {
+        hair_on = false;
     }
     match op.get("build") {
         Some(Value::String(w)) => {
@@ -216,9 +313,12 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
             b.style = match w.to_lowercase().as_str() {
                 "realistic" | "real" | "lifelike" => 0.0,
                 "stylised" | "stylized" | "stylish" => 0.5,
-                // No anime look of its own yet: the toon one, said in the reply.
-                "toon" | "cartoon" | "cartoony" | "chibi" | "anime" | "manga" | "cel" => 1.0,
-                other => other.parse::<f32>().map_err(|_| format!("style \"{other}\": realistic, stylised, toon (anime and cartoon mean toon), or a number 0 to 1"))?,
+                "toon" | "cartoon" | "cartoony" | "chibi" | "cel" => 1.0,
+                "anime" | "manga" => {
+                    b.anime = true;
+                    b.style.max(0.55)
+                }
+                other => other.parse::<f32>().map_err(|_| format!("style \"{other}\": realistic, stylised, toon, anime, or a number 0 to 1"))?,
             }
         }
         Some(v) => b.style = v.as_f64().unwrap_or(0.0) as f32,
@@ -236,7 +336,32 @@ fn character(op: &Value, size: f32, detail: usize) -> Result<Mesh, String> {
         Some(v) => b.figure = v.as_f64().unwrap_or(0.0) as f32,
         None => {}
     }
-    Ok(studio_mesh::character::character(size.max(20.0), &b))
+    let mut mesh = studio_mesh::character::character(size.max(20.0), &b);
+    if hair_on && b.face && b.species.is_none() {
+        let style = hair_style.unwrap_or_else(|| default_hairstyle(&b).to_string());
+        let spec = studio_modeling::hair::HairSpec { style, colour: Some(b.hair), strands: hair_strands, length: hair_length, anime: b.anime || b.style >= 0.99, ..Default::default() };
+        match studio_modeling::hair::fit(&mesh, &spec) {
+            Ok(g) => {
+                studio_mesh::wear::attach(&mut mesh, &g)?;
+            }
+            Err(e) if op.get("hair").is_some() || op.get("hairstyle").is_some() => return Err(format!("hair: {e}")),
+            Err(_) => {}
+        }
+    }
+    Ok(mesh)
+}
+
+/// The hair a figure is born with when none is named.
+fn default_hairstyle(b: &studio_mesh::character::Build) -> &'static str {
+    if b.age > 0.0 && b.age < 3.0 {
+        "buzz"
+    } else if b.anime {
+        if b.figure > 0.3 { "bangs" } else { "spiky" }
+    } else if b.figure > 0.3 {
+        "long"
+    } else {
+        "short"
+    }
 }
 
 /// Material fields of an op or step; `named`: its "name" names the
@@ -593,11 +718,7 @@ impl Session {
                 if let Some(c) = n.get_mut(0..1) {
                     c.make_ascii_uppercase();
                 }
-                let mut notes = Vec::new();
-                if is_character(shape) && op.get("style").and_then(Value::as_str).is_some_and(|w| matches!(w.to_lowercase().as_str(), "anime" | "manga" | "cel")) {
-                    notes.push("there is no anime look yet, so this is the toon style (big head, simple shapes)".to_owned());
-                }
-                (m, n, notes)
+                (m, n, Vec::new())
             }
         };
         let shape_name = op.get("shape").and_then(Value::as_str).unwrap_or("");
@@ -672,6 +793,13 @@ impl Session {
         {
             g.params.insert("wetness".into(), m::Value::Scalar(w));
         }
+        // Toon shading: asked for, or the anime and toon look's own.
+        let shading = shading_params(op, wants_toon_look(op))?;
+        if let m::ClipSource::Generator(g) = &mut c.source {
+            for (k, v) in &shading {
+                g.params.insert(k.clone(), v.clone());
+            }
+        }
         // Models throw shadows unless told not to.
         if op.get("shadows").and_then(Value::as_bool) == Some(false) {
             c.material.get_or_insert_with(Default::default).casts_shadows = false;
@@ -689,7 +817,47 @@ impl Session {
         if let Some(kept) = self.kept_like(&name) {
             said.push_str(&format!("; {kept}"));
         }
+        if shading.iter().any(|(k, v)| k == "shading" && matches!(v, m::Value::Text(t) if !t.is_empty())) {
+            said.push_str("; drawn toon-shaded (cel bands, rim light, ink outline; change with the shading op)");
+        }
         Ok(said)
+    }
+
+    /// `shading`: the toon look on model clips, or back to physical
+    /// shading: `clip`/`clips` (default every model clip in the sequence),
+    /// `shading`, `bands`, `outline`, `outline_colour`, `shadow_colour`,
+    /// `rim`, `rim_colour`, `highlights`, `threshold`.
+    pub(super) fn shading_op(&mut self, op: &Value) -> Result<String, String> {
+        let mut ids: Vec<u32> = op.get("clip").and_then(Value::as_u64).map(|c| c as u32).into_iter().collect();
+        ids.extend(super::ids(op, "clips"));
+        if ids.is_empty() {
+            ids = self.doc.model.sequence(self.doc.seq()).map(|q| q.clips.iter().filter(|c| matches!(&c.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Model)).map(|c| c.id.0 as u32).collect()).unwrap_or_default();
+        }
+        if ids.is_empty() {
+            return Err("shading: no model clips here to shade".into());
+        }
+        let params = shading_params(op, true)?;
+        let toon = params.iter().any(|(k, v)| k == "shading" && matches!(v, m::Value::Text(t) if !t.is_empty()));
+        for &id in &ids {
+            let mut mc = self.model_clip(id).ok_or_else(|| format!("no clip {id}"))?;
+            match &mut mc.source {
+                m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Model => {
+                    if !toon {
+                        for k in ["toon_bands", "outline", "outline_colour", "shadow_colour", "rim", "rim_colour", "highlights", "toon_threshold"] {
+                            g.params.remove(k);
+                        }
+                    }
+                    for (k, v) in &params {
+                        g.params.insert(k.clone(), v.clone());
+                    }
+                }
+                _ => return Err(format!("clip {id} is not a model clip: shading is for 3D models and worlds")),
+            }
+            let seq = self.doc.seq();
+            let ok = self.doc.apply("Shading", m::Edit::SetClip { seq, clip: Box::new(mc) });
+            self.check(ok, "")?;
+        }
+        Ok(format!("{} model clip{} {}", ids.len(), if ids.len() == 1 { "" } else { "s" }, if toon { "toon-shaded: cel bands, a shadow colour, rim light and ink outlines" } else { "back to physical shading" }))
     }
 
     /// `mesh`: change a model, one step or a list of steps in order (one

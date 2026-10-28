@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 /// Every edit op, by the name you type.
 pub(super) const OPS: &[&str] = &[
-    "key_background", "polygon_mask", "scene", "music", "narrate", "place", "add", "text", "card", "sfx", "sing", "fx_layer", "split", "trim", "delete", "move", "reorder", "roll", "slide", "slip", "duplicate", "freeze", "replace", "detach_audio", "link", "unlink", "group", "ungroup", "merge", "unmerge", "set", "animate", "keys", "apply", "effect", "copy_look", "mask", "particles", "living", "puppet", "lip_sync", "scissor", "mask_puppet", "corner_pin", "three_d", "camera", "light", "atmosphere", "model", "mesh", "parallax", "motion", "transition", "reframe", "stagger", "modifier", "physics", "driver", "flatten", "unflatten", "align", "distribute", "parent", "matte", "restack", "audio", "use_move", "use_design", "lane", "marker", "keyframe", "raw",
+    "key_background", "polygon_mask", "scene", "music", "narrate", "place", "add", "text", "card", "sfx", "sing", "fx_layer", "split", "trim", "delete", "move", "reorder", "roll", "slide", "slip", "duplicate", "freeze", "replace", "detach_audio", "link", "unlink", "group", "ungroup", "merge", "unmerge", "set", "animate", "keys", "apply", "effect", "copy_look", "mask", "particles", "living", "puppet", "lip_sync", "scissor", "mask_puppet", "corner_pin", "three_d", "camera", "light", "atmosphere", "model", "shading", "mesh", "parallax", "motion", "transition", "reframe", "stagger", "modifier", "physics", "driver", "flatten", "unflatten", "align", "distribute", "parent", "matte", "restack", "audio", "use_move", "use_design", "lane", "marker", "keyframe", "raw",
 ];
 
 /// The field a bare word fills, per command (plural fields take several).

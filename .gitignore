@@ -159,10 +159,30 @@ node_modules/
 *.token
 
 # Agent scratch, showcase and test output
-# Showcase work: the stdio client script and its call files, the scratch
-# project the app writes (project.json, accepted.json, agent-usage.jsonl,
-# Models/, Vector/, media/, music/, sfx/, cache/, backups/), renders, QC
-# sidecars and frame grabs
-/showcase-work/
-# Fallback folder for a showcase's finished mp4 and contact sheet
+# Folders a showcase run works in: the copied zornov binary, the stdio MCP
+# client and its call files, the scratch project the app writes (media,
+# music, sfx, Models, Vector, cache, backups), renders and frame grabs
+/showcase-bin/
 /showcase-out/
+/showcase-proj/
+/showcase-project/
+/showcase-work/
+# Projects the math film and showcase tests save, should their output go to the root
+/Math shapes/
+/Math showcase/
+# QC reports written beside an exported file
+*.qc.json
+*.qc.txt
+# Saved model meshes and baked motion
+*.smesh
+*.scache
+# Flight-recorder traces (a project's .zornov/agent-trace/, an eval run's
+# TASK/agent-trace/): tool calls and replies, never committed
+agent-trace/
+# Friction reports and live-tap dumps written next to them
+friction-report*.md
+tap*.txt
+# Replay copies of a project, if TMPDIR points into the tree
+zornov-replay-*/
+# Finder files inside testdata, which the !/testdata/** line above lets back in
+/testdata/**/.DS_Store

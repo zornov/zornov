@@ -127,7 +127,7 @@ impl ModelScene {
                             _ => crate::realtime::Quality::Balanced,
                         };
                         let tod = params.get("time_of_day").and_then(Param::as_f32);
-                        SourceDesc::World(crate::world_scene::WorldDesc { world, camera: None, time: rel as f32 / 1e6, time_of_day: tod, metres_per_px: params.f("metres_per_px", crate::world_scene::DEFAULT_METRES_PER_PX), quality: q, carrier: None })
+                        SourceDesc::World(crate::world_scene::WorldDesc { world, camera: None, time: rel as f32 / 1e6, time_of_day: tod, metres_per_px: params.f("metres_per_px", crate::world_scene::DEFAULT_METRES_PER_PX), quality: q, carrier: None, toon: toon_of(&params) })
                     } else {
                     let file = params.text("file", "").to_string();
                     let mesh = crate::mesh_render::load(&file)?;
@@ -146,6 +146,7 @@ impl ModelScene {
                         wetness: params.get("wetness").and_then(Param::as_f32),
                         // A glow can be brighter than white: it blooms.
                         emissive_strength: params.get("emissive_strength").and_then(Param::as_f32),
+                        toon: toon_of(&params),
                     };
                     // Placed, lit and seen when the frame is resolved.
                     SourceDesc::Mesh(crate::mesh_render::MeshDesc {
@@ -441,6 +442,30 @@ pub fn convert_value(v: &Value) -> Param {
         Value::Choice(s) => Param::Choice(s.clone()),
         Value::Curve(c) => Param::Curve(c.clone()),
     }
+}
+
+/// Toon shading a model clip asks for: `shading` "toon" (also "cel",
+/// "anime", "flat"), with `toon_bands` (2 or 3), `shadow_colour`,
+/// `toon_threshold`, `rim`, `rim_colour`, `highlights`, `outline` (canvas
+/// px, 0 none) and `outline_colour`.
+fn toon_of(params: &Params) -> Option<crate::mesh_render::Toon> {
+    let d = crate::mesh_render::Toon::default();
+    let rgb = |k: &str, or: [f32; 3]| params.get(k).and_then(Param::as_colour).map_or(or, |c| [c[0], c[1], c[2]]);
+    let toon = match params.text("shading", "") {
+        "toon" | "cel" | "anime" | "cartoon" => d,
+        "flat" => crate::mesh_render::Toon { bands: 2, threshold: 0.0, rim: 0.0, highlights: false, ..d },
+        _ => return None,
+    };
+    Some(crate::mesh_render::Toon {
+        bands: params.f("toon_bands", toon.bands as f32).clamp(2.0, 3.0) as u8,
+        shadow: rgb("shadow_colour", toon.shadow),
+        threshold: params.f("toon_threshold", toon.threshold).clamp(0.0, 1.0),
+        rim: params.f("rim", toon.rim).clamp(0.0, 2.0),
+        rim_colour: rgb("rim_colour", toon.rim_colour),
+        highlights: params.flag("highlights", toon.highlights),
+        outline: params.f("outline", toon.outline).clamp(0.0, 40.0),
+        outline_colour: rgb("outline_colour", toon.outline_colour),
+    })
 }
 
 /// Converts a model parameter map.
