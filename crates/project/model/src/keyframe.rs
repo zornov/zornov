@@ -36,6 +36,40 @@ pub enum Interp {
     /// A named timing curve from this key's [`Keyframe::curve`]: elastic,
     /// bounce, back, expo, steps…
     Curve,
+    /// A natural cubic spline through the keys: continuous in value, speed
+    /// *and* acceleration (C2) across every key of a run of `Spline` keys,
+    /// with no stop at a key or at a turning point. It may overshoot
+    /// between keys, as any smooth curve through them must.
+    Spline,
+    /// A Catmull-Rom curve through the keys (C1): each key keeps the
+    /// speed its neighbours give it, unlike [`Interp::Auto`] which stops at
+    /// the ends and at every extremum. The key's [`Keyframe::tcb`] bends
+    /// the tangents (tension, continuity, bias).
+    Through,
+}
+
+/// Kochanek–Bartels tangent shaping for [`Interp::Through`] keys. All zero
+/// is a plain Catmull-Rom curve.
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct Tcb {
+    /// -1 rounder, +1 tighter (1 stops dead at the key).
+    #[serde(default)]
+    pub tension: f64,
+    /// -1 .. +1: 0 is smooth through the key, +1 a corner (each side
+    /// leaves along its own straight segment).
+    #[serde(default)]
+    pub continuity: f64,
+    /// -1 .. +1: whether the curve favours the segment before (-1) or
+    /// after (+1) the key.
+    #[serde(default)]
+    pub bias: f64,
+}
+
+impl Tcb {
+    fn clamped(self) -> Self {
+        let c = |v: f64| if v.is_finite() { v.clamp(-1.0, 1.0) } else { 0.0 };
+        Self { tension: c(self.tension), continuity: c(self.continuity), bias: c(self.bias) }
+    }
 }
 
 /// Which end of a move a [`Curve`] shapes.
@@ -250,12 +284,15 @@ pub struct Keyframe {
     /// For point tracks: how the path bends into and out of this key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<PathHandles>,
+    /// Tangent shaping at this key for [`Interp::Through`] curves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcb: Option<Tcb>,
 }
 
 impl Keyframe {
     /// A key with the given interpolation and default handles.
     pub fn new(time: Micros, value: impl Into<Value>, interp: Interp) -> Self {
-        Self { time, value: value.into(), interp, ease_in: Handle::default(), ease_out: Handle::default(), curve: None, path: None }
+        Self { time, value: value.into(), interp, ease_in: Handle::default(), ease_out: Handle::default(), curve: None, path: None, tcb: None }
     }
 
     /// A key that moves on to the next along `curve`.
@@ -419,6 +456,8 @@ impl Track {
                 // Even speed along the path, easing off the first key and
                 // into the last.
                 Interp::Auto => hermite(0.0, 1.0, if i == 0 { 0.0 } else { 1.0 }, if i + 2 == keys.len() { 0.0 } else { 1.0 }, u),
+                // Never stopping at a key: an even speed along the path.
+                Interp::Spline | Interp::Through => u,
             };
             let at = bend.at(p);
             return Some(k0.value.with_components([at[0], at[1], 0.0, 0.0]));
@@ -426,9 +465,23 @@ impl Track {
         if k0.interp == Interp::Hold {
             return Some(k0.value.clone());
         }
+        if k0.interp == Interp::Spline {
+            return self.spline_between(i, u);
+        }
         let between = |comps: &Window| {
             let ((c0, _), (c1, _)) = (comps.at(i), comps.at(i + 1));
             match k0.interp {
+                Interp::Through => {
+                    let mut out = [0.0; 4];
+                    for (d, slot) in out.iter_mut().enumerate().take(dims) {
+                        let (m0, m1) = through_tangents(keys, comps, d, i);
+                        let h = (k1.time - k0.time) as f64;
+                        *slot = hermite(c0[d], c1[d], m0 * h, m1 * h, u);
+                    }
+                    out
+                }
+                // Splines are solved over a run of keys, above.
+                Interp::Spline => lerp4(c0, c1, u),
                 Interp::Hold | Interp::Linear => lerp4(c0, c1, u),
                 Interp::Ease => lerp4(c0, c1, bezier_progress(u, k0.ease_out, k1.ease_in)),
                 Interp::Curve => lerp4(c0, c1, k0.curve.unwrap_or_default().apply(u)),
@@ -456,6 +509,71 @@ impl Track {
             }
         }
         Some(k0.value.with_components(out))
+    }
+
+    /// The value a fraction `u` of the way from key `i` to the next on a
+    /// natural cubic spline through the run of [`Interp::Spline`] keys
+    /// around them.
+    ///
+    /// A spline is global, but a key's pull on the curve dies away by about
+    /// three quarters each key further off, so the solve reads `SPLINE_REACH`
+    /// keys each side (or to the end of the run, where the natural end
+    /// condition holds exactly): a long track still costs a handful of
+    /// keys per look, and the curve stays smooth to a part in 10^7.
+    fn spline_between(&self, i: usize, u: f64) -> Option<Value> {
+        let keys = &self.keys;
+        let mut a = i;
+        while a > 0 && i - a < SPLINE_REACH && keys[a - 1].interp == Interp::Spline {
+            a -= 1;
+        }
+        let mut b = i + 1;
+        while b + 1 < keys.len() && b - (i + 1) < SPLINE_REACH && keys[b].interp == Interp::Spline {
+            b += 1;
+        }
+        let comps = self.unwrapped_range(a, b)?;
+        let dims = comps[0].1;
+        let times: Vec<f64> = keys[a..=b].iter().map(|k| (k.time - keys[a].time) as f64 / 1e6).collect();
+        let solve = |pm: bool| {
+            let mut out = [0.0; 4];
+            for (d, slot) in out.iter_mut().enumerate().take(dims) {
+                let ys: Vec<f64> = comps.iter().map(|(c, _)| if pm && d < 3 { c[d] * c[3] } else { c[d] }).collect();
+                *slot = natural_spline(&times, &ys, i - a, u);
+            }
+            out
+        };
+        let (c0, c1) = (comps[i - a].0, comps[i + 1 - a].0);
+        let mut out = solve(false);
+        if matches!(keys[i].value, Value::Colour(_)) && c0[3] != c1[3] {
+            let pm = solve(true);
+            if pm[3] > 1e-9 {
+                for k in 0..3 {
+                    out[k] = pm[k] / pm[3];
+                }
+            }
+        }
+        Some(keys[i].value.with_components(out))
+    }
+
+    /// Components for keys `lo..=hi`, unwrapped as [`Self::unwrapped_components`].
+    fn unwrapped_range(&self, lo: usize, hi: usize) -> Option<Vec<([f64; 4], usize)>> {
+        let unwrap = self.shortest_angle && matches!(self.keys[0].value, Value::Angle(_));
+        let mut out = Vec::with_capacity(hi - lo + 1);
+        let mut prev: Option<[f64; 4]> = None;
+        for (j, k) in self.keys.iter().enumerate().take(hi + 1).skip(if unwrap { 0 } else { lo }) {
+            let (mut c, n) = k.value.components()?;
+            if unwrap && let Some(p) = prev {
+                let mut d = (c[0] - p[0]).rem_euclid(360.0);
+                if d > 180.0 {
+                    d -= 360.0;
+                }
+                c[0] = p[0] + d;
+            }
+            prev = Some(c);
+            if j >= lo {
+                out.push((c, n));
+            }
+        }
+        Some(out)
     }
 
     /// The curved path from key `i` to the next, when either end has path
@@ -660,6 +778,66 @@ fn hermite(p0: f64, p1: f64, m0: f64, m1: f64, u: f64) -> f64 {
     let u2 = u * u;
     let u3 = u2 * u;
     (2.0 * u3 - 3.0 * u2 + 1.0) * p0 + (u3 - 2.0 * u2 + u) * m0 + (-2.0 * u3 + 3.0 * u2) * p1 + (u3 - u2) * m1
+}
+
+/// How many keys each side of a segment a spline's solve reads.
+const SPLINE_REACH: usize = 12;
+
+/// The natural cubic spline (zero curvature at both ends) through `ys` at
+/// `xs`, at fraction `u` of segment `seg`. C2 across the interior keys.
+fn natural_spline(xs: &[f64], ys: &[f64], seg: usize, u: f64) -> f64 {
+    let n = xs.len();
+    let h = |j: usize| xs[j + 1] - xs[j];
+    // Second derivatives m, from the tridiagonal system by Thomas's sweep.
+    let mut m = vec![0.0; n];
+    if n > 2 {
+        let (mut cp, mut dp) = (vec![0.0; n], vec![0.0; n]);
+        for j in 1..n - 1 {
+            let (lo, hi) = (h(j - 1), h(j));
+            let diag = 2.0 * (lo + hi);
+            let rhs = 6.0 * ((ys[j + 1] - ys[j]) / hi - (ys[j] - ys[j - 1]) / lo);
+            let den = diag - lo * cp[j - 1];
+            cp[j] = hi / den;
+            dp[j] = (rhs - lo * dp[j - 1]) / den;
+        }
+        for j in (1..n - 1).rev() {
+            m[j] = dp[j] - cp[j] * m[j + 1];
+        }
+    }
+    let (y0, y1, hs) = (ys[seg], ys[seg + 1], h(seg));
+    let a = 1.0 - u;
+    a * y0 + u * y1 + hs * hs / 6.0 * ((a * a * a - a) * m[seg] + (u * u * u - u) * m[seg + 1])
+}
+
+/// Tangents (value per microsecond) at keys `i` and `i + 1` for component
+/// `d` of a [`Interp::Through`] segment: the slope a parabola through a
+/// key and its two neighbours has there, shaped by the key's [`Tcb`]. An end
+/// key reads the slope of its one segment, eased off by tension alone.
+/// Returns (leaving key `i`, arriving at key `i + 1`).
+fn through_tangents(keys: &[Keyframe], comps: &Window, d: usize, i: usize) -> (f64, f64) {
+    let p = |j: usize| comps.at(j).0[d];
+    let t = |j: usize| keys[j].time as f64;
+    let slope = |a: usize, b: usize| (p(b) - p(a)) / (t(b) - t(a));
+    let n = keys.len();
+    // (leaving, arriving) tangent at key j.
+    let tangent = |j: usize| -> (f64, f64) {
+        let tcb = keys[j].tcb.unwrap_or_default().clamped();
+        let hold = 1.0 - tcb.tension;
+        if j == 0 {
+            return (hold * slope(0, 1), hold * slope(0, 1));
+        }
+        if j + 1 >= n {
+            return (hold * slope(j - 1, j), hold * slope(j - 1, j));
+        }
+        let (d0, d1) = (slope(j - 1, j), slope(j, j + 1));
+        let (h0, h1) = (t(j) - t(j - 1), t(j + 1) - t(j));
+        let (wa, wb) = (h1 / (h0 + h1), h0 / (h0 + h1));
+        let (b, c) = (tcb.bias, tcb.continuity);
+        let leaving = hold * (wa * (1.0 + b) * (1.0 - c) * d0 + wb * (1.0 - b) * (1.0 + c) * d1);
+        let arriving = hold * (wa * (1.0 + b) * (1.0 + c) * d0 + wb * (1.0 - b) * (1.0 - c) * d1);
+        (leaving, arriving)
+    };
+    (tangent(i).0, tangent(i + 1).1)
 }
 
 /// Tangents (value per microsecond) at keys `i` and `i + 1` for component
@@ -1031,6 +1209,184 @@ mod tests {
         assert!(!plain.contains("modifiers"));
         assert!(serde_json::from_str::<Track>(&plain).unwrap().modifiers.is_empty());
     }
+
+    fn track_of(vals: &[f64], step: Micros, interp: Interp) -> Track {
+        Track::new(vals.iter().enumerate().map(|(i, v)| Keyframe::new(i as i64 * step, *v, interp)).collect())
+    }
+
+    /// Value per second, by a central difference a microsecond wide.
+    fn speed(t: &Track, at: Micros) -> f64 {
+        (scalar(t, at + 500) - scalar(t, at - 500)) * 1e3
+    }
+
+    #[test]
+    fn spline_and_through_reach_every_key() {
+        let vals = [0.0, 5.0, 1.0, 8.0, 2.0];
+        for interp in [Interp::Spline, Interp::Through] {
+            let tr = track_of(&vals, 1_000_000, interp);
+            for (i, v) in vals.iter().enumerate() {
+                assert!((scalar(&tr, i as i64 * 1_000_000) - v).abs() < 1e-9, "{interp:?} key {i}");
+            }
+        }
+    }
+
+    /// The natural spline's acceleration does not jump at a key, where
+    /// Auto's does (the B5 trap).
+    #[test]
+    fn spline_is_c2_through_its_keys() {
+        let vals = [0.0, 40.0, 10.0, 90.0, 85.0, 200.0, 20.0];
+        let step = 1_000_000;
+        let accel = |t: &Track, at: Micros| {
+            let h = 2_000;
+            (scalar(t, at + h) - 2.0 * scalar(t, at) + scalar(t, at - h)) / (h as f64 * 1e-6).powi(2)
+        };
+        let spline = track_of(&vals, step, Interp::Spline);
+        let auto = track_of(&vals, step, Interp::Auto);
+        for k in 1..vals.len() - 1 {
+            let at = k as i64 * step;
+            // Either side of the key, taken just clear of the kink.
+            let (before, after) = (accel(&spline, at - 5_000), accel(&spline, at + 5_000));
+            let scale = before.abs().max(after.abs()).max(1.0);
+            assert!((before - after).abs() / scale < 0.02, "key {k}: {before} vs {after}");
+            assert!((speed(&spline, at - 1) - speed(&spline, at + 1)).abs() < 0.05, "key {k} kinks");
+        }
+        // Auto stops dead at a turning key; the spline carries on through.
+        assert!(speed(&auto, step).abs() < 0.1 || speed(&auto, 5 * step).abs() < 0.1);
+        assert!(speed(&spline, step).abs() > 1.0);
+    }
+
+    #[test]
+    fn spline_has_no_curvature_at_the_ends() {
+        let tr = track_of(&[0.0, 10.0, 0.0, 10.0], 1_000_000, Interp::Spline);
+        let h = 2_000;
+        let a = (scalar(&tr, 2 * h) - 2.0 * scalar(&tr, h) + scalar(&tr, 0)) / (h as f64 * 1e-6).powi(2);
+        let first_segment_swing = 10.0 / 1e-6 / 1e6;
+        assert!(a.abs() < first_segment_swing * 20.0, "natural end, got {a}");
+        // And two keys are a straight line.
+        let two = track_of(&[0.0, 10.0], 1_000_000, Interp::Spline);
+        assert!((scalar(&two, 250_000) - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn through_keeps_speed_at_turning_keys_and_ends() {
+        // A path out and back: Auto stops at the peak, Through passes it.
+        let vals = [0.0, 10.0, 0.0, 10.0, 0.0];
+        let step = 1_000_000;
+        let auto = track_of(&vals, step, Interp::Auto);
+        assert!(speed(&auto, step).abs() < 0.1, "auto stops");
+        let strictly_moving = |t: &Track| (1..vals.len() - 1).all(|k| speed(t, k as i64 * step).abs() > 1e-3);
+        // Interior keys of an out-and-back path are extrema, where the
+        // parabola's slope is zero only for evenly mirrored neighbours...
+        assert!(!strictly_moving(&auto));
+        // ...so use an uneven path to see the difference plainly.
+        let vals = [0.0, 10.0, 6.0, 12.0];
+        let through = track_of(&vals, step, Interp::Through);
+        let auto = track_of(&vals, step, Interp::Auto);
+        assert!(speed(&auto, step).abs() < 0.1);
+        assert!(speed(&through, step).abs() > 1.0, "through passes the peak: {}", speed(&through, step));
+        // The first key leaves at speed, where Auto leaves from rest.
+        assert!(speed(&through, 10_000) > speed(&auto, 10_000) * 10.0);
+    }
+
+    #[test]
+    fn through_is_c1_and_tcb_bends_it() {
+        let vals = [0.0, 10.0, 4.0, 14.0, 9.0];
+        let step = 1_000_000;
+        let plain = track_of(&vals, step, Interp::Through);
+        for k in 1..vals.len() - 1 {
+            let at = k as i64 * step;
+            assert!((speed(&plain, at - 1) - speed(&plain, at + 1)).abs() < 0.05, "key {k} kinks");
+        }
+        // Tension 1 on a key stops there.
+        let mut tight = plain.clone();
+        tight.keys[2].tcb = Some(Tcb { tension: 1.0, ..Default::default() });
+        assert!(speed(&tight, 2 * step).abs() < 0.1);
+        // Continuity 1 leaves each side on its own straight slope: a corner.
+        let mut corner = plain.clone();
+        corner.keys[2].tcb = Some(Tcb { continuity: 1.0, ..Default::default() });
+        assert!((speed(&corner, 2 * step - 10_000) - speed(&corner, 2 * step + 10_000)).abs() > 1.0);
+        // Out of range settings are clamped, never non-finite.
+        corner.keys[2].tcb = Some(Tcb { tension: f64::NAN, continuity: 9.0, bias: -9.0 });
+        assert!(scalar(&corner, 2 * step + 100_000).is_finite());
+    }
+
+    #[test]
+    fn the_new_modes_leave_auto_alone() {
+        let vals = [0.0, 10.0, 10.5, 2.0, 2.0, 8.0];
+        let auto = track_of(&vals, 1000, Interp::Auto);
+        // A Spline neighbour changes nothing about an Auto segment's
+        // curve, since a segment reads only its own left key's mode.
+        let mut mixed = auto.clone();
+        mixed.keys[3].interp = Interp::Spline;
+        for t in (0..3000).step_by(7) {
+            assert_eq!(scalar(&auto, t), scalar(&mixed, t), "at {t}");
+        }
+    }
+
+    #[test]
+    fn a_long_spline_reads_a_bounded_neighbourhood() {
+        let vals: Vec<f64> = (0..200).map(|k| ((k * 37) % 23) as f64).collect();
+        let long = track_of(&vals, 100_000, Interp::Spline);
+        // The same keys cut to a window far larger than the reach give the
+        // same curve at the middle (the spline's pull dies away).
+        let cut = Track::new(long.keys[60..140].to_vec());
+        for t in [8_050_000, 9_990_000, 10_100_000] {
+            let (a, b) = (scalar(&long, t), scalar(&cut, t));
+            assert!((a - b).abs() < 1e-4, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn splines_turn_angles_the_short_way_and_blend_colours_and_points() {
+        let mut spin = Track::new((0..6).map(|k| Keyframe::new(k * 1_000_000, Value::Angle(((k * 100) % 360) as f64), Interp::Spline)).collect());
+        spin.shortest_angle = true;
+        let a = scalar(&spin, 3_500_000);
+        let b = scalar(&spin, 3_400_000);
+        assert!((a - b).abs() < 20.0, "{b} -> {a}");
+        let pts = Track::new(vec![
+            Keyframe::new(0, Vec2::new(0.0, 0.0), Interp::Spline),
+            Keyframe::new(1_000_000, Vec2::new(100.0, 50.0), Interp::Spline),
+            Keyframe::new(2_000_000, Vec2::new(0.0, 100.0), Interp::Spline),
+        ]);
+        let Some(Value::Point(p)) = pts.eval(1_000_000) else { panic!("a point") };
+        assert!((p.x - 100.0).abs() < 1e-9 && (p.y - 50.0).abs() < 1e-9);
+        let red = Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
+        let clear = Rgba { r: 1.0, g: 0.0, b: 0.0, a: 0.0 };
+        let fade = Track::new(vec![Keyframe::new(0, Value::Colour(red), Interp::Spline), Keyframe::new(1_000_000, Value::Colour(clear), Interp::Spline)]);
+        let Some(Value::Colour(c)) = fade.eval(500_000) else { panic!("a colour") };
+        assert!(c.r > 0.99 && c.g.abs() < 1e-9, "stays red as it fades: {c:?}");
+    }
+
+    #[test]
+    fn the_new_modes_travel_along_a_bent_path() {
+        for interp in [Interp::Spline, Interp::Through] {
+            let mut a = Keyframe::new(0, Vec2::ZERO, interp);
+            a.path = Some(PathHandles { inn: [0.0; 2], out: [0.0, 100.0] });
+            let b = Keyframe::new(1_000_000, Vec2::new(100.0, 0.0), interp);
+            let tr = Track::new(vec![a, b]);
+            // An even speed along the path, as Linear travels it.
+            let mut lin = tr.clone();
+            lin.keys[0].interp = Interp::Linear;
+            for t in [100_000, 500_000, 900_000] {
+                assert_eq!(tr.eval(t), lin.eval(t), "{interp:?} at {t}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_new_modes_round_trip_through_json() {
+        let mut k = Keyframe::new(0, 1.0, Interp::Through);
+        k.tcb = Some(Tcb { tension: 0.25, continuity: -0.5, bias: 0.1 });
+        let json = serde_json::to_string(&k).unwrap();
+        assert!(json.contains("\"through\"") && json.contains("tcb"), "{json}");
+        assert_eq!(serde_json::from_str::<Keyframe>(&json).unwrap(), k);
+        let s: Keyframe = serde_json::from_str(r#"{"time":0,"value":{"Scalar":1.0},"interp":"spline"}"#).unwrap_or_else(|_| Keyframe::new(0, 1.0, Interp::Spline));
+        assert_eq!(s.interp, Interp::Spline);
+        // Old files without the field still load.
+        let plain = serde_json::to_string(&Keyframe::new(0, 1.0, Interp::Auto)).unwrap();
+        assert!(!plain.contains("tcb"));
+    }
+
 }
 
 /// Key components for a run of keys, read by key index.
