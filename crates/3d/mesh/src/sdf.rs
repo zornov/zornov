@@ -343,8 +343,13 @@ pub fn build_counted(parts: &[Part], materials: Vec<Material>, cell: f32) -> (Me
     }
     let v = |x: usize, y: usize, z: usize| values[(z * n[1] + y) * n[0] + x];
     // Surface nets: a vertex in every cell the surface passes through, at
-    // the average of where it crosses the cell's edges.
-    let mut index = vec![u32::MAX; n[0] * n[1] * n[2]];
+    // the average of where it crosses the cell's edges. A slice of cells
+    // at a time: a quad joins the cells round a grid edge, which lie in
+    // this slice and the one before, so two slices of vertex numbers are
+    // all that is kept (a whole grid of them was 4 bytes a grid point,
+    // 240 MB at the evaluation cap).
+    let slice = n[0] * n[1];
+    let (mut before, mut here) = (vec![u32::MAX; slice], vec![u32::MAX; slice]);
     let mut mesh = Mesh { materials, ..Default::default() };
     const EDGES: [([usize; 3], [usize; 3]); 12] = [
         ([0, 0, 0], [1, 0, 0]),
@@ -360,7 +365,11 @@ pub fn build_counted(parts: &[Part], materials: Vec<Material>, cell: f32) -> (Me
         ([0, 1, 0], [0, 1, 1]),
         ([1, 1, 0], [1, 1, 1]),
     ];
+    // A quad across every grid edge the surface crosses, wound outwards.
+    let mut quads: Vec<[u32; 4]> = Vec::new();
     for z in 0..n[2] - 1 {
+        std::mem::swap(&mut before, &mut here);
+        here.fill(u32::MAX);
         for y in 0..n[1] - 1 {
             for x in 0..n[0] - 1 {
                 let mut sum = [0.0f32; 3];
@@ -377,38 +386,38 @@ pub fn build_counted(parts: &[Part], materials: Vec<Material>, cell: f32) -> (Me
                     }
                 }
                 if count > 0 {
-                    index[(z * n[1] + y) * n[0] + x] = mesh.positions.len() as u32;
+                    here[y * n[0] + x] = mesh.positions.len() as u32;
                     mesh.positions.push(scale(sum, 1.0 / count as f32));
                 }
             }
         }
-    }
-    // A quad across every grid edge the surface crosses, wound outwards.
-    let cell_id = |x: usize, y: usize, z: usize| index[(z * n[1] + y) * n[0] + x];
-    let mut quads: Vec<[u32; 4]> = Vec::new();
-    for z in 1..n[2] - 1 {
+        // The grid edges from the points of layer z: their cells are in
+        // slices z - 1 (`before`) and z (`here`).
+        if z == 0 {
+            continue;
+        }
+        let cell_id = |x: usize, y: usize, s: &[u32]| s[y * n[0] + x];
         for y in 1..n[1] - 1 {
             for x in 1..n[0] - 1 {
-                let here = v(x, y, z) < 0.0;
-                // Edge along x to (x+1, y, z): cells sharing it.
+                let inside = v(x, y, z) < 0.0;
                 for axis in 0..3 {
                     let (dx, dy, dz) = [(1, 0, 0), (0, 1, 0), (0, 0, 1)][axis];
                     if x + dx >= n[0] || y + dy >= n[1] || z + dz >= n[2] {
                         continue;
                     }
                     let there = v(x + dx, y + dy, z + dz) < 0.0;
-                    if here == there {
+                    if inside == there {
                         continue;
                     }
                     let c = match axis {
-                        0 => [cell_id(x, y - 1, z - 1), cell_id(x, y, z - 1), cell_id(x, y, z), cell_id(x, y - 1, z)],
-                        1 => [cell_id(x - 1, y, z - 1), cell_id(x - 1, y, z), cell_id(x, y, z), cell_id(x, y, z - 1)],
-                        _ => [cell_id(x - 1, y - 1, z), cell_id(x, y - 1, z), cell_id(x, y, z), cell_id(x - 1, y, z)],
+                        0 => [cell_id(x, y - 1, &before), cell_id(x, y, &before), cell_id(x, y, &here), cell_id(x, y - 1, &here)],
+                        1 => [cell_id(x - 1, y, &before), cell_id(x - 1, y, &here), cell_id(x, y, &here), cell_id(x, y, &before)],
+                        _ => [cell_id(x - 1, y - 1, &here), cell_id(x, y - 1, &here), cell_id(x, y, &here), cell_id(x - 1, y, &here)],
                     };
                     if c.contains(&u32::MAX) {
                         continue;
                     }
-                    quads.push(if here { c } else { [c[3], c[2], c[1], c[0]] });
+                    quads.push(if inside { c } else { [c[3], c[2], c[1], c[0]] });
                 }
             }
         }
@@ -631,6 +640,29 @@ mod tests {
         // Faces point outwards.
         let out = (0..m.triangles()).filter(|&t| dot(m.face_normal(t), normalise(m.centroid(t))) > 0.0).count();
         assert!(out as f32 > m.triangles() as f32 * 0.95);
+    }
+
+    /// A fingerprint of a built mix of parts, to compare meshing changes
+    /// that must not change the mesh (run with `--ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn fingerprint_of_a_build() {
+        let parts = vec![
+            Part::new(Shape::Ellipsoid, [-40.0, 0.0, 0.0], [100.0, 80.0, 90.0]),
+            Part { blend: 30.0, material: 1, ..Part::new(Shape::Box, [40.0, 10.0, 0.0], [90.0; 3]) },
+            Part { join: Join::Subtract, blend: 5.0, ..Part::new(Shape::Cylinder, [0.0, 0.0, 0.0], [40.0, 300.0, 40.0]) },
+        ];
+        let m = build(&parts, vec![Material::default(), Material::default()], 1.5);
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for p in &m.positions {
+            for c in p {
+                h = (h ^ u64::from(c.to_bits())).wrapping_mul(0x100_0000_01b3);
+            }
+        }
+        for i in &m.indices {
+            h = (h ^ u64::from(*i)).wrapping_mul(0x100_0000_01b3);
+        }
+        println!("build: {} vertices, {} triangles, fingerprint {h:016x}", m.positions.len(), m.triangles());
     }
 
     #[test]
