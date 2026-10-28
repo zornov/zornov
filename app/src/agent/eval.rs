@@ -15,7 +15,11 @@
 //! Claude Code through `zornov mcp --attach`), headless, then scores what
 //! is on the timeline: checks with weights, 0 to 100 a task. Results go to
 //! `DIR/results.json` and a line is added to `DIR/history.jsonl`, and the
-//! table shows the change since the last run.
+//! table shows the change since the last run. Each task's calls are also
+//! recorded (`DIR/TASK/agent-trace/TASK.jsonl`) and measured for friction:
+//! calls to goal, retry, silent-drop and undo rates, reply tokens and wall
+//! time go into both files, so a commit is measured on what agents go
+//! through, not just the score.
 
 use super::Session;
 use super::brain::{AgentEvent, Answer, Gate};
@@ -52,6 +56,8 @@ pub struct Run {
     /// The correction reached the agent.
     pub steered: bool,
     pub timed_out: bool,
+    /// The friction the agent met, from its trace ([`super::trace_report::metrics`]).
+    pub friction: Value,
 }
 
 /// One scored check.
@@ -355,6 +361,8 @@ pub fn run_task(task: &Task, dir: &Path, cast: impl FnOnce(PathBuf) -> crew::Cas
     let mut s = Session::at(&proj)?;
     (task.setup)(&mut s, dir)?;
     call(&mut s, "save", json!({}))?;
+    // The agent's calls from here on are recorded, the scoring's are not.
+    let trace_file = super::trace::begin_session(&dir.join("agent-trace"), task.name);
     let (calls_tx, calls_rx) = mpsc::channel();
     let (events_tx, events_rx) = mpsc::channel();
     let gate = Arc::new(Gate::new(calls_tx, events_tx, || {}));
@@ -429,6 +437,9 @@ pub fn run_task(task: &Task, dir: &Path, cast: impl FnOnce(PathBuf) -> crew::Cas
     }
     live.end_turn(&mut s.doc);
     run.seconds = started.elapsed().as_secs_f32();
+    super::trace::end_session();
+    super::trace::force(Some(false));
+    run.friction = super::trace_report::load(&trace_file).ok().and_then(|t| t.into_iter().next()).map_or_else(|| json!({"calls": 0}), |t| super::trace_report::metrics(&t));
     if let Err(e) = turn.join().unwrap_or_else(|p| Err(super::guard::describe("the request", p.as_ref()))) {
         run.errors.push(e);
     }
@@ -462,6 +473,8 @@ pub fn main(args: &[String]) -> i32 {
     let minutes: u64 = get("--minutes").and_then(|m| m.parse().ok()).unwrap_or(30);
     let want: Option<Vec<String>> = get("--tasks").map(|t| t.split(',').map(str::to_owned).collect());
     let _ = crate::content::get_blocking();
+    super::trace::set_source(super::trace::Source::Eval);
+    super::trace::force(Some(false));
     let mut results = Vec::new();
     for task in tasks().into_iter().filter(|t| want.as_ref().is_none_or(|w| w.iter().any(|x| x == t.name))) {
         let dir = out.join(task.name);
@@ -475,10 +488,12 @@ pub fn main(args: &[String]) -> i32 {
                     println!("  {} {:<22} {}", if c.pass { "✓" } else { "✗" }, c.name, c.detail);
                 }
                 println!("  = {score:.0}/100 in {:.0}s, {} tokens, {} tool calls", run.seconds, run.tokens, run.tools.len());
+                let f = &run.friction;
+                println!("    friction: {} calls to goal, retry {:.0}%, silent drop {:.0}%, undo {:.0}%, {} reply tokens", f["calls_to_goal"], f["retry_rate"].as_f64().unwrap_or(0.0) * 100.0, f["silent_drop_rate"].as_f64().unwrap_or(0.0) * 100.0, f["undo_rate"].as_f64().unwrap_or(0.0) * 100.0, f["reply_tokens"]);
                 results.push(json!({
                     "task": task.name, "score": score, "seconds": run.seconds, "tokens": run.tokens, "tools": run.tools.len(),
                     "checks": checks.iter().map(|c| json!({"name": c.name, "pass": c.pass, "weight": c.weight, "detail": c.detail})).collect::<Vec<_>>(),
-                    "plan": run.plan.as_ref().map(|p| p.text()), "errors": run.errors, "said": run.said,
+                    "plan": run.plan.as_ref().map(|p| p.text()), "errors": run.errors, "said": run.said, "friction": run.friction,
                 }));
             }
             Err(e) => {
@@ -490,7 +505,15 @@ pub fn main(args: &[String]) -> i32 {
         let _ = std::fs::write(out.join("results.json"), serde_json::to_string_pretty(&json!({"results": results})).unwrap_or_default());
     }
     let mean = if results.is_empty() { 0.0 } else { results.iter().filter_map(|r| r["score"].as_f64()).sum::<f64>() / results.len() as f64 };
-    let line = json!({"when": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()), "provider": provider, "model": model, "crew": crew_mode, "mean": mean, "tasks": results.iter().map(|r| json!({"task": r["task"], "score": r["score"], "seconds": r["seconds"]})).collect::<Vec<_>>()});
+    // How tight the loop was, over every task: what recording cost a call,
+    // how long a call took to reach the live tap, fix to retried call.
+    let avg = |k: &str| -> Value {
+        let v: Vec<f64> = results.iter().filter_map(|r| r["friction"]["speed"][k]["mean"].as_f64()).collect();
+        if v.is_empty() { Value::Null } else { json!((v.iter().sum::<f64>() / v.len() as f64 * 10.0).round() / 10.0) }
+    };
+    let speed = json!({"record_us_mean": avg("record_us"), "stream_queue_us_mean": avg("stream_queue_us"), "fix_to_retry_s_mean": avg("fix_to_retry_s")});
+    println!("loop: record {} µs a call, {} µs to the live tap, fix to retry {} s", speed["record_us_mean"], speed["stream_queue_us_mean"], speed["fix_to_retry_s_mean"]);
+    let line = json!({"when": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()), "provider": provider, "model": model, "crew": crew_mode, "mean": mean, "speed": speed, "tasks": results.iter().map(|r| json!({"task": r["task"], "score": r["score"], "seconds": r["seconds"], "friction": r["friction"]})).collect::<Vec<_>>()});
     let history = out.join("history.jsonl");
     let before = std::fs::read_to_string(&history).ok().and_then(|t| t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v["crew"] == json!(crew_mode)).last());
     let _ = std::fs::write(out.join("results.json"), serde_json::to_string_pretty(&json!({"summary": line, "results": results})).unwrap_or_default());

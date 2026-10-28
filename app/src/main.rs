@@ -138,11 +138,23 @@ fn main() -> eframe::Result {
     // `zornov mcp`: the agent server on stdin / stdout, no window.
     let argv: Vec<String> = std::env::args().skip(1).collect();
     match argv.first().map(String::as_str) {
-        Some("mcp") => std::process::exit(agent::cli::mcp(&argv[1..])),
+        Some("mcp") => agent::trace::exit(agent::cli::mcp(&argv[1..])),
         // `zornov agent TOOL JSON`: one call from a shell or script.
-        Some("agent") => std::process::exit(agent::cli::agent(&argv[1..])),
+        Some("agent") => agent::trace::exit(agent::cli::agent(&argv[1..])),
         // `zornov eval`: the AI editor on scored jobs, headless.
         Some("eval") => std::process::exit(agent::eval::main(&argv[1..])),
+        // `zornov trace report|on|off`: what agents ran into (the flight recorder).
+        Some("trace") => std::process::exit(agent::trace_report::main(&argv[1..])),
+        // `zornov replay TRACE`: a recorded agent session again, on this build.
+        Some("replay") => std::process::exit(agent::replay::main(&argv[1..])),
+        // `zornov dev ask|retry|swap`: talk to the agent inside a window (development builds).
+        #[cfg(feature = "agent-dev")]
+        Some("dev") => std::process::exit(agent::dev::main(&argv[1..])),
+        #[cfg(not(feature = "agent-dev"))]
+        Some("dev") => {
+            eprintln!("zornov dev: this build has no developer tools (they are in development builds made with --features agent-dev)");
+            std::process::exit(2)
+        }
         // `zornov node`: a render node other Studios on the network send pieces of a render to.
         #[cfg(feature = "render")]
         Some("node") => std::process::exit(deliver_run::node_main(&argv[1..])),
@@ -153,7 +165,7 @@ fn main() -> eframe::Result {
     }
     // `zornov` in a terminal: the prompt, `zornov new`, `zornov see`…
     if let Some(code) = agent::shell::main(&argv) {
-        std::process::exit(code);
+        agent::trace::exit(code);
     }
     // Programs a previous Studio left behind (it was killed or crashed).
     agent::procs::reap_orphans();

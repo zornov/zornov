@@ -354,6 +354,7 @@ impl Live {
     /// Each frame: take finished results onto the document, start the next
     /// call.
     pub fn tick(&mut self, doc: &mut Doc, calls: &Receiver<ToolCall>) {
+        super::inproc::publish_if_wanted(&doc.model, rev(doc));
         while let Ok(c) = calls.try_recv() {
             if c.epoch < self.floor {
                 let _ = c.reply.send(Err("The user stopped this request. Do nothing more.".into()));
@@ -760,6 +761,7 @@ impl Live {
         // Undo and redo take back the asker's own work only: an agent's
         // its last call, never what the person did.
         if matches!(tool, "undo" | "redo") {
+            let rev_before = rev(doc);
             let r = match (tool, by_person) {
                 ("undo", true) => Ok(doc.undo()),
                 ("redo", true) => Ok(doc.redo()),
@@ -767,7 +769,9 @@ impl Live {
                 _ => doc.redo_agent_call(),
             };
             let key = if tool == "undo" { "undone" } else { "redone" };
-            return r.map(|l| vec![Content::Text(serde_json::json!({key: l, "revision": rev(doc)}).to_string())]);
+            let r = r.map(|l| vec![Content::Text(serde_json::json!({key: l, "revision": rev(doc)}).to_string())]);
+            super::trace::on_window(tool, args, &r, rev_before, rev(doc), doc.folder.as_ref().map(|f| f.root()));
+            return r;
         }
         std::mem::swap(doc, &mut self.window.doc);
         let r = super::guard::run(tool, || self.window.run(tool, args));

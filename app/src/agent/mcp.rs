@@ -43,6 +43,7 @@ pub fn tools() -> Vec<Value> {
     v.extend(super::search_media::tools());
     v.extend(super::crew::tools());
     v.extend(super::skills::tools());
+    v.extend(super::trace::tools());
     v
 }
 
@@ -334,14 +335,14 @@ pub fn handle_with_list(msg: &Value, call: &mut dyn FnMut(&str, &Value) -> Value
 }
 
 /// Serves MCP on stdin / stdout until stdin closes.
-pub fn serve_stdio(mut session: Session) {
-    serve_lines(&mut |name, args| {
-        let r = super::guard::run(name, || session.run(name, args));
-        result_of(r)
-    });
+/// Export progress, project resources with change notices and pictures as
+/// files come with it (mcp_extras.rs).
+pub fn serve_stdio(session: Session) {
+    super::mcp_extras::serve_stdio(session);
 }
 
 /// MCP on stdin / stdout, tool calls through `call`.
+#[allow(dead_code)]
 pub fn serve_lines(call: &mut dyn FnMut(&str, &Value) -> Value) {
     serve_lines_listing(call, &mut tools)
 }
