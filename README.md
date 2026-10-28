@@ -265,7 +265,7 @@ The app is in [`app/`](app): the interface, the editor, the 3D workspace and the
 | `crates/project/` | The project model, content library, production, languages, updates |
 | `crates/plugins/` | The plugin host and its API |
 | `crates/business/` | Accounts, plans and the cloud server (off by default) |
-| `crates/dev/` | Build tasks (`cargo xtask`), the shared test kit and the text checks |
+| `crates/dev/` | Build tasks (`cargo xtask`), the shared test kit, the text checks, and the agent tools a dev build can hot-swap |
 
 Outside `crates/`:
 

@@ -90,6 +90,7 @@ exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "studio-webmedia" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-world" },
     { allow = ["AGPL-3.0-or-later"], crate = "xtask" },
+    { allow = ["AGPL-3.0-or-later"], crate = "zornov-agent-hot" },
 ]
 
 allow = [

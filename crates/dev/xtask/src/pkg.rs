@@ -8,7 +8,7 @@
 use crate::licenses::Notices;
 use crate::release::{VERSION, release_dir, rel, sign_update};
 use crate::repro::{self, Item, Made};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 fn deb_arch() -> Result<&'static str, String> {
@@ -280,6 +280,7 @@ pub fn package_msi() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn notices() -> Notices {
         vec![("LICENSE".into(), b"licence".to_vec()), ("NOTICE".into(), b"notice".to_vec())]

@@ -17,5 +17,14 @@ GEMINI.md                     @marshiyar
 .cursorrules                  @marshiyar
 .claude/                      @marshiyar
 .cursor/                      @marshiyar
+# What Claude Code and Claude Desktop run on people's machines when they
+# install Zornov's plugin or extension.
+/.claude-plugin/              @marshiyar
+/packaging/claude-code/       @marshiyar
+/packaging/mcpb/              @marshiyar
+# The dev-only agent channel: the guard that keeps it out of release builds,
+# and the hot-swapped tool library it loads.
+/app/src/agent/dev.rs         @marshiyar
+/crates/dev/agent-hot/        @marshiyar
 /SECURITY.md                  @marshiyar
 /LICENSE                      @marshiyar
