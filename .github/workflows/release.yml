@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.99.1"
       - name: Import the Developer ID certificate
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
@@ -94,7 +94,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.99.1"
       - name: WiX
         # WiX 5: version 6 and later ask every user to accept a maintenance-fee EULA.
         run: dotnet tool install --global wix --version 5.0.2
@@ -129,7 +129,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.99.1"
       - name: Build packages
         run: |
           sudo apt-get update
@@ -178,7 +178,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: "1.99.0"
+          toolchain: "1.99.1"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: collected
