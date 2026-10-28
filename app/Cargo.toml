@@ -35,6 +35,7 @@ agent-dev = []
 
 [dependencies]
 studio-paths = { path = "../crates/project/paths" }
+studio-keystore = { path = "../crates/project/keystore" }
 studio-guard = { path = "../crates/dev/guard" }
 studio-i18n = { path = "../crates/project/i18n" }
 eframe = { version = "0.37", features = ["persistence"] }
@@ -102,9 +103,6 @@ studio-plugins = { path = "../crates/plugins/plugins" }
 # (with FTS5); macOS and Linux use the system's.
 libsqlite3-sys = { version = "0.39", features = ["bundled"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3"
 
 [build-dependencies]
 winresource = "0.1"

@@ -58,6 +58,7 @@ exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "studio-hw" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-i18n" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-imageio" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-keystore" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-live" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-lottie" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-media" },

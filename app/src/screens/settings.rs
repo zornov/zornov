@@ -503,27 +503,29 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             let saved = *st.ai_key_saved.get_or_insert_with(|| keychain::api_key(account).is_some());
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
-                    ui.label(egui::RichText::new(crate::i18n::shown("Saved in the Keychain")).font(theme::body()));
+                    ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
                     if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
                         keychain::remove_api_key(account);
+                        forget_saved_label(ui, account);
                         st.ai_key_saved = Some(false);
                         st.ai_key_note = Some("Key removed.".into());
                     }
                 } else {
                     ui.add(egui::TextEdit::singleline(&mut st.ai_key).password(true).hint_text(hint).desired_width(220.0));
                     if Button::primary("Save").show(ui).clicked() {
-                        match keychain::set_api_key(account, &st.ai_key) {
-                            Ok(()) => {
+                        match keychain::save_api_key(account, &st.ai_key) {
+                            Ok(kept) => {
                                 st.ai_key.clear();
                                 st.ai_key_saved = Some(true);
-                                st.ai_key_note = Some("Key saved in the Keychain.".into());
+                                forget_saved_label(ui, account);
+                                st.ai_key_note = Some(keychain::saved_note(&kept));
                             }
                             Err(e) => st.ai_key_note = Some(e),
                         }
                     }
                 }
             });
-            let default_note = crate::i18n::tf(format!("From {from}. Kept in your login Keychain; Zornov never shows it again."));
+            let default_note = crate::i18n::tf(format!("From {from}. {}; Zornov never shows it again.", keychain::kept_in()));
             note(ui, st.ai_key_note.as_deref().unwrap_or(&default_note));
         }
         kit::labeled_row(ui, "Changes", |ui| {
@@ -735,9 +737,9 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
 /// (`voice_service::speak_with`: a Mac voice says it, when they are allowed).
 fn voice_note(service: &str, from: &str, mac_allowed: bool) -> String {
     if mac_allowed {
-        crate::i18n::tf(format!("Key from {from}. Kept in your login Keychain. If {service} cannot speak a line (no key, no credit, offline), a Mac voice says it instead and the reply says so. Switch on Never use Mac voices to have the line fail instead."))
+        crate::i18n::tf(format!("Key from {from}. {}. If {service} cannot speak a line (no key, no credit, offline), a Mac voice says it instead and the reply says so. Switch on Never use Mac voices to have the line fail instead.", crate::agent::keychain::kept_in()))
     } else {
-        crate::i18n::tf(format!("Key from {from}. Kept in your login Keychain. If {service} cannot speak a line, the line fails and says why: the Mac voices are off, so no other voice stands in."))
+        crate::i18n::tf(format!("Key from {from}. {}. If {service} cannot speak a line, the line fails and says why: the Mac voices are off, so no other voice stands in.", crate::agent::keychain::kept_in()))
     }
 }
 
@@ -767,25 +769,43 @@ fn generated_media(ui: &mut egui::Ui) {
     });
 }
 
+/// Where a saved key is ("Saved in the Keychain"), asked of the store once
+/// and remembered while Settings is open.
+fn saved_label(ui: &egui::Ui, account: &str) -> String {
+    let id = egui::Id::unique(("key-saved-label", account));
+    if let Some(l) = ui.data(|d| d.get_temp::<String>(id)) {
+        return l;
+    }
+    let l = crate::agent::keychain::saved_label(account);
+    ui.data_mut(|d| d.insert_temp(id, l.clone()));
+    l
+}
+
+fn forget_saved_label(ui: &egui::Ui, account: &str) {
+    ui.data_mut(|d| d.remove::<String>(egui::Id::unique(("key-saved-label", account))));
+}
+
 /// A key's row: saved (with Remove) or a field to paste one into.
 fn key_row(ui: &mut egui::Ui, account: &str, saved: bool, typed: &mut String, note_out: &mut Option<String>, mut set_saved: impl FnMut(bool)) {
     use crate::agent::keychain;
     kit::labeled_row(ui, "API key", |ui| {
         if saved {
-            ui.label(egui::RichText::new(crate::i18n::shown("Saved in the Keychain")).font(theme::body()));
+            ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
             if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
                 keychain::remove_api_key(account);
+                forget_saved_label(ui, account);
                 set_saved(false);
                 *note_out = Some("Key removed.".into());
             }
         } else {
             ui.add(egui::TextEdit::singleline(typed).password(true).hint_text("paste the key").desired_width(220.0));
             if Button::primary("Save").show(ui).clicked() {
-                match keychain::set_api_key(account, typed.trim()) {
-                    Ok(()) => {
+                match keychain::save_api_key(account, typed.trim()) {
+                    Ok(kept) => {
                         typed.clear();
                         set_saved(true);
-                        *note_out = Some("Key saved in the Keychain.".into());
+                        forget_saved_label(ui, account);
+                        *note_out = Some(keychain::saved_note(&kept));
                     }
                     Err(e) => *note_out = Some(e),
                 }
