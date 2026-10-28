@@ -63,7 +63,7 @@ const DEPTS: &[Dept] = &[
     Dept {
         name: "3D and camera",
         lines: &[
-            ("real 3D models, sculpting, materials", "model mesh asset"),
+            ("real 3D models, sculpting, materials, toon shading", "model mesh asset shading toon"),
             ("dress any 3D figure (coats, hats, shoes, armour…) and put props in its hands, with a flame that lights the scene", "wear hold"),
             ("places as ONE model: buildings, facades, streets, interiors, bridges, fences, stairs in any style; merge or split models into named parts", "build_place combine uncombine"),
             ("2D layers in 3D space; cameras and lights", "three_d camera light parallax"),
@@ -146,6 +146,7 @@ const DEPTS: &[Dept] = &[
             ("what the content library has", "tool:catalogue tool:search"),
             ("your files across projects", "tool:assets tool:project_care"),
             ("Zornov help; skills (the procedure for a kind of work) and lessons", "tool:howto tool:capabilities tool:guide tool:skill"),
+            ("tell Zornov's makers what surprised you", "tool:feedback"),
         ],
     },
     Dept {

@@ -852,10 +852,9 @@ pub fn redact(v: &Value, key: Option<&str>) -> Value {
             let looks_like_media = s.starts_with("data:") || (s.len() > 256 && !s.contains(char::is_whitespace) && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=' | b'-' | b'_')));
             if by_key || looks_like_media || looks_secret(s) || s.len() > 4_000 {
                 json!(format!("[redacted {} bytes]", s.len()))
-            } else if s.len() > 40 {
-                json!(redact_text(s))
             } else {
-                v.clone()
+                // Short text too: a token inside a one-line note is still a token.
+                json!(redact_text(s))
             }
         }
         Value::Array(a) => Value::Array(a.iter().map(|x| redact(x, key)).collect()),
@@ -1021,13 +1020,13 @@ pub fn tools() -> Vec<Value> {
     let s = |d: &str| json!({"type": "string", "description": d});
     vec![json!({
         "name": FEEDBACK,
-        "description": "Tell Zornov's developers what surprised you (an ignored field, an unclear error, a missing op, a check finding that is intended). Free, changes nothing; then carry on.",
+        "description": "Tell Zornov's developers what surprised you. Changes nothing.",
         "inputSchema": {"type": "object", "properties": {
-            "expected": s("what you expected"),
-            "got": s("what happened"),
+            "expected": s("expected"),
+            "got": s("got instead"),
             "tool": s("the tool"),
-            "kind": s("surprise, ignored_field, unclear_error, missing, docs, slow, or intended (a check finding you mean)"),
-            "finding": s("intended: the finding"),
+            "kind": s("surprise, ignored_field, unclear_error, missing, docs, slow, intended"),
+            "finding": s("for intended: the finding"),
         }, "required": ["expected", "got"]},
     })]
 }
