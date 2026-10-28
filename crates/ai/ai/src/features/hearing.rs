@@ -116,7 +116,10 @@ fn frames(x: &[f32]) -> Vec<Feat> {
         // Peaks: local maxima well above the frame's level, 100 Hz–4 kHz.
         let pmax = p[lo..(4000.0 / bin_hz) as usize].iter().cloned().fold(0.0, f64::max);
         let peaks: Vec<usize> = (lo.max(1)..(4000.0 / bin_hz) as usize).filter(|&k| p[k] > p[k - 1] && p[k] >= p[k + 1] && p[k] > pmax * 0.05).collect();
-        let f0 = if db(rms * rms) > -50.0 { pitch(f, &fft2) } else { None };
+        // A voice's harmonics carry most of its voiced energy below 1 kHz;
+        // a cricket's 4-5 kHz tone, a hiss or a cymbal have no pitch here.
+        let voice_band = p.iter().enumerate().filter(|(k, _)| (80.0..1000.0).contains(&(*k as f64 * bin_hz))).map(|(_, v)| v).sum::<f64>();
+        let f0 = if db(rms * rms) > -50.0 && voice_band > 0.05 * p.iter().sum::<f64>() { pitch(f, &fft2) } else { None };
         let sub_db = db((p[1] + p[2]) / FRAME as f64);
         out.push(Feat { rms_db: db(rms * rms), bands, sub_db, flatness, centroid, flux, f0, peaks });
         prev = Some(mag);
@@ -126,27 +129,59 @@ fn frames(x: &[f32]) -> Vec<Feat> {
 }
 
 /// Autocorrelation pitch (70–400 Hz) through a zero-padded FFT, `None`
-/// when not voiced (the normalised peak under 0.6).
+/// when not voiced: the normalised cross-correlation at the best lag (each
+/// lag against the energy of the two stretches it compares, so long lags
+/// are not favoured) under 0.6.
 fn pitch(f: &[f32], fft: &Fft) -> Option<f64> {
     let (lo, hi) = ((RATE / 400) as usize, (RATE / 70) as usize);
     let n = f.len();
     let mean = f.iter().sum::<f32>() / n as f32;
-    let x: Vec<f32> = f.iter().map(|v| v - mean).collect();
+    let raw: Vec<f32> = f.iter().map(|v| v - mean).collect();
+    // The voice band alone (60 Hz - 1 kHz): a bright bed (crickets, hiss)
+    // over a voice neither hides its pitch nor lends it one.
+    let (mut re, mut im) = fft.rfft(&raw);
+    let bin = RATE as f64 / (2 * n) as f64;
+    for k in 0..re.len() {
+        let hz = k as f64 * bin;
+        if !(60.0..=1000.0).contains(&hz) {
+            re[k] = 0.0;
+            im[k] = 0.0;
+        }
+    }
+    let x: Vec<f32> = fft.irfft(&re, &im)[..n].to_vec();
     let (re, im) = fft.rfft(&x);
     let pw: Vec<f32> = re.iter().zip(&im).map(|(a, b)| a * a + b * b).collect();
     let r = fft.irfft(&pw, &vec![0.0; pw.len()]);
     if r[0] <= 1e-9 {
         return None;
     }
-    // Unbiased: each lag summed over n − lag pairs.
+    // Energy of the first n − lag and the last n − lag samples.
+    let mut pre = vec![0f64; n + 1];
+    for (i, v) in x.iter().enumerate() {
+        pre[i + 1] = pre[i] + (*v as f64) * (*v as f64);
+    }
+    let nccf = |lag: usize| -> f32 {
+        let (e0, e1) = (pre[n - lag], pre[n] - pre[lag]);
+        if e0 * e1 > 1e-18 { (r[lag] as f64 / (e0 * e1).sqrt()) as f32 } else { 0.0 }
+    };
+    let top = hi.min(n - 2);
     let mut best = (0.0f32, 0usize);
-    for lag in lo..=hi.min(n - 1) {
-        let v = r[lag] / r[0] * n as f32 / (n - lag) as f32;
+    for lag in lo..=top {
+        let v = nccf(lag);
         if v > best.0 {
             best = (v, lag);
         }
     }
-    (best.0 > 0.6).then(|| RATE as f64 / best.1 as f64)
+    if best.0 <= 0.6 {
+        return None;
+    }
+    // The peak between lags, by a parabola through its neighbours, so the
+    // pitch moves smoothly rather than in whole-sample steps.
+    let l = best.1;
+    let (a, b, c) = (nccf(l - 1) as f64, best.0 as f64, nccf(l + 1) as f64);
+    let d = a - 2.0 * b + c;
+    let shift = if l > lo && l < top && d.abs() > 1e-9 { (0.5 * (a - c) / d).clamp(-0.5, 0.5) } else { 0.0 };
+    Some(RATE as f64 / (l as f64 + shift))
 }
 
 /// Rate the hum search works at: harmonics up to 360 Hz need no more.
@@ -326,7 +361,9 @@ pub fn analyse(mono: &[f32], rate: u32) -> Heard {
             labels.push("silence");
             continue;
         }
-        let wf = window_feats(win, &env[((a + b) / 2).saturating_sub(ctx / 2).min(env.len().saturating_sub(ctx))..][..ctx.min(env.len())], loud);
+        let c0 = ((a + b) / 2).saturating_sub(ctx / 2).min(env.len().saturating_sub(ctx));
+        let c1 = (c0 + ctx).min(env.len());
+        let wf = window_feats(win, &env[c0..c1], &fs[c0..c1], loud);
         let label = classify(&wf);
         labels.push(label);
     }
@@ -434,9 +471,11 @@ struct WinFeat {
     /// How far the energy below 150 Hz outweighs the rest (dB): a hum or a
     /// rumble alone.
     lowness: f64,
+    /// The pitch only climbs (or only falls): a sweep, not a voice.
+    sweep: bool,
 }
 
-fn window_feats(win: &[Feat], env: &[f64], loud: f64) -> WinFeat {
+fn window_feats(win: &[Feat], env: &[f64], around: &[Feat], loud: f64) -> WinFeat {
     let sounding: Vec<&Feat> = win.iter().filter(|f| f.rms_db > loud - 30.0).collect();
     let n = sounding.len().max(1) as f64;
     let voiced = sounding.iter().filter(|f| f.f0.is_some()).count() as f64 / n;
@@ -453,15 +492,23 @@ fn window_feats(win: &[Feat], env: &[f64], loud: f64) -> WinFeat {
             }
         }
     }
-    let lin: Vec<f64> = win.iter().map(|f| 10f64.powf(f.rms_db / 10.0)).collect();
+    // Gaps between words, in the band words live in (150 Hz - 4 kHz), so a
+    // bright bed (crickets, hiss) or a rumble does not fill them.
+    let lin: Vec<f64> = win.iter().map(|f| (1..=4).map(|b| 10f64.powf(f.bands[b] / 10.0)).sum::<f64>()).collect();
     let mean = lin.iter().sum::<f64>() / lin.len().max(1) as f64;
     let low_energy = lin.iter().filter(|&&v| v < mean * 0.25).count() as f64 / lin.len().max(1) as f64;
     let mut jumps: Vec<f64> = win.windows(2).filter_map(|p| Some((12.0 * (p[1].f0? / p[0].f0?).log2()).abs())).collect();
     jumps.sort_by(f64::total_cmp);
     let glide = jumps.get(jumps.len() / 2).copied().unwrap_or(0.0);
+    // A sweep: over the two seconds around, the pitch only climbs (or only
+    // falls) and covers a third or more (a riser, a siren's rise). A voice's
+    // pitch goes up and down from phrase to phrase.
+    let signed: Vec<f64> = around.windows(2).filter_map(|p| Some(12.0 * (p[1].f0? / p[0].f0?).log2())).filter(|j| j.abs() < 3.0).collect();
+    let (up, down) = (signed.iter().filter(|j| **j > 0.02).map(|j| j.abs()).sum::<f64>(), signed.iter().filter(|j| **j < -0.02).map(|j| j.abs()).sum::<f64>());
+    let sweep = signed.len() >= 20 && up.max(down) >= 4.0 && up.min(down) <= 0.15 * up.max(down);
     let band = |k: usize| db(sounding.iter().map(|f| 10f64.powf(f.bands[k] / 10.0)).sum::<f64>() / n);
     let lowness = band(0) - (1..6).map(band).fold(f64::NEG_INFINITY, f64::max);
-    WinFeat { voiced, flatness, flux, flux_sd, persistence: kept as f64 / total.max(1) as f64, low_energy, m4: modulation(env, 3.0, 8.0), glide, lowness }
+    WinFeat { voiced, flatness, flux, flux_sd, persistence: kept as f64 / total.max(1) as f64, low_energy, m4: modulation(env, 3.0, 8.0), glide, lowness, sweep }
 }
 
 /// A label for half a second. Speech: voiced with gaps, pitch that moves,
@@ -475,7 +522,7 @@ fn classify(f: &WinFeat) -> &'static str {
         return if f.flux_sd > 0.12 || f.low_energy > 0.25 { "applause" } else { "noise" };
     }
     // A voice: pitched, and the pitch moves (held synth notes do not).
-    let talking = f.voiced > 0.3 && f.glide >= 0.08 && f.glide < 3.0;
+    let talking = f.voiced > 0.3 && f.glide >= 0.08 && f.glide < 3.0 && !f.sweep;
     // Gaps between words: the level falls between syllables. Over music
     // the floor stays up.
     let gaps = f.low_energy > 0.15;
@@ -483,7 +530,8 @@ fn classify(f: &WinFeat) -> &'static str {
         return "speech";
     }
     if talking {
-        return if f.m4 > 0.3 || f.persistence < 0.75 { "speech over music" } else { "music" };
+        // Over music a voice still has syllables: the 3-8 Hz movement.
+        return if f.m4 > 0.3 { "speech over music" } else { "music" };
     }
     if f.voiced < 0.1 && f.flux < 0.08 && f.low_energy < 0.05 {
         // Pitchless but steady: a drone, a pad, room tone.
@@ -831,6 +879,71 @@ mod tests {
         let buzz50 = |t: f64| (1..8).step_by(2).map(|k| 0.01 / k as f64 * (2.0 * std::f64::consts::PI * 50.0 * k as f64 * t).sin()).sum::<f64>();
         let music: Vec<f32> = bass_line(10.0).iter().enumerate().map(|(i, v)| v + buzz50(i as f64 / R as f64) as f32).collect();
         assert_eq!(analyse(&music, R).hum.map(|h| h.0), Some(50.0), "{:?}", analyse(&music, R).hum);
+    }
+
+    /// Crickets: 4-5 kHz tone pulses, three to a chirp, a chirp every half
+    /// second or so, three insects out of step (as the ambience makes them).
+    fn crickets(secs: f64) -> Vec<f32> {
+        let n = (secs * R as f64) as usize;
+        let mut x = vec![0f32; n];
+        for (c, (hz, every)) in [(4400.0, 0.47), (4750.0, 0.61), (5000.0, 0.83)].iter().enumerate() {
+            let mut t = 0.05 * c as f64;
+            while t < secs {
+                for k in 0..3 {
+                    let s = ((t + k as f64 * 0.03) * R as f64) as usize;
+                    for i in 0..(0.018 * R as f64) as usize {
+                        if s + i < n {
+                            let u = i as f64 / (0.018 * R as f64);
+                            x[s + i] += (0.2 * (std::f64::consts::PI * u).sin().powf(1.5) * (2.0 * std::f64::consts::PI * hz * i as f64 / R as f64).sin()) as f32;
+                        }
+                    }
+                }
+                t += every;
+            }
+        }
+        x
+    }
+
+    /// A synth riser: noise swept up through a band-pass with a tone
+    /// climbing three octaves under it, growing to the drop.
+    fn riser(secs: f64) -> Vec<f32> {
+        let n = (secs * R as f64) as usize;
+        let mut seed = 5u64;
+        let (mut lo, mut band) = (0f64, 0f64);
+        let mut ph = 0f64;
+        (0..n)
+            .map(|i| {
+                let p = i as f64 / n as f64;
+                let hz = 250.0 * 24f64.powf(p);
+                let fc = (2.0 * (std::f64::consts::PI * hz.min(R as f64 * 0.2) / R as f64).sin()).min(1.0);
+                let hi = noise(&mut seed) as f64 - lo - 0.5 * band;
+                band += fc * hi;
+                lo += fc * band;
+                ph += 110.0 * 8f64.powf(p) / R as f64;
+                let tone: f64 = (1..6).map(|k| (2.0 * std::f64::consts::PI * k as f64 * ph).sin() / k as f64).sum();
+                ((band + 0.3 * tone) * p * p * 0.3) as f32
+            })
+            .collect()
+    }
+
+    fn talk_share(h: &Heard) -> f64 {
+        share(h, "speech") + share(h, "speech over music")
+    }
+
+    /// Crickets and a riser are not a voice: crickets have no pitch in
+    /// the voice's range, and a riser's pitch only ever climbs.
+    #[test]
+    fn crickets_and_risers_are_not_speech() {
+        let c = analyse(&crickets(8.0), R);
+        assert!(talk_share(&c) < 0.1, "crickets: {:?}", c.shares);
+        assert!(c.voice_pitch.is_none(), "crickets: {:?}", c.voice_pitch);
+        for secs in [2.4, 6.0] {
+            let r = analyse(&riser(secs), R);
+            assert!(talk_share(&r) < 0.1, "riser {secs} s: {:?}", r.shares);
+        }
+        // And a voice over the crickets is still a voice.
+        let v: Vec<f32> = speechy(8.0).iter().zip(crickets(8.0)).map(|(a, b)| a + 0.3 * b).collect();
+        assert!(talk_share(&analyse(&v, R)) > 0.6, "{:?}", analyse(&v, R).shares);
     }
 
     #[test]

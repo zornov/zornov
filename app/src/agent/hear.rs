@@ -315,6 +315,36 @@ mod listen_tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// A film with only music, a riser and a night of crickets has no
+    /// speech for QC to want captions for; a voice over it does.
+    #[test]
+    fn music_risers_and_crickets_are_not_speech_to_qc() {
+        let dir = std::env::temp_dir().join(format!("studio-hear-qc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mono = |(l, r): (Vec<f32>, Vec<f32>)| -> Vec<f32> { l.iter().zip(&r).map(|(a, b)| 0.5 * (a + b)).collect() };
+        let rate = crate::agent::synth::RATE;
+        let riser = dir.join("riser.wav");
+        wav(&riser, rate, &mono(crate::agent::synth::make("riser", 3.0, 1).unwrap()));
+        let night = dir.join("night.wav");
+        wav(&night, rate, &mono(crate::agent::synth::ambience("crickets", 10.0, 2).unwrap()));
+        let bed = music(&dir);
+        let mut s = Session::new(services::project::new_custom("QC", 640, 360, 30.0));
+        let v = text(s.call("import", &json!({"paths": [bed.to_string_lossy(), riser.to_string_lossy(), night.to_string_lossy()]})).unwrap());
+        let ids: Vec<u64> = v["media"].as_array().unwrap().iter().map(|m| m.as_u64().unwrap()).collect();
+        s.edit(&[json!({"op": "place", "media": ids[0], "at": 0}), json!({"op": "place", "media": ids[1], "at": 9}), json!({"op": "place", "media": ids[2], "at": 12})], "place", false).unwrap();
+        let end = s.doc.project.duration();
+        let heard: f64 = crate::deliver_run::speech_spans(&s.doc, 0, end).iter().map(|(a, b)| b - a).sum();
+        assert!(heard < 1.0, "{heard:.1} s of speech in a film of music, a riser and crickets");
+        if let Some(talk) = speech(&dir) {
+            let v = text(s.call("import", &json!({"paths": [talk.to_string_lossy()]})).unwrap());
+            s.edit(&[json!({"op": "place", "media": v["media"][0], "at": 2})], "talk", false).unwrap();
+            let end = s.doc.project.duration();
+            let said: f64 = crate::deliver_run::speech_spans(&s.doc, 0, end).iter().map(|(a, b)| b - a).sum();
+            assert!(said > 4.0, "a voice over it: {said:.1} s of speech");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn listen_hears_speech_and_the_mix_balance() {
         let dir = std::env::temp_dir().join(format!("studio-hear-{}", std::process::id()));

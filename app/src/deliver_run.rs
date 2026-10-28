@@ -431,11 +431,57 @@ pub fn caption_cues(doc: &Doc) -> Vec<(f64, f64, String)> {
     v
 }
 
-/// Seconds of speech in the project's mix, and the spans.
+/// Seconds of speech in the project's mix, and the spans (seconds from
+/// `a`). Each clip is heard on its own, as it plays: speech is where the
+/// voice detector opens on a clip (10 ms edges) and the ear hears a voice
+/// in it (speech, or speech over music, by the half second). The detector
+/// alone follows level and opens on any music, riser or cricket that
+/// moves; the ear on the whole mix loses a voice under loud music.
 pub fn speech_spans(doc: &Doc, a: i64, b: i64) -> Vec<(f64, f64)> {
-    let pcm = crate::sound_bridge::mix_for_export(&doc.model, a, b);
-    let mono: Vec<f32> = pcm.chunks_exact(2).map(|f| 0.5 * (f[0] + f[1])).collect();
-    studio_sound::vad::speech_segments(&mono, crate::sound_bridge::RATE, studio_sound::vad::VadParams::default()).into_iter().map(|(s, e)| (s as f64 / US, e as f64 / US)).collect()
+    let rate = crate::sound_bridge::RATE;
+    let mut model = doc.model.clone();
+    let muted: std::collections::HashMap<u64, bool> = model.sequences.iter().flat_map(|s| s.clips.iter()).map(|c| (c.id.0, c.audio.muted)).collect();
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for c in doc.project.clips.iter().filter(|c| c.media.is_some() && c.start < b && c.start + c.dur > a) {
+        if doc.project.media(c.media.unwrap_or_default()).is_some_and(|m| matches!(m.kind, crate::view::MediaKind::Image)) {
+            continue;
+        }
+        let (t0, t1) = (c.start.max(a), (c.start + c.dur).min(b));
+        for s in &mut model.sequences {
+            for mc in &mut s.clips {
+                mc.audio.muted = if mc.id.0 as u32 == c.id { muted.get(&mc.id.0).copied().unwrap_or(false) } else { true };
+            }
+        }
+        let pcm = crate::sound_bridge::mix_for_export(&model, t0, t1);
+        let mono: Vec<f32> = pcm.chunks_exact(2).map(|f| 0.5 * (f[0] + f[1])).collect();
+        if mono.iter().all(|v| v.abs() < 1e-6) {
+            continue;
+        }
+        let open = studio_sound::vad::speech_segments(&mono, rate, studio_sound::vad::VadParams::default());
+        if open.is_empty() {
+            continue;
+        }
+        let heard = studio_ai::features::hearing::analyse(&mono, rate);
+        let off = (t0 - a) as f64 / US;
+        for (s0, e0) in open {
+            for v in heard.segments.iter().filter(|s| s.label.starts_with("speech")) {
+                let (s, e) = ((s0 as f64 / US).max(v.from), (e0 as f64 / US).min(v.to));
+                if e > s {
+                    out.push((off + s, off + e));
+                }
+            }
+        }
+    }
+    // Two voices at once are one stretch of speech.
+    out.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (s, e) in out {
+        match merged.last_mut() {
+            Some(m) if s <= m.1 => m.1 = m.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+    merged
 }
 
 pub fn qc_extra(doc: &Doc, range: (i64, i64)) -> filecheck::Extra {
