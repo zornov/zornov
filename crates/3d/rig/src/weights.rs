@@ -228,34 +228,99 @@ impl Weights {
 /// `falloff` the distance over which two bones blend. Points the graph
 /// cannot reach from any bone go to the nearest bone in a straight line.
 pub fn auto<const N: usize>(g: &Graph, pos: &[P<N>], bones: &[(P<N>, P<N>)], falloff: f64) -> Weights {
+    from_distances(&bone_distances(g, pos, bones, f64::INFINITY), falloff, 0.0)
+}
+
+/// For each bone (`(head, tail)`), every point's distance from it through
+/// the shape: seeded where the surface comes nearest the bone (at the
+/// straight distance there), then along the graph's edges, stopping past
+/// `reach` (`f64::INFINITY`: everywhere). A point cut off from a bone, or
+/// past the reach, is far: four times its straight distance plus 10⁶, so
+/// among bones all cut off the nearest in a straight line still wins.
+/// Bones are worked out in parallel.
+pub fn bone_distances<const N: usize>(g: &Graph, pos: &[P<N>], bones: &[(P<N>, P<N>)], reach: f64) -> Vec<Vec<f64>> {
     let n = pos.len().min(g.len());
-    let mut out = Weights::new(n, bones.len());
     if n == 0 || bones.is_empty() {
-        return out;
+        return vec![Vec::new(); bones.len()];
     }
     // A typical edge: points within it of a bone sit on the bone.
     let mut lens: Vec<f64> = g.edges.iter().flat_map(|e| e.iter().map(|x| x.1)).collect();
     lens.sort_by(f64::total_cmp);
     let edge = lens.get(lens.len() / 2).copied().unwrap_or(1.0).max(1e-9);
-    let fields: Vec<Vec<f64>> = bones
-        .iter()
-        .map(|&(a, b)| {
-            let straight: Vec<f64> = pos.iter().take(n).map(|&p| to_segment(p, a, b)).collect();
-            let near = straight.iter().copied().fold(f64::INFINITY, f64::min);
-            let seeds: Vec<(usize, f64)> = straight.iter().enumerate().filter(|(_, d)| **d <= near + edge * 1.5).map(|(i, d)| (i, *d)).collect();
-            let mut d = geodesic(g, &seeds);
-            for (x, s) in d.iter_mut().zip(&straight) {
-                if !x.is_finite() {
-                    // Cut off from this bone: far, by the straight line.
-                    *x = s * 4.0 + 1e6;
-                }
+    let one = |&(a, b): &(P<N>, P<N>)| -> Vec<f64> {
+        let straight: Vec<f64> = pos.iter().take(n).map(|&p| to_segment(p, a, b)).collect();
+        let near = straight.iter().copied().fold(f64::INFINITY, f64::min);
+        let seeds: Vec<(usize, f64)> = straight.iter().enumerate().filter(|(_, d)| **d <= near + edge * 1.5).map(|(i, d)| (i, *d)).collect();
+        let mut d = geodesic_within(g, &seeds, reach);
+        d.truncate(n);
+        for (x, s) in d.iter_mut().zip(&straight) {
+            if !x.is_finite() {
+                *x = s * 4.0 + 1e6;
             }
-            d
-        })
-        .collect();
-    let sigma = falloff.max(1e-9);
+        }
+        d
+    };
+    let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16).min(bones.len());
+    let mut out: Vec<Vec<f64>> = vec![Vec::new(); bones.len()];
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let slots: Vec<std::sync::Mutex<&mut Vec<f64>>> = out.iter_mut().map(std::sync::Mutex::new).collect();
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                loop {
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if k >= bones.len() {
+                        break;
+                    }
+                    let d = one(&bones[k]);
+                    **slots[k].lock().unwrap_or_else(|e| e.into_inner()) = d;
+                }
+            });
+        }
+    });
+    out
+}
+
+/// [`geodesic`], stopping once the distance passes `reach` (points beyond
+/// stay infinite).
+pub fn geodesic_within(g: &Graph, seeds: &[(usize, f64)], reach: f64) -> Vec<f64> {
+    let mut d = vec![f64::INFINITY; g.len()];
+    let mut heap = BinaryHeap::new();
+    for &(n, d0) in seeds {
+        if n < d.len() && d0 < d[n] {
+            d[n] = d0;
+            heap.push(Item(d0, n));
+        }
+    }
+    while let Some(Item(dn, n)) = heap.pop() {
+        if dn > d[n] || dn > reach {
+            continue;
+        }
+        for &(m, w) in &g.edges[n] {
+            let nd = dn + w;
+            if nd < d[m] && nd <= reach {
+                d[m] = nd;
+                heap.push(Item(nd, m));
+            }
+        }
+    }
+    d
+}
+
+/// Weights from each bone's distances (`fields[bone][point]`, as
+/// [`bone_distances`] gives them): a point's bone weighs
+/// `exp(-((d - nearest) / σ)²)` with `σ = falloff + relative × nearest`,
+/// so a joint deep in a thick torso blends over a wide band and a finger
+/// next to its neighbour over a narrow one. Rows sum to one.
+pub fn from_distances(fields: &[Vec<f64>], falloff: f64, relative: f64) -> Weights {
+    let n = fields.iter().map(Vec::len).min().unwrap_or(0);
+    let mut out = Weights::new(n, fields.len());
     for i in 0..n {
         let near = fields.iter().map(|f| f[i]).fold(f64::INFINITY, f64::min);
+        // A point far from every bone measures by its straight distance
+        // (see `bone_distances`), not the offset that marks it far.
+        let base = if near >= 1e6 { (near - 1e6) / 4.0 } else { near };
+        let sigma = (falloff + relative * base.max(0.0)).max(1e-9);
         let r = out.row_mut(i);
         for (b, f) in fields.iter().enumerate() {
             r[b] = (-((f[i] - near) / sigma).powi(2)).exp() as f32;

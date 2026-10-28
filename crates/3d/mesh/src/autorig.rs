@@ -13,11 +13,12 @@
 //! - [`quadruped`]: four legs, a spine, a neck, a head and a tail for an
 //!   animal standing on all fours along any line on the ground (its long
 //!   axis found from the shape, the head at the end that has one).
-//! - [`bind`]: skin weights. Each vertex goes to the bones it can see
-//!   (a straight line inside the body reaches them, so an arm does not
-//!   pull the side of the chest it rests against), nearer bones weighing
-//!   more; then the weights are smoothed over the surface so joints bend
-//!   softly, and each vertex keeps its four strongest bones.
+//! - [`bind`]: skin weights by distance through the surface (geodesic,
+//!   so an arm does not pull the side of the chest it rests against),
+//!   nearer bones weighing more, blended wider where bones lie deep;
+//!   then smoothed over the surface so joints bend softly, and each
+//!   vertex keeps its four strongest bones. [`audit_weights`] counts the
+//!   faults a bad skin shows (far, cross-side and unjoined influences).
 
 use crate::bvh::Bvh;
 use crate::rig::{Bone, Constraint, Rig, Target};
@@ -375,7 +376,11 @@ pub fn body_frame(mesh: &Mesh, forward: Option<V3>) -> BodyFrame {
         let mut d = [th.cos() as f32, 0.0, th.sin() as f32];
         // A fixed sign: the long axis points to +x (or +z when it runs
         // along z), so the default head end is the low end.
-        if d[0].abs() >= d[2].abs() { if d[0] < 0.0 { d = scale(d, -1.0) } } else if d[2] < 0.0 {
+        if d[0].abs() >= d[2].abs() {
+            if d[0] < 0.0 {
+                d = scale(d, -1.0)
+            }
+        } else if d[2] < 0.0 {
             d = scale(d, -1.0);
         }
         d
@@ -482,9 +487,291 @@ pub fn quadruped_facing(mesh: &Mesh, forward: Option<V3>) -> Rig {
 }
 
 /// Binds the skin: works out every vertex's weights from the rig's
-/// deforming bones (see the module notes). Leaves a rig with no bones
-/// alone.
+/// deforming bones by distance *through the solid model* (voxel geodesic,
+/// [`crate::solid`]: the way from a bone to a vertex runs inside the
+/// body), so an arm resting on the chest, a leg against the belly or the
+/// two sides of a crotch do not pull each other, while a bone deep in a
+/// torso still reaches all round it. A bone weighs
+/// `exp(-((d - nearest) / σ)²)` with σ a fifth of a percent of the model's
+/// size plus 12 % of the nearest bone's distance (so blends scale with
+/// depth: wider in a torso, narrow between fingers, and two parallel limbs
+/// do not share the skin between them). A vertex keeps only bones within
+/// three joints of each other in the armature (strongest first), so the
+/// skin between two parts that move apart is not dragged by both; the
+/// weights are then smoothed over the surface and each vertex keeps its
+/// four strongest bones. Pieces of the model not joined to any bone's surface
+/// go to the nearest bone in a straight line. Leaves a rig with no bones
+/// alone. [`bind_by_sight`] is the older way (straight lines that the body
+/// does not block), kept to compare against.
 pub fn bind(mesh: &Mesh, rig: &mut Rig) {
+    let deform: Vec<usize> = (0..rig.bones.len()).filter(|&i| rig.bones[i].deform).collect();
+    if deform.is_empty() || mesh.positions.is_empty() {
+        rig.joints.clear();
+        rig.weights.clear();
+        return;
+    }
+    use studio_rig::weights as sw;
+    let (ids, unique) = mesh.position_ids();
+    let pos: Vec<[f64; 3]> = unique.iter().map(|p| p.map(f64::from)).collect();
+    let tris: Vec<[u32; 3]> = (0..mesh.triangles()).map(|t| mesh.tri(t).map(|v| ids[v])).collect();
+    let graph = sw::Graph::from_triangles(&pos, &tris);
+    let (lo, hi) = mesh.bounds();
+    let size = length(sub(hi, lo)).max(1.0);
+    // Distances through the solid model, bone by bone in parallel.
+    let solid = crate::solid::Solid::of(mesh, 80);
+    let reach = size * 0.6;
+    let fields: Vec<Vec<f64>> = {
+        let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16).min(deform.len());
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let mut out: Vec<Vec<f64>> = vec![Vec::new(); deform.len()];
+        let slots: Vec<std::sync::Mutex<&mut Vec<f64>>> = out.iter_mut().map(std::sync::Mutex::new).collect();
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(|| {
+                    loop {
+                        let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if k >= deform.len() {
+                            break;
+                        }
+                        let b = &rig.bones[deform[k]];
+                        let d = solid.distances_from_segment(b.head, b.tail, reach);
+                        let f: Vec<f64> = unique
+                            .iter()
+                            .map(|&p| {
+                                let x = solid.read(&d, p);
+                                // Cut off from this bone: far, by the straight line.
+                                if x.is_finite() { f64::from(x) } else { f64::from(length(sub(p, closest_on_segment(b.head, b.tail, p)))) * 4.0 + 1e6 }
+                            })
+                            .collect();
+                        **slots[k].lock().unwrap_or_else(|e| e.into_inner()) = f;
+                    }
+                });
+            }
+        });
+        out
+    };
+    let mut w = sw::from_distances(&fields, f64::from(size) * 0.002, 0.12);
+    // A vertex rides on bones near each other in the armature: walking
+    // from the strongest down, a bone more than three joints from one
+    // already kept is dropped (it would drag the skin between two parts
+    // that do not move together: a flank between a front and a back leg).
+    {
+        let hops = joint_hops(rig);
+        for i in 0..w.nodes() {
+            let r = w.row_mut(i);
+            let mut order: Vec<usize> = (0..r.len()).filter(|&b| r[b] > 0.0).collect();
+            order.sort_by(|&a, &b| r[b].total_cmp(&r[a]));
+            let mut kept: Vec<usize> = Vec::new();
+            for b in order {
+                if kept.iter().all(|&k| hops(deform[k], deform[b]) <= 3) {
+                    kept.push(b);
+                } else {
+                    r[b] = 0.0;
+                }
+            }
+        }
+    }
+    w.normalise();
+    sw::smooth(&graph, &mut w, 6, 0.5, &[]);
+    w.limit(4, 0.01);
+    rig.joints = Vec::with_capacity(mesh.positions.len());
+    rig.weights = Vec::with_capacity(mesh.positions.len());
+    for &id in &ids {
+        let (j, x) = w.top4(id as usize);
+        rig.joints.push(j.map(|k| deform[(k as usize).min(deform.len() - 1)] as u16));
+        rig.weights.push(x);
+    }
+}
+
+/// Joints between two bones of `rig` along the armature (`usize::MAX`
+/// for bones in separate trees).
+fn joint_hops(rig: &Rig) -> impl Fn(usize, usize) -> usize + '_ {
+    let depth: Vec<usize> = (0..rig.bones.len()).map(|i| std::iter::successors(rig.bones[i].parent, |&p| rig.bones[p].parent).count()).collect();
+    move |a: usize, b: usize| {
+        let (mut x, mut y, mut steps) = (a, b, 0);
+        while x != y {
+            let up = if depth[x] >= depth[y] { &mut x } else { &mut y };
+            match rig.bones[*up].parent {
+                Some(p) => *up = p,
+                None => return usize::MAX,
+            }
+            steps += 1;
+        }
+        steps
+    }
+}
+
+/// What is wrong with a skin's weights, counted over the model's welded
+/// vertices (a vertex counts once per kind of fault).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WeightAudit {
+    pub vertices: usize,
+    /// Pulled (weight over 5 %) by a bone much further than its nearest:
+    /// more than a tenth of the rig's size beyond it.
+    pub far: usize,
+    /// Pulled (over 5 %) by a left bone while on the right of the middle,
+    /// or the other way round (the middle found from the rig's paired
+    /// bones; vertices within a quarter of the gap between twin bones of
+    /// it are let off).
+    pub cross_side: usize,
+    /// Carried (over 10 % each) by two bones more than three joints apart
+    /// in the armature (a flank vertex on a front and a back leg; the base
+    /// of the neck on the head and a shoulder is allowed, and so is a
+    /// left and a right bone sharing the middle line, a crotch's seam).
+    pub non_adjacent: usize,
+    /// Edges of the surface across which the weights jump (the two ends'
+    /// weights differ by more than 0.7 summed over the bones): where the
+    /// skin tears open when the joint bends.
+    pub tears: usize,
+    /// The bone pairs behind the most faults, worst first (at most five):
+    /// the bone that pulls and the bone that should have the vertex (or
+    /// the two unjoined bones), and how many vertices.
+    pub worst: Vec<(String, String, usize)>,
+}
+
+impl WeightAudit {
+    pub fn total(&self) -> usize {
+        self.far + self.cross_side + self.non_adjacent + self.tears
+    }
+
+    /// In words, for a check note; `None` when clean.
+    pub fn describe(&self) -> Option<String> {
+        if self.total() == 0 {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if self.far > 0 {
+            parts.push(format!("{} pulled by a far bone", self.far));
+        }
+        if self.cross_side > 0 {
+            parts.push(format!("{} pulled by a bone of the other side", self.cross_side));
+        }
+        if self.non_adjacent > 0 {
+            parts.push(format!("{} shared by bones not joined to each other", self.non_adjacent));
+        }
+        if self.tears > 0 {
+            parts.push(format!("{} edges where the weights jump (the skin tears when it bends)", self.tears));
+        }
+        let worst: Vec<String> = self.worst.iter().take(3).map(|(a, b, n)| format!("{a} with {b} ({n})")).collect();
+        Some(format!("{} faults over {} vertices: {}{}", self.total(), self.vertices, parts.join(", "), if worst.is_empty() { String::new() } else { format!("; worst: {}", worst.join(", ")) }))
+    }
+}
+
+/// Audits `mesh`'s skin under `rig`: see [`WeightAudit`]. A rig without
+/// weights audits clean.
+pub fn audit_weights(mesh: &Mesh, rig: &Rig) -> WeightAudit {
+    let nb = rig.bones.len();
+    if nb == 0 || rig.weights.len() != mesh.positions.len() || rig.joints.len() != mesh.positions.len() {
+        return WeightAudit::default();
+    }
+    let (ids, unique) = mesh.position_ids();
+    // The rig's size, and its middle and across from paired bones.
+    let (mut blo, mut bhi) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for b in &rig.bones {
+        for p in [b.head, b.tail] {
+            for i in 0..3 {
+                blo[i] = blo[i].min(p[i]);
+                bhi[i] = bhi[i].max(p[i]);
+            }
+        }
+    }
+    let size = length(sub(bhi, blo)).max(1.0);
+    use studio_rig::names::{Side, side};
+    let sides: Vec<Option<Side>> = rig.bones.iter().map(|b| side(&b.name).filter(|s| matches!(s, Side::Left | Side::Right))).collect();
+    let (mut across, mut mid, mut gap, mut pairs) = ([0f32; 3], [0f32; 3], 0f32, 0f32);
+    for (i, b) in rig.bones.iter().enumerate() {
+        if sides[i] != Some(Side::Left) {
+            continue;
+        }
+        if let Some(twin) = studio_rig::names::mirror(&b.name).and_then(|n| rig.bone(&n)) {
+            let d = sub(b.head, rig.bones[twin].head);
+            across = add(across, d);
+            mid = add(mid, scale(add(b.head, rig.bones[twin].head), 0.5));
+            gap += length(d);
+            pairs += 1.0;
+        }
+    }
+    let lateral = (pairs > 0.0 && length(across) > 1e-6).then(|| (normalise(across), scale(mid, 1.0 / pairs), gap / pairs));
+    let apart = joint_hops(rig);
+    let deform: Vec<usize> = (0..nb).filter(|&i| rig.bones[i].deform).collect();
+    let mut first: Vec<Option<usize>> = vec![None; unique.len()];
+    for (v, &id) in ids.iter().enumerate() {
+        first[id as usize].get_or_insert(v);
+    }
+    let mut out = WeightAudit { vertices: unique.len(), ..WeightAudit::default() };
+    let mut pairs: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
+    for (k, v) in first.iter().enumerate() {
+        let Some(v) = *v else { continue };
+        let p = unique[k];
+        let infl: Vec<(usize, f32)> = (0..4).filter(|&j| rig.weights[v][j] > 0.0 && (rig.joints[v][j] as usize) < nb).map(|j| (rig.joints[v][j] as usize, rig.weights[v][j])).collect();
+        let dist = |b: usize| length(sub(p, closest_on_segment(rig.bones[b].head, rig.bones[b].tail, p)));
+        let (nearest, near) = deform.iter().map(|&b| (b, dist(b))).fold((0, f32::INFINITY), |a, x| if x.1 < a.1 { x } else { a });
+        if let Some(&(b, _)) = infl.iter().find(|&&(b, w)| w > 0.05 && dist(b) > near + 0.1 * size) {
+            out.far += 1;
+            *pairs.entry((b, nearest)).or_default() += 1;
+        }
+        if let Some((ax, m, gap)) = lateral {
+            let s = dot(sub(p, m), ax);
+            let margin = 0.25 * gap;
+            if let Some(&(b, _)) = infl.iter().find(|&&(b, w)| {
+                w > 0.05
+                    && match sides[b] {
+                        Some(Side::Left) => s < -margin,
+                        Some(Side::Right) => s > margin,
+                        _ => false,
+                    }
+            }) {
+                out.cross_side += 1;
+                *pairs.entry((b, nearest)).or_default() += 1;
+            }
+        }
+        let strong: Vec<usize> = infl.iter().filter(|e| e.1 > 0.1).map(|e| e.0).collect();
+        // On the middle line (as the cross-side check lets it off) a left
+        // and a right bone may share a vertex: the seam of a crotch.
+        let on_middle = lateral.is_some_and(|(ax, m, gap)| dot(sub(p, m), ax).abs() <= 0.25 * gap);
+        let twins = |a: usize, b: usize| matches!((sides[a], sides[b]), (Some(Side::Left), Some(Side::Right)) | (Some(Side::Right), Some(Side::Left)));
+        if let Some((a, b)) = strong.iter().enumerate().find_map(|(i, &a)| strong[i + 1..].iter().find(|&&b| apart(a, b) > 3 && !(on_middle && twins(a, b))).map(|&b| (a.min(b), a.max(b)))) {
+            out.non_adjacent += 1;
+            *pairs.entry((a, b)).or_default() += 1;
+        }
+    }
+    // Jumps across edges.
+    let row = |v: usize| -> Vec<(usize, f32)> { (0..4).filter(|&j| rig.weights[v][j] > 0.0).map(|j| (rig.joints[v][j] as usize, rig.weights[v][j])).collect() };
+    let mut seen = std::collections::HashSet::new();
+    for t in 0..mesh.triangles() {
+        let c = mesh.tri(t);
+        for (a, b) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[0])] {
+            let (ia, ib) = (ids[a], ids[b]);
+            if ia == ib || !seen.insert((ia.min(ib), ia.max(ib))) {
+                continue;
+            }
+            let (ra, rb) = (row(a), row(b));
+            let mut diff = 0.0;
+            for &(bone, w) in &ra {
+                diff += (w - rb.iter().find(|e| e.0 == bone).map_or(0.0, |e| e.1)).abs();
+            }
+            for &(bone, w) in &rb {
+                if !ra.iter().any(|e| e.0 == bone) {
+                    diff += w;
+                }
+            }
+            if diff > 0.7 {
+                out.tears += 1;
+            }
+        }
+    }
+    let mut worst: Vec<((usize, usize), usize)> = pairs.into_iter().collect();
+    worst.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    out.worst = worst.into_iter().take(5).map(|((a, b), n)| (rig.bones[a].name.clone(), rig.bones[b].name.clone(), n)).collect();
+    out
+}
+
+/// The older bind: each vertex goes to the bones it can see (a straight
+/// line inside the body reaches them), nearer bones weighing more, then
+/// smoothed over the surface. Kept to compare [`bind`] against; it lets a
+/// limb pull a torso it can see across a gap, and cuts off sharply where
+/// the line of sight is lost.
+pub fn bind_by_sight(mesh: &Mesh, rig: &mut Rig) {
     let deform: Vec<usize> = (0..rig.bones.len()).filter(|&i| rig.bones[i].deform).collect();
     if deform.is_empty() || mesh.positions.is_empty() {
         rig.joints.clear();
@@ -715,6 +1002,84 @@ pub fn rig_mesh(mesh: &mut Mesh, template: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clay animal along z, head toward -z, y down: a torso, four legs
+    /// melted into it, a neck and head and a tail, from blended shapes as
+    /// the formula animals are.
+    fn clay_animal() -> Mesh {
+        use crate::sdf::{Part, Shape, build};
+        let cap = |a: V3, b: V3, r: f32, blend: f32| Part { a, b, blend, ..Part::new(Shape::Capsule, [0.0; 3], [r * 2.0; 3]) };
+        let mut parts = vec![Part::new(Shape::Ellipsoid, [0.0, 0.0, 0.0], [110.0, 90.0, 260.0])];
+        for (x, z) in [(-32.0f32, -80.0f32), (32.0, -80.0), (-32.0, 80.0), (32.0, 80.0)] {
+            parts.push(cap([x, 10.0, z], [x, 120.0, z], 16.0, 12.0));
+        }
+        parts.push(cap([0.0, -10.0, -110.0], [0.0, -60.0, -150.0], 22.0, 14.0));
+        parts.push(Part { blend: 10.0, ..Part::new(Shape::Ellipsoid, [0.0, -70.0, -170.0], [60.0, 55.0, 75.0]) });
+        parts.push(cap([0.0, -10.0, 125.0], [0.0, -40.0, 190.0], 8.0, 8.0));
+        build(&parts, vec![], 4.0)
+    }
+
+    #[test]
+    fn geodesic_weights_audit_cleaner_than_sight_on_a_clay_animal() {
+        let m = clay_animal();
+        let rig0 = quadruped(&m);
+        let mut by_sight = rig0.clone();
+        bind_by_sight(&m, &mut by_sight);
+        let mut geo = rig0.clone();
+        bind(&m, &mut geo);
+        let (a, b) = (audit_weights(&m, &by_sight), audit_weights(&m, &geo));
+        println!("worst by sight {:?}\nworst geodesic {:?}", a.worst, b.worst);
+        println!("clay animal, {} vertices: by sight {a:?}; geodesic {b:?}", a.vertices);
+        // The spine runs along z (the body's length) toward the head.
+        let hips = &geo.bones[geo.bone("hips").unwrap()];
+        let head = &geo.bones[geo.bone("head").unwrap()];
+        assert!(head.tail[2] < hips.head[2] - 150.0, "head toward -z: {:?} {:?}", hips.head, head.tail);
+        // Measured: sight far 160, cross 76, unjoined 80, tears 6 (322);
+        // through the solid far 4, cross 1, unjoined 181, tears 60 (246).
+        assert!(b.total() < a.total(), "geodesic {b:?} vs sight {a:?}");
+        assert!(b.far * 10 < a.far && b.cross_side * 10 < a.cross_side, "geodesic {b:?} vs sight {a:?}");
+        // Rows sum to one with at most four bones.
+        assert!(geo.weights.iter().all(|w| (w.iter().sum::<f32>() - 1.0).abs() < 1e-3));
+    }
+
+    #[test]
+    fn geodesic_weights_audit_cleaner_on_a_figure() {
+        let (m, _) = crate::character::mannequin(400.0, &crate::character::Build::default());
+        let rig0 = humanoid(&m, Arms::A);
+        let mut by_sight = rig0.clone();
+        bind_by_sight(&m, &mut by_sight);
+        let mut geo = rig0;
+        bind(&m, &mut geo);
+        let (a, b) = (audit_weights(&m, &by_sight), audit_weights(&m, &geo));
+        println!("worst by sight {:?}\nworst geodesic {:?}", a.worst, b.worst);
+        println!("figure, {} vertices: by sight {a:?}; geodesic {b:?}", a.vertices);
+        // Measured: sight tears 44 (arm and torso cut where the line of
+        // sight is lost), through the solid none; neither has far,
+        // cross-side or unjoined influences.
+        assert!(b.total() < a.total() && b.tears == 0, "geodesic {b:?} vs sight {a:?}");
+    }
+
+    #[test]
+    fn the_audit_catches_a_skin_pulled_across_the_body() {
+        let m = clay_animal();
+        let mut r = quadruped(&m);
+        bind(&m, &mut r);
+        let clean = audit_weights(&m, &r);
+        // Every vertex half on the left front leg: the right side is pulled
+        // across, the far end of the body by a far bone.
+        let leg = r.bone("leg_front.L.0").unwrap() as u16;
+        for (j, w) in r.joints.iter_mut().zip(r.weights.iter_mut()) {
+            j[1] = leg;
+            w[0] = 0.5;
+            w[1] = 0.5;
+            w[2] = 0.0;
+            w[3] = 0.0;
+        }
+        let bad = audit_weights(&m, &r);
+        println!("clean {clean:?}, pulled {bad:?}");
+        assert!(bad.cross_side > clean.cross_side + bad.vertices / 5 && bad.far > clean.far + bad.vertices / 5, "{bad:?}");
+        assert!(bad.describe().is_some_and(|d| d.contains("other side")));
+    }
     use crate::rig::PoseInput;
     use std::collections::HashMap;
 
