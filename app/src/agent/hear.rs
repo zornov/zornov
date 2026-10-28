@@ -286,6 +286,35 @@ mod listen_tests {
         v.iter().find_map(|c| if let Content::Text(t) = c { serde_json::from_str(t).ok() } else { None }).unwrap()
     }
 
+    /// `listen` on a clip hears the clip as it plays: its volume, its EQ
+    /// and its effects, not the file underneath. `from` / `to` are timeline
+    /// seconds, as the answer's times are.
+    #[test]
+    fn listen_to_a_clip_hears_its_volume_and_effects() {
+        let dir = std::env::temp_dir().join(format!("studio-hear-fx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bed = music(&dir);
+        let mut s = Session::new(services::project::new_custom("Hear", 640, 360, 30.0));
+        let v = text(s.call("import", &json!({"paths": [bed.to_string_lossy()]})).unwrap());
+        let media = v["media"][0].as_u64().unwrap();
+        let r = s.edit(&[json!({"op": "place", "media": media, "at": 2.0})], "place", false).unwrap();
+        let id = r["changed"]["added"][0]["id"].as_u64().unwrap();
+        let raw = s.listen(&json!({"clip": id})).unwrap();
+        // 20 dB down and the top cut away at 300 Hz.
+        s.edit(&[json!({"op": "set", "clip": id, "volume": -20})], "down", false).unwrap();
+        s.edit(&[json!({"op": "audio", "clip": id, "effect": "eq", "params": {"low_pass": 300}})], "dull", false).unwrap();
+        let done = s.listen(&json!({"clip": id})).unwrap();
+        let (a, b) = (raw["average_db"].as_f64().unwrap(), done["average_db"].as_f64().unwrap());
+        assert!(a - b > 20.0, "average {a} dB → {b} dB");
+        assert_eq!(done["brightness"], "dark, bass-heavy", "{done}");
+        assert!(done["listened_to"].as_str().unwrap().contains("as it plays"), "{done}");
+        // Timeline seconds: 4..6 s of the timeline is 2..4 s into the clip.
+        let part = s.listen(&json!({"clip": id, "from": 4.0, "to": 6.0})).unwrap();
+        assert!((part["duration"].as_f64().unwrap() - 2.0).abs() < 0.02, "{part}");
+        assert!(part["loudest_at"].as_f64().is_some_and(|t| (4.0..=6.0).contains(&t)), "{part}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn listen_hears_speech_and_the_mix_balance() {
         let dir = std::env::temp_dir().join(format!("studio-hear-{}", std::process::id()));

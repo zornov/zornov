@@ -183,38 +183,46 @@ impl Session {
             return self.listen_mix(a);
         }
         let p = self.doc.project.clone();
-        // A clip with no file of its own (merged clips, nested sequences):
-        // what it plays is the mix under it.
-        if let Some(c) = a.get("clip").and_then(super::craft::as_id).and_then(|id| p.clip(id as u32)) {
-            if c.media.is_none() {
-                // `from` / `to` are timeline seconds, kept inside the clip.
-                let sec = |v: f64| (v * SEC as f64) as view::Time;
-                let t0 = a.get("from").and_then(Value::as_f64).map_or(c.start, |v| sec(v).clamp(c.start, c.end()));
-                let t1 = a.get("to").and_then(Value::as_f64).map_or(c.end(), |v| sec(v).clamp(t0, c.end()));
-                if t1 <= t0 {
-                    return Err(format!("clip {} has nothing between {:.2}s and {:.2}s", c.id, t0 as f64 / SEC as f64, t1 as f64 / SEC as f64));
-                }
-                let pcm = crate::sound_bridge::mix_for_export(&self.doc.model, t0, t1);
-                let (l, r): (Vec<f32>, Vec<f32>) = pcm.chunks_exact(2).map(|q| (q[0], q[1])).unzip();
-                if l.iter().all(|v| v.abs() < 1e-6) {
-                    return Err(format!("clip {} makes no sound (nothing audible under it)", c.id));
-                }
-                let mono: Vec<f32> = l.iter().zip(&r).map(|(a, b)| 0.5 * (a + b)).collect();
-                let side: f64 = l.iter().zip(&r).map(|(a, b)| ((a - b) as f64).powi(2)).sum();
-                let mid: f64 = mono.iter().map(|&m| (m as f64).powi(2) * 4.0).sum();
-                let mut out = describe(&mono, crate::sound_bridge::RATE, Some((side / mid.max(1e-9)).sqrt()), t0 as f64 / SEC as f64, 1.0);
-                out["heard"] = super::hear::heard(&mono, crate::sound_bridge::RATE, &|t| t0 as f64 / SEC as f64 + t);
-                out["listened_to"] = json!(format!("clip {}: the mix it plays (times on the timeline)", c.id));
-                return Ok(out);
-            }
-        }
-        let (path, from, to, offset, pace, what) = if let Some(id) = a.get("clip").and_then(super::craft::as_id) {
+        // A clip is heard as it plays: rendered through the mixer on its
+        // own, with its volume, fades, speed and effects (and its lane's).
+        // A clip with no file of its own (merged clips, nested sequences)
+        // plays the mix under it. `from` / `to` are timeline seconds, kept
+        // inside the clip.
+        if let Some(id) = a.get("clip").and_then(super::craft::as_id) {
             let c = p.clip(id as u32).ok_or_else(|| format!("no clip {id}"))?;
-            let mi = c.media.and_then(|m| p.media(m)).ok_or("that clip has no media to listen to")?;
-            let speed = c.speed as f64 / 100.0;
-            let src_in = c.src_in as f64 / SEC as f64;
-            (mi.path.clone().ok_or("that media has no file")?, src_in, src_in + c.dur as f64 / SEC as f64 * speed, c.start as f64 / SEC as f64 - src_in / speed, speed, format!("clip {id} (times on the timeline)"))
-        } else if let Some(mv) = a.get("media") {
+            let sec = |v: f64| (v * SEC as f64) as view::Time;
+            let t0 = a.get("from").and_then(Value::as_f64).map_or(c.start, |v| sec(v).clamp(c.start, c.end()));
+            let t1 = a.get("to").and_then(Value::as_f64).map_or(c.end(), |v| sec(v).clamp(t0, c.end()));
+            if t1 <= t0 {
+                return Err(format!("clip {} has nothing between {:.2}s and {:.2}s", c.id, t0 as f64 / SEC as f64, t1 as f64 / SEC as f64));
+            }
+            let pcm = if c.media.is_none() {
+                crate::sound_bridge::mix_for_export(&self.doc.model, t0, t1)
+            } else {
+                let mut model = self.doc.model.clone();
+                for sq in &mut model.sequences {
+                    for mc in &mut sq.clips {
+                        if mc.id.0 as u32 != c.id {
+                            mc.audio.muted = true;
+                        }
+                    }
+                }
+                crate::sound_bridge::mix_for_export(&model, t0, t1)
+            };
+            let (l, r): (Vec<f32>, Vec<f32>) = pcm.chunks_exact(2).map(|q| (q[0], q[1])).unzip();
+            if l.iter().all(|v| v.abs() < 1e-6) {
+                return Err(if c.media.is_none() { format!("clip {} makes no sound (nothing audible under it)", c.id) } else { format!("clip {} is silent as it plays there (muted, turned all the way down, or no sound in its media)", c.id) });
+            }
+            let mono: Vec<f32> = l.iter().zip(&r).map(|(a, b)| 0.5 * (a + b)).collect();
+            let side: f64 = l.iter().zip(&r).map(|(a, b)| ((a - b) as f64).powi(2)).sum();
+            let mid: f64 = mono.iter().map(|&m| (m as f64).powi(2) * 4.0).sum();
+            let start = t0 as f64 / SEC as f64;
+            let mut out = describe(&mono, crate::sound_bridge::RATE, Some((side / mid.max(1e-9)).sqrt()), start, 1.0);
+            out["heard"] = super::hear::heard(&mono, crate::sound_bridge::RATE, &|t| start + t);
+            out["listened_to"] = json!(if c.media.is_none() { format!("clip {}: the mix it plays (times on the timeline)", c.id) } else { format!("clip {} as it plays: its volume, fades, speed and effects (times on the timeline)", c.id) });
+            return Ok(out);
+        }
+        let (path, from, to, offset, pace, what) = if let Some(mv) = a.get("media") {
             let mi = self.media_item(mv)?;
             (mi.path.clone().ok_or("that media has no file")?, 0.0, f64::INFINITY, 0.0, 1.0, format!("{} (times in the file)", mi.name))
         } else if let Some(name) = a.get("item").and_then(Value::as_str) {
