@@ -40,7 +40,14 @@ pub fn shared() -> Option<&'static Shared> {
 }
 
 fn open() -> Option<Shared> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    if cfg!(windows) && wgpu::Backends::from_env().is_none() {
+        // DirectX 12, as the window draws (app/src/main.rs): opening a Vulkan
+        // device faults inside some drivers (Intel UHD), and tests never pass
+        // through main to be told.
+        desc.backends = wgpu::Backends::DX12;
+    }
+    let instance = wgpu::Instance::new(desc);
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         ..Default::default()

@@ -118,7 +118,9 @@ mod tests {
             let baked = look.bake(LOOK_SIZE);
             for (a, b) in shipped.data.iter().zip(&baked.data) {
                 for i in 0..3 {
-                    assert!((a[i] - b[i]).abs() < 2e-5, "{} out of date", look.slug);
+                    // Not exact: libm differs a little between systems (the Windows 10
+                    // C runtime is ~1e-4 off near clipping); a stale file is far more.
+                    assert!((a[i] - b[i]).abs() < 2e-4, "{} out of date", look.slug);
                 }
             }
         }

@@ -106,7 +106,14 @@ fn a_merged_clip_longer_than_its_layers_flattens() {
     s.edit(&[json!({"op": "merge", "clips": [card, other], "name": "Box"})], "merge", false).unwrap();
     let merged = last_clip(&s);
     s.edit(&[json!({"op": "set", "clip": merged, "duration": 1.6})], "longer", false).unwrap();
-    let r = s.edit(&[json!({"op": "flatten", "clip": merged})], "flatten", false);
+    let mut r = s.edit(&[json!({"op": "flatten", "clip": merged})], "flatten", false);
+    // A slow machine renders past export's wait: ask again with the job.
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    while let Some(eid) = r.as_ref().ok().and_then(super::layers::pending_flatten) {
+        assert!(std::time::Instant::now() < until, "the flatten render never finished");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        r = s.edit(&[json!({"op": "flatten", "clip": merged, "export": eid})], "flatten", false);
+    }
     assert!(r.is_ok(), "{r:?}");
     let mc = s.model_clip(merged).unwrap();
     let m::ClipSource::Media(r) = &mc.source else { panic!("plays from a file") };

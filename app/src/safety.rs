@@ -586,7 +586,8 @@ pub fn relocate(dir: &Path) -> Result<usize, String> {
     }
     fn go(v: &mut Value, old: &str, new: &str, n: &mut usize) {
         match v {
-            Value::String(s) if s.starts_with(old) && (s.len() == old.len() || s[old.len()..].starts_with('/')) => {
+            // `\` too: Windows paths.
+            Value::String(s) if s.starts_with(old) && (s.len() == old.len() || s[old.len()..].starts_with(['/', '\\'])) => {
                 *s = format!("{new}{}", &s[old.len()..]);
                 *n += 1;
             }
@@ -1237,8 +1238,11 @@ mod tests {
         backup(&root, &d.join("drive"), 3, false).unwrap();
         let h = health(&root, None);
         let codes: Vec<&str> = h["issues"].as_array().unwrap().iter().map(|i| i["code"].as_str().unwrap()).collect();
-        assert_eq!(codes, vec!["media-outside"], "everything else is fine: {h}");
-        assert_eq!(h["status"], "needs attention");
+        // The shoot folder is outside the project; it counts as outside only
+        // when it is outside home too, and Windows keeps temp files in home.
+        let outside: Vec<&str> = if d.starts_with(studio_paths::home()) { vec![] } else { vec!["media-outside"] };
+        assert_eq!(codes, outside, "everything else is fine: {h}");
+        assert_eq!(h["status"], if outside.is_empty() { "healthy" } else { "needs attention" });
         // A broken project file is critical, and says how to get out.
         std::fs::write(root.join("project.json"), b"{").unwrap();
         assert_eq!(health(&root, None)["status"], "at risk");

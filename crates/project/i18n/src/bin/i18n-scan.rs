@@ -40,7 +40,7 @@ fn slug(text: &str) -> String {
 fn scan_missing(root: &std::path::Path) -> std::collections::BTreeMap<String, String> {
     let mut missing = std::collections::BTreeMap::<String, String>::new();
     for f in scan::ui_files(root) {
-        let rel = f.strip_prefix(root).unwrap_or(&f).display().to_string();
+        let rel = scan::relative(root, &f);
         if rel == "gallery.rs" {
             continue;
         }
@@ -142,7 +142,7 @@ fn main() {
             let mut count = 0;
             let baseline = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/hardcoded_baseline.txt")).unwrap_or_default();
             for f in scan::ui_files(&root) {
-                let rel = f.strip_prefix(&root).unwrap_or(&f).display().to_string();
+                let rel = scan::relative(&root, &f);
                 if rel == "gallery.rs" {
                     continue;
                 }

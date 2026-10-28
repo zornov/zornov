@@ -1454,7 +1454,19 @@ mod tests {
         let r = call(&mut live, &mut doc, &calls, "edit", json!({"ops": [{"op": "merge", "clips": ids}]}));
         assert!(r.is_ok(), "{}", err_of(&r));
         let merged = doc.project.clips.iter().map(|c| c.id).max().unwrap();
-        let r = call(&mut live, &mut doc, &calls, "edit", json!({"ops": [{"op": "flatten", "clip": merged}]}));
+        let mut r = call(&mut live, &mut doc, &calls, "edit", json!({"ops": [{"op": "flatten", "clip": merged}]}));
+        // A slow or busy machine renders past export's wait: flatten answers
+        // with the job, and is asked again with it once that is done.
+        let until = Instant::now() + std::time::Duration::from_secs(600);
+        let pending = |r: &ToolResult| {
+            let t = r.as_ref().ok()?.iter().find_map(|c| if let Content::Text(t) = c { Some(t) } else { None })?;
+            crate::agent::layers::pending_flatten(&serde_json::from_str(t).ok()?)
+        };
+        while let Some(eid) = pending(&r) {
+            assert!(Instant::now() < until, "the flatten render never finished");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            r = call(&mut live, &mut doc, &calls, "edit", json!({"ops": [{"op": "flatten", "clip": merged, "export": eid}]}));
+        }
         assert!(r.is_ok(), "{}", err_of(&r));
         let flat = doc.project.clip(merged).and_then(|c| c.media);
         assert!(flat.is_some(), "the window shows the flattened clip");

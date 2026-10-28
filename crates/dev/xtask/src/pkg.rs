@@ -333,6 +333,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "AppImages are built on Linux")]
     fn appdir_has_apprun_desktop_icon_and_content() {
         let d = scratch("appdir");
         appdir_from(&d.join("zornov-bin"), Some(&d.join("core")), &notices(), &d.join("AppDir")).unwrap();

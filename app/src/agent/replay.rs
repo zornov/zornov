@@ -168,11 +168,14 @@ fn confine_paths(v: &mut Value, key: Option<&str>, c: &Confine) -> Result<(), St
             if p.components().any(|x| matches!(x, std::path::Component::ParentDir)) {
                 return Err(format!("it names a path with .. ({s})"));
             }
+            // `absolute`, not `Path::is_absolute`: on Windows `/etc/passwd` has no
+            // drive so it is "relative", and joining it onto the copy gives `C:\etc\passwd`.
             let moved = match (&c.from, &c.to) {
-                (Some(from), Some(to)) if p.is_absolute() => p.strip_prefix(from).ok().map(|rest| to.join(rest)),
-                (_, Some(to)) if p.is_relative() && !s.starts_with('~') => Some(to.join(p)),
+                (Some(from), Some(to)) if absolute => p.strip_prefix(from).ok().map(|rest| to.join(rest)),
+                (_, Some(to)) if !absolute => Some(to.join(p)),
                 _ => None,
-            };
+            }
+            .filter(|m| c.to.as_ref().is_some_and(|to| m.starts_with(to)));
             match moved {
                 Some(m) => {
                     *s = m.display().to_string();

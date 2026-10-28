@@ -157,21 +157,51 @@ impl Session {
         let dir = self.home.clone().map(|h| h.join("media").join("flattened")).unwrap_or_else(|| studio_paths::cache().join("flattened"));
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let name: String = self.doc.model.sequence(inner).map(|s| s.name.clone()).unwrap_or_default().chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-').collect();
-        // Its own file: the folder may be shared (the cache, other windows).
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() % 1_000_000_000);
-        let path = dir.join(format!("{}-{}-{}-{stamp:09}.mp4", if name.trim().is_empty() { "flattened".into() } else { name.trim().replace(' ', "-") }, self.doc.edits, std::process::id()));
+        let stem = if name.trim().is_empty() { "flattened".into() } else { name.trim().replace(' ', "-") };
         // The whole stretch the clip plays: a merged clip may run on past
         // the end of its layers (lengthened, or slowed down).
         let need = mc.source_out().max(len);
-        let args = json!({"preset": "Social 1080p", "path": path.display().to_string(), "range": [0.0, secs(need)]});
-        let out = self.within(inner, |s| s.run("export", &args))?;
-        let said = out.iter().find_map(|c| match c {
-            Content::Text(t) => Some(t.clone()),
-            _ => None,
-        });
-        if !path.is_file() {
-            return Err(format!("the render did not come out: {}", said.unwrap_or_default()));
-        }
+        // A render past export's wait goes on in the background: flatten
+        // answers with its export id and is asked again with it, so the
+        // request never outlives the client's patience and nothing renders twice.
+        let pending = |eid: u64, progress: f32, eta: Option<f32>| -> Result<String, String> {
+            Ok(json!({"flatten": id, "export": eid, "still_rendering": true, "progress": progress, "eta_secs": eta, "next": format!("flatten {{\"clip\": {id}, \"export\": {eid}}} again once export_status {{\"export\": {eid}}} says done")}).to_string())
+        };
+        let path = if let Some(eid) = op.get("export").and_then(Value::as_u64) {
+            let job = self.exports.iter().find(|(i, _)| u64::from(*i) == eid).map(|(_, j)| j).ok_or_else(|| format!("no export {eid}: flatten {{\"clip\": {id}}} without it renders again"))?;
+            let p = job.request.path.clone();
+            let mine = p.parent() == Some(dir.as_path()) && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&format!("{stem}-"))) && (job.request.range.1 - need).abs() < 1000;
+            if !mine {
+                return Err(format!("export {eid} is not clip {id}'s flatten render (or its layers changed since): flatten {{\"clip\": {id}}} without it renders again"));
+            }
+            match job.outcome() {
+                None => return pending(eid, job.fraction(), job.eta_secs()),
+                Some(crate::services::export::Event::Failed(e)) => return Err(format!("the flatten render failed: {e}")),
+                Some(crate::services::export::Event::Finished { .. }) if p.is_file() => p,
+                Some(_) => return Err(format!("the flatten render was stopped: flatten {{\"clip\": {id}}} without \"export\" renders again")),
+            }
+        } else {
+            // Its own file: the folder may be shared (the cache, other windows).
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() % 1_000_000_000);
+            let path = dir.join(format!("{stem}-{}-{}-{stamp:09}.mp4", self.doc.edits, std::process::id()));
+            // No quality report: the file only stands in for the layers.
+            let args = json!({"preset": "Social 1080p", "path": path.display().to_string(), "range": [0.0, secs(need)], "qc": false});
+            let out = self.within(inner, |s| s.run("export", &args))?;
+            let said = out.iter().find_map(|c| match c {
+                Content::Text(t) => Some(t.clone()),
+                _ => None,
+            });
+            let v: Value = said.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+            if v["still_rendering"] == true
+                && let Some(eid) = v["export"].as_u64()
+            {
+                return pending(eid, v["progress"].as_f64().unwrap_or(0.0) as f32, v["eta_secs"].as_f64().map(|e| e as f32));
+            }
+            if !path.is_file() {
+                return Err(format!("the render did not come out: {}", said.unwrap_or_default()));
+            }
+            path
+        };
         let report = crate::services::project::import_media(&mut self.doc, &[path.clone()]);
         let media = *report.ids.first().ok_or("the rendered file could not be brought in")?;
         let mut mc = self.model_clip(id as u32).ok_or("the clip is gone")?;
@@ -413,4 +443,11 @@ impl Session {
         }
         Ok(said.join("; "))
     }
+}
+
+/// The export id of a flatten still rendering, from an `edit` answer (the
+/// tests poll with it, as an agent does).
+#[cfg(test)]
+pub(crate) fn pending_flatten(edit: &Value) -> Option<u64> {
+    edit["notes"].as_array()?.iter().filter_map(Value::as_str).filter_map(|n| serde_json::from_str::<Value>(n).ok()).find(|n| n["still_rendering"] == true).and_then(|n| n["export"].as_u64())
 }

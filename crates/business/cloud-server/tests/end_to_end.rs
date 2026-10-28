@@ -153,7 +153,11 @@ fn config(data: &Path, stripe: &str, provider: &str) -> Config {
         name: "Test cloud".into(),
         packs: vec![Pack { id: "c500".into(), credits: 500, price_minor: 500, currency: "usd".into() }],
         stripe_api: stripe.into(),
-        render_command: vec!["/bin/cp".into(), "{project}".into(), "{out}".into()],
+        render_command: if cfg!(windows) {
+            ["cmd", "/C", "copy", "/Y", "{project}", "{out}"].map(String::from).to_vec()
+        } else {
+            vec!["/bin/cp".into(), "{project}".into(), "{out}".into()]
+        },
         ..Default::default()
     };
     file.upstreams.insert("openai".into(), Upstream { base: provider.into(), header: "Authorization".into(), prefix: "Bearer ".into(), key_env: "STUDIO_E2E_PROVIDER_KEY".into() });

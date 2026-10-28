@@ -36,7 +36,7 @@ fn violations() -> BTreeSet<String> {
     let root = app_src();
     let mut out = BTreeSet::new();
     for f in scan::ui_files(&root) {
-        let rel = f.strip_prefix(&root).unwrap_or(&f).display().to_string();
+        let rel = scan::relative(&root, &f);
         // The component gallery is a developer tool.
         if rel == "gallery.rs" {
             continue;

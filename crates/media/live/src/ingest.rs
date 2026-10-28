@@ -66,7 +66,8 @@ pub fn scan(root: &Path) -> Result<Vec<CardFile>, String> {
             if md.is_dir() {
                 walk(&path, root, out)?;
             } else if md.is_file() {
-                let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
+                // `/` on every system: the manifest and its checksums move between machines.
+                let rel = path.strip_prefix(root).unwrap_or(&path).components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
                 out.push(CardFile { rel, size: md.len(), kind: kind_of(&path).into() });
             }
         }
@@ -176,7 +177,23 @@ fn device(p: &Path) -> Option<u64> {
     }
 }
 
-#[cfg(not(unix))]
+/// Windows: the drive letter or network share the path resolves to.
+#[cfg(windows)]
+fn device(p: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let mut q = p;
+    loop {
+        if let Ok(c) = fs::canonicalize(q) {
+            let Some(std::path::Component::Prefix(pre)) = c.components().next() else { return None };
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            pre.as_os_str().to_ascii_uppercase().hash(&mut h);
+            return Some(h.finish());
+        }
+        q = q.parent()?;
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn device(_: &Path) -> Option<u64> {
     None
 }

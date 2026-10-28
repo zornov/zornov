@@ -340,8 +340,10 @@ thing, and never export and re-import to combine layers:
 - `flatten` renders a merged clip once to a video that plays in its place
   (keeps its position, animation, effects and transitions): for heavy
   scenes that should play smoothly, or to use a built scene as footage.
-  Opaque: anything it showed through turns black. `unflatten` brings the
-  live layers back.
+  Opaque: anything it showed through turns black. A long render answers
+  `still_rendering` with an `export` id: once `export_status` says done,
+  flatten again with `clip` and that `export` to finish (nothing renders
+  twice). `unflatten` brings the live layers back.
 - `align` (`to`: left, centre, right, top, middle, bottom; `margin`;
   `relative: "first"` lines up on the first clip) and `distribute`
   (`axis`: horizontal or vertical) lay clips out by their real boxes.
@@ -430,7 +432,7 @@ Each op is `{"op": "<name>", …fields}`.
 | `foley` | `clip` (a puppet that has acted), `surface`, `size`, `character`, `feet` (`paws` for an animal on four feet; read from the character's look when not given), `volume`, `lane`; or `contacts` (timeline seconds where feet land, from keys or a gait) with `hit` (step, land, tap, paddle), `surface`, `size`, `feet`; or `kind` (splash, rustle, thud, flap, swish) with `at` | footsteps (paddles, landings, taps) on the frames the puppet's feet land, made for the ground (its scene's place, or `surface`: grass, leaves, dirt, gravel, stone, wood, snow, sand, mud, water, metal, carpet, tile, wet pavement) and its weight, on padded paws for an animal; laying again replaces them. Or steps exactly at given contacts, or a one-off action sound at a moment |
 | `motion` | `clip`/`clips`, `entry`, `exit`, `loop` | motion presets, all three at once |
 | `merge` / `unmerge` | `clips`, `name` / `clip` | several clips as one; edit inside it by the inner ids, or `"inside"` |
-| `flatten` / `unflatten` | `clip` (merged) | render a merged clip to one video in place / back to live layers |
+| `flatten` / `unflatten` | `clip` (merged), `export` (a pending render) / `clip` | render a merged clip to one video in place / back to live layers |
 | `align` / `distribute` | `clips`, `to`, `margin`, `relative` / `axis` | line clips up on the canvas or each other / space them evenly |
 | `parent` | `clip`/`clips`, `to` (null lets go), `at` | clips follow another clip's position, scale and rotation |
 | `matte` | `clip`, `with`, `mode`, `remove` | a clip shows only through the shape or brightness of the clip above |
