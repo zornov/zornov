@@ -14,6 +14,7 @@
   <a href="https://zornov.com">Website</a> ·
   <a href="#made-in-zornov">Films</a> ·
   <a href="#the-ai-editor">AI editor</a> ·
+  <a href="#with-your-ai-assistant">MCP</a> ·
   <a href="#what-it-does">Features</a> ·
   <a href="#build-and-run">Build</a> ·
   <a href="#documentation">Docs</a>
@@ -28,6 +29,8 @@
 </p>
 
 Zornov is a free, open-source film studio. Edit, grade, animate puppets, build 3D worlds, compose the score and deliver, all in one app. An AI director can work on the same timeline while you do, and you can take over anywhere.
+
+Every tool the window has is also one call away for AI assistants. Claude, Codex or any client that speaks MCP can open a project, cut it, light it, score it, look at the frames, check its own work and export, with the same tools you use.
 
 ## Made in Zornov
 
@@ -58,7 +61,19 @@ Every film here was edited, animated, scored and exported in Zornov, from public
     <td align="center"><sub><b>AI director</b>: a mission trailer, cut by AI through Zornov's tools</sub></td>
     <td align="center"><sub><b>Deliver</b>: one film, tall and wide</sub></td>
   </tr>
+  <tr>
+    <td colspan="2"><img alt="Shapes made from formulas: a gold gyroid lattice, a torus knot and a seashell, a Mandelbulb fractal traced with no mesh, a grown tree, a golden-angle pine cone and a twisted ribbon" src="docs/images/films/math.webp"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><sub><b>Shapes from mathematics</b>: every form is a formula, meshed or traced straight from it, made by an AI assistant through MCP</sub></td>
+  </tr>
 </table>
+
+### Models made in Zornov
+
+<img alt="Forty-five 3D models made in Zornov: characters with hair and clothes, roosters, a fisherman, a lighthouse, art deco streets, galleries, a porch, a phone, extruded 3D titles, chrome and amber props, and shapes from mathematics such as a gyroid lattice, a Mandelbulb, a torus knot, a seashell, a Möbius strip, a grown tree, a pine cone, a strange attractor and a twisted ribbon" src="docs/images/models.webp" width="100%">
+
+<sub>Every one modelled, dressed or grown in Zornov, many by an AI assistant driving its tools through MCP.</sub>
 
 ## The editor
 
@@ -83,6 +98,19 @@ Tell it what you want, and it works on your timeline live, with more than 80 too
 
 The AI editor uses the model you connect: Codex with your ChatGPT sign-in, Claude Code, or an API key. What you ask it, and what it looks at to answer, goes to that provider. The rest of Zornov works without it, and offline.
 
+## With your AI assistant
+
+`zornov mcp` serves every tool to an AI assistant over the Model Context Protocol. If the project is open in a Zornov window, you watch each edit land as the assistant makes it.
+
+| Assistant | Set it up |
+|---|---|
+| **Claude Code** | `/plugin marketplace add zornov/zornov`, then `/plugin install zornov@zornov` |
+| **Claude Desktop** | Open [`Zornov.mcpb`](https://github.com/zornov/zornov/releases/latest/download/Zornov.mcpb) from the latest release |
+| **Codex** | `codex mcp add zornov -- zornov mcp --project /path/to/my-video` |
+| **Any MCP client** | `{"command": "zornov", "args": ["mcp", "--project", "/path/to/my-video"]}` |
+
+The assistant gets the whole studio, not a render API: `edit` takes ops in one undoable step, `see` and `contact_sheet` show it the frames, `listen` lets it hear the mix, and `check`, `review` and `qc` tell it what a professional wouldn't ship before it exports. Leave out `--project` and it opens or starts a project itself. On Windows, use `zornov-cli.exe`. See [AI assistants (MCP)](docs/terminal.md#ai-assistants-mcp) for every setup.
+
 ## What it does
 
 <img alt="The start screen: new projects by frame shape, templates drawn as the timelines they set up, and recent projects" src="docs/images/start-dark.png" width="100%">
@@ -94,29 +122,32 @@ The AI editor uses the model you connect: Codex with your ChatGPT sign-in, Claud
 - Titles, lower thirds, callouts, charts and 3D text, edited in place on the canvas.
 
 ### Picture
-- Native decoding and encoding of H.264, HEVC, AV1, VP9, ProRes, DNxHR, AAC, Opus and Vorbis, in MP4, MOV, MXF and WebM.
+- Its own codecs, written in Rust. It reads H.264, HEVC, AV1, VP9, ProRes, AAC, Opus, Vorbis, FLAC and MP3 from MP4, MOV, WebM and MKV, and writes H.264, ProRes, DNxHR and AAC. HEVC 10-bit goes through the Mac's hardware encoder.
+- Masters as EXR and DPX sequences, and MXF track files for DCP and IMF packages.
 - A GPU compositor working in 16-bit float, with blend modes, masks, mattes, tracking, stabilising and corner pinning.
 - Colour grading with scopes, LUTs, HDR and shot matching.
 - Keying, rotoscoping and cut-outs. Restore, denoise, upscale and smooth slow motion.
 
 ### 3D
 - A full modelling workspace: extrude, inset, bevel, loop cut, knife and bridge, modifiers, UVs, materials and sculpting.
-- Characters with fingers, eyes, lashes, teeth and hair, fitted clothes, rigs and walks with planted feet.
+- Characters with fingers, eyes, lashes and teeth, sculpted hairstyles that sit under a hat, and closed clothes that move with the skin, with fabric patterns at their real size. Rigs, and walks with planted feet.
+- Shapes from mathematics: lattices like the gyroid, fractals like the Mandelbulb and Menger sponge, parametric surfaces, knots, height fields, L-system plants, phyllotaxis and strange attractors, or any formula of x, y, z and time. Twist, bend, taper and warp any model. Fractals and implicit solids can be traced straight from their formula on the GPU, with no mesh.
+- Toon and anime looks: cel bands, shadow colour, rim light and ink outlines on any model, and anime proportions for characters.
 - Physics: rigid bodies, ragdolls, cloth, hair, fracture, fluids and smoke, baked to the timeline.
 - A real-time renderer and a path tracer with weather, fog, light beams and wet surfaces.
 - Walkable worlds with terrain, plants, water and sky, recorded as camera shots. Procedural streets and interiors in eight styles.
-- glTF, OBJ, FBX, STL and PLY import.
+- glTF, OBJ, FBX, STL and PLY import, plus USD in the modelling workspace. Export to glTF, FBX, USD, OBJ, STL and PLY.
 
 ### Animation
-- Puppets with pins, bones and scissor cuts, so limbs and lips move apart.
+- Puppets with pins, bones and scissor cuts, so limbs and lips move apart. They walk, run and sneak, each foot planted on the ground and lifted in an arc.
 - Lip sync, blinks, acting beats, drivers and squash and stretch.
 - Motion presets, stagger, expressions and particles.
 - Vector illustration with paths, pathfinder, type and trace.
 
 ### Sound
 - A mixer with buses, loudness, stems, dialogue cleanup and ADR, and an effects chain on every clip.
-- Original music composed in the app in 11 genres, fitted to the exact length and cue points.
-- About 50 physically modelled sound effects, animal voices, footsteps on 13 surfaces, and sung vocals.
+- Original music composed in the app in 18 genres, from jazz and folk to metal, trap, drum and bass, synthwave and chiptune, fitted to the exact length and cue points. It plays 29 instruments, distorted guitars with power chords among them, and says so when the brief asks for something it can't make.
+- More than 50 physically modelled sound effects, 16 animal voices, footsteps on 14 surfaces, and sung vocals.
 - Narration with the system's voices, or ElevenLabs and Fish Audio if you add their keys.
 
 ## Download
@@ -202,7 +233,8 @@ Run `zornov` on its own for a prompt: commands run, anything else goes to the AI
 | Guide | What it covers |
 |---|---|
 | [AI crew](docs/ai-crew.md) | How the AI editor and its crew work |
-| [Terminal and headless use](docs/terminal.md) | The `zornov` prompt, one-off commands, JSON for scripts, MCP for AI assistants and render nodes |
+| [Terminal and headless use](docs/terminal.md) | The `zornov` prompt, one-off commands, JSON for scripts, MCP for Claude Code, Claude Desktop, Codex and others, and render nodes |
+| [Seeing what agents go through](docs/agent-observability.md) | For Zornov's developers: the flight recorder, friction reports, replay, and the dev-only live tap |
 | [Plugins](docs/plugins.md) | Writing plugins: effects, generators, transitions, importers, exporters and panels |
 | [Accessibility](docs/accessibility.md) | Using Zornov without a mouse, with a screen reader, at large sizes and in any light |
 | [Localisation](docs/localisation.md) | The interface languages and how to add translations |
@@ -222,7 +254,7 @@ The app is in [`app/`](app): the interface, the editor, the 3D workspace and the
 
 | Folder | What it holds |
 |---|---|
-| `crates/codecs/` | Video and audio codecs: H.264, HEVC, AV1, VP9, ProRes, DNxHR, AAC, Opus |
+| `crates/codecs/` | Video and audio codecs: H.264, HEVC, AV1, VP9, ProRes, DNxHR, AAC, Opus (Vorbis, FLAC and MP3 are read in `crates/media/`) |
 | `crates/media/` | Containers, decoding, encoding, delivery, capture and web media |
 | `crates/picture/` | The GPU renderer, colour, effects, text, motion graphics, Lottie |
 | `crates/paint/` | The paint and photo engine (layers, brushes, PSD, RAW, HEIF) |
@@ -242,7 +274,8 @@ Outside `crates/`:
 | `docs/` | The guides above, and the README's pictures and films |
 | `docker/` | The Linux build container (also the dev container) |
 | `plugins/` | Example plugins (`examples/`) and their built `.wasm` files (`dist/`), bundled with the app |
-| `packaging/` | Release configuration, the app icons, macOS entitlements and the Linux desktop entry |
+| `packaging/` | Release configuration, the app icons, macOS entitlements, the Linux desktop entry, the Claude Code plugin and the Claude Desktop extension manifest |
+| `.claude-plugin/` | The Claude Code plugin marketplace that `/plugin marketplace add zornov/zornov` reads |
 | `testdata/` | Small shared media, audio and image files used by the codec and app tests |
 | `tools/` | Stand-alone developer tools (`pack-content`) |
 

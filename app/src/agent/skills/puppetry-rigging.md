@@ -102,8 +102,8 @@ read as talking to each other.
   reuse them (`apply`) so it moves like itself all film.
 - **Walks have weight.** A walk is two steps a second for an adult
   (`speed` 0.8 for a heavy or old one, 1.3 for a child), the body
-  lowest at the contact and highest as the legs pass; `travel: "auto"`
-  keeps the feet from skating. A run leans forward and leaves the
+  lowest at the contact and highest as the legs pass; leave out `travel` and
+  the reply gives the `travel` (px) that keeps the planted foot still. A run leans forward and leaves the
   ground; a sneak crouches and slows. Never slide a character across
   the frame without its legs going.
 - **Plant the feet.** In a scene where a character stands and gestures,

@@ -59,9 +59,9 @@ The grid bends a little so each cue falls on a beat (more when no `bpm` was give
 - Same words every time: change the words or use `variant` for another take.
 
 ### Genres, moods and instruments
-Genres (any near word works): jazz (noir, swing, lounge), folk (acoustic, country, ballad), cinematic (score, orchestral, epic), dark (ominous, horror, tense, suspense), electronic (minimal, techno, house, synthwave), ambient (calm, drone, meditation), lofi (chill, hip hop), rock, piano (classical, ballad, lullaby), pop (upbeat, corporate), playful (quirky, comedy, circus).
+Genres (any near word works): jazz (noir, swing, lounge), folk (acoustic, country, ballad), cinematic (score, orchestral, epic), dark (ominous, horror, tense, suspense), electronic (minimal, techno, house, edm), ambient (calm, drone, meditation), lofi (chill, hip hop), rock, piano (classical, ballad, lullaby), pop (upbeat, corporate), playful (quirky, comedy, circus), jrock (anime opening, j-rock), metal (thrash, djent, metalcore), punk (pop punk, skate punk), trap (drill, 808s), dnb (drum and bass, jungle, breakbeat), synthwave (retrowave, outrun, 80s), chiptune (8-bit, video game, arcade).
 Mood words: dark, sad, tense, noir (minor, slower); hopeful, happy, bright (major); slow, calm, fast, driving, upbeat (tempo); build, rising, fading (shape); sparse, minimal (thinner); epic, big (fuller).
-Instruments: piano, electric piano, organ, acoustic or nylon guitar, harp, double bass, electric bass, synth bass, sax, trumpet, trombone, horn, flute, clarinet, violin, cello, strings, pad, choir, synth lead, synth pluck, bells, marimba, vibraphone; drums, brushes, or "no drums".
+Instruments: piano, electric piano, organ, acoustic or nylon guitar, electric guitar, distorted guitar (power chords), harp, double bass, electric bass, synth bass, sax, trumpet, trombone, horn, flute, clarinet, violin, cello, strings, pad, choir, synth lead, synth pluck, supersaw, chip (8-bit), bells, marimba, vibraphone; drums, brushes, or "no drums".
 
 ### Calls
 `music {"genre": "noir jazz with sax and double bass", "duration": 40, "cues": [{"at": 2.0, "kind": "hit"}, {"at": 34.0, "kind": "resolve"}]}`
