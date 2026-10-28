@@ -25,7 +25,7 @@ mod f16;
 pub use f16::{f16_to_f32, f32_to_f16, pixels_to_f16_bytes};
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
@@ -436,17 +436,38 @@ pub struct GpuContext {
     /// Adapter name, for the about box and the benchmark table.
     pub adapter_name: String,
     pipelines: Pipelines,
+    /// Held from pushing an error scope to popping it: the device is shared
+    /// by every thread, and wgpu's scopes must pop in the order they were
+    /// pushed.
+    scopes: Mutex<()>,
 }
 
 impl GpuContext {
-    /// Opens the best available adapter and builds the pipelines. `None`
+    /// The process's GPU context: the best available adapter with its
+    /// pipelines built, opened on first use and shared from then on. `None`
     /// when there is no usable GPU, when a shader fails to compile on this
     /// driver, or when `STUDIO_RENDER_NO_GPU` is set (which the tests and
     /// the benchmark use to force the CPU path).
+    ///
+    /// One context, never dropped, like `direct`, `trace` and `atmosphere`
+    /// keep theirs: opening and dropping devices on several threads at once
+    /// crashes the Vulkan loader (a dropped instance unloads the driver while
+    /// another thread is still inside it) and WARP on Windows. It also spares
+    /// every renderer building the device and its pipelines again.
     pub fn new() -> Option<Arc<GpuContext>> {
         if std::env::var_os("STUDIO_RENDER_NO_GPU").is_some() {
             return None;
         }
+        static SHARED: OnceLock<Option<Arc<GpuContext>>> = OnceLock::new();
+        SHARED.get_or_init(GpuContext::open).clone()
+    }
+
+    /// Hold this while pushing and popping error scopes on the device.
+    pub fn scopes(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.scopes.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn open() -> Option<Arc<GpuContext>> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -474,7 +495,7 @@ impl GpuContext {
             eprintln!("studio-render: GPU pipelines unavailable: {e}");
             return None;
         }
-        Some(Arc::new(GpuContext { device, queue, adapter_name, pipelines }))
+        Some(Arc::new(GpuContext { device, queue, adapter_name, pipelines, scopes: Mutex::new(()) }))
     }
 }
 

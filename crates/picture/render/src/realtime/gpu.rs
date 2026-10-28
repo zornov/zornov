@@ -146,6 +146,7 @@ fn water_buffers() -> [Option<wgpu::VertexBufferLayout<'static>>; 1] {
 impl Pipes {
     pub fn new(ctx: &Arc<crate::gpu::GpuContext>) -> Result<Pipes, String> {
         let d = &ctx.device;
+        let _scopes = ctx.scopes();
         let scope = d.push_error_scope(wgpu::ErrorFilter::Validation);
         let layouts = Layouts::new(d);
         let pl = |label: &str, groups: &[&wgpu::BindGroupLayout]| {

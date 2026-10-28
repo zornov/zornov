@@ -10,7 +10,7 @@
 mod encode;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use wgpu::util::DeviceExt;
 
@@ -80,6 +80,9 @@ pub struct GpuRaster {
     pub queue: wgpu::Queue,
     pub adapter_name: String,
     pipes: Pipelines,
+    /// Held from pushing the error scopes to popping them: the device is
+    /// shared by every thread, and wgpu's scopes must pop in push order.
+    scopes: std::sync::Mutex<()>,
 }
 
 fn compute(device: &wgpu::Device, module: &wgpu::ShaderModule, entry: &str) -> wgpu::ComputePipeline {
@@ -94,12 +97,19 @@ fn compute(device: &wgpu::Device, module: &wgpu::ShaderModule, entry: &str) -> w
 }
 
 impl GpuRaster {
-    /// Opens the best adapter. `None` without a usable GPU, or when
-    /// `STUDIO_RENDER_NO_GPU` is set.
+    /// The process's rasterizer on the best adapter, opened on first use and
+    /// shared from then on (opening and dropping devices on several threads
+    /// at once crashes the Vulkan loader). `None` without a usable GPU, or
+    /// when `STUDIO_RENDER_NO_GPU` is set.
     pub fn new() -> Option<Arc<GpuRaster>> {
         if std::env::var_os("STUDIO_RENDER_NO_GPU").is_some() {
             return None;
         }
+        static SHARED: OnceLock<Option<Arc<GpuRaster>>> = OnceLock::new();
+        SHARED.get_or_init(GpuRaster::open).clone()
+    }
+
+    fn open() -> Option<Arc<GpuRaster>> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
         let name = adapter.get_info().name;
@@ -132,7 +142,7 @@ impl GpuRaster {
             eprintln!("studio-vector-raster: GPU pipelines unavailable: {e}");
             return None;
         }
-        Some(Arc::new(GpuRaster { device, queue, adapter_name, pipes }))
+        Some(Arc::new(GpuRaster { device, queue, adapter_name, pipes, scopes: std::sync::Mutex::new(()) }))
     }
 
     fn storage(&self, label: &str, bytes: &[u8]) -> wgpu::Buffer {
@@ -176,6 +186,7 @@ impl GpuRaster {
         if w == 0 || h == 0 {
             return Ok(Pixmap { width: w, height: h, data: Vec::new() });
         }
+        let _scopes = self.scopes.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let oom = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
 
