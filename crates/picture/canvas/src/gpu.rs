@@ -60,22 +60,8 @@ mod tests {
     use serde_json::json;
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster_block(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).ok()?;
-        pollster_block(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: adapter.limits(), ..Default::default() })).ok()
-    }
-
-    /// A tiny executor for the two awaits above.
-    fn pollster_block<F: std::future::Future>(f: F) -> F::Output {
-        let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(waker);
-        let mut f = std::pin::pin!(f);
-        loop {
-            if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
-                return v;
-            }
-            std::thread::yield_now();
-        }
+        let g = studio_gpu_device::shared()?;
+        Some((g.device.clone(), g.queue.clone()))
     }
 
     #[test]

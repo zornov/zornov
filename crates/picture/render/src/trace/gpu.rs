@@ -25,13 +25,11 @@ fn tracer() -> Option<&'static Mutex<Tracer>> {
         if std::env::var_os("STUDIO_RENDER_NO_GPU").is_some() {
             return None;
         }
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
-        let limits = adapter.limits();
-        if limits.max_storage_buffers_per_shader_stage < 8 {
+        let shared = studio_gpu_device::shared()?;
+        if shared.limits.max_storage_buffers_per_shader_stage < 8 {
             return None;
         }
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("studio-trace"), required_features: wgpu::Features::empty(), required_limits: limits, ..Default::default() })).ok()?;
+        let (device, queue) = (shared.device.clone(), shared.queue.clone());
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("trace"), source: wgpu::ShaderSource::Wgsl(source().into()) });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("trace"), layout: None, module: &module, entry_point: Some("main"), compilation_options: Default::default(), cache: None });

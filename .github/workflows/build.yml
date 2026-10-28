@@ -116,7 +116,10 @@ jobs:
 
   windows:
     # Windows builds and tests natively; it is the one system the maintainers
-    # cannot run at their desks.
+    # cannot run at their desks. The runners have no GPU, so the GPU tests run
+    # on WARP, Windows' software adapter. nextest gives every test its own
+    # process: a test that crashes it fails alone, by name, and the rest still
+    # run. A crash also leaves a minidump, uploaded with the test report.
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
@@ -132,13 +135,61 @@ jobs:
         # One cache per job, saved by main only: pull requests restore it
         # without writing their own, which would push main's out of the 10 GB.
         with:
+          shared-key: windows-ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      - name: Install nextest
+        shell: bash
+        run: |
+          curl -LsSf -o nextest.tar.gz https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.148/cargo-nextest-0.9.148-x86_64-pc-windows-msvc.tar.gz
+          echo "bef17504bed9d4994cf860c122e84a90d613b92e6d89584fa9e28bd53ad42e15  nextest.tar.gz" | sha256sum -c -
+          tar xzf nextest.tar.gz -C "$HOME/.cargo/bin"
+          rm nextest.tar.gz
+      - name: Keep crash dumps
+        # Windows Error Reporting writes a minidump of any process that
+        # crashes into dumps/.
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          New-Item -Path $key -Force | Out-Null
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\dumps" | Out-Null
+          Set-ItemProperty -Path $key -Name DumpFolder -Value "$env:GITHUB_WORKSPACE\dumps" -Type ExpandString
+          Set-ItemProperty -Path $key -Name DumpType -Value 1 -Type DWord
+          Set-ItemProperty -Path $key -Name DumpCount -Value 20 -Type DWord
+      - name: Test
+        run: cargo nextest run --workspace --cargo-profile ci --profile ci
+      - name: Doc tests
+        run: cargo test --workspace --doc --profile ci
+      - name: Tests left the test data untouched
+        run: cargo xtask assets-check
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: windows-test-report
+          path: |
+            target/nextest/ci/junit.xml
+            dumps/
+          if-no-files-found: ignore
+
+  windows-package:
+    # The Windows package, from a full release build. Beside the tests rather
+    # than after them, and on main only: pull requests don't need the zip.
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
           shared-key: windows-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
-      - name: Test
-        run: cargo test --release --workspace
-      - name: Tests left the test data untouched
-        run: cargo xtask assets-check
       - name: Package
         run: cargo xtask package-windows
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -217,7 +268,7 @@ jobs:
     # The one required check: green when every job above passed or was skipped
     # on purpose (documentation only). A cancelled run was replaced by a newer
     # one, so it warns instead of failing.
-    needs: [changes, deny, workflows, assets, windows, linux, clippy]
+    needs: [changes, deny, workflows, assets, windows, windows-package, linux, clippy]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

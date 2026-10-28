@@ -33,6 +33,7 @@ studio-model = { path = "../../project/model", optional = true }
 studio-fx = { path = "../fx", optional = true }
 wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"] }
 pollster = "0.4"
+studio-gpu-device = { path = "../gpu-device" }
 bytemuck = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

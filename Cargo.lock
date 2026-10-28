@@ -5673,6 +5673,7 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-ai",
+ "studio-gpu-device",
  "studio-pixel-algo",
  "studio-pixel-codecs",
  "studio-pixel-color",
@@ -5797,6 +5798,14 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-media",
+]
+
+[[package]]
+name = "studio-gpu-device"
+version = "0.1.2"
+dependencies = [
+ "pollster 0.4.0",
+ "wgpu",
 ]
 
 [[package]]
@@ -6344,6 +6353,7 @@ dependencies = [
  "serde_json",
  "studio-colour",
  "studio-fx",
+ "studio-gpu-device",
  "studio-h264",
  "studio-hevc",
  "studio-hw",
@@ -6511,6 +6521,7 @@ dependencies = [
  "resvg 0.48.1",
  "serde",
  "serde_json",
+ "studio-gpu-device",
  "usvg 0.48.1",
  "wgpu",
 ]

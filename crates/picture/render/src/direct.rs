@@ -314,9 +314,8 @@ fn device() -> Option<&'static Mutex<Gpu>> {
         if std::env::var_os("STUDIO_RENDER_NO_GPU").is_some() {
             return None;
         }
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("studio-direct"), required_features: wgpu::Features::empty(), required_limits: adapter.limits(), ..Default::default() })).ok()?;
+        let shared = studio_gpu_device::shared()?;
+        let (device, queue) = (shared.device.clone(), shared.queue.clone());
         let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only }, has_dynamic_offset: false, min_binding_size: None }, count: None };
         let entries = [wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None }, storage(1, true), storage(2, false)];
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("direct"), entries: &entries });

@@ -8,7 +8,7 @@ description = "Zornov's vector rasterizer: exact-area anti-aliasing, non-zero an
 [features]
 default = ["gpu"]
 # The WGSL compute renderer. Without it only the CPU renderer is built.
-gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:studio-gpu-device"]
 
 [dependencies]
 kurbo = { version = "0.13", features = ["serde"] }
@@ -16,6 +16,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"], optional = true }
 pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
+studio-gpu-device = { path = "../../picture/gpu-device", optional = true }
 
 [dev-dependencies]
 png = "0.17"

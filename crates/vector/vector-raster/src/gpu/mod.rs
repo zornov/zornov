@@ -110,17 +110,8 @@ impl GpuRaster {
     }
 
     fn open() -> Option<Arc<GpuRaster>> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
-        let name = adapter.get_info().name;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("studio-vector-raster"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            ..Default::default()
-        }))
-        .ok()?;
-        GpuRaster::from_device(device, queue, name)
+        let g = studio_gpu_device::shared()?;
+        GpuRaster::from_device(g.device.clone(), g.queue.clone(), g.adapter_name.clone())
     }
 
     /// Uses an existing device (the application shares its own). `None`

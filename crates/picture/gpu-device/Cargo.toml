@@ -1,0 +1,10 @@
+[package]
+name = "studio-gpu-device"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Zornov's one GPU device per process, shared by the renderer, the vector rasterizer and every other GPU pass."
+
+[dependencies]
+wgpu = { version = "30", default-features = false, features = ["wgsl", "metal", "vulkan", "dx12"] }
+pollster = "0.4"

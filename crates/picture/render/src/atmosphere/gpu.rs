@@ -40,13 +40,11 @@ fn gpu() -> Option<&'static Mutex<Gpu>> {
         if std::env::var_os("STUDIO_RENDER_NO_GPU").is_some() {
             return None;
         }
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions { power_preference: wgpu::PowerPreference::HighPerformance, ..Default::default() })).ok()?;
-        let limits = adapter.limits();
-        if limits.max_storage_buffers_per_shader_stage < 8 {
+        let shared = studio_gpu_device::shared()?;
+        if shared.limits.max_storage_buffers_per_shader_stage < 8 {
             return None;
         }
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("studio-atmosphere"), required_features: wgpu::Features::empty(), required_limits: limits, ..Default::default() })).ok()?;
+        let (device, queue) = (shared.device.clone(), shared.queue.clone());
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("atmosphere"), source: wgpu::ShaderSource::Wgsl(source().into()) });
         let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only }, has_dynamic_offset: false, min_binding_size: None }, count: None };

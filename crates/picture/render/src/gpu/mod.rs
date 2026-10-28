@@ -471,21 +471,8 @@ impl GpuContext {
     }
 
     fn open() -> Option<Arc<GpuContext>> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .ok()?;
-        let info = adapter.get_info();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("studio-render"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            ..Default::default()
-        }))
-        .ok()?;
-        GpuContext::build(device, queue, info.name, info.device_type == wgpu::DeviceType::Cpu)
+        let g = studio_gpu_device::shared()?;
+        GpuContext::build(g.device.clone(), g.queue.clone(), g.adapter_name.clone(), g.software)
     }
 
     /// Wraps an existing device (the application shares egui's). `None` if
