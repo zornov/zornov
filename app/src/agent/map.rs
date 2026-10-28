@@ -145,8 +145,7 @@ const DEPTS: &[Dept] = &[
         lines: &[
             ("what the content library has", "tool:catalogue tool:search"),
             ("your files across projects", "tool:assets tool:project_care"),
-            ("Zornov help; skills (the procedure for a kind of work) and lessons", "tool:howto tool:capabilities tool:guide tool:skill"),
-            ("tell Zornov's makers what surprised you", "tool:feedback"),
+            ("Zornov help; skills (the procedure for a kind of work) and lessons; tell its makers what surprised you", "tool:howto tool:capabilities tool:guide tool:skill tool:feedback"),
         ],
     },
     Dept {
