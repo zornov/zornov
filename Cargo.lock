@@ -5563,11 +5563,11 @@ dependencies = [
 
 [[package]]
 name = "studio-aac"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-ai"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5582,7 +5582,7 @@ dependencies = [
 
 [[package]]
 name = "studio-app"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "eframe",
  "libc",
@@ -5653,14 +5653,14 @@ dependencies = [
 
 [[package]]
 name = "studio-audio"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cpal",
 ]
 
 [[package]]
 name = "studio-av1"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -5668,7 +5668,7 @@ dependencies = [
 
 [[package]]
 name = "studio-canvas"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5690,7 +5690,7 @@ dependencies = [
 
 [[package]]
 name = "studio-cloud-server"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ring",
  "security-framework 3.7.0",
@@ -5703,14 +5703,14 @@ dependencies = [
 
 [[package]]
 name = "studio-colour"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "naga 26.0.0",
 ]
 
 [[package]]
 name = "studio-commerce"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ring",
  "serde",
@@ -5722,7 +5722,7 @@ dependencies = [
 
 [[package]]
 name = "studio-content"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5733,14 +5733,14 @@ dependencies = [
 
 [[package]]
 name = "studio-craft-media"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "proptest",
 ]
 
 [[package]]
 name = "studio-crash"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libc",
  "serde",
@@ -5752,7 +5752,7 @@ dependencies = [
 
 [[package]]
 name = "studio-deliver"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5766,7 +5766,7 @@ dependencies = [
 
 [[package]]
 name = "studio-dnxhr"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
@@ -5774,7 +5774,7 @@ dependencies = [
 
 [[package]]
 name = "studio-encode"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-aac",
  "studio-h264",
@@ -5783,7 +5783,7 @@ dependencies = [
 
 [[package]]
 name = "studio-entitlements"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ring",
  "serde",
@@ -5792,7 +5792,7 @@ dependencies = [
 
 [[package]]
 name = "studio-fx"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "naga 26.0.0",
  "serde",
@@ -5802,7 +5802,7 @@ dependencies = [
 
 [[package]]
 name = "studio-gpu-device"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "pollster 0.4.0",
  "wgpu",
@@ -5810,18 +5810,18 @@ dependencies = [
 
 [[package]]
 name = "studio-guard"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-h264"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
 ]
 
 [[package]]
 name = "studio-hevc"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
 ]
@@ -5832,7 +5832,7 @@ version = "0.1.0"
 
 [[package]]
 name = "studio-i18n"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "sys-locale",
  "unicode-bidi",
@@ -5840,14 +5840,14 @@ dependencies = [
 
 [[package]]
 name = "studio-imageio"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-media",
 ]
 
 [[package]]
 name = "studio-keystore"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "security-framework 3.7.0",
  "serde_json",
@@ -5858,7 +5858,7 @@ dependencies = [
 
 [[package]]
 name = "studio-live"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
@@ -5875,7 +5875,7 @@ dependencies = [
 
 [[package]]
 name = "studio-lottie"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde_json",
  "studio-media",
@@ -5884,14 +5884,14 @@ dependencies = [
 
 [[package]]
 name = "studio-media"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-paths",
 ]
 
 [[package]]
 name = "studio-mesh"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "gltf",
  "studio-media",
@@ -5901,7 +5901,7 @@ dependencies = [
 
 [[package]]
 name = "studio-model"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "proptest",
  "roxmltree 0.20.0",
@@ -5912,7 +5912,7 @@ dependencies = [
 
 [[package]]
 name = "studio-modeling"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5923,7 +5923,7 @@ dependencies = [
 
 [[package]]
 name = "studio-mograph"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5933,11 +5933,11 @@ dependencies = [
 
 [[package]]
 name = "studio-morph"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-mov"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-dnxhr",
  "studio-prores",
@@ -5945,30 +5945,30 @@ dependencies = [
 
 [[package]]
 name = "studio-mp4"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-net"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ureq",
 ]
 
 [[package]]
 name = "studio-nn"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-opus"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-paths"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-pixel-affinity"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -5978,7 +5978,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-algo"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "rustfft",
@@ -5992,7 +5992,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-cms"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "moxcms",
  "rayon",
@@ -6000,7 +6000,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-codecs"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "exr",
  "flate2",
@@ -6021,7 +6021,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-color"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "studio-pixel-cms",
@@ -6029,7 +6029,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-compose"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "criterion",
  "proptest",
@@ -6045,7 +6045,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-doc"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -6056,11 +6056,11 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-docpath"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-pixel-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "blake3",
  "chrono",
@@ -6098,7 +6098,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-format"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "blake3",
  "crc32fast",
@@ -6121,14 +6121,14 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-geom"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "studio-pixel-gpu"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "half",
  "log",
@@ -6146,14 +6146,14 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-heif"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "heic-rs",
 ]
 
 [[package]]
 name = "studio-pixel-io"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "blake3",
  "crc32fast",
@@ -6184,14 +6184,14 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-ops"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-pixel-doc",
 ]
 
 [[package]]
 name = "studio-pixel-paint"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -6202,7 +6202,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-plugins"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "rustix 1.1.5",
@@ -6218,7 +6218,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-psd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
  "proptest",
@@ -6229,7 +6229,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-raster"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "proptest",
  "rayon",
@@ -6240,7 +6240,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-raw"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
  "image",
@@ -6255,7 +6255,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-tablet"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
@@ -6267,7 +6267,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-testkit"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "memory-stats",
  "serde_json",
@@ -6275,7 +6275,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-text"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
  "parley",
@@ -6290,7 +6290,7 @@ dependencies = [
 
 [[package]]
 name = "studio-pixel-vector"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "studio-pixel-color",
@@ -6305,7 +6305,7 @@ version = "1.0.0"
 
 [[package]]
 name = "studio-plugins"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "libloading",
  "naga 30.0.1",
@@ -6321,7 +6321,7 @@ dependencies = [
 
 [[package]]
 name = "studio-production"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -6329,7 +6329,7 @@ dependencies = [
 
 [[package]]
 name = "studio-prores"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "studio-craft-media",
@@ -6338,14 +6338,14 @@ dependencies = [
 
 [[package]]
 name = "studio-psd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "miniz_oxide 0.8.9",
 ]
 
 [[package]]
 name = "studio-quality"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "png 0.17.16",
  "serde",
@@ -6355,7 +6355,7 @@ dependencies = [
 
 [[package]]
 name = "studio-render"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bytemuck",
  "flate2",
@@ -6386,39 +6386,39 @@ dependencies = [
 
 [[package]]
 name = "studio-rig"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "studio-sim"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-mesh",
 ]
 
 [[package]]
 name = "studio-sound"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-audio",
 ]
 
 [[package]]
 name = "studio-speech"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-mesh",
 ]
 
 [[package]]
 name = "studio-synth"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "studio-sound",
 ]
 
 [[package]]
 name = "studio-testkit"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "proptest",
  "serde",
@@ -6436,7 +6436,7 @@ dependencies = [
 
 [[package]]
 name = "studio-text"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "fontdb 0.23.0",
  "png 0.17.16",
@@ -6455,7 +6455,7 @@ dependencies = [
 
 [[package]]
 name = "studio-update"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
  "ring",
@@ -6468,7 +6468,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vector"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "i_overlay",
  "serde",
@@ -6480,7 +6480,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vector-art"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "image",
  "kurbo 0.13.1",
@@ -6501,7 +6501,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vector-geom"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "kurbo 0.13.1",
  "proptest",
@@ -6512,7 +6512,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vector-pathops"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "kurbo 0.13.1",
  "linesweeper",
@@ -6523,7 +6523,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vector-raster"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bytemuck",
  "kurbo 0.13.1",
@@ -6539,7 +6539,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vector-trace"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "image",
  "kurbo 0.13.1",
@@ -6551,7 +6551,7 @@ dependencies = [
 
 [[package]]
 name = "studio-vp9"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rayon",
  "studio-craft-media",
@@ -6560,7 +6560,7 @@ dependencies = [
 
 [[package]]
 name = "studio-webmedia"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde_json",
  "studio-encode",
@@ -6572,7 +6572,7 @@ dependencies = [
 
 [[package]]
 name = "studio-world"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -8500,7 +8500,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
  "p12",
@@ -8804,7 +8804,7 @@ dependencies = [
 
 [[package]]
 name = "zornov-agent-hot"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "serde_json",
 ]
