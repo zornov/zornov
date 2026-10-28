@@ -4,8 +4,8 @@
 # (homebrew/cask itself takes self-submitted apps from 225 stars). Each
 # release: set version, and sha256 from the release's DMG digest.
 cask "zornov" do
-  version "0.1.1"
-  sha256 "baf74f822c25122d28b6818df859037175167f786154a662f0297809e959685f"
+  version "0.1.2"
+  sha256 "b8c0a6672057267028339985bd9b73ae6459e4a719427c01de7f287800a97541"
 
   url "https://github.com/zornov/zornov/releases/download/v#{version}/Zornov-#{version}-macos-aarch64.dmg",
       verified: "github.com/zornov/zornov/"
