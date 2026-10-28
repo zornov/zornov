@@ -91,3 +91,65 @@ fn quadruped_head_goes_to_the_end_with_the_head() {
         assert!(head.tail[axis] * sign > 120.0, "head bone reaches the head: {:?}", head.tail);
     }
 }
+
+#[test]
+fn quadruped_refuses_a_body_it_cannot_orient() {
+    // Round in plan: no long axis.
+    let mut ball = prim::uv_sphere(1.0, 24, 12);
+    for p in &mut ball.positions {
+        *p = [p[0] * 60.0, p[1] * 40.0, p[2] * 60.0];
+    }
+    let e = autorig::try_quadruped(&ball, None).unwrap_err();
+    assert!(e.contains("forward"), "{e}");
+    // A long body with alike ends: the head end is unclear, unless told.
+    assert!(autorig::try_quadruped(&body_along(2), None).is_err());
+    assert!(autorig::try_quadruped(&body_along(2), Some([0.0, 0.0, 1.0])).is_ok());
+    // A clear body is fine.
+    assert!(autorig::try_quadruped(&bear_along(2, 1.0), None).is_ok());
+}
+
+#[test]
+fn smodel_is_named_not_mistaken_for_a_junk_file() {
+    assert!(studio_mesh::foreign::is_model_ext("smodel"));
+    let dir = std::env::temp_dir().join(format!("zornov-smodel-probe-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("a.smodel");
+    std::fs::write(&f, b"not really").unwrap();
+    let e = studio_mesh::import::load(&f, 0.0).err().unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(e.contains("editable model source"), "{e}");
+}
+
+#[test]
+fn l_system_forks_thin_once_and_keep_the_pipe_rule() {
+    use studio_mesh::math::growth::{Turtle, pipe_radii, turtle};
+    // `![` thins once, not twice, per level.
+    let g = turtle("F![F![F]]", &Turtle { taper: 0.7, width: 1.0, ..Turtle::default() });
+    let w: Vec<f64> = g.branches.iter().map(|b| b.radii[0]).collect();
+    println!("base radius per branch {w:?}");
+    assert!((w[1] / w[0] - 0.7).abs() < 1e-9 && (w[2] / w[1] - 0.7).abs() < 1e-9, "{w:?}");
+    // Pipe rule at a fork: r_parent^2 is about the sum of the children's.
+    let g = turtle("FFFF[+FFF][-FFF]", &Turtle::default());
+    let r = pipe_radii(&g, 1.0, 2.0);
+    let at_fork = r[0][4];
+    let kids: f64 = (1..g.branches.len()).map(|b| r[b][0].powi(2)).sum();
+    assert!((at_fork.powi(2) - kids).abs() / at_fork.powi(2) < 0.35, "fork {at_fork}, kids {kids}");
+}
+
+#[test]
+fn a_tree_rigs_by_branch_and_a_branch_swings_alone() {
+    use studio_mesh::math::growth::{Turtle, pipe_radii, turtle};
+    use studio_mesh::{rig::PoseInput, treerig};
+    let g = turtle("FFFF[+FFF[+FF]-FF][-FFF]FF", &Turtle { angle: 35.0, step: 10.0, width: 2.0, ..Turtle::default() });
+    let place = |p: [f64; 3]| [p[0] as f32, -(p[2] as f32), p[1] as f32];
+    let (mut m, ids) = treerig::bark(&g, &pipe_radii(&g, 2.0, 2.0), &|_| 6, &place);
+    treerig::rig_mesh(&mut m, &ids, &g, &place, 2).unwrap();
+    let rig = m.rig.clone().unwrap();
+    assert!(rig.bones.len() >= g.branches.len(), "{} bones for {} branches", rig.bones.len(), g.branches.len());
+    let posed = rig.posed_mesh(&m, &PoseInput { rotations: [("branch.1.0".to_string(), [50.0, 0.0, 0.0])].into(), ..Default::default() });
+    let moved = |id: u32| (0..m.positions.len()).filter(|&v| ids[v] == id).map(|v| {
+        let (a, b) = (posed.positions[v], m.positions[v]);
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    }).fold(0.0f32, f32::max);
+    assert!(moved(1) > 3.0 && moved(0) < 1e-3, "branch 1 moved {}, trunk {}", moved(1), moved(0));
+}

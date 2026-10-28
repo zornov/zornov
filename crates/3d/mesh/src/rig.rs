@@ -335,6 +335,15 @@ impl Constraint {
             Constraint::Ik { bone, .. } | Constraint::LookAt { bone, .. } | Constraint::Limit { bone, .. } | Constraint::CopyRotation { bone, .. } => *bone,
         }
     }
+    /// Where it runs in a solve: IK, copies, limits, look-at.
+    pub fn stage(&self) -> u8 {
+        match self {
+            Constraint::Ik { .. } => 0,
+            Constraint::CopyRotation { .. } => 1,
+            Constraint::Limit { .. } => 2,
+            Constraint::LookAt { .. } => 3,
+        }
+    }
     pub fn kind(&self) -> &'static str {
         match self {
             Constraint::Ik { .. } => "ik",
@@ -716,7 +725,13 @@ impl Rig {
             }
         }
         let mut world = self.forward(&local);
-        for c in &self.constraints {
+        // IK, then copies, then limits, then look-at, whatever order they
+        // were added in: a limit listed before an IK would otherwise be
+        // undone by it, and a look-at is the last word on where a bone
+        // points. Within a stage the list order stands.
+        let mut order: Vec<&Constraint> = self.constraints.iter().collect();
+        order.sort_by_key(|c| c.stage());
+        for c in order {
             let influence = input.influences.get(c.name()).copied().unwrap_or(match c {
                 Constraint::Ik { influence, .. } | Constraint::LookAt { influence, .. } | Constraint::CopyRotation { influence, .. } => *influence,
                 Constraint::Limit { .. } => 1.0,
@@ -1258,6 +1273,34 @@ mod tests {
         let posed = r.evaluate(&PoseInput { targets: HashMap::from([("foot".to_string(), [0.0, 500.0, 0.0])]), ..Default::default() });
         let tail = r.bone_lines(&posed)[1].1;
         assert!(close(tail, [0.0, 200.0, 0.0], 1.0), "{tail:?}");
+    }
+
+    #[test]
+    fn constraints_solve_ik_then_limits_then_look_at_whatever_the_list_order() {
+        let limit = Constraint::Limit { name: "stiff".into(), bone: 0, min: [-5.0, -5.0, -5.0], max: [5.0, 5.0, 5.0] };
+        let ik = Constraint::Ik { name: "foot".into(), bone: 1, chain: 2, target: Target::Point([0.0, 150.0, -30.0]), pole: Some([0.0, 100.0, -200.0]), influence: 1.0 };
+        let thigh_x = |r: &Rig| q_to_euler(r.evaluate(&PoseInput::default()).local[0].rot)[0];
+        // The limit listed first, then the IK: the limit still holds.
+        let mut early = leg();
+        early.constraints = vec![limit.clone(), ik.clone()];
+        let mut late = leg();
+        late.constraints = vec![ik.clone(), limit.clone()];
+        let free = {
+            let mut r = leg();
+            r.constraints = vec![ik];
+            thigh_x(&r)
+        };
+        assert!(free.abs() > 10.0, "the IK alone bends the thigh: {free}");
+        assert!(thigh_x(&early).abs() <= 5.01, "limit listed before the IK: {}", thigh_x(&early));
+        assert!((thigh_x(&early) - thigh_x(&late)).abs() < 1e-3, "the same either way");
+        // A look-at listed before a limit on the same bone has the last word.
+        let mut h = Rig::default();
+        h.bones.push(Bone::new("head", None, [0.0; 3], [0.0, -50.0, 0.0]));
+        h.constraints.push(Constraint::LookAt { name: "look".into(), bone: 0, target: Target::Point([300.0, -300.0, 0.0]), influence: 1.0 });
+        h.constraints.push(Constraint::Limit { name: "stiff".into(), bone: 0, min: [0.0; 3], max: [0.0; 3] });
+        let posed = h.evaluate(&PoseInput::default());
+        let d = normalise(sub(h.bone_lines(&posed)[0].1, [0.0; 3]));
+        assert!(close(d, normalise([1.0, -1.0, 0.0]), 1e-3), "{d:?}");
     }
 
     #[test]
