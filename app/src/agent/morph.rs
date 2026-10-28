@@ -77,7 +77,7 @@ fn shape_targets(s: &Session, to: &Value) -> Result<Value, String> {
             let Some(m::Value::Text(src)) = g.params.get("vector") else { return Err(format!("clip {other} is not a shape layer")) };
             let doc = studio_vector::parse(src)?;
             let items = doc.get("items").cloned().unwrap_or(doc);
-            let shapes: Vec<Value> = items.as_array().into_iter().flatten().filter(|it| matches!(it.get("type").and_then(Value::as_str), Some("rect" | "rectangle" | "ellipse" | "circle" | "polygon" | "star" | "line" | "arc" | "pie" | "path"))).cloned().collect();
+            let shapes: Vec<Value> = items.as_array().into_iter().flatten().filter(|it| matches!(it.get("type").and_then(Value::as_str), Some("rect" | "rectangle" | "ellipse" | "circle" | "polygon" | "star" | "line" | "arc" | "pie" | "path" | "curve"))).cloned().collect();
             if shapes.is_empty() {
                 return Err(format!("clip {other} has no shapes to morph into"));
             }

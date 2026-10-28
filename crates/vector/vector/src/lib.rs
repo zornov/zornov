@@ -9,8 +9,11 @@
 //!   (`points`, `radius`, `inner`), `line` (`from`, `to`), `arc` and
 //!   `pie` (`radius`, `inner`, `start`, `end` in degrees from straight
 //!   up, clockwise), `path` (`points` + `closed` / `smooth`, or
-//!   `vertices` with `in` / `out` handles, or SVG `d`). Each takes a
-//!   `position`.
+//!   `vertices` with `in` / `out` handles, or SVG `d`), `curve` (from
+//!   mathematics: presets such as rose, lissajous, heart, spirograph,
+//!   superformula, koch, dragon; formulas x(u), y(u), polar r(theta),
+//!   implicit f(x, y) = 0; L-systems; Fourier epicycles: see [`curve`]).
+//!   Each takes a `position`.
 //! * Paint: `fill` (`colour`, `opacity`, `rule`, `gradient`, `blend`),
 //!   `stroke` (`colour`, `width`, `cap`, `join`, `miter`, `dash`,
 //!   `dash_offset`, `gradient`, `opacity`, `blend`). A gradient is
@@ -32,6 +35,7 @@
 //! Every number, point and colour can be animated (see [`value`]).
 //! Coordinates are canvas pixels from the centre of the picture, y down.
 
+pub mod curve;
 pub mod draw;
 pub mod extrude;
 pub mod lottie;

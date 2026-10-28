@@ -161,6 +161,8 @@ impl ModelScene {
                             casts_shadows: true,
                             accepts_shadows: true,
                             motion,
+                            // A math shape drawn from its formula (`math_recipe`), when asked.
+                            direct: if params.text("math_render", "mesh") == "direct" { crate::direct::from_recipe(params.text("math_recipe", ""), rel as f32 / 1e6) } else { None },
                         }],
                         camera: None,
                         lights: Vec::new(),

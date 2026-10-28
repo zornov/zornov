@@ -119,6 +119,9 @@ pub struct Hero {
     /// How well a front-on render matches the reference picture made for it
     /// (0..1), when there is one.
     pub reference: Option<f32>,
+    /// Made from a formula (`model` `math`): its form is the formula's, not
+    /// a primitive waiting for parts.
+    pub math: bool,
 }
 
 pub struct Light {
@@ -349,7 +352,7 @@ pub fn judge(heroes: &[Hero], env: &Env, words: &Words) -> Vec<Problem> {
         out.extend(solidity::notes(h.id, &h.name, at, &h.info.solid));
 
         // Primitive: few parts, one material, nothing but a plain outline.
-        if c.shells <= 2 && c.materials <= 1 && c.bones == 0 && c.plain_outline() && c.triangles < 150_000 {
+        if c.shells <= 2 && c.materials <= 1 && c.bones == 0 && c.plain_outline() && c.triangles < 150_000 && !h.math {
             out.push(Problem {
                 kind: "3d_primitive",
                 at,
@@ -804,7 +807,7 @@ pub fn scene(model: &m::Project, view: &view::Project, refs: &[(Vec<String>, Pat
                 }
                 if end - start >= 1.0 && !skipped && let Some(info) = crate::mesh_store::file_of(c).and_then(|f| info_of_file(&f)) {
                     let k = &info.craft;
-                    if k.triangles > 0 && k.triangles <= 4000 && k.shells <= 2 && k.materials <= 2 && k.bones == 0 {
+                    if k.triangles > 0 && k.triangles <= 4000 && k.shells <= 2 && k.materials <= 2 && k.bones == 0 && !g.params.contains_key("math_kind") {
                         env.prims.push(PrimClip { id: c.id.0 as u32, name: c.name.clone(), start, end });
                     }
                 }
@@ -829,6 +832,7 @@ pub fn scene(model: &m::Project, view: &view::Project, refs: &[(Vec<String>, Pat
                     look_set: param_set(g, &["base_colour", "metallic", "roughness"]),
                     glow_set: param_set(g, &["emissive"]),
                     reference,
+                    math: g.params.contains_key("math_kind"),
                 });
             }
             _ => {}

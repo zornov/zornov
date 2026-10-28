@@ -369,8 +369,10 @@ fn default_hairstyle(b: &studio_mesh::character::Build) -> &'static str {
 /// A model from blended parts (`parts`): each melts into the ones before
 /// it (`blend` px) or carves them (`subtract`); a part's own colour and
 /// finish make a material of their own.
-fn blended(op: &Value) -> Result<Mesh, String> {
+fn blended(op: &Value) -> Result<(Mesh, Option<super::math_shapes::Moving>), String> {
     use studio_mesh::sdf::{Join, Part, Shape};
+    // Parts that are formulas, by their place in `parts`.
+    let mut fields: Vec<(usize, std::sync::Arc<studio_mesh::math::field::Field>)> = Vec::new();
     let list = op.get("parts").and_then(Value::as_array).ok_or("\"parts\" is a list of {\"shape\", \"at\", \"size\", …}")?;
     if list.is_empty() || list.len() > 400 {
         return Err("\"parts\" holds 1 to 400 parts".into());
@@ -408,7 +410,27 @@ fn blended(op: &Value) -> Result<Mesh, String> {
             }
             continue;
         }
-        let shape = Shape::parse(shape_name).ok_or_else(|| bad("shape is ellipsoid, box, capsule, cone (tapering, from/to with radius and radius_to), cylinder, torus or wedge; or a \"path\" of points for a tube"))?;
+        // A solid from a formula: an implicit `math` filling `size`.
+        if let Some(m) = v.get("math") {
+            let (f, sides, _) = super::math_shapes::field_of(m).map_err(|e| bad(&e))?;
+            let size = super::math_shapes::field_size(sides, super::math_shapes::fit_of(v, 200.0).map_err(|e| bad(&e))?);
+            fields.push((parts.len(), f.clone()));
+            let mut p = Part::field(f, field_v3(v, "at")?.unwrap_or([0.0; 3]), size);
+            p.turn = field_v3(v, "turn")?.unwrap_or([0.0; 3]);
+            p.blend = num(v, "blend").unwrap_or(0.0).max(0.0);
+            p.join = match (v.get("subtract").and_then(Value::as_bool), v.get("intersect").and_then(Value::as_bool)) {
+                (Some(true), _) => Join::Subtract,
+                (_, Some(true)) => Join::Intersect,
+                _ => Join::Add,
+            };
+            if let Some(mat) = surface_of(v, true)? {
+                materials.push(mat);
+                p.material = materials.len() as u32 - 1;
+            }
+            parts.push(p);
+            continue;
+        }
+        let shape = Shape::parse(shape_name).ok_or_else(|| bad("shape is ellipsoid, box, capsule, cone (tapering, from/to with radius and radius_to), cylinder, torus or wedge; or a \"path\" of points for a tube; or a \"math\" (an implicit formula or preset)"))?;
         let size = match v.get("size") {
             Some(s) if s.is_number() => [s.as_f64().unwrap_or(0.0) as f32; 3],
             Some(s) => v3(s).ok_or_else(|| bad("size is a number or [x, y, z] (px)"))?,
@@ -461,11 +483,17 @@ fn blended(op: &Value) -> Result<Mesh, String> {
     if thin.is_finite() && thin > 0.0 {
         cell = cell.min(thin / 3.0).max(extent * 2.0 / 360.0);
     }
+    // Formulas cost more per sample: the grid stays under the cap.
+    if !fields.is_empty() {
+        let cost = fields.iter().map(|(_, f)| f.cost()).sum::<u64>() + 1;
+        cell = cell.max(studio_mesh::math::field::cell_for([extent * 2.0; 3], detail, cost));
+    }
     let m = studio_mesh::sdf::build(&parts, materials, cell);
     if m.triangles() == 0 {
         return Err("the parts make no surface (all carved away, or no part adds)".into());
     }
-    Ok(m)
+    let moving = super::math_shapes::moving_parts(parts, fields, cell, m.positions.len());
+    Ok((m, moving))
 }
 
 /// How strong a glow is: a multiplier of the `emissive` colour, above 1
@@ -688,6 +716,17 @@ impl Session {
             return Err("model adds a new model (shape or file) or exports one (\"clip\" + \"export\"); to change a model use the mesh op".into());
         }
         let short = self.doc.project.width.min(self.doc.project.height) as f32;
+        let mut moving: Option<super::math_shapes::Moving> = None;
+        let mut math_said: Option<Value> = None;
+        let mut recipe: Option<studio_mesh::math::field::Recipe> = None;
+        let direct = match op.get("render").and_then(Value::as_str) {
+            None | Some("mesh") => false,
+            Some("direct") => true,
+            Some(other) => return Err(format!("render \"{other}\": mesh (triangles, the default) or direct (drawn straight from a math formula)")),
+        };
+        if direct && op.get("math").is_none() {
+            return Err("render: direct draws a math shape from its formula; give \"math\" (an implicit formula or preset)".into());
+        }
         let (mut mesh, what, notes) = match op.get("file").and_then(Value::as_str) {
             Some(file) => {
                 let fit = num(op, "size").unwrap_or(short * 0.6);
@@ -706,7 +745,34 @@ impl Session {
                     (got.mesh, n, got.notes)
                 }
             }
-            None if op.get("parts").is_some() => (blended(op)?, op.get("name").and_then(Value::as_str).unwrap_or("Model").to_owned(), Vec::new()),
+            None if op.get("math").is_some() => {
+                let fit = super::math_shapes::fit_of(op, short * 0.4)?;
+                let detail = op.get("detail").and_then(Value::as_u64).unwrap_or(4).clamp(1, 6) as usize;
+                // Drawn directly, the mesh is only a stand-in: a coarse one.
+                let mut made = super::math_shapes::make(&op["math"], fit, if direct { detail.min(2) } else { detail })?;
+                if made.mesh.triangles() > MAX_TRIANGLES {
+                    // Too fine to keep: simplified (a lower detail is faster).
+                    let had = made.mesh.triangles();
+                    studio_mesh::decimate::decimate(&mut made.mesh, MAX_TRIANGLES);
+                    made.said["notes"] = json!([format!("{had} triangles simplified to {} (the most a model keeps); a lower detail, or render: direct, keeps it lighter", made.mesh.triangles())]);
+                    // Its vertices are not the bake's any more.
+                    made.moving = None;
+                }
+                if direct && made.recipe.is_none() {
+                    return Err("render: direct draws implicit solids and fractals (a distance field, sphere traced); parametric surfaces, tubes, height fields and growth are drawn as their meshes".into());
+                }
+                if op["math"].get("bake").and_then(Value::as_bool) != Some(false) && !direct {
+                    moving = made.moving;
+                }
+                recipe = made.recipe;
+                math_said = Some(made.said);
+                (made.mesh, op.get("name").and_then(Value::as_str).map(str::to_owned).unwrap_or(made.name), Vec::new())
+            }
+            None if op.get("parts").is_some() => {
+                let (m, mv) = blended(op)?;
+                moving = mv;
+                (m, op.get("name").and_then(Value::as_str).unwrap_or("Model").to_owned(), Vec::new())
+            }
             None => {
                 // No shape used to make a sphere and say ok.
                 if op.get("shape").and_then(Value::as_str).is_none() {
@@ -729,7 +795,11 @@ impl Session {
         if let Some(mat) = surface_of(op, false)?.filter(|_| op.get("parts").is_none() && !is_character(shape_name) && !matches!(shape_name, "head" | "human_head" | "face" | "bust")) {
             // On a file, the colour and finish go over every material.
             let keep_tex: Vec<_> = mesh.materials.iter().map(|m| m.texture.clone()).collect();
-            if op.get("file").is_some() {
+            if op.get("math").is_some() && mesh.materials.len() > 1 {
+                // A plant's bark, not its leaves; a cone's seeds, not its core.
+                let name = mesh.materials[0].name.clone();
+                mesh.materials[0] = studio_mesh::Material { name, ..mat };
+            } else if op.get("file").is_some() {
                 for (i, m) in mesh.materials.iter_mut().enumerate() {
                     *m = studio_mesh::Material { texture: keep_tex[i].clone(), name: m.name.clone(), ..mat.clone() };
                 }
@@ -752,7 +822,20 @@ impl Session {
                 skin.subsurface = mat.subsurface;
             }
         }
-        self.place_model(op, &mesh, what, notes)
+        let mut said = self.place_model(op, &mesh, what, notes)?;
+        if let Some(m) = math_said {
+            let id = self.doc.project.clips.iter().map(|c| c.id).max().unwrap_or(0) as u32;
+            let how = self.keep_math(id, m["kind"].as_str().unwrap_or("math"), recipe.as_ref(), direct)?;
+            said.push_str(&format!("; math: {m}"));
+            if direct {
+                said.push_str(&format!("; {how}"));
+            }
+        }
+        if let Some(mv) = moving {
+            let id = self.doc.project.clips.iter().map(|c| c.id).max().unwrap_or(0) as u32;
+            said.push_str(&format!("; {}", self.bake_math(id, &mesh, &mv)?));
+        }
+        Ok(said)
     }
 
     /// Puts a finished model on the timeline as a model clip: `at`,
@@ -1037,8 +1120,14 @@ impl Session {
                 ops::centre_and_fit(mesh, num(s, "size").unwrap_or(0.0));
                 "centred".into()
             }
+            "twist" | "bend" | "taper" | "warp" | "repeat" => super::math_shapes::warp_step(mesh, what, s)?,
+            "render" => super::math_shapes::render_step(mesh, mc, s)?,
             "add" => {
-                let mut part = primitive(s, 100.0)?;
+                let mut part = match s.get("math") {
+                    // A shape from mathematics, `size` px.
+                    Some(m) => super::math_shapes::make(m, super::math_shapes::fit_of(s, 100.0)?, s.get("detail").and_then(Value::as_u64).unwrap_or(3).clamp(1, 6) as usize)?.mesh,
+                    None => primitive(s, 100.0)?,
+                };
                 if let Some(mat) = surface_of(s, true)? {
                     part.materials = vec![mat];
                 } else {
@@ -1059,7 +1148,7 @@ impl Session {
                     ops::transform(&mut twin, &Region::All, [-at[0], at[1], at[2]], [0.0; 3], [1.0; 3], [0.0; 3]);
                     ops::merge(mesh, &twin);
                 }
-                format!("{}{} added", if pair { "a pair of " } else { "" }, s.get("shape").and_then(Value::as_str).unwrap_or("sphere"))
+                format!("{}{} added", if pair { "a pair of " } else { "" }, s.get("shape").and_then(Value::as_str).or(s.get("math").map(|_| "math shape")).unwrap_or("sphere"))
             }
             "boolean" | "union" | "subtract" | "intersect" => {
                 let mode = s.get("mode").and_then(Value::as_str).unwrap_or(what);
@@ -1270,7 +1359,7 @@ impl Session {
     }
 }
 
-pub const STEPS: &[&str] = &["subdivide", "bevel", "smooth", "sculpt", "stroke", "symmetrize", "mirror", "extrude", "displace", "move", "fit", "add", "boolean", "decimate", "normals", "material", "texture", "uv", "delete", "array"];
+pub const STEPS: &[&str] = &["subdivide", "bevel", "smooth", "sculpt", "stroke", "symmetrize", "mirror", "extrude", "displace", "move", "fit", "add", "boolean", "decimate", "normals", "material", "texture", "uv", "delete", "array", "twist", "bend", "taper", "warp", "repeat", "render"];
 
 #[cfg(test)]
 mod tests {

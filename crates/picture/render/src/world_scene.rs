@@ -259,7 +259,7 @@ pub fn to_mesh_desc(desc: &WorldDesc, canvas: &Canvas, camera: &CameraDesc, budg
                 m.single_group();
                 tris += m.triangles();
                 id += 1;
-                instances.push(MeshInstance { id, mesh: Arc::new(m), key: format!("chunk {i} {j} {lod}"), world: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], overrides: MaterialOverride::default(), smooth: 1.0, accepts_lights: true, casts_shadows: true, accepts_shadows: true, motion: None });
+                instances.push(MeshInstance { id, mesh: Arc::new(m), key: format!("chunk {i} {j} {lod}"), world: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], overrides: MaterialOverride::default(), smooth: 1.0, accepts_lights: true, casts_shadows: true, accepts_shadows: true, motion: None, direct: None });
             }
         }
         for batch in &list.batches {
@@ -279,6 +279,7 @@ pub fn to_mesh_desc(desc: &WorldDesc, canvas: &Canvas, camera: &CameraDesc, budg
                     casts_shadows: true,
                     accepts_shadows: true,
                     motion: None,
+                    direct: None,
                 });
             }
         }
@@ -301,6 +302,7 @@ pub fn to_mesh_desc(desc: &WorldDesc, canvas: &Canvas, camera: &CameraDesc, budg
                 casts_shadows: true,
                 accepts_shadows: true,
                 motion: None,
+                direct: None,
             });
         }
         // Water: a thin clear slab at each level.
@@ -311,7 +313,7 @@ pub fn to_mesh_desc(desc: &WorldDesc, canvas: &Canvas, camera: &CameraDesc, budg
             m.materials = vec![Material { name: "Water".into(), base_colour: [wt.colour[0].max(0.05), wt.colour[1].max(0.2), wt.colour[2].max(0.25), 1.0], roughness: 0.04, transmission: 1.0, ior: 1.33, ..Material::default() }];
             m.single_group();
             id += 1;
-            instances.push(MeshInstance { id, mesh: Arc::new(m), key: "water".into(), world: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], overrides: MaterialOverride::default(), smooth: 1.0, accepts_lights: true, casts_shadows: false, accepts_shadows: true, motion: None });
+            instances.push(MeshInstance { id, mesh: Arc::new(m), key: "water".into(), world: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], overrides: MaterialOverride::default(), smooth: 1.0, accepts_lights: true, casts_shadows: false, accepts_shadows: true, motion: None, direct: None });
         }
         if tris <= budget {
             break;

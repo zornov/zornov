@@ -6,7 +6,7 @@ use studio_mesh::{Material, Mesh, ops, prim, region::Region, rig::{Bone, Rig}, s
 use studio_modeling::{bevel, poly::{NormalMode, Poly}, select::Edges};
 
 fn hero(id: u32, name: &str, start: f64, end: f64, mesh: &Mesh, posed: bool, file: &str) -> Hero {
-    Hero { id, name: name.into(), start, end, file: file.into(), info: Arc::new(Info::of(mesh)), posed, look_set: false, glow_set: false, reference: None }
+    Hero { id, name: name.into(), start, end, file: file.into(), info: Arc::new(Info::of(mesh)), posed, look_set: false, glow_set: false, reference: None, math: false }
 }
 
 /// What the AURA run built: two rounded boxes, one carved out of the other.

@@ -152,6 +152,22 @@ fn shapes_in(v: &Value, cx: &Ctx, notes: &mut Notes) -> Vec<Path> {
 fn shape(o: &serde_json::Map<String, Value>, cx: &Ctx, notes: &mut Notes) -> Option<Path> {
     let kind = o.get("type").and_then(Value::as_str)?;
     let at = cx.pt(o.get("position").or(o.get("centre")).or(o.get("center")), [0.0, 0.0]);
+    if kind == "curve" {
+        // A curve from mathematics, worked out at this frame's time.
+        return match crate::curve::make(o, cx.t, &|k, d| cx.num(o.get(k), d)) {
+            Ok(l) => {
+                let subs: Vec<Sub> = l.lines.iter().map(|(pts, closed)| {
+                    let pts: Vec<[f64; 2]> = pts.iter().map(|p| [p[0] + at[0], p[1] + at[1]]).collect();
+                    if cx.flag(o.get("smooth"), false) { path::smooth(&pts, *closed, 1.0) } else { Sub::polyline(&pts, *closed) }
+                }).collect();
+                Some(Path::new(subs))
+            }
+            Err(e) => {
+                notes.warnings.push(format!("curve: {e}"));
+                None
+            }
+        };
+    }
     let sub = match kind {
         "rect" | "rectangle" => ops::rect(at, cx.pt(o.get("size"), [100.0, 100.0]), cx.num(o.get("roundness").or(o.get("radius")), 0.0)),
         "ellipse" | "circle" => {
