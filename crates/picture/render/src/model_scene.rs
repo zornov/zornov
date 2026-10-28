@@ -166,6 +166,7 @@ impl ModelScene {
                         }],
                         camera: None,
                         lights: Vec::new(),
+                        ..Default::default()
                     })
                     }
                 }

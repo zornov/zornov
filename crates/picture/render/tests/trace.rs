@@ -45,6 +45,7 @@ fn ball_on_floor(canvas: &Canvas) -> MeshDesc {
         instances: vec![instance(1, floor, [0.0, 60.0, 200.0]), instance(2, ball, [0.0, 0.0, 200.0])],
         camera: Some(CameraDesc::default_for(canvas)),
         lights: vec![sun([0.6, 1.0, 0.3]), ambient(0.15)],
+        ..Default::default()
     }
 }
 
@@ -100,7 +101,7 @@ fn a_sky_shows_behind_and_a_glowing_panel_lights_a_room() {
     let mut panel = studio_mesh::prim::cube([150.0, 4.0, 150.0]);
     panel.materials[0].emissive = [6.0; 3];
     let cam = CameraDesc { position: [0.0, 0.0, -150.0], ..CameraDesc::default_for(&canvas) };
-    let desc = MeshDesc { instances: vec![instance(1, room, [0.0; 3]), instance(3, panel, [0.0, -145.0, 0.0])], camera: Some(cam), lights: vec![ambient(0.0)] };
+    let desc = MeshDesc { instances: vec![instance(1, room, [0.0; 3]), instance(3, panel, [0.0, -145.0, 0.0])], camera: Some(cam), lights: vec![ambient(0.0)], ..Default::default() };
     let s = trace::scene::Scene::build(&desc, &canvas, (96, 54));
     assert!(!s.emit.is_empty());
     let p = trace::cpu::render(&s, 16, &TraceSettings { samples: 16, denoise: true, ..Default::default() });
@@ -116,7 +117,7 @@ fn smoke_dims_what_is_behind_it() {
     let mut puff = Mesh::default();
     puff.materials.push(studio_mesh::Material::default());
     puff.volume = Some(Arc::new(studio_mesh::Volume { dims: [4, 4, 4], min: [-60.0; 3], max: [60.0; 3], cells: vec![[255, 0]; 64], look: studio_mesh::VolumeLook { colour: [0.1, 0.1, 0.1], density: 0.08, fire: 0.0 } }));
-    let base = MeshDesc { instances: vec![instance(1, wall.clone(), [0.0, 0.0, 300.0])], camera: Some(CameraDesc::default_for(&canvas)), lights: vec![ambient(1.0)] };
+    let base = MeshDesc { instances: vec![instance(1, wall.clone(), [0.0, 0.0, 300.0])], camera: Some(CameraDesc::default_for(&canvas)), lights: vec![ambient(1.0)], ..Default::default() };
     let mut smoky = base.clone();
     smoky.instances.push(instance(2, puff, [0.0, 0.0, 0.0]));
     let settings = TraceSettings { samples: 8, denoise: false, ..Default::default() };

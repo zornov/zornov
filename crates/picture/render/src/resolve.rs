@@ -129,7 +129,7 @@ pub fn resolve(scene: &dyn Scene, t: Micros) -> RenderList {
             Node::Adjustment { .. } => {}
         }
     }
-    let nodes = merge_meshes(nodes);
+    let nodes = share_world(merge_meshes(nodes));
     RenderList { canvas, time: t, nodes, camera, lights }
 }
 
@@ -200,6 +200,45 @@ fn merge_meshes(nodes: Vec<Node>) -> Vec<Node> {
         out.push(n);
     }
     out
+}
+
+/// The 3D passes of a frame (model layers split apart by 2D layers, or by
+/// effects of their own) are one world: each pass draws its own models,
+/// with the lower passes' models as holdouts (nearer ones hide it) and the
+/// higher passes' as shadow casters. The world's sky and the air of empty
+/// space are drawn once, by the lowest pass (or the world layer below);
+/// the passes above are transparent wherever none of their models are, so
+/// a 2D card between them stays seen.
+fn share_world(mut nodes: Vec<Node>) -> Vec<Node> {
+    let pass = |n: &Node| match n {
+        Node::Layer { clip, .. } => matches!(clip.source, SourceDesc::Mesh(_)),
+        _ => false,
+    };
+    let world_at = nodes.iter().position(|n| matches!(n, Node::Layer { clip, .. } if matches!(clip.source, SourceDesc::World(_))));
+    let passes: Vec<usize> = nodes.iter().enumerate().filter(|(_, n)| pass(n)).map(|(i, _)| i).collect();
+    if passes.len() < 2 && world_at.is_none_or(|w| passes.first().is_none_or(|p| *p < w)) {
+        return nodes;
+    }
+    let own: Vec<Vec<crate::mesh_render::MeshInstance>> = passes
+        .iter()
+        .map(|&i| match &nodes[i] {
+            Node::Layer { clip, .. } => match &clip.source {
+                SourceDesc::Mesh(m) => m.instances.clone(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        })
+        .collect();
+    for (k, &i) in passes.iter().enumerate() {
+        if let Node::Layer { clip, .. } = &mut nodes[i]
+            && let SourceDesc::Mesh(m) = &mut clip.source
+        {
+            m.holdouts = own[..k].iter().flatten().cloned().collect();
+            m.casters = own[k + 1..].iter().flatten().cloned().collect();
+            m.layered = k > 0 || world_at.is_some_and(|w| w < i);
+        }
+    }
+    nodes
 }
 
 #[cfg(test)]

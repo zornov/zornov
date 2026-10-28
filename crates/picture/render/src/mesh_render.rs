@@ -148,6 +148,24 @@ pub struct MeshDesc {
     pub instances: Vec<MeshInstance>,
     pub camera: Option<CameraDesc>,
     pub lights: Vec<LightDesc>,
+    /// Models of lower 3D passes of the same frame (2D layers sit between):
+    /// they hide what of this pass is behind them and cast shadows on it,
+    /// but are not drawn here (their own pass drew them). See
+    /// [`crate::resolve`].
+    pub holdouts: Vec<MeshInstance>,
+    /// Models of higher 3D passes: they only cast shadows here.
+    pub casters: Vec<MeshInstance>,
+    /// Drawn over a lower 3D pass: the world's sky and the air of empty
+    /// space belong to the lowest pass, so this one is transparent
+    /// wherever none of its own models are.
+    pub layered: bool,
+}
+
+impl MeshDesc {
+    /// Whether other passes' models take part (as holdouts or casters).
+    pub fn shares_world(&self) -> bool {
+        self.layered || !self.holdouts.is_empty() || !self.casters.is_empty()
+    }
 }
 
 type MeshCache = Mutex<(HashMap<String, Arc<Mesh>>, Vec<String>)>;
@@ -222,9 +240,14 @@ fn mul3(m: &[V3; 3], v: V3) -> V3 {
 
 /// The bounding box of a pass in the world.
 pub fn world_bounds(desc: &MeshDesc) -> Option<(V3, V3)> {
+    bounds_of(desc.instances.iter())
+}
+
+/// The world-space box round `instances`.
+fn bounds_of<'a>(instances: impl Iterator<Item = &'a MeshInstance>) -> Option<(V3, V3)> {
     let mut lo = [f32::INFINITY; 3];
     let mut hi = [f32::NEG_INFINITY; 3];
-    for inst in &desc.instances {
+    for inst in instances {
         let (a, b) = inst.mesh.bounds();
         for k in 0..8 {
             let c = [if k & 1 == 0 { a[0] } else { b[0] }, if k & 2 == 0 { a[1] } else { b[1] }, if k & 4 == 0 { a[2] } else { b[2] }];
@@ -863,6 +886,24 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
     // Final renders with bouncing light, when the camera asks for them (a
     // toon look is drawn here: bands and ink, not bounced light).
     if let Some(settings) = desc.camera.and_then(|c| c.trace).filter(|_| !desc.instances.iter().any(|i| i.overrides.toon.is_some())) {
+        // The tracer draws this pass's own models; a layered pass leaves
+        // the sky to the lowest one. (Holdouts and casters of other passes
+        // are not traced.)
+        let own;
+        let desc = if desc.shares_world() {
+            let mut d = MeshDesc { instances: desc.instances.clone(), camera: desc.camera, lights: desc.lights.clone(), ..Default::default() };
+            if desc.layered {
+                for l in &mut d.lights {
+                    if let Some(sk) = l.sky.as_mut() {
+                        sk.background = false;
+                    }
+                }
+            }
+            own = d;
+            &own
+        } else {
+            desc
+        };
         let passes = crate::trace::render(desc, canvas, (tw, th), &settings);
         let mut frame = passes.beauty;
         if desc.lights.iter().any(|l| l.look.is_some()) {
@@ -895,11 +936,15 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
     let sky = lights.iter().find_map(|l| l.sky);
     let irradiance = sky.map(|sk| crate::sky::Irradiance::of(&sk));
     let env = sky.as_ref().zip(irradiance.as_ref());
-    let meshes: Vec<&Mesh> = desc.instances.iter().map(|i| i.mesh.as_ref()).collect();
-    let placed: Vec<Placed> = desc
-        .instances
+    // This pass's models, then the holdouts and casters of the others.
+    let drawn = desc.instances.len();
+    let held = drawn + desc.holdouts.len();
+    let all: Vec<&MeshInstance> = desc.instances.iter().chain(&desc.holdouts).chain(&desc.casters).collect();
+    let meshes: Vec<&Mesh> = all.iter().map(|i| i.mesh.as_ref()).collect();
+    let placed: Vec<Placed> = all
         .iter()
-        .map(|inst| {
+        .enumerate()
+        .map(|(k, inst)| {
             let nm = normal_matrix(&inst.world);
             Placed {
                 world_pos: inst.mesh.positions.iter().map(|p| xform(&inst.world, *p)).collect(),
@@ -909,13 +954,13 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                 smooth: inst.smooth.clamp(0.0, 1.0),
                 lit: inst.accepts_lights,
                 accepts_shadows: inst.accepts_shadows,
-                toon: inst.overrides.toon,
+                toon: if k < drawn { inst.overrides.toon } else { None },
             }
         })
         .collect();
     let view = View { position: camera.position, axes: camera.axes, zoom: camera.zoom * k, centre: [w as f32 * 0.5, h as f32 * 0.5], ortho: false };
     // Shapes drawn from their formula are traced, not rasterised.
-    let tris = raster_tris(&placed, &meshes, &view, |i| desc.instances[i].direct.is_none());
+    let tris = raster_tris(&placed, &meshes, &view, |i| i < held && (i >= drawn || all[i].direct.is_none()));
     let hits = rasterise(&tris, w, h, true);
     let lens = crate::direct::Lens { position: view.position, axes: view.axes, zoom: view.zoom, centre: view.centre };
     let traced: Vec<(usize, [usize; 4], Vec<[f32; 4]>)> = desc
@@ -950,8 +995,8 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
             }
         }
     }
-    let casters: Vec<bool> = desc.instances.iter().map(|i| i.casts_shadows).collect();
-    let bounds = world_bounds(desc).unwrap_or(([0.0; 3], [0.0; 3]));
+    let casters: Vec<bool> = all.iter().map(|i| i.casts_shadows).collect();
+    let bounds = bounds_of(all.iter().copied()).unwrap_or(([0.0; 3], [0.0; 3]));
     let maps: Vec<Option<ShadowMap>> = lights
         .iter()
         .map(|l| if l.casts_shadows && casters.iter().any(|c| *c) { shadow_map(l, &placed, &meshes, &casters, bounds) } else { None })
@@ -980,9 +1025,13 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
                     for (i, px) in out.iter_mut().enumerate() {
                         let hit = hits[start + i];
                         let tr = if traced.is_empty() { None } else { traced_at(start + i) };
+                        // Another pass's model nearer than anything of this one: left for that pass.
+                        if tr.is_none() && hit.tri != u32::MAX && tris[hit.tri as usize].inst as usize >= drawn {
+                            continue;
+                        }
                         if hit.tri == u32::MAX && tr.is_none() {
-                            // The sky behind, when it shows.
-                            if let Some(sk) = sky.filter(|sk| sk.background) {
+                            // The sky behind, when it shows (the lowest pass's).
+                            if let Some(sk) = sky.filter(|sk| sk.background && !desc.layered) {
                                 let gi = start + i;
                                 let d = pixel_dir(&view, (gi % w) as f32 + 0.5, (gi / w) as f32 + 0.5);
                                 let mut c = crate::sky::radiance(&sk, d);
@@ -1100,11 +1149,19 @@ pub fn render_with(desc: &MeshDesc, canvas: &Canvas, target: (u32, u32), gpu: bo
         (out, depth, surf)
     };
     if lights.iter().any(|l| l.look.is_some()) {
+        // A layered pass keeps the air on its own models only: what is empty
+        // here shows the passes and layers below, which have theirs.
+        let empty: Vec<bool> = if desc.layered { out.pixels.iter().map(|p| p[3] <= 0.0).collect() } else { Vec::new() };
         let lens = crate::atmosphere::Lens { position: camera.position, axes: camera.axes, zoom: camera.zoom * tw as f32 / canvas.width.max(1) as f32, centre: [tw as f32 * 0.5, th as f32 * 0.5] };
         let shadows = air_shadows(&lights, &maps);
         let pic = crate::atmosphere::Picture { width: tw as usize, height: th as usize, depth: &depth, surface: &surf };
         if let Some(plan) = crate::atmosphere::plan(&lights, &lens, &pic, &shadows, canvas.height as f32) {
             crate::atmosphere::run(&plan, &pic, &mut out.pixels, gpu);
+        }
+        for (px, e) in out.pixels.iter_mut().zip(&empty) {
+            if *e {
+                *px = [0.0; 4];
+            }
         }
     }
     out
@@ -1321,7 +1378,7 @@ mod tests {
     #[test]
     fn a_ball_is_round_lit_and_in_the_middle() {
         let canvas = Canvas::new(320, 180, 30.0);
-        let desc = MeshDesc { instances: vec![instance(studio_mesh::prim::ico_sphere(60.0, 4), [0.0; 3])], camera: None, lights: vec![] };
+        let desc = MeshDesc { instances: vec![instance(studio_mesh::prim::ico_sphere(60.0, 4), [0.0; 3])], camera: None, lights: vec![], ..Default::default() };
         let f = render(&desc, &canvas, (320, 180));
         let at = |x: usize, y: usize| f.pixels[y * 320 + x];
         // Covered at the centre, empty at the corner.
@@ -1344,7 +1401,7 @@ mod tests {
         let mut near = instance(studio_mesh::prim::ico_sphere(30.0, 3), [0.0, 0.0, 0.0]);
         near.overrides.base_colour = Some([1.0, 0.0, 0.0, 1.0]);
         // Far first in the list: the depth buffer decides, not the order.
-        let desc = MeshDesc { instances: vec![far.clone(), near], camera: None, lights: vec![] };
+        let desc = MeshDesc { instances: vec![far.clone(), near], camera: None, lights: vec![], ..Default::default() };
         let f = render(&desc, &canvas, (320, 180));
         let c = f.pixels[90 * 320 + 160];
         assert!(c[0] > c[1], "the ball is in front: {c:?}");
@@ -1362,7 +1419,7 @@ mod tests {
         // A floor running from behind the camera to far away.
         let mut floor = studio_mesh::prim::plane(4000.0, 4000.0, 4);
         studio_mesh::ops::transform(&mut floor, &studio_mesh::region::Region::All, [0.0, 60.0, cam.position[2] + 1500.0], [0.0; 3], [1.0; 3], [0.0; 3]);
-        let desc = MeshDesc { instances: vec![instance(floor, [0.0; 3])], camera: Some(cam), lights: vec![] };
+        let desc = MeshDesc { instances: vec![instance(floor, [0.0; 3])], camera: Some(cam), lights: vec![], ..Default::default() };
         let f = render(&desc, &canvas, (160, 90));
         // Below the horizon is floor, above it sky.
         assert!(f.pixels[85 * 160 + 80][3] > 0.99);
