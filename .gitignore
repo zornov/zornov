@@ -157,3 +157,14 @@ node_modules/
 *secret*
 *credentials*
 *.token
+
+# Agent scratch, showcase and test output
+# A showcase build: the copied zornov binary, the MCP client script, its frame dumps
+/showcase-bin/
+# Scratch Zornov project the showcase is made in (media, sfx, music, cache, backups)
+/showcase-proj/
+# Rendered showcase videos
+/showcase-out/
+# QC sidecars written beside an export
+*.qc.json
+*.qc.txt
