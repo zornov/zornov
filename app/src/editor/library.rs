@@ -336,10 +336,77 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
                     ui.label(egui::RichText::new(name).font(theme::body()).color(theme::tokens(ui.ctx()).text));
                     ui.add_space(2.0);
                 }
+                if rail == RailItem::Media {
+                    offline_banner(app, ui);
+                }
                 grid(app, ui, rail, &items);
             }
         });
     });
+}
+
+/// "N files are offline", with the way to find them again, above the bin.
+fn offline_banner(app: &mut StudioApp, ui: &mut egui::Ui) {
+    let n = crate::services::library::offline_ids(&app.doc.project.media).len();
+    if n == 0 {
+        return;
+    }
+    ui.horizontal(|ui| {
+        let t = theme::tokens(ui.ctx());
+        icons::paint(ui.painter(), Rect::from_min_size(ui.cursor().min + Vec2::new(0.0, 2.0), Vec2::splat(16.0)), Icon::Warning, 14.0, t.danger);
+        ui.add_space(20.0);
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("{n} file{} offline", if n == 1 { " is" } else { "s are" }))).font(theme::body()).color(t.text));
+        if Button::secondary("Find in folder").icon(Icon::FolderOpen).compact().show(ui).clicked() {
+            relink_from_folder(app, ui.ctx());
+        }
+    });
+    ui.add_space(6.0);
+}
+
+/// Pick a folder and point every offline file found there (by name) back at it.
+fn relink_from_folder(app: &mut StudioApp, ctx: &egui::Context) {
+    let Some(dir) = rfd::FileDialog::new().set_title("Find offline files in").pick_folder() else { return };
+    let res = crate::services::library::relink_in(&mut app.doc, &[dir]);
+    kit::push(ctx, res.message(), None, Some(if res.done.is_empty() { Icon::Info } else { Icon::Check }));
+}
+
+/// Right-click on a bin item: add it, or (when its file is gone) relink it.
+fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collections::HashSet<u32>) {
+    let id = egui::Id::new("media-menu");
+    if !kit::is_open(ctx, id) {
+        return;
+    }
+    let Some(media) = ctx.data(|d| d.get_temp::<u32>(egui::Id::new("media-menu-for"))) else { return };
+    let Some(index) = app.doc.project.media.iter().position(|x| x.id == media) else {
+        kit::set_open(ctx, id, false);
+        return;
+    };
+    let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
+    let (mut add_it, mut relink_it) = (false, false);
+    kit::popover(ctx, id, Rect::from_min_size(at, Vec2::ZERO), kit::Side::Below, 200.0, |ui| {
+        add_it = kit::MenuItem::new("Add to timeline").show(ui).clicked();
+        if offline.contains(&media) {
+            relink_it = kit::MenuItem::new("Relink file").show(ui).clicked();
+        }
+    });
+    if add_it {
+        kit::set_open(ctx, id, false);
+        add(app, ctx, RailItem::Media, index, None, None);
+    }
+    if relink_it {
+        kit::set_open(ctx, id, false);
+        let name = app.doc.project.media[index].name.clone();
+        if let Some(to) = rfd::FileDialog::new().set_title(format!("Locate {name}")).pick_file() {
+            match crate::services::library::relink(&mut app.doc, media, &to) {
+                Ok(msg) => {
+                    kit::push(ctx, msg, None, Some(Icon::Check));
+                }
+                Err(e) => {
+                    kit::push(ctx, e.0, None, Some(Icon::Warning));
+                }
+            }
+        }
+    }
 }
 
 /// Indices into the catalogue for this rail item, after chip and search
@@ -396,7 +463,22 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
 fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize]) {
     let t = theme::tokens(ui.ctx());
     let names: Vec<String> = items.iter().map(|&i| item_name(app, rail, i)).collect();
-    let badges: Vec<Option<String>> = items.iter().map(|&i| badge(app, rail, i)).collect();
+    let offline = if rail == RailItem::Media { crate::services::library::offline_ids(&app.doc.project.media) } else { Default::default() };
+    // A file that cannot be read says so (with the reason on hover) instead of a grey tile.
+    let unreadable: Vec<Option<String>> = items.iter().map(|&i| if rail == RailItem::Media && app.doc.project.media[i].kind != MediaKind::Audio { app.doc.project.media[i].path.as_deref().and_then(thumbs::read_failure) } else { None }).collect();
+    let badges: Vec<Option<String>> = items
+        .iter()
+        .enumerate()
+        .map(|(k, &i)| {
+            if rail == RailItem::Media && offline.contains(&app.doc.project.media[i].id) {
+                Some("Offline".to_string())
+            } else if unreadable[k].is_some() {
+                Some("Can't read".to_string())
+            } else {
+                badge(app, rail, i)
+            }
+        })
+        .collect();
     let selected = app.editor.library_selected;
     let now = ui.input(|i| i.time);
     let progress: Vec<Option<f32>> = items
@@ -409,12 +491,15 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
             app.editor_import_progress(id, now)
         })
         .collect();
-    let tips: Vec<Option<&'static str>> = items
+    let tips: Vec<Option<String>> = items
         .iter()
-        .map(|&i| match rail {
-            RailItem::Effects => Some(catalogue::effects()[i].description),
-            RailItem::Cuts => Some(catalogue::cuts()[i].description),
-            RailItem::Motions => Some(catalogue::motions()[i].description),
+        .enumerate()
+        .map(|(k, &i)| match rail {
+            RailItem::Effects => Some(catalogue::effects()[i].description.to_string()),
+            RailItem::Cuts => Some(catalogue::cuts()[i].description.to_string()),
+            RailItem::Motions => Some(catalogue::motions()[i].description.to_string()),
+            RailItem::Media if offline.contains(&app.doc.project.media[i].id) => Some(crate::i18n::tf(format!("{} is not at {}. Right-click to relink it.", app.doc.project.media[i].name, app.doc.project.media[i].path.as_ref().map_or_else(String::new, |p| p.display().to_string())))),
+            RailItem::Media => unreadable[k].as_ref().map(|e| crate::i18n::tf(format!("Could not read this file: {e}"))),
             _ => None,
         })
         .collect();
@@ -428,12 +513,19 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
         selected: selected == Some((rail, items[k])),
         addable: rail != RailItem::Ai,
         progress: progress[k],
-        tip: tips[k],
+        tip: tips[k].as_deref(),
         added: added[k],
     };
     let media = app.doc.project.media.clone();
     let thumbs = &mut app.thumbs;
-    let mut paint = |p: &Painter, r: Rect, k: usize, hover: f32, live: bool| paint_thumb(thumbs, &media, rail, items[k], p, r, hover, live, &t);
+    let mut paint = |p: &Painter, r: Rect, k: usize, hover: f32, live: bool| {
+        paint_thumb(thumbs, &media, rail, items[k], p, r, hover, live, &t);
+        if rail == RailItem::Media && offline.contains(&media[items[k]].id) {
+            // Gone from disk: the picture dims and says so.
+            p.rect_filled(r, 0, t.sunken.gamma_multiply(0.75));
+            icons::paint(p, Rect::from_center_size(r.center(), Vec2::splat(20.0)), Icon::Warning, 18.0, t.danger);
+        }
+    };
     let out = if app.prefs.library_list {
         kit::tile_list(ui, rail.name(), items.len(), info, |k| LibDrag { rail, index: items[k] }, &mut paint)
     } else {
@@ -448,6 +540,13 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
         TileGrid::new(rail.name()).aspect(aspect).min_width(min).centred().show(ui, items.len(), info, |k| LibDrag { rail, index: items[k] }, &mut paint)
     };
     let ctx = ui.ctx().clone();
+    if rail == RailItem::Media {
+        if let Some(k) = out.secondary {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("media-menu-for"), app.doc.project.media[items[k]].id));
+            kit::set_open(&ctx, egui::Id::new("media-menu"), true);
+        }
+        media_menu(app, &ctx, &offline);
+    }
     if let Some(k) = out.clicked {
         app.editor.library_selected = Some((rail, items[k]));
         if rail != RailItem::Media {
