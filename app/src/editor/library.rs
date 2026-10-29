@@ -305,7 +305,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     if matches!(rail, RailItem::Assets | RailItem::Audio) && super::library_content::panel(app, ui, rail, chip, &query, body) {
         return;
     }
-    let items = items_for(app, rail, chip, &query);
+    let sort = ui.ctx().data(|d| d.get_temp::<crate::services::library::Sort>(egui::Id::new("media-sort"))).unwrap_or_default();
+    let items = items_for(app, rail, chip, &query, sort);
     if items.is_empty() {
         let mut eui = bui.new_child(egui::UiBuilder::new().max_rect(body.shrink(pad)));
         let clicked = if rail == RailItem::Media && app.doc.project.media.is_empty() && query.is_empty() {
@@ -338,11 +339,31 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
                 }
                 if rail == RailItem::Media {
                     offline_banner(app, ui);
+                    sort_row(app, ui, sort);
                 }
                 grid(app, ui, rail, &items);
             }
         });
     });
+}
+
+/// "Sort: Date added" with the other orders in a menu.
+fn sort_row(app: &StudioApp, ui: &mut egui::Ui, sort: crate::services::library::Sort) {
+    if app.doc.project.media.len() < 2 {
+        return;
+    }
+    let mut pick = None;
+    kit::menu_group_button(ui, "media-sort", &crate::i18n::tf(format!("Sort: {}", sort.label())), Some(Icon::List), |ui| {
+        for s in crate::services::library::Sort::ALL {
+            if kit::MenuItem::new(s.label()).checked(s == sort).show(ui).clicked() {
+                pick = Some(s);
+            }
+        }
+    });
+    if let Some(s) = pick {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("media-sort"), s));
+    }
+    ui.add_space(6.0);
 }
 
 /// "N files are offline", with the way to find them again, above the bin.
@@ -382,13 +403,47 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
         return;
     };
     let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
-    let (mut add_it, mut relink_it) = (false, false);
-    kit::popover(ctx, id, Rect::from_min_size(at, Vec2::ZERO), kit::Side::Below, 200.0, |ui| {
+    let (mut add_it, mut relink_it, mut proxy_it, mut cancel_it) = (false, false, false, false);
+    let is_video = app.doc.project.media[index].kind == MediaKind::Video;
+    let making = crate::services::proxies::progress_of(media).is_some();
+    let (mut name, mut folder) = ctx.data(|d| d.get_temp::<(String, String)>(egui::Id::new("media-menu-fields"))).unwrap_or_else(|| (app.doc.project.media[index].name.clone(), crate::services::library::folder_of(&app.doc, media).unwrap_or_default()));
+    let (mut renamed, mut filed) = (false, false);
+    kit::popover(ctx, id, Rect::from_min_size(at, Vec2::ZERO), kit::Side::Below, 220.0, |ui| {
         add_it = kit::MenuItem::new("Add to timeline").show(ui).clicked();
         if offline.contains(&media) {
             relink_it = kit::MenuItem::new("Relink file").show(ui).clicked();
+        } else if is_video && making {
+            cancel_it = kit::MenuItem::new("Cancel proxy").show(ui).clicked();
+        } else if is_video {
+            proxy_it = kit::MenuItem::new("Make proxy").show(ui).clicked();
         }
+        kit::menu_separator(ui);
+        renamed = kit::text_field(ui, &mut name, "Name", Some(Icon::FilmStrip), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        filed = kit::text_field(ui, &mut folder, "Folder", Some(Icon::Folder), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     });
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("media-menu-fields"), (name.clone(), folder.clone())));
+    if renamed || filed {
+        kit::set_open(ctx, id, false);
+        ctx.data_mut(|d| d.remove::<(String, String)>(egui::Id::new("media-menu-fields")));
+        let res = if renamed { crate::services::library::rename(&mut app.doc, media, &name) } else { crate::services::library::set_folder(&mut app.doc, media, &folder) };
+        match res {
+            Ok(msg) => {
+                kit::push(ctx, msg, None, Some(Icon::Check));
+            }
+            Err(e) => {
+                kit::push(ctx, e.0, None, Some(Icon::Warning));
+            }
+        }
+    }
+    if proxy_it {
+        kit::set_open(ctx, id, false);
+        crate::services::proxies::start(&app.doc, vec![m::MediaId(media as u64)], 2);
+        kit::push(ctx, crate::i18n::tf(format!("Making a proxy of {}", app.doc.project.media[index].name)), None, Some(Icon::Info));
+    }
+    if cancel_it {
+        kit::set_open(ctx, id, false);
+        crate::services::proxies::cancel(media);
+    }
     if add_it {
         kit::set_open(ctx, id, false);
         add(app, ctx, RailItem::Media, index, None, None);
@@ -411,9 +466,10 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
 
 /// Indices into the catalogue for this rail item, after chip and search
 /// filters.
-fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize> {
+fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str, sort: crate::services::library::Sort) -> Vec<usize> {
     let names: Vec<String> = match rail {
-        RailItem::Media => app.doc.project.media.iter().map(|m| m.name.clone()).collect(),
+        // A folder's name finds what is in it.
+        RailItem::Media => app.doc.project.media.iter().map(|m| match crate::services::library::folder_of(&app.doc, m.id) { Some(f) => format!("{} {f}", m.name), None => m.name.clone() }).collect(),
         RailItem::Assets => view::ASSETS.iter().map(|s| s.to_string()).collect(),
         RailItem::Text => studio_text::styles::catalogue().iter().map(|s| s.name.clone()).collect(),
         RailItem::Motions => catalogue::motions().iter().map(|s| s.name.to_string()).collect(),
@@ -425,7 +481,7 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
         RailItem::Story => Vec::new(),
     };
     let n = rail.groups().len().max(1);
-    names
+    let mut found: Vec<usize> = names
         .iter()
         .enumerate()
         .filter(|(i, name)| {
@@ -457,11 +513,24 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
             in_group && (q.is_empty() || name.to_lowercase().contains(q))
         })
         .map(|(i, _)| i)
-        .collect()
+        .collect();
+    if rail == RailItem::Media {
+        crate::services::library::sort_media(&app.doc, &mut found, sort);
+    }
+    found
 }
 
 fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize]) {
     let t = theme::tokens(ui.ctx());
+    if rail == RailItem::Media {
+        // Proxies made in the background land here, with their result.
+        for (msg, bad) in crate::services::proxies::collect(&mut app.doc) {
+            kit::push(ui.ctx(), msg, None, Some(if bad { Icon::Warning } else { Icon::Check }));
+        }
+        if crate::services::proxies::busy() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
     let names: Vec<String> = items.iter().map(|&i| item_name(app, rail, i)).collect();
     let offline = if rail == RailItem::Media { crate::services::library::offline_ids(&app.doc.project.media) } else { Default::default() };
     // A file that cannot be read says so (with the reason on hover) instead of a grey tile.
@@ -488,9 +557,10 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
                 return None;
             }
             let id = app.doc.project.media[i].id;
-            app.editor_import_progress(id, now)
+            app.editor_import_progress(id, now).or_else(|| crate::services::proxies::progress_of(id))
         })
         .collect();
+    let folders: Vec<Option<String>> = items.iter().map(|&i| if rail == RailItem::Media { crate::services::library::folder_of(&app.doc, app.doc.project.media[i].id) } else { None }).collect();
     let tips: Vec<Option<String>> = items
         .iter()
         .enumerate()
@@ -509,7 +579,7 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
     let info = |k: usize| TileInfo {
         label: names[k].as_str(),
         badge: badges[k].as_deref(),
-        sub: None,
+        sub: folders[k].as_deref(),
         selected: selected == Some((rail, items[k])),
         addable: rail != RailItem::Ai,
         progress: progress[k],
@@ -542,7 +612,10 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
     let ctx = ui.ctx().clone();
     if rail == RailItem::Media {
         if let Some(k) = out.secondary {
-            ctx.data_mut(|d| d.insert_temp(egui::Id::new("media-menu-for"), app.doc.project.media[items[k]].id));
+            ctx.data_mut(|d| {
+                d.insert_temp(egui::Id::new("media-menu-for"), app.doc.project.media[items[k]].id);
+                d.remove::<(String, String)>(egui::Id::new("media-menu-fields"));
+            });
             kit::set_open(&ctx, egui::Id::new("media-menu"), true);
         }
         media_menu(app, &ctx, &offline);
@@ -614,7 +687,8 @@ fn paint_thumb(thumbs: &mut thumbs::Thumbs, media: &[view::MediaItem], rail: Rai
         RailItem::Media => {
             let m = &media[i];
             if m.kind == MediaKind::Audio {
-                waveform_tile(p, r, m.seed, live.then_some(clock), t);
+                let peaks = m.path.as_deref().and_then(crate::services::library::peaks);
+                peaks_tile(p, r, peaks.as_deref().map(|v| v.as_slice()), live.then_some(clock), t);
                 return;
             }
             // Hover plays through the footage.
@@ -705,7 +779,11 @@ fn paint_thumb(thumbs: &mut thumbs::Thumbs, media: &[view::MediaItem], rail: Rai
             let bob = if live { (clock * 3.0).sin() as f32 * 0.06 } else { 0.0 };
             asset_shape(p, Rect::from_center_size(r.center(), r.size() * (0.55 + bob)), i, if live { clock as f32 } else { 0.0 }, t);
         }
-        RailItem::Audio => waveform_tile(p, r, 200 + i as u32, live.then_some(clock), t),
+        RailItem::Audio => {
+            // Built-in sounds are names only: no waveform to show.
+            p.rect_filled(r, 0, theme::mix(t.sunken, t.audio, if t.dark { 0.35 } else { 0.55 }));
+            icons::paint(p, Rect::from_center_size(r.center(), Vec2::splat(22.0)), Icon::SpeakerHigh, 20.0, Color32::from_white_alpha(200));
+        }
         RailItem::Ai | RailItem::Story => {}
     }
     let _ = hover;
@@ -759,21 +837,26 @@ pub fn image_rotated_uv(p: &Painter, tex: egui::TextureId, r: Rect, uv: Rect, an
     p.add(egui::Shape::mesh(mesh));
 }
 
-fn waveform_tile(p: &Painter, r: Rect, seed: u32, clock: Option<f64>, t: &theme::Tokens) {
+/// A sound's real peaks as bars; `None` (still being read, or unreadable)
+/// is a quiet centre line, not an invented wave.
+fn peaks_tile(p: &Painter, r: Rect, peaks: Option<&[f32]>, clock: Option<f64>, t: &theme::Tokens) {
     p.rect_filled(r, 0, theme::mix(t.sunken, t.audio, if t.dark { 0.35 } else { 0.55 }));
-    let bars = (r.width() / 3.0) as usize;
     let mid = r.center().y;
+    let Some(peaks) = peaks else {
+        p.hline(r.x_range().shrink(6.0), mid, egui::Stroke::new(1.5, Color32::from_white_alpha(110)));
+        return;
+    };
+    let bars = ((r.width() - 4.0) / 3.0).max(1.0) as usize;
     let play = clock.map(|c| ((c * 0.3) % 1.0) as f32);
     for k in 0..bars {
         let x = r.left() + 2.0 + k as f32 * 3.0;
-        let h = waveform_sample(seed, k as f32 / bars as f32) * r.height() * 0.36;
-        let played = play.is_some_and(|pl| (k as f32 / bars as f32) < pl);
-        let c = if played { Color32::WHITE } else { Color32::from_white_alpha(170) };
+        let u = k as f32 / bars as f32;
+        let h = (peaks[(u * peaks.len() as f32) as usize % peaks.len()] * r.height() * 0.36).max(0.8);
+        let c = if play.is_some_and(|pl| u < pl) { Color32::WHITE } else { Color32::from_white_alpha(170) };
         p.line_segment([egui::pos2(x, mid - h), egui::pos2(x, mid + h)], egui::Stroke::new(1.6, c));
     }
     if let Some(pl) = play {
-        let x = egui::lerp(r.left()..=r.right(), pl);
-        p.vline(x, r.y_range(), egui::Stroke::new(1.0, Color32::WHITE));
+        p.vline(egui::lerp(r.left()..=r.right(), pl), r.y_range(), egui::Stroke::new(1.0, Color32::WHITE));
     }
 }
 
