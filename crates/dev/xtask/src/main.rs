@@ -11,9 +11,10 @@
 //! cargo xtask sbs REF SHOT OUT [WIDTH]   a reference above a Studio shot
 //! cargo xtask signing           the local signing identity (made once)
 //! cargo xtask release-mac       Developer ID signed, notarized DMG (docs/releasing.md)
-//! cargo xtask check-release [APP] [--no-notarize]
+//! cargo xtask check-release [APP] [--no-notarize] [--record-size [--allow-growth]]
 //!                               fails on a Zornov.app with host paths, symbols,
-//!                               wrong entitlements, signing or libraries
+//!                               wrong entitlements, signing, libraries or a
+//!                               binary over packaging/macos/size-budget.conf
 //! cargo xtask package-deb       dist/release/zornov_<ver>_<arch>.deb
 //! cargo xtask package-appimage  dist/release/Zornov-<ver>-<arch>.AppImage
 //! cargo xtask package-msi       dist/release/Zornov-<ver>-windows-<arch>.msi
@@ -68,7 +69,7 @@ fn main() -> ExitCode {
         Some("headers") => headers(args.get(1).is_some_and(|a| a == "--check")),
         #[cfg(target_os = "macos")]
         Some("signing") => signing::identity().map(|s| format!("signing with \"{}\" ({}) from {}", signing::NAME, s.hash, signing::keychain().display())),
-        _ => Err("usage: cargo xtask bundle | release-mac | check-release [APP] [--no-notarize] | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
+        _ => Err("usage: cargo xtask bundle | release-mac | check-release [APP] [--no-notarize] [--record-size [--allow-growth]] | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
     };
     match r {
         Ok(out) => {

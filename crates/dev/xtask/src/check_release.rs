@@ -17,15 +17,32 @@ const MAX_LOCAL_SYMBOLS: usize = 100;
 /// The longest example shown for a host path.
 const EXAMPLE_LEN: usize = 100;
 
-/// `cargo xtask check-release [APP] [--no-notarize]`
+/// The release binary's size budget, in the repository.
+const BUDGET_FILE: &str = "packaging/macos/size-budget.conf";
+
+/// The growth a new budget file allows when none is given.
+const DEFAULT_GROWTH_PERCENT: u64 = 3;
+
+/// A binary this much under its budget is worth recording, so the
+/// shrink is kept.
+const SHRINK_NOTE_PERCENT: u64 = 1;
+
+const USAGE: &str = "usage: cargo xtask check-release [APP] [--no-notarize] [--record-size [--allow-growth]]";
+
+/// `cargo xtask check-release [APP] [--no-notarize] [--record-size [--allow-growth]]`
 pub fn check_release(args: &[String]) -> Result<String, String> {
-    let (mut app, mut notarized) = (None, true);
+    let (mut app, mut notarized, mut record, mut allow_growth) = (None, true, false, false);
     for a in args {
         match a.as_str() {
             "--no-notarize" => notarized = false,
-            o if o.starts_with("--") => return Err(format!("unknown option {o}; usage: cargo xtask check-release [APP] [--no-notarize]")),
+            "--record-size" => record = true,
+            "--allow-growth" => allow_growth = true,
+            o if o.starts_with("--") => return Err(format!("unknown option {o}; {USAGE}")),
             _ => app = Some(PathBuf::from(a)),
         }
+    }
+    if allow_growth && !record {
+        return Err(format!("--allow-growth only goes with --record-size; {USAGE}"));
     }
     if !cfg!(target_os = "macos") {
         return Err("check-release runs on a Mac".into());
@@ -33,25 +50,31 @@ pub fn check_release(args: &[String]) -> Result<String, String> {
     let app = app.unwrap_or_else(|| crate::root().join("dist/release/macos/Zornov.app"));
     let exe = app.join("Contents/MacOS/zornov");
     if !exe.is_file() {
-        return Err(format!("{}: no Contents/MacOS/zornov (usage: cargo xtask check-release [APP] [--no-notarize])", app.display()));
+        return Err(format!("{}: no Contents/MacOS/zornov ({USAGE})", app.display()));
+    }
+    if record {
+        return record_size_cmd(&exe, allow_growth);
     }
     let bin = std::fs::read(&exe).map_err(|e| format!("{}: {e}", exe.display()))?;
     let public_key = studio_update::config::load().public_key;
-    let checks: [(&str, Vec<String>); 6] = [
+    let (size_fails, size_note) = size_budget(bin.len() as u64);
+    let checks: [(&str, Vec<String>); 7] = [
         ("host paths", host_paths(&bin)),
         ("symbols", symbols(&exe)),
         ("entitlements", entitlements(&app)),
         ("signature", signature(&app, notarized)),
         ("linked libraries", libraries(&exe)),
         ("update key and version", key_and_version(&bin, &public_key, &app)),
+        ("size budget", size_fails),
     ];
+    let note = size_note.map(|n| format!("\n{n}")).unwrap_or_default();
     let failed: Vec<String> = checks.iter().flat_map(|(_, f)| f.iter().cloned()).collect();
     if failed.is_empty() {
-        return Ok(format!("{} passes all {} release checks", app.display(), checks.len()));
+        return Ok(format!("{} passes all {} release checks{note}", app.display(), checks.len()));
     }
     let passed: Vec<&str> = checks.iter().filter(|(_, f)| f.is_empty()).map(|(n, _)| *n).collect();
     Err(format!(
-        "{} fails {} release check{}:\n- {}\n(passed: {}; see {DOCS})",
+        "{} fails {} release check{}:\n- {}\n(passed: {}; see {DOCS}){note}",
         rel(&app),
         failed.len(),
         if failed.len() == 1 { "" } else { "s" },
@@ -268,6 +291,110 @@ fn key_and_version(bin: &[u8], public_key: &str, app: &Path) -> Vec<String> {
     fails
 }
 
+// ------------------------------------------------------------ size budget
+
+/// The binary's size budget: `binary_bytes` recorded on purpose, plus
+/// `growth_percent` of slack before a release fails.
+#[derive(Debug, PartialEq, Eq)]
+struct Budget {
+    bytes: u64,
+    growth_percent: u64,
+}
+
+impl Budget {
+    fn limit(&self) -> u64 {
+        self.bytes + self.bytes * self.growth_percent / 100
+    }
+}
+
+fn parse_budget(text: &str) -> Result<Budget, String> {
+    let (mut bytes, mut growth) = (None, None);
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let v = v.trim().parse::<u64>().map_err(|_| format!("{BUDGET_FILE}: {} is not a whole number", k.trim()));
+        match k.trim() {
+            "binary_bytes" => bytes = Some(v?),
+            "growth_percent" => growth = Some(v?),
+            _ => {}
+        }
+    }
+    Ok(Budget { bytes: bytes.ok_or(format!("{BUDGET_FILE} has no binary_bytes"))?, growth_percent: growth.unwrap_or(DEFAULT_GROWTH_PERCENT) })
+}
+
+fn budget_text(b: &Budget) -> String {
+    format!(
+        "# The release binary's size budget, checked by `cargo xtask check-release`.\n\
+         # Record a new size with `cargo xtask check-release APP --record-size`\n\
+         # (it only lowers the budget; raising it needs --allow-growth too).\n\
+         binary_bytes = {}\n\
+         growth_percent = {}\n",
+        b.bytes, b.growth_percent
+    )
+}
+
+fn mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1e6)
+}
+
+/// The failure when `size` is over the budget, and a note when it is far
+/// enough under it to be worth recording.
+fn judge_size(size: u64, b: &Budget) -> (Vec<String>, Option<String>) {
+    if size > b.limit() {
+        let fail = format!(
+            "the binary is {} ({} bytes), over its budget of {} ({} recorded + {}%). Find what grew with `cargo bloat --release -p studio-app --crates`; if the growth is meant, record it with `--record-size --allow-growth`",
+            mb(size),
+            size,
+            mb(b.limit()),
+            mb(b.bytes),
+            b.growth_percent
+        );
+        return (vec![fail], None);
+    }
+    let shrunk = size < b.bytes && (b.bytes - size) * 100 >= b.bytes * SHRINK_NOTE_PERCENT;
+    let note = shrunk.then(|| format!("note: the binary is {} under its recorded size ({} of {}); keep the gain with `--record-size`", mb(b.bytes - size), mb(size), mb(b.bytes)));
+    (Vec::new(), note)
+}
+
+fn size_budget(size: u64) -> (Vec<String>, Option<String>) {
+    let file = crate::root().join(BUDGET_FILE);
+    match std::fs::read_to_string(&file) {
+        Ok(text) => match parse_budget(&text) {
+            Ok(b) => judge_size(size, &b),
+            Err(e) => (vec![e], None),
+        },
+        Err(_) => (vec![format!("there is no {BUDGET_FILE}: record one with `cargo xtask check-release APP --record-size`")], None),
+    }
+}
+
+/// The new budget file for a binary of `size`, or why it is refused.
+fn recorded(size: u64, old: Option<&Budget>, allow_growth: bool) -> Result<Budget, String> {
+    let growth_percent = old.map_or(DEFAULT_GROWTH_PERCENT, |b| b.growth_percent);
+    match old {
+        Some(b) if size > b.bytes && !allow_growth => Err(format!(
+            "not recorded: the binary is {} bigger than the budget's {}. Add --allow-growth to raise the budget on purpose",
+            mb(size - b.bytes),
+            mb(b.bytes)
+        )),
+        _ => Ok(Budget { bytes: size, growth_percent }),
+    }
+}
+
+fn record_size_cmd(exe: &Path, allow_growth: bool) -> Result<String, String> {
+    let size = std::fs::metadata(exe).map_err(|e| format!("{}: {e}", exe.display()))?.len();
+    let file = crate::root().join(BUDGET_FILE);
+    let old = match std::fs::read_to_string(&file) {
+        Ok(text) => Some(parse_budget(&text)?),
+        Err(_) => None,
+    };
+    let new = recorded(size, old.as_ref(), allow_growth)?;
+    std::fs::write(&file, budget_text(&new)).map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(match old {
+        Some(b) => format!("{BUDGET_FILE}: {} -> {} ({} bytes; fails above {})", mb(b.bytes), mb(new.bytes), new.bytes, mb(new.limit())),
+        None => format!("{BUDGET_FILE}: recorded {} ({} bytes; fails above {})", mb(new.bytes), new.bytes, mb(new.limit())),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +458,42 @@ mod tests {
         assert!(has_key(b"xx55CC3001F11C6D06yy", key));
         assert!(!has_key(b"xx55cc3001f11c6d07yy", key));
         assert!(!has_key(b"anything", ""));
+    }
+
+    #[test]
+    fn the_budget_file_is_read() {
+        let b = parse_budget("# a comment\nbinary_bytes = 1000 # the shipped one\ngrowth_percent = 5\nother = x\n").unwrap();
+        assert_eq!(b, Budget { bytes: 1000, growth_percent: 5 });
+        assert_eq!(parse_budget("binary_bytes = 7").unwrap().growth_percent, DEFAULT_GROWTH_PERCENT);
+        assert!(parse_budget("growth_percent = 3").unwrap_err().contains("no binary_bytes"));
+        assert!(parse_budget("binary_bytes = big").unwrap_err().contains("whole number"));
+        assert_eq!(parse_budget(&budget_text(&b)).unwrap(), b);
+    }
+
+    #[test]
+    fn the_limit_holds_to_the_byte() {
+        let b = Budget { bytes: 1000, growth_percent: 3 };
+        assert_eq!(b.limit(), 1030);
+        assert!(judge_size(1030, &b).0.is_empty());
+        let (fails, _) = judge_size(1031, &b);
+        assert_eq!(fails.len(), 1);
+        assert!(fails[0].contains("over its budget") && fails[0].contains("--allow-growth"), "{}", fails[0]);
+    }
+
+    #[test]
+    fn a_real_shrink_is_pointed_out() {
+        let b = Budget { bytes: 1000, growth_percent: 3 };
+        assert!(judge_size(995, &b).1.is_none(), "under 1%: no note");
+        assert!(judge_size(990, &b).1.unwrap().contains("--record-size"));
+        assert!(judge_size(1010, &b).1.is_none(), "growth inside the slack: no note");
+    }
+
+    #[test]
+    fn recording_only_lowers_the_budget_unless_asked() {
+        let old = Budget { bytes: 1000, growth_percent: 5 };
+        assert_eq!(recorded(900, Some(&old), false).unwrap(), Budget { bytes: 900, growth_percent: 5 });
+        assert!(recorded(1001, Some(&old), false).unwrap_err().contains("--allow-growth"));
+        assert_eq!(recorded(1001, Some(&old), true).unwrap().bytes, 1001);
+        assert_eq!(recorded(42, None, false).unwrap(), Budget { bytes: 42, growth_percent: DEFAULT_GROWTH_PERCENT });
     }
 }

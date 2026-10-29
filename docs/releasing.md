@@ -74,10 +74,15 @@ Without credentials it fails with the list of what is missing.
 
 `release-mac` ends its signing with `cargo xtask check-release` on the stapled
 app (host paths, stripped symbols, entitlements, Developer ID signature,
-linked libraries, update key and version), so a failing app never reaches the
-DMG. Run `cargo xtask check-release [APP] [--no-notarize]` on any
+linked libraries, update key and version, size budget), so a failing app never
+reaches the DMG. Run `cargo xtask check-release [APP] [--no-notarize]` on any
 `Zornov.app` (default `dist/release/macos/Zornov.app`); it lists every failure
 with its fix. An ad hoc build (`--identity -`) skips it.
+
+The size budget is `packaging/macos/size-budget.conf`: the binary may grow
+`growth_percent` over `binary_bytes` before a release fails. When a change makes
+the app smaller, keep the gain with `cargo xtask check-release APP --record-size`;
+that only lowers the budget, and raising it needs `--allow-growth` as well.
 
 The entitlements file asks for only the microphone (voice-overs). Zornov loads
 no third-party libraries and generates no code at run time, so it needs
