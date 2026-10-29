@@ -530,6 +530,8 @@ pub struct GpuCompositor {
     encoder: Option<wgpu::CommandEncoder>,
     /// Idle working textures for reuse.
     pool: Vec<Tex>,
+    /// The staging buffer exact readbacks reuse.
+    readback: crate::realtime::readback::Readback,
     /// Converted pictures, keyed by the decoded picture's address and the
     /// tone-mapping flag. The weak reference tells a stale address apart
     /// from a live picture.
@@ -588,6 +590,7 @@ impl GpuCompositor {
             sources,
             encoder: None,
             pool: Vec::new(),
+            readback: crate::realtime::readback::Readback::new(),
             pictures: HashMap::new(),
             stamp: 0,
             luts: HashMap::new(),
@@ -719,34 +722,16 @@ impl GpuCompositor {
 
     /// Reads a texture back: `bpp` bytes per pixel, rows unpadded.
     fn read_bytes(&mut self, texture: &wgpu::Texture, width: u32, height: u32, bpp: u32) -> Vec<u8> {
-        let padded = (width * bpp).div_ceil(256) * 256;
-        let buffer = self.ctx.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: padded as u64 * height as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let (buffer, padded) = self.readback.sync_target(&self.ctx.device, width, height, bpp);
+        let buffer = buffer.clone();
         self.enc().copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) } },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
         self.flush();
-        let slice = buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.ctx.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().expect("map callback").expect("buffer map");
-        let data = slice.get_mapped_range().expect("mapped range");
-        let row = (width * bpp) as usize;
-        let mut out = Vec::with_capacity(row * height as usize);
-        for y in 0..height as usize {
-            out.extend_from_slice(&data[y * padded as usize..y * padded as usize + row]);
-        }
-        drop(data);
-        buffer.unmap();
+        let mut out = Vec::new();
+        self.readback.read_sync(&self.ctx.device, &mut out).expect("buffer map");
         out
     }
 
