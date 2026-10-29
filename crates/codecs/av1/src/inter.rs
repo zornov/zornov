@@ -8,7 +8,8 @@ use crate::mvpred::round2_signed64;
 use crate::spec_tables::*;
 use crate::tile::TileDecoder;
 
-const PRED_STRIDE: usize = 128;
+/// Row stride of the prediction buffers.
+pub const PRED_STRIDE: usize = 128;
 
 #[inline(always)]
 fn round2(x: i32, n: u32) -> i32 {
@@ -16,7 +17,7 @@ fn round2(x: i32, n: u32) -> i32 {
 }
 
 /// Rounding variables (7.11.3.2): (InterRound0, InterRound1, InterPostRound).
-pub(crate) fn rounding(is_compound: bool, bd: u32) -> (u32, u32, u32) {
+pub fn rounding(is_compound: bool, bd: u32) -> (u32, u32, u32) {
     let mut r0 = 3;
     let mut r1 = if is_compound { 7 } else { 11 };
     if bd == 12 {
@@ -207,67 +208,7 @@ impl TileDecoder<'_, '_> {
     ) {
         let refp = self.ref_plane(ref_idx, plane);
         let (last_x, last_y) = self.ref_plane_dims(ref_idx, plane);
-        let mut fh = filters[1] as usize;
-        if w <= 4 {
-            if fh == EIGHTTAP || fh == EIGHTTAP_SHARP {
-                fh = 4;
-            } else if fh == EIGHTTAP_SMOOTH {
-                fh = 5;
-            }
-        }
-        let mut fv = filters[0] as usize;
-        if h <= 4 {
-            if fv == EIGHTTAP || fv == EIGHTTAP_SHARP {
-                fv = 4;
-            } else if fv == EIGHTTAP_SMOOTH {
-                fv = 5;
-            }
-        }
-        let unit = 1 << SCALE_SUBPEL_BITS;
-        if x_step == unit && y_step == unit {
-            mc_unscaled(
-                refp,
-                last_x,
-                last_y,
-                x,
-                y,
-                w,
-                h,
-                &SUBPEL_FILTERS[fh][((x >> 6) & SUBPEL_MASK as i32) as usize],
-                &SUBPEL_FILTERS[fv][((y >> 6) & SUBPEL_MASK as i32) as usize],
-                rnd,
-                pred,
-                tmp,
-            );
-            return;
-        }
-        let inter_h = ((((h as i32 - 1) * y_step + (1 << SCALE_SUBPEL_BITS) - 1) >> SCALE_SUBPEL_BITS) + 8) as usize;
-        for r in 0..inter_h {
-            let ry = ((y >> 10) + r as i32 - 3).clamp(0, last_y) as usize;
-            let row = refp.row(ry);
-            for c in 0..w {
-                let p = x + x_step * c as i32;
-                let filt = &SUBPEL_FILTERS[fh][((p >> 6) & SUBPEL_MASK as i32) as usize];
-                let mut s = 0i32;
-                let bx = (p >> 10) - 3;
-                for t in 0..8 {
-                    s += filt[t] as i32 * row[(bx + t as i32).clamp(0, last_x) as usize] as i32;
-                }
-                tmp[r * w + c] = round2(s, rnd.0);
-            }
-        }
-        for r in 0..h {
-            for c in 0..w {
-                let p = (y & 1023) + y_step * r as i32;
-                let filt = &SUBPEL_FILTERS[fv][((p >> 6) & SUBPEL_MASK as i32) as usize];
-                let base = (p >> 10) as usize;
-                let mut s = 0i32;
-                for t in 0..8 {
-                    s += filt[t] as i32 * tmp[(base + t) * w + c];
-                }
-                pred[r * PRED_STRIDE + c] = round2(s, rnd.1);
-            }
-        }
+        block_inter_prediction(refp, last_x, last_y, x, y, x_step, y_step, w, h, filters, rnd, pred, tmp);
     }
 
     /// Block warp process (7.11.3.5) for the 8x8 section (i8, j8).
@@ -712,10 +653,94 @@ fn vpass<const W: usize>(rows: &[i32], vf: &[i16; 8], out: &mut [i32], half: i32
     }
 }
 
+/// Block inter prediction process (7.11.3.4) from the reference plane `refp` (whose last sample
+/// column and row are `last_x`, `last_y`) into `pred` (stride [`PRED_STRIDE`]); `tmp` holds the
+/// intermediate (horizontally filtered) rows, `(h + 7) * w` at least. `x`, `y` are the start
+/// position in 1/1024 sample units, `x_step`, `y_step` the step (1024 when unscaled), and
+/// `filters` the `[vertical, horizontal]` interpolation filter types.
+#[allow(clippy::too_many_arguments)]
+pub fn block_inter_prediction(
+    refp: &Plane,
+    last_x: i32,
+    last_y: i32,
+    x: i32,
+    y: i32,
+    x_step: i32,
+    y_step: i32,
+    w: usize,
+    h: usize,
+    filters: [u8; 2],
+    rnd: (u32, u32, u32),
+    pred: &mut [i32],
+    tmp: &mut [i32],
+) {
+    let mut fh = filters[1] as usize;
+    if w <= 4 {
+        if fh == EIGHTTAP || fh == EIGHTTAP_SHARP {
+            fh = 4;
+        } else if fh == EIGHTTAP_SMOOTH {
+            fh = 5;
+        }
+    }
+    let mut fv = filters[0] as usize;
+    if h <= 4 {
+        if fv == EIGHTTAP || fv == EIGHTTAP_SHARP {
+            fv = 4;
+        } else if fv == EIGHTTAP_SMOOTH {
+            fv = 5;
+        }
+    }
+    let unit = 1 << SCALE_SUBPEL_BITS;
+    if x_step == unit && y_step == unit {
+        mc_unscaled(
+            refp,
+            last_x,
+            last_y,
+            x,
+            y,
+            w,
+            h,
+            &SUBPEL_FILTERS[fh][((x >> 6) & SUBPEL_MASK as i32) as usize],
+            &SUBPEL_FILTERS[fv][((y >> 6) & SUBPEL_MASK as i32) as usize],
+            rnd,
+            pred,
+            tmp,
+        );
+        return;
+    }
+    let inter_h = ((((h as i32 - 1) * y_step + (1 << SCALE_SUBPEL_BITS) - 1) >> SCALE_SUBPEL_BITS) + 8) as usize;
+    for r in 0..inter_h {
+        let ry = ((y >> 10) + r as i32 - 3).clamp(0, last_y) as usize;
+        let row = refp.row(ry);
+        for c in 0..w {
+            let p = x + x_step * c as i32;
+            let filt = &SUBPEL_FILTERS[fh][((p >> 6) & SUBPEL_MASK as i32) as usize];
+            let mut s = 0i32;
+            let bx = (p >> 10) - 3;
+            for t in 0..8 {
+                s += filt[t] as i32 * row[(bx + t as i32).clamp(0, last_x) as usize] as i32;
+            }
+            tmp[r * w + c] = round2(s, rnd.0);
+        }
+    }
+    for r in 0..h {
+        for c in 0..w {
+            let p = (y & 1023) + y_step * r as i32;
+            let filt = &SUBPEL_FILTERS[fv][((p >> 6) & SUBPEL_MASK as i32) as usize];
+            let base = (p >> 10) as usize;
+            let mut s = 0i32;
+            for t in 0..8 {
+                s += filt[t] as i32 * tmp[(base + t) * w + c];
+            }
+            pred[r * PRED_STRIDE + c] = round2(s, rnd.1);
+        }
+    }
+}
+
 /// Block inter prediction without reference scaling: every column / row uses the same filter
 /// phase, so the filters run over whole rows (bit-identical to the per-sample process).
 #[allow(clippy::too_many_arguments)]
-fn mc_unscaled(
+pub fn mc_unscaled(
     refp: &Plane,
     last_x: i32,
     last_y: i32,

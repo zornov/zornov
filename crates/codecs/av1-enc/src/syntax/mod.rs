@@ -4,7 +4,8 @@
 //! M4: block-level syntax writers (spec 5.11), the inverse of the decoder's tile parsing. Keeps its
 //! own above/left context state and mirrors the decoder's context derivation.
 //!
-//! Scope of this version: intra frames, one tile, 4:2:0, 64x64 or 128x128 superblocks, every
+//! Scope of this version: intra frames and phase (b) inter frames (single reference, translation
+//! only, inter blocks only), one tile, 4:2:0, 64x64 or 128x128 superblocks, every
 //! partition type, all 13 intra modes with angle deltas, the intra transform sets, `TX_MODE_LARGEST`
 //! or `TX_MODE_SELECT`, and lossless. The frame header the writer pairs with (M1) fixes the rest:
 //! no segmentation, delta q, CDEF bits, palettes, filter intra or chroma-from-luma.
@@ -16,17 +17,33 @@ pub mod intra_info;
 
 use studio_av1::spec_tables::*;
 
+use studio_av1::mvpred::MvFrame;
+
 use crate::entropy::SymbolEncoder;
 use crate::entropy::cdf_ctx::CdfContext;
+use crate::motion::mvpred::{find_stack, frame_info};
 use crate::recon::IntraExtra;
-use crate::types::{BlockDecision, SbDecision, SbPos, SeqParams};
+use crate::types::{BlockDecision, BlockMode, CoefBlock, InterDecision, InterSbDecision, SbDecision, SbPos, SeqParams};
 
 use coef::{TxbParams, write_coefficients};
 use ctx::*;
+use inter_info::write_inter_block_mode_info;
 use intra_info::{BlockInfo, FrameSyntax, write_intra_frame_mode_info};
 
 /// A leaf of a partition: `(mi_row, mi_col, w4, h4)`.
 type Leaf = (usize, usize, usize, usize);
+
+/// What the residual syntax needs to know about a block.
+struct ResidualGeo {
+    mi_row: usize,
+    mi_col: usize,
+    mi_size: usize,
+    has_chroma: bool,
+    tx_size: usize,
+    y_mode: usize,
+    uv_mode: usize,
+    is_inter: bool,
+}
 
 /// Writes one tile's symbols.
 pub struct TileWriter {
@@ -38,6 +55,8 @@ pub struct TileWriter {
     base_q_idx: u8,
     sb_size: usize,
     frame: FrameSyntax,
+    /// Frame-level inputs of the motion vector processes (inter frames).
+    mv_frame: MvFrame,
 }
 
 impl TileWriter {
@@ -53,6 +72,7 @@ impl TileWriter {
             base_q_idx,
             sb_size: if seq.use_128x128_superblock { BLOCK_128X128 } else { BLOCK_64X64 },
             frame: FrameSyntax { tx_mode_select: false, lossless: base_q_idx == 0 },
+            mv_frame: frame_info(mi_rows as usize, mi_cols as usize),
         }
     }
 
@@ -151,13 +171,22 @@ impl TileWriter {
         self.ctx.store_block(r, c, ms, dec.y_mode, dec.skip, tx);
     }
 
-    /// `residual()` (5.11.34) for an intra block.
+    /// `residual()` (5.11.34) of an intra block.
     fn write_residual(&mut self, b: &BlockInfo, dec: &BlockDecision) {
+        let g = ResidualGeo { mi_row: b.mi_row, mi_col: b.mi_col, mi_size: b.mi_size, has_chroma: b.has_chroma, tx_size: b.tx_size, y_mode: b.y_mode, uv_mode: b.uv_mode, is_inter: false };
+        self.write_residual_coefs(&g, &dec.coefs);
+    }
+
+    /// `residual()` (5.11.34): the transform blocks of a block in decode order. `coefs` has one
+    /// entry for each transform block that starts inside the coded area.
+    fn write_residual_coefs(&mut self, b: &ResidualGeo, all: &[CoefBlock]) {
         let ms = b.mi_size;
         let width_chunks = (block_width(ms) >> 6).max(1);
         let height_chunks = (block_height(ms) >> 6).max(1);
         let mi_size_chunk = if width_chunks > 1 || height_chunks > 1 { BLOCK_64X64 } else { ms };
-        let mut coefs = dec.coefs.iter();
+        let mut coefs = all.iter();
+        // the type of the luma transform, which inter chroma follows
+        let mut luma_type = DCT_DCT;
         for chunk_y in 0..height_chunks {
             for chunk_x in 0..width_chunks {
                 for plane in 0..(1 + 2 * b.has_chroma as usize) {
@@ -190,14 +219,57 @@ impl TileWriter {
                                 uv_mode: b.uv_mode,
                                 lossless: self.frame.lossless,
                                 qidx_nonzero: self.base_q_idx > 0,
+                                is_inter: b.is_inter,
+                                luma_tx_type: luma_type,
                             };
                             write_coefficients(&mut self.enc, &mut self.cdfs.cdfs, &mut self.ctx, &p, cb);
+                            if plane == 0 {
+                                luma_type = if cb.eob > 0 { cb.tx_type } else { DCT_DCT };
+                            }
                         }
                     }
                 }
             }
         }
         assert!(coefs.next().is_none(), "more coefficient blocks than transform blocks");
+    }
+
+    /// One inter block of an inter frame (`decode_block()` without prediction): its mode info
+    /// with the motion vector, then the coefficients unless it is a skip block.
+    pub fn write_inter_block(&mut self, d: &InterDecision) {
+        let (r, c) = (d.mi_row as usize, d.mi_col as usize);
+        let (bw4, bh4) = (d.w4 as usize, d.h4 as usize);
+        let ms = block_size_of(bw4, bh4).unwrap_or_else(|| panic!("no block size {bw4}x{bh4}"));
+        assert!(r < self.mi_rows && c < self.mi_cols, "block outside the frame");
+        let stack = find_stack(&self.ctx.mi, &self.mv_frame, (r, c, bw4, bh4), d.ref_frame);
+        write_inter_block_mode_info(&mut self.enc, &mut self.cdfs.cdfs, &self.ctx, d, &stack);
+        // TX_MODE_LARGEST: the transform size is not coded
+        let tx = if self.frame.lossless { TX_4X4 } else { MAX_TX_SIZE_RECT[ms] as usize };
+        assert!(!self.frame.tx_mode_select && !self.frame.lossless, "inter blocks need TX_MODE_LARGEST and a lossy frame");
+        if d.skip {
+            self.ctx.reset_block_context(r, c, bw4, bh4, true);
+        } else {
+            let g = ResidualGeo { mi_row: r, mi_col: c, mi_size: ms, has_chroma: true, tx_size: tx, y_mode: DC_PRED, uv_mode: DC_PRED, is_inter: true };
+            self.write_residual_coefs(&g, &d.coefs);
+        }
+        self.ctx.store_inter_block(r, c, ms, d.mode, d.skip, tx, d.ref_frame as i8, d.mv);
+    }
+
+    /// Writes one superblock of an inter frame, blocks in decode order; see
+    /// [`write_sb`](Self::write_sb).
+    pub fn write_inter_sb(&mut self, sb: SbPos, dec: &InterSbDecision) {
+        if sb.col == 0 {
+            self.ctx.clear_left();
+        }
+        let shapes: Vec<Leaf> = dec.blocks.iter().map(BlockMode::shape).collect();
+        let sb4 = NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize;
+        let mut cur = 0;
+        let mut emit = |w: &mut TileWriter, i: usize| match &dec.blocks[i] {
+            BlockMode::Inter(d) => w.write_inter_block(d),
+            BlockMode::Intra(_) => panic!("intra blocks in inter frames are not written yet"),
+        };
+        self.write_tree(&shapes, &mut cur, sb.row as usize * sb4, sb.col as usize * sb4, self.sb_size, &mut emit);
+        assert_eq!(cur, shapes.len(), "blocks left over after the partition tree");
     }
 
     /// Writes one superblock: its partition tree and blocks. `dec.blocks` lists the blocks in
@@ -216,13 +288,18 @@ impl TileWriter {
         if sb.col == 0 {
             self.ctx.clear_left();
         }
+        let shapes: Vec<Leaf> = dec.blocks.iter().map(|b| (b.mi_row as usize, b.mi_col as usize, b.w4 as usize, b.h4 as usize)).collect();
         let sb4 = NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize;
         let mut cur = 0;
-        self.write_tree(dec, extras, &mut cur, sb.row as usize * sb4, sb.col as usize * sb4, self.sb_size);
+        let mut emit = |w: &mut TileWriter, i: usize| w.write_block_ex(&dec.blocks[i], extras.get(i).copied().unwrap_or_default());
+        self.write_tree(&shapes, &mut cur, sb.row as usize * sb4, sb.col as usize * sb4, self.sb_size, &mut emit);
         assert_eq!(cur, dec.blocks.len(), "blocks left over after the partition tree");
     }
 
-    fn write_tree(&mut self, dec: &SbDecision, extras: &[IntraExtra], cur: &mut usize, r: usize, c: usize, bsize: usize) {
+    /// Walks the partition tree of the `bsize` node at `(r, c)`, inferring each partition from the
+    /// shapes of the blocks that follow, and calls `emit` with the index of each block in decode
+    /// order.
+    fn write_tree(&mut self, shapes: &[Leaf], cur: &mut usize, r: usize, c: usize, bsize: usize, emit: &mut dyn FnMut(&mut TileWriter, usize)) {
         if r >= self.mi_rows || c >= self.mi_cols {
             return;
         }
@@ -251,7 +328,7 @@ impl TileWriter {
             };
             for &p in allowed {
                 let l = self.leaves(p, r, c, bsize);
-                if !l.is_empty() && dec.blocks[*cur..].len() >= l.len() && l.iter().zip(&dec.blocks[*cur..]).all(|(&(lr, lc, lw, lh), b)| (b.mi_row as usize, b.mi_col as usize, b.w4 as usize, b.h4 as usize) == (lr, lc, lw, lh)) {
+                if !l.is_empty() && shapes[*cur..].len() >= l.len() && l.iter().zip(&shapes[*cur..]).all(|(a, b)| a == b) {
                     partition = p;
                     leaves = l;
                     break;
@@ -262,13 +339,12 @@ impl TileWriter {
         if partition == PARTITION_SPLIT {
             let sub = PARTITION_SUBSIZE[PARTITION_SPLIT][bsize] as usize;
             for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
-                self.write_tree(dec, extras, cur, r + dr, c + dc, sub);
+                self.write_tree(shapes, cur, r + dr, c + dc, sub, emit);
             }
         } else {
             for _ in &leaves {
-                let b = dec.blocks.get(*cur).unwrap_or_else(|| panic!("partition at ({r},{c}) ends past the last block"));
-                let extra = extras.get(*cur).copied().unwrap_or_default();
-                self.write_block_ex(b, extra);
+                assert!(*cur < shapes.len(), "partition at ({r},{c}) ends past the last block");
+                emit(self, *cur);
                 *cur += 1;
             }
         }

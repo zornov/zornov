@@ -21,11 +21,13 @@ mod decoder;
 pub mod frame;
 mod grain;
 pub mod header;
-mod inter;
+/// Public for encoders; not a stable API.
+pub mod inter;
 mod inter_info;
 /// Intra prediction (spec 7.11.2). Public for encoders; not a stable API.
 pub mod intra;
-mod mvpred;
+/// Public for encoders; not a stable API.
+pub mod mvpred;
 mod par;
 mod postfilter;
 mod restoration;
