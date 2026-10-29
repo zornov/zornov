@@ -457,17 +457,15 @@ pub fn quadruped(mesh: &Mesh) -> Rig {
     quadruped_facing(mesh, None)
 }
 
-/// [`quadruped_facing`] that refuses a body it cannot orient: round in plan
-/// (no long axis) or with ends that look alike and no `forward` given. The
-/// message says what to do. [`quadruped`] guesses instead (head at the low
-/// end of the long axis).
+/// [`quadruped_facing`] that refuses a body with no long axis (round in
+/// plan) when no `forward` is given: the message says what to do. A long
+/// body whose two ends look alike (a plain capsule) is accepted with the
+/// head at the low end of its axis, as [`quadruped`] does; pass `forward`
+/// to choose the end.
 pub fn try_quadruped(mesh: &Mesh, forward: Option<V3>) -> Result<Rig, String> {
     let fr = body_frame(mesh, forward);
     if !fr.axis_found {
         return Err("quadruped: the body is as wide as it is long, so its length axis is unclear; say which way it faces (forward) or use a body with a clear length".into());
-    }
-    if !fr.head_found {
-        return Err("quadruped: the two ends look alike, so which one is the head is unclear; say which way it faces (forward)".into());
     }
     Ok(quadruped_facing(mesh, forward))
 }
