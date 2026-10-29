@@ -386,6 +386,26 @@ fn reverse_and_speed() {
     assert!(f.p.apply(Edit::SetSpeed { seq, clip: f.a, speed: Speed::Constant(-1.0) }).is_err());
 }
 
+/// Speeding a clip up squeezes its keys together; two that land on the
+/// same microsecond both stay (the later one a tick on), none is dropped.
+#[test]
+fn speed_changes_keep_every_key() {
+    let mut f = fixture();
+    let seq = f.seq;
+    let path = "transform.opacity".to_string();
+    for (t, v) in [(0, 0.0), (1000, 0.25), (1001, 0.5), (1002, 0.75), (2 * S, 1.0)] {
+        f.p.apply(Edit::SetKeyframe { seq, clip: f.a, property: path.clone(), key: Keyframe::new(t, v, Interp::Linear) }).unwrap();
+    }
+    round_trip(&mut f.p, Edit::SetSpeed { seq, clip: f.a, speed: Speed::Constant(4.0) });
+    let tr = &f.clip(f.a).keyframes[&path];
+    assert_eq!(tr.keys.len(), 5, "no key lost: {:?}", tr.keys.iter().map(|k| k.time).collect::<Vec<_>>());
+    assert!(tr.validate().is_ok(), "still strictly increasing");
+    let values: Vec<f64> = tr.keys.iter().map(|k| k.value.as_f64().unwrap()).collect();
+    assert_eq!(values, vec![0.0, 0.25, 0.5, 0.75, 1.0]);
+    // Keys that were far enough apart land where the ratio puts them.
+    assert_eq!(tr.keys[4].time, (2 * S) / 4);
+}
+
 #[test]
 fn transitions() {
     let mut f = fixture();
