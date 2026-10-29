@@ -57,6 +57,12 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     // Header.
     let header = Rect::from_min_size(r.min + Vec2::splat(pad), Vec2::new(r.width() - pad * 2.0, 28.0));
     let cut = app.editor.selected_cut.and_then(|id| app.doc.project.transitions.iter().find(|t| t.id == id)).cloned();
+    // A cut that no longer exists (undone, deleted) is not a selection: the
+    // header and the body both fall back to the Project.
+    if cut.is_none() {
+        app.editor.selected_cut = None;
+    }
+    let live_cut = cut.as_ref().map(|c| c.id);
     let (title, sub) = match (&first, sel.len()) {
         (None, _) if cut.is_some() => {
             let c = cut.as_ref().unwrap();
@@ -98,7 +104,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     egui::ScrollArea::vertical().id_salt("insp-scroll").auto_shrink([false, false]).show_v(&mut bui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: pad as i8, right: pad as i8, top: 0, bottom: 12 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = theme::space::SECTION_GAP;
-            match (first, app.editor.selected_cut) {
+            match (first, live_cut) {
                 (None, Some(cut)) => cut_section(app, ui, cut),
                 (None, None) => sequence(app, ui),
                 (Some(c), _) => clip_sections(app, ui, &sel, &c),
@@ -287,7 +293,11 @@ fn prop(
     let mut keyed = key_here.is_some();
     // Only properties the model can animate get a keyframe diamond.
     let keyable = path.starts_with("transform.") || path.starts_with("grade.") || matches!(path, "audio.volume_db" | "audio.pan");
-    let mut row = FieldRow::new(label, &mut v, range.clone())
+    // Several clips with different values: the row shows the first one's and
+    // says so; a change sets them all.
+    let mixed = is_mixed(ids.iter().filter_map(|id| app.doc.project.clip(*id)).map(get));
+    let shown = if mixed { format!("{label} (mixed)") } else { label.to_owned() };
+    let mut row = FieldRow::new(&shown, &mut v, range.clone())
         .default(default)
         .unit(unit)
         .decimals(decimals)
@@ -418,6 +428,13 @@ fn effect_bool(e: &m::Effect, pd: &studio_fx::ParamDef) -> bool {
         (_, studio_fx::ParamValue::Bool(b)) => b,
         _ => false,
     }
+}
+
+/// Whether the values differ (so a multi-selection row can say "mixed").
+fn is_mixed(values: impl Iterator<Item = f32>) -> bool {
+    let mut it = values;
+    let Some(first) = it.next() else { return false };
+    it.any(|v| (v - first).abs() > 1e-4)
 }
 
 fn edit_all(app: &mut StudioApp, ids: &[u32], label: &str, f: impl Fn(&mut Clip)) {
@@ -1013,6 +1030,13 @@ pub fn percent_to_db(p: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_row_is_mixed_only_when_the_selected_clips_differ() {
+        assert!(!is_mixed([].into_iter()));
+        assert!(!is_mixed([1.0, 1.0].into_iter()));
+        assert!(is_mixed([1.0, 0.5, 1.0].into_iter()));
+    }
 
     fn names(t: &[(&'static str, Vec<&'static str>)]) -> Vec<&'static str> {
         t.iter().map(|t| t.0).collect()
