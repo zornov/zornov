@@ -334,4 +334,29 @@ mod tests {
         assert_eq!(r[1].level, Level::Warning);
         assert_eq!(r[0].level, Level::Info);
     }
+
+    /// Toast grammar (D41, D47): sentence case, no trailing period, no
+    /// developer text (`{:?}`). Checks the toast calls in the files this
+    /// package owns; other packages can add their files to the list.
+    #[test]
+    fn toast_calls_follow_the_grammar() {
+        let files = [
+            ("kit/toast.rs", include_str!("toast.rs")),
+            ("screens/queue.rs", include_str!("../screens/queue.rs")),
+            ("safety.rs", include_str!("../safety.rs")),
+            ("help.rs", include_str!("../help.rs")),
+            ("a11y.rs", include_str!("../a11y.rs")),
+        ];
+        for (name, src) in files {
+            let src = src.split("#[cfg(test)]").next().unwrap_or("");
+            for (n, line) in src.lines().enumerate() {
+                let l = line.trim();
+                if !(l.contains("kit::push(") || l.contains("push_error(")) || l.starts_with("//") {
+                    continue;
+                }
+                assert!(!l.contains(":?}"), "{name}:{}: developer text in a toast: {l}", n + 1);
+                assert!(!l.contains(".\"") && !l.contains(".\","), "{name}:{}: trailing period in a toast: {l}", n + 1);
+            }
+        }
+    }
 }

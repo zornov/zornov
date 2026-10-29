@@ -11,13 +11,21 @@ pub fn play_unless(quiet: bool) {
     }
 }
 
+/// The output device, opened once and kept for the next chime.
+static OUT: std::sync::Mutex<Option<studio_audio::AudioOut>> = std::sync::Mutex::new(None);
+
 /// Play the chime on a background thread; silent if there is no output.
 pub fn play() {
     std::thread::spawn(|| {
-        let Ok(out) = studio_audio::AudioOut::open() else { return };
-        out.push(&samples());
-        // Keep the stream open until the notes have played.
-        std::thread::sleep(std::time::Duration::from_millis(900));
+        let mut out = OUT.lock().unwrap_or_else(|e| e.into_inner());
+        if out.is_none() {
+            *out = studio_audio::AudioOut::open().ok();
+        }
+        if let Some(o) = out.as_ref() {
+            o.push(&samples());
+            // Hold the device until the notes have played, so two chimes do not overlap.
+            std::thread::sleep(std::time::Duration::from_millis(900));
+        }
     });
 }
 
