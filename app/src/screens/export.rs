@@ -93,6 +93,8 @@ fn bitrate_mbps(s: &ExportState, w: u32, h: u32, fps: f32) -> f32 {
         Format::Gif => 0.25,
         Format::H264 => 0.1,
         Format::Hevc10 => 0.07,
+        // Key frames only, so far: several times H.264's size.
+        Format::Av1 => 0.45,
         Format::M4a => 0.0,
         Format::ProRes422Hq | Format::DnxHr | Format::DnxHrHq => 1.1,
         Format::DnxHrSq => 0.7,
@@ -264,9 +266,18 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
             Format::Clv => {
                 FieldRow::new("Quality", &mut s.quality, 1.0..=100.0).default(90.0).unit("%").show(ui);
             }
+            Format::Av1 => {
+                FieldRow::new("Quality", &mut s.quality, 1.0..=100.0).default(70.0).unit("%").show(ui);
+            }
             Format::Png | Format::Gif | Format::M4a => {}
             // Masters are full quality.
             _ => {}
+        }
+        if let Some(note) = Format::ALL[s.codec.min(Format::ALL.len() - 1)].note() {
+            ui.horizontal(|ui| {
+                ui.add_space(kit::LABEL_W);
+                ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown(note)).font(theme::caption()).color(t.text_2)).wrap());
+            });
         }
         kit::labeled_row(ui, "Range", |ui| {
             let mut sel = if has_range { s.range } else { 0 };
@@ -368,5 +379,26 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| kit::label_trunc(ui, egui::RichText::new(text).font(theme::body()).color(t.text_2)));
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Overlay;
+    use crate::ui_tests::Harness;
+
+    #[test]
+    fn av1_is_a_choice_on_the_export_screen_with_an_honest_note() {
+        let index = Format::ALL.iter().position(|f| *f == Format::Av1).expect("AV1 is in the format list");
+        assert_eq!(Format::ALL[index], Format::Av1);
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Export;
+        h.app.export.codec = index;
+        h.frames(4);
+        let labels = h.labels();
+        assert!(labels.iter().any(|l| l.contains("AV1 (MP4)")), "the format menu shows AV1: {labels:?}");
+        assert!(labels.iter().any(|l| l.contains("Early encoder: larger files, key frames only.")), "the note is shown: {labels:?}");
+        assert!(labels.iter().any(|l| l.contains("Quality")), "AV1 has a quality control");
     }
 }

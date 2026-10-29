@@ -201,6 +201,8 @@ enum Video {
     Software(Box<studio_encode::h264::Encoder>),
     /// 10-bit HEVC, fed 16-bit pictures.
     HardwareHevc(studio_hw::HevcEncoder),
+    /// AV1 from `studio-av1-enc`; `n` counts the pictures pushed (the pts).
+    Av1 { enc: Box<studio_av1_enc::Encoder>, n: i64 },
 }
 
 fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistry>, model: &Arc<studio_model::Project>, req: &Request, task: &Task, mut opts: RunOptions) -> Result<(), String> {
@@ -221,13 +223,24 @@ fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistr
     }
     let mut writer = match req.format {
         _ if opts.sink.is_some() => Writer::Sink(opts.sink.take().expect("checked")),
-        Format::H264 | Format::Hevc10 => {
+        Format::H264 | Format::Hevc10 | Format::Av1 => {
             let mut cfg = studio_encode::h264::Config::new(w, h, fps_num, fps_den);
             cfg.bitrate_kbps = req.bitrate_kbps.clamp(1000, 200_000);
             let soft_info = |c: &studio_encode::h264::Config| studio_encode::h264::Encoder::new(c.clone()).map(|e| e.track_info());
-            let hw = if req.format == Format::Hevc10 || opts.software || std::env::var_os("STUDIO_SOFTWARE_ENCODE").is_some() { None } else { studio_hw::H264Encoder::new(w, h, fps_num, fps_den, cfg.bitrate_kbps, cfg.gop) };
-            let mut mux = studio_encode::mux::Muxer::create(&req.path, studio_encode::mux::Options::mp4()).map_err(io)?;
+            let hw = if matches!(req.format, Format::Hevc10 | Format::Av1) || opts.software || std::env::var_os("STUDIO_SOFTWARE_ENCODE").is_some() { None } else { studio_hw::H264Encoder::new(w, h, fps_num, fps_den, cfg.bitrate_kbps, cfg.gop) };
+            let mux_opts = if req.format == Format::Av1 { studio_encode::mux::Options::mp4_av1() } else { studio_encode::mux::Options::mp4() };
+            let mut mux = studio_encode::mux::Muxer::create(&req.path, mux_opts).map_err(io)?;
             let (enc, track) = match hw {
+                _ if req.format == Format::Av1 => {
+                    let mut acfg = studio_av1_enc::Config::new(w, h);
+                    acfg.fps = (fps_num, fps_den);
+                    acfg.rate = studio_av1_enc::RateMode::Cqp(Format::av1_base_q_idx(req.quality));
+                    let enc = studio_av1_enc::Encoder::new(acfg).map_err(|e| format!("AV1 encoder: {e:?}"))?;
+                    // BT.709 limited range, as the encoder's colour conversion writes it.
+                    let info = studio_encode::mux::Av1TrackInfo { width: w, height: h, fps_num, fps_den, av1c: enc.av1c(), color: studio_encode::h264::ColorDesc { primaries: 1, transfer: 1, matrix: 1, full_range: false }, bitrate: req.bitrate_kbps.saturating_mul(1000) };
+                    let track = mux.add_av1_video(info).map_err(io)?;
+                    (Video::Av1 { enc: Box::new(enc), n: 0 }, track)
+                }
                 _ if req.format == Format::Hevc10 => {
                     let hw = studio_hw::HevcEncoder::new_main10(w, h, fps_num, fps_den, cfg.bitrate_kbps, cfg.gop).ok_or("This Mac's video hardware cannot write 10-bit HEVC; export as H.264 instead.")?;
                     let mut info = soft_info(&cfg).map_err(|e| format!("{e:?}"))?;
@@ -388,6 +401,21 @@ fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistr
                             t_write += c.elapsed().as_secs_f64();
                             Ok(())
                         }
+                        Video::Av1 { enc, n } => {
+                            let a = std::time::Instant::now();
+                            let pic = studio_av1_enc::color::from_rgba8(&rgba, fw, fh, 8, false);
+                            let b = std::time::Instant::now();
+                            let pkts = enc.push_frame(&pic, *n).map_err(|e| format!("AV1 encoder: {e:?}"))?;
+                            *n += 1;
+                            let c = std::time::Instant::now();
+                            for p in pkts {
+                                mux.write_temporal_unit(*track, &p.data).map_err(|e| e.to_string())?;
+                            }
+                            t_yuv += (b - a).as_secs_f64();
+                            t_enc += (c - b).as_secs_f64();
+                            t_write += c.elapsed().as_secs_f64();
+                            Ok(())
+                        }
                         Video::Hardware(hw) => {
                             let b = std::time::Instant::now();
                             let outs = hw.encode_rgba(&rgba)?;
@@ -451,6 +479,12 @@ fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistr
                 Video::Hardware(mut hw) => hw.finish()?,
                 Video::HardwareHevc(mut hw) => hw.finish()?,
                 Video::Software(_) => Vec::new(),
+                Video::Av1 { mut enc, .. } => {
+                    for p in enc.flush().map_err(|e| format!("AV1 encoder: {e:?}"))? {
+                        mux.write_temporal_unit(track, &p.data).map_err(io)?;
+                    }
+                    Vec::new()
+                }
             };
             for o in held {
                 mux.write_sample(track, &o.data, o.keyframe).map_err(io)?;
@@ -612,6 +646,101 @@ mod tests {
         let task = start(&doc, Request { path: seq.clone(), format: Format::Png, size: (160, 90), fps: 10.0, range: (0, view::SEC / 2), quality: 100.0, bitrate_kbps: 0 });
         wait(&task);
         assert_eq!(std::fs::read_dir(&seq).unwrap().count(), 5);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A new project with a 2 s tone, then a gradient picture, on the timeline.
+    fn picture_and_tone(dir: &std::path::Path) -> Doc {
+        let (pw, ph) = (320u32, 180u32);
+        let pixels: Vec<u8> = (0..pw * ph).flat_map(|i| { let (x, y) = (i % pw, i / pw); [(x * 255 / pw) as u8, (y * 255 / ph) as u8, 140, 255] }).collect();
+        std::fs::write(dir.join("grad.png"), studio_media::png::encode(&studio_media::RgbaImage { width: pw, height: ph, pixels })).unwrap();
+        let samples: Vec<f32> = (0..48_000 * 2).flat_map(|i| {
+            let v = 0.5 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48_000.0).sin();
+            [v, v]
+        }).collect();
+        std::fs::write(dir.join("tone.wav"), studio_media::wav::encode_pcm16(&studio_media::wav::Wav { sample_rate: 48_000, channels: 2, samples })).unwrap();
+        let mut doc = crate::services::project::new_project(crate::services::project::canvas("Landscape").unwrap());
+        crate::services::project::import_to_timeline(&mut doc, &[dir.join("tone.wav"), dir.join("grad.png")]).unwrap();
+        doc
+    }
+
+    #[test]
+    fn exports_av1_in_mp4_that_studio_av1_reads_back() {
+        let dir = std::env::temp_dir().join(format!("studio-export-av1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let doc = picture_and_tone(&dir);
+        let path = dir.join("out.mp4");
+        let task = start(&doc, Request { path: path.clone(), format: Format::Av1, size: (320, 180), fps: 24.0, range: (0, 4 * view::SEC), quality: 70.0, bitrate_kbps: 2000 });
+        wait(&task);
+        assert!(task.fraction() > 0.99);
+
+        let mut dmx = studio_mp4::open(&path).unwrap();
+        let movie = dmx.movie().clone();
+        let v = movie.video().expect("a video track").clone();
+        assert_eq!(&v.fourcc, b"av01");
+        assert_eq!((v.coded_width, v.coded_height), (320, 180));
+        assert_eq!(v.samples.len(), 96, "4 s at 24 fps");
+        let secs = v.samples.iter().map(|s| s.duration as f64).sum::<f64>() / v.timescale as f64;
+        assert!((secs - 4.0).abs() < 0.05, "video lasts {secs:.3} s");
+        assert!(v.samples.iter().all(|s| s.sync), "key frames only");
+        assert!(movie.audio().is_some(), "the sound is muxed like the other MP4 formats");
+
+        // Decode every sample with studio-av1.
+        let mut dec = studio_av1::Decoder::new();
+        let mut pics = Vec::new();
+        for s in &v.samples {
+            let data = dmx.read_sample(s).unwrap();
+            pics.extend(dec.decode(&data).unwrap());
+        }
+        // The decoder holds back pictures still in flight.
+        pics.extend(dec.flush());
+        assert_eq!(pics.len(), 96);
+        assert!(pics.iter().all(|p| (p.width, p.height) == (320, 180)));
+        let luma_mean = pics[80].planes[0].iter().map(|&y| y as f64).sum::<f64>() / pics[80].planes[0].len() as f64;
+        assert!(luma_mean > 30.0, "the picture is not black (mean luma {luma_mean:.0})");
+
+        // The sound reads back, and the import path accepts the file.
+        let back = crate::sound_bridge::decoded(path.to_str().unwrap()).expect("an audio track");
+        assert!((back.left.len() as f64 / back.rate as f64 - 4.0).abs() < 0.05, "the sound spans the exported range");
+        let probe = crate::media_io::probe(&path).unwrap();
+        let pv = probe.video.expect("probe sees the video");
+        assert_eq!((pv.width, pv.height), (320, 180));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Export QC reads H.264 and HEVC only (`studio-deliver` filecheck); this passes
+    /// once it has an AV1 branch. Run with `--ignored`.
+    #[test]
+    #[ignore = "needs an AV1 branch in studio-deliver's filecheck"]
+    fn av1_export_passes_qc() {
+        let dir = std::env::temp_dir().join(format!("studio-export-av1-qc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let doc = picture_and_tone(&dir);
+        let path = dir.join("out.mp4");
+        let task = start(&doc, Request { path: path.clone(), format: Format::Av1, size: (320, 180), fps: 24.0, range: (0, 2 * view::SEC), quality: 70.0, bitrate_kbps: 2000 });
+        wait(&task);
+        let report = studio_deliver::filecheck::check_file(&path, &studio_deliver::qc::Profile::default(), &Default::default()).expect("QC reads the file");
+        assert!(report.passed, "{report:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `cargo test --release ... av1_export_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore = "timing report"]
+    fn av1_export_timing() {
+        let dir = std::env::temp_dir().join(format!("studio-export-av1-time-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let doc = picture_and_tone(&dir);
+        for (format, name) in [(Format::Av1, "av1.mp4"), (Format::H264, "h264.mp4")] {
+            let path = dir.join(name);
+            let t = std::time::Instant::now();
+            let task = start(&doc, Request { path: path.clone(), format, size: (1920, 1080), fps: 30.0, range: (0, 5 * view::SEC), quality: 70.0, bitrate_kbps: 8000 });
+            wait(&task);
+            eprintln!("TIMING {format:?}: 5 s 1080p30 in {:.1} s, {} bytes", t.elapsed().as_secs_f64(), std::fs::metadata(&path).unwrap().len());
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

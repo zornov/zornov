@@ -5600,6 +5600,7 @@ dependencies = [
  "studio-ai",
  "studio-audio",
  "studio-av1",
+ "studio-av1-enc",
  "studio-canvas",
  "studio-colour",
  "studio-commerce",
