@@ -5,7 +5,8 @@
 //! text-like edges, stripes, flat, odd sizes from 1x1 to 1921x1081). Every packet must decode
 //! with `studio-av1` to the encoder's own reconstruction, bit for bit, and meet a PSNR floor for
 //! its content class and quantiser. A bounded fuzz run over sizes and quantisers must not panic.
-//! An ignored benchmark records the speed and the machine load.
+//! The MP4 test muxes the packets with the workspace muxer and decodes the file on the video
+//! hardware (VideoToolbox). An ignored benchmark records the speed and the machine load.
 
 use studio_av1::Decoder;
 use studio_av1_enc::{Config, Encoder, Frame, RateMode};
@@ -234,4 +235,64 @@ fn bench_1080p_single_thread() {
     }
     let load = std::process::Command::new("sysctl").args(["-n", "vm.loadavg"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     eprintln!("vm.loadavg after: {load}");
+}
+
+/// The packets, in an MP4 written by the workspace muxer, read back by the workspace demuxer,
+/// decode on the video hardware to the encoder's reconstruction.
+#[test]
+fn mp4_decodes_on_videotoolbox_bit_exactly() {
+    use studio_encode::mux::{Muxer, Options, av1c_from_sequence_header};
+    if !studio_hw::Av1Decoder::supported() {
+        eprintln!("SKIPPED: this machine's video hardware does not decode AV1");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("studio-av1-enc-vt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for &(w, h) in &[(160u32, 96u32), (130, 70), (66, 66)] {
+        let imgs = [gradient(w as usize, h as usize), photo_like(w as usize, h as usize, 3), edges(w as usize, h as usize)];
+        let mut enc = Encoder::new(Config { rate: RateMode::Cqp(80), speed: 6, ..Config::new(w, h) }).unwrap();
+        let (mut pkts, mut recon) = (Vec::new(), Vec::new());
+        for (i, img) in imgs.iter().enumerate() {
+            pkts.extend(enc.push_frame(img, i as i64).unwrap());
+            recon.push(enc.reconstruction().unwrap().clone());
+        }
+        // the muxer's view of the stream: the sequence header comes from the first packet
+        let seq_obu_len = 2 + pkts[0].data[1] as usize;
+        let info = av1c_from_sequence_header(&pkts[0].data[..seq_obu_len]).unwrap();
+        assert_eq!(info.av1c, enc.av1c(), "the muxer derives the av1C the encoder reports");
+        let path = dir.join(format!("clip-{w}x{h}.mp4"));
+        let mut mux = Muxer::create(&path, Options::mp4_av1()).unwrap();
+        let track = mux.add_av1_video(info.track_info(30, 1, 1_000_000)).unwrap();
+        for p in &pkts {
+            mux.write_temporal_unit(track, &p.data).unwrap();
+        }
+        mux.finish().unwrap();
+
+        let mut demux = studio_mp4::open(&path).unwrap();
+        let movie = demux.movie().clone();
+        let v = &movie.tracks[0];
+        assert_eq!(&v.fourcc, b"av01");
+        assert_eq!((v.width, v.height), (w, h));
+        assert!(v.samples.iter().all(|s| s.sync), "every packet is a sync sample");
+        let studio_mp4::Codec::Av1 { config } = &v.codec else { panic!("not AV1: {:?}", v.codec) };
+        let mut hw = studio_hw::Av1Decoder::new(&config.raw, w, h).expect("a hardware AV1 decoder");
+        let mut got = Vec::new();
+        for (i, s) in v.samples.iter().enumerate() {
+            let data = demux.read_sample(s).unwrap();
+            got.extend(hw.decode(&data, i as i64).unwrap());
+        }
+        got.extend(hw.flush());
+        assert_eq!(got.len(), imgs.len(), "{w}x{h}: every picture comes back");
+        got.sort_by_key(|d| d.sample);
+        let mut exact = true;
+        for (d, want) in got.iter().zip(&recon) {
+            assert_eq!((d.width, d.height), (w, h));
+            for (plane, ref_plane) in [(&d.y, &want.planes[0]), (&d.u, &want.planes[1]), (&d.v, &want.planes[2])] {
+                assert_eq!(plane.len(), ref_plane.len());
+                exact &= plane.iter().zip(ref_plane).all(|(&a, &b)| a as u16 == b);
+            }
+        }
+        eprintln!("{w}x{h}: VideoToolbox decode of the MP4 matches the reconstruction bit for bit: {exact}");
+        assert!(exact, "{w}x{h}: VideoToolbox output differs from the encoder's reconstruction");
+    }
 }

@@ -5676,6 +5676,9 @@ version = "0.1.3"
 dependencies = [
  "rayon",
  "studio-av1",
+ "studio-encode",
+ "studio-hw",
+ "studio-mp4",
 ]
 
 [[package]]
