@@ -147,6 +147,10 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("trim-back-10", "Trim the edit ten frames earlier", "⇧["),
     ("trim-fwd-10", "Trim the edit ten frames later", "⇧]"),
     ("editorial-panel", "Editorial window", "⌥E"),
+    // Clipboard: these arrive as the system's copy, cut and paste events.
+    ("copy", "Copy", "⌘C"),
+    ("cut", "Cut", "⌘X"),
+    ("paste", "Paste", "⌘V"),
 ];
 
 struct Licence {

@@ -116,12 +116,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     if let Some(a) = out.action {
         run(app, &ctx, a);
     }
+    if let Some(op) = out.clip_op {
+        run_clip_op(app, &ctx, op);
+    }
 }
 
 /// What the top bar's controls asked for this frame.
 #[derive(Default)]
 struct Picked {
     action: Option<Action>,
+    clip_op: Option<ClipOp>,
     panel: Option<Panel>,
     workspace: Option<Workspace>,
     paint: bool,
@@ -278,7 +282,29 @@ fn save_click(state: &SaveState) -> Option<Action> {
     }
 }
 
+/// A menu row that works on the selected clips (the clip menu's rows).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ClipOp {
+    Copy,
+    Cut,
+    Paste,
+    /// Group, ungroup, link, unlink, freeze, reverse, copy-look, paste-look.
+    Key(&'static str),
+}
+
+/// Runs a clip row; each says why when the selection does not fit.
+fn run_clip_op(app: &mut StudioApp, ctx: &egui::Context, op: ClipOp) {
+    match op {
+        ClipOp::Copy => super::clip_menu::copy_selection(app, ctx, false),
+        ClipOp::Cut => super::clip_menu::copy_selection(app, ctx, true),
+        ClipOp::Paste => super::clip_menu::paste_selection(app, ctx),
+        ClipOp::Key(id) => super::clip_menu::key_action(app, ctx, id),
+    }
+}
+
 struct Item {
+    /// Set for a clip row: it is run instead of `action`.
+    op: Option<ClipOp>,
     label: &'static str,
     /// Its keys: an action's from the keymap, or a fixed key.
     shortcut: String,
@@ -288,7 +314,11 @@ struct Item {
 }
 
 fn item(label: &'static str, shortcut: &str, icon: Option<Icon>, enabled: bool, action: fn() -> Option<Action>) -> Option<Item> {
-    Some(Item { label, shortcut: shortcut.to_owned(), icon, enabled, action })
+    Some(Item { op: None, label, shortcut: shortcut.to_owned(), icon, enabled, action })
+}
+
+fn clip_item(label: &'static str, shortcut: &str, icon: Option<Icon>, op: ClipOp) -> Option<Item> {
+    Some(Item { op: Some(op), label, shortcut: shortcut.to_owned(), icon, enabled: true, action: || None })
 }
 
 fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
@@ -317,6 +347,10 @@ fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
             item("Undo", &k("undo"), Some(Icon::ArrowUUpLeft), d.can_undo(), || Some(Action::Undo)),
             item("Redo", &k("redo"), Some(Icon::ArrowUUpRight), d.can_redo(), || Some(Action::Redo)),
             None,
+            clip_item("Cut", &k("cut"), Some(Icon::Scissors), ClipOp::Cut),
+            clip_item("Copy", &k("copy"), Some(Icon::Copy), ClipOp::Copy),
+            clip_item("Paste", &k("paste"), None, ClipOp::Paste),
+            None,
             item("Select all", &k("select-all"), None, true, || Some(Action::SelectAll)),
             item("Duplicate", &k("duplicate"), Some(Icon::Copy), sel, || Some(Action::Duplicate)),
             item("Delete", &k("delete"), Some(Icon::Trash), sel, || Some(Action::Delete)),
@@ -324,6 +358,16 @@ fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
         ("Clip", vec![
             item("Split at playhead", &k("split"), Some(Icon::Scissors), true, || Some(Action::Split)),
             item("Add marker", &k("marker"), Some(Icon::Flag), true, || Some(Action::Marker)),
+            None,
+            clip_item("Group", &k("group"), None, ClipOp::Key("group")),
+            clip_item("Ungroup", &k("ungroup"), None, ClipOp::Key("ungroup")),
+            clip_item("Link", &k("link"), None, ClipOp::Key("link")),
+            clip_item("Unlink", &k("unlink"), None, ClipOp::Key("unlink")),
+            None,
+            clip_item("Freeze frame at playhead", &k("freeze"), None, ClipOp::Key("freeze")),
+            clip_item("Reverse", &k("reverse"), None, ClipOp::Key("reverse")),
+            clip_item("Copy look", &k("copy-look"), None, ClipOp::Key("copy-look")),
+            clip_item("Paste look", &k("paste-look"), None, ClipOp::Key("paste-look")),
             None,
             item("Set in point", &k("in"), None, true, || Some(Action::RangeIn)),
             item("Set out point", &k("out"), None, true, || Some(Action::RangeOut)),
@@ -390,6 +434,7 @@ fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], view: Option<&Vie
                         };
                         if m.show(ui).clicked() {
                             out.action = (it.action)();
+                            out.clip_op = it.op;
                             kit::set_open(ui.ctx(), id, false);
                         }
                     }
@@ -490,6 +535,21 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every Edit and Clip row that works on the selection has an item with
+    /// its keys, and the menus list them once.
+    #[test]
+    fn the_clip_rows_are_in_the_menus_once_with_their_keys() {
+        let h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        let all = menus(&h.app);
+        let rows: Vec<(&str, Option<ClipOp>, String)> = all.iter().flat_map(|(_, v)| v.iter().flatten()).filter(|i| i.op.is_some()).map(|i| (i.label, i.op, i.shortcut.clone())).collect();
+        assert_eq!(rows.len(), 11);
+        for want in ["Cut", "Copy", "Paste", "Group", "Ungroup", "Link", "Unlink", "Freeze frame at playhead", "Reverse", "Copy look", "Paste look"] {
+            assert_eq!(rows.iter().filter(|r| r.0 == want).count(), 1, "{want}");
+        }
+        assert_eq!(rows.iter().find(|r| r.0 == "Copy").unwrap().2, "⌘C");
+        assert_eq!(rows.iter().find(|r| r.0 == "Group").unwrap().2, "⌘G");
+    }
 
     #[test]
     fn save_state_names_each_case_and_failure_saves_now() {
