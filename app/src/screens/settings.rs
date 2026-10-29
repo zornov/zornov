@@ -36,8 +36,6 @@ pub struct SettingsState {
     pub lessons_at: f64,
     pub lesson_edit: Option<(u64, String)>,
     pub lesson_clear: bool,
-    /// The destructive button clicked once and waiting for its second click.
-    pub armed: Option<String>,
     /// The shortcuts as they were before "Reset all", for Undo.
     pub shortcuts_undo: Option<Vec<(String, String)>>,
     /// Settings ▸ Models: the real models folder and its downloads (made
@@ -49,21 +47,6 @@ pub struct SettingsState {
     /// Settings ▸ Account: the plan, the cloud, credits, receipts, marketplace.
     #[cfg(feature = "commerce")]
     pub account: crate::screens::account::AccountState,
-}
-
-/// A button that cannot be taken back asks for a second click: the first
-/// arms `key` (its label should say so), the second does it.
-fn confirmed(armed: &mut Option<String>, key: &str, clicked: bool) -> bool {
-    if !clicked {
-        return false;
-    }
-    if armed.as_deref() == Some(key) {
-        *armed = None;
-        true
-    } else {
-        *armed = Some(key.to_owned());
-        false
-    }
 }
 
 const PAGES: &[(&str, Icon)] = &[
@@ -565,9 +548,9 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
                     ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
-                    let sure = st.armed.as_deref() == Some("api-key");
-                    let clicked = Button::secondary(if sure { "Remove the key?" } else { "Remove" }).icon(Icon::Trash).show(ui).clicked();
-                    if confirmed(&mut st.armed, "api-key", clicked) {
+                    let id = egui::Id::unique(("remove-api-key", account));
+                    let label = if kit::armed(ui.ctx(), id) { "Click again to remove" } else { "Remove" };
+                    if Button::secondary(label).icon(Icon::Trash).show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                         keychain::remove_api_key(account);
                         forget_saved_label(ui, account);
                         st.ai_key_saved = Some(false);
@@ -678,10 +661,9 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                         if Button::ghost("Edit").compact().show(ui).clicked() {
                             st.lesson_edit = Some((l.id, l.text.clone()));
                         }
-                        let key = format!("lesson-{}", l.id);
-                        let sure = st.armed.as_deref() == Some(key.as_str());
-                        let clicked = Button::ghost(if sure { "Delete it?" } else { "Delete" }).icon(Icon::Trash).compact().show(ui).clicked();
-                        if confirmed(&mut st.armed, &key, clicked) {
+                        let id = egui::Id::unique(("delete-lesson", l.id));
+                        let label = if kit::armed(ui.ctx(), id) { "Click again to delete" } else { "Delete" };
+                        if Button::ghost(label).icon(Icon::Trash).compact().show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                             match store.forget(l.id) {
                                 Ok(()) => {
                                     changed = true;
@@ -1048,16 +1030,6 @@ mod tests {
 
     /// Esc while a shortcut is being captured cancels the capture and leaves
     /// Settings open; the next Esc closes Settings.
-    #[test]
-    fn a_destructive_button_needs_its_second_click() {
-        let mut armed = None;
-        assert!(!confirmed(&mut armed, "a", false));
-        assert!(!confirmed(&mut armed, "a", true), "first click arms");
-        assert!(!confirmed(&mut armed, "b", true), "another button re-arms");
-        assert!(confirmed(&mut armed, "b", true), "second click does it");
-        assert_eq!(armed, None);
-    }
-
     #[test]
     fn escape_cancels_a_capture_without_closing_settings() {
         use crate::app::Overlay;
