@@ -142,7 +142,7 @@ enum Host {
 /// The host and port of an http(s) link.
 fn host_port(url: &str) -> Option<(String, u16)> {
     let (scheme, rest) = url.split_once("://")?;
-    let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let auth = rest.split(['/', '\\', '?', '#']).next().unwrap_or("");
     let auth = auth.rsplit('@').next().unwrap_or(auth);
     let (host, port) = match auth.strip_prefix('[') {
         Some(v6) => {
