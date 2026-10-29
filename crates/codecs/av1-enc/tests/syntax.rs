@@ -203,7 +203,7 @@ fn random_coefs(rng: &mut Rng, d: &BlockDecision, tx: usize, plane: usize, q: u8
     let (w, h) = (TX_WIDTH[tx] as usize, TX_HEIGHT[tx] as usize);
     let (tw, th) = (w.min(32), h.min(32));
     let n = tw * th;
-    let p = TxbParams { plane, x4: 0, y4: 0, mi_size: 0, y_mode: d.y_mode, uv_mode: d.uv_mode, lossless: q == 0, qidx_nonzero: q > 0 };
+    let p = TxbParams { plane, x4: 0, y4: 0, mi_size: 0, y_mode: d.y_mode, uv_mode: d.uv_mode, lossless: q == 0, qidx_nonzero: q > 0, is_inter: false, luma_tx_type: DCT_DCT };
     let luma_type = if plane == 0 && q > 0 {
         let set = intra_tx_set(tx);
         let allowed: Vec<usize> = (0..16).filter(|&t| set == 0 && t == DCT_DCT || set > 0 && TX_TYPE_IN_SET_INTRA[set][t] == 1).collect();

@@ -8,6 +8,7 @@
 //! One tile, 4:2:0, intra frames only: neighbours are available whenever they lie inside the
 //! frame, and the mode info of earlier blocks is kept in per-4x4 grids.
 
+use studio_av1::frame::{MiInfo, Mv};
 use studio_av1::spec_tables::*;
 
 /// Chroma subsampling of the supported streams (profile 0 is always 4:2:0).
@@ -100,11 +101,9 @@ pub fn coeff_base_eob_ctx(c: usize, bwl: usize, height: usize) -> usize {
 pub struct ContextState {
     pub mi_rows: usize,
     pub mi_cols: usize,
-    mi_size: Vec<u8>,
-    skip: Vec<bool>,
-    y_mode: Vec<u8>,
-    /// Transform size of each 4x4 unit (`InterTxSizes`, which equals `TxSize` in intra frames).
-    tx_size: Vec<u8>,
+    /// Mode info of the blocks written so far, in the decoder's own layout: the motion vector
+    /// processes read it as they do in the decoder.
+    pub mi: MiInfo,
     above_level: [Vec<u8>; 3],
     above_dc: [Vec<u8>; 3],
     left_level: [Vec<u8>; 3],
@@ -115,14 +114,10 @@ pub struct ContextState {
 
 impl ContextState {
     pub fn new(mi_cols: usize, mi_rows: usize) -> ContextState {
-        let n = mi_rows * mi_cols;
         ContextState {
             mi_rows,
             mi_cols,
-            mi_size: vec![0; n],
-            skip: vec![false; n],
-            y_mode: vec![DC_PRED as u8; n],
-            tx_size: vec![0; n],
+            mi: MiInfo::new(mi_cols, mi_rows, false),
             above_level: std::array::from_fn(|_| vec![0; mi_cols + ARRAY_SLACK]),
             above_dc: std::array::from_fn(|_| vec![0; mi_cols + ARRAY_SLACK]),
             left_level: std::array::from_fn(|_| vec![0; mi_rows + ARRAY_SLACK]),
@@ -133,7 +128,7 @@ impl ContextState {
 
     #[inline]
     fn idx(&self, r: usize, c: usize) -> usize {
-        r * self.mi_cols + c
+        self.mi.idx(r, c)
     }
 
     /// `clear_left_context()`: at the start of every superblock row.
@@ -146,26 +141,26 @@ impl ContextState {
 
     /// The partition context (8.3.2) of the block of log2 width `bsl` (in 4x4 units) at `(r, c)`.
     pub fn partition_ctx(&self, r: usize, c: usize, bsl: usize) -> usize {
-        let above = r > 0 && (MI_WIDTH_LOG2[self.mi_size[self.idx(r - 1, c)] as usize] as usize) < bsl;
-        let left = c > 0 && (MI_HEIGHT_LOG2[self.mi_size[self.idx(r, c - 1)] as usize] as usize) < bsl;
+        let above = r > 0 && (MI_WIDTH_LOG2[self.mi.mi_size[self.idx(r - 1, c)] as usize] as usize) < bsl;
+        let left = c > 0 && (MI_HEIGHT_LOG2[self.mi.mi_size[self.idx(r, c - 1)] as usize] as usize) < bsl;
         left as usize * 2 + above as usize
     }
 
     pub fn skip_ctx(&self, r: usize, c: usize) -> usize {
         let mut ctx = 0;
         if r > 0 {
-            ctx += self.skip[self.idx(r - 1, c)] as usize;
+            ctx += self.mi.skip[self.idx(r - 1, c)] as usize;
         }
         if c > 0 {
-            ctx += self.skip[self.idx(r, c - 1)] as usize;
+            ctx += self.mi.skip[self.idx(r, c - 1)] as usize;
         }
         ctx
     }
 
     /// `(above, left)` contexts of the intra frame y mode.
     pub fn y_mode_ctx(&self, r: usize, c: usize) -> (usize, usize) {
-        let above = if r > 0 { self.y_mode[self.idx(r - 1, c)] as usize } else { DC_PRED };
-        let left = if c > 0 { self.y_mode[self.idx(r, c - 1)] as usize } else { DC_PRED };
+        let above = if r > 0 { self.mi.y_mode[self.idx(r - 1, c)] as usize } else { DC_PRED };
+        let left = if c > 0 { self.mi.y_mode[self.idx(r, c - 1)] as usize } else { DC_PRED };
         (INTRA_MODE_CONTEXT[above] as usize, INTRA_MODE_CONTEXT[left] as usize)
     }
 
@@ -173,23 +168,82 @@ impl ContextState {
     pub fn tx_depth_ctx(&self, r: usize, c: usize, max_rect: usize) -> usize {
         let max_w = TX_WIDTH[max_rect] as usize;
         let max_h = TX_HEIGHT[max_rect] as usize;
-        let above_w = if r > 0 { TX_WIDTH[self.tx_size[self.idx(r - 1, c)] as usize] as usize } else { 0 };
-        let left_h = if c > 0 { TX_HEIGHT[self.tx_size[self.idx(r, c - 1)] as usize] as usize } else { 0 };
+        let mi = &self.mi;
+        // an inter neighbour counts with its block size, an intra one with its transform size
+        let above_w = if r == 0 {
+            0
+        } else if mi.is_inter[self.idx(r - 1, c)] {
+            block_width(mi.mi_size[self.idx(r - 1, c)] as usize)
+        } else {
+            TX_WIDTH[mi.inter_tx_size[self.idx(r - 1, c)] as usize] as usize
+        };
+        let left_h = if c == 0 {
+            0
+        } else if mi.is_inter[self.idx(r, c - 1)] {
+            block_height(mi.mi_size[self.idx(r, c - 1)] as usize)
+        } else {
+            TX_HEIGHT[mi.inter_tx_size[self.idx(r, c - 1)] as usize] as usize
+        };
         (above_w >= max_w) as usize + (left_h >= max_h) as usize
     }
 
-    /// Records a coded block in the mode info grids (clipped to the frame).
+    /// Records a coded intra block in the mode info (clipped to the frame).
     pub fn store_block(&mut self, r: usize, c: usize, mi_size: usize, y_mode: usize, skip: bool, tx_size: usize) {
+        self.store(r, c, mi_size, y_mode, skip, tx_size, [INTRA_FRAME as i8, -1], [Mv::ZERO; 2], false);
+    }
+
+    /// Records a coded inter block in the mode info (clipped to the frame).
+    #[allow(clippy::too_many_arguments)]
+    pub fn store_inter_block(&mut self, r: usize, c: usize, mi_size: usize, mode: usize, skip: bool, tx_size: usize, ref_frame: i8, mv: [i32; 2]) {
+        self.store(r, c, mi_size, mode, skip, tx_size, [ref_frame, -1], [Mv::new(mv[0], mv[1]), Mv::ZERO], true);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn store(&mut self, r: usize, c: usize, mi_size: usize, mode: usize, skip: bool, tx_size: usize, ref_frame: [i8; 2], mv: [Mv; 2], is_inter: bool) {
         let (bh4, bw4) = (NUM_4X4_BLOCKS_HIGH[mi_size] as usize, NUM_4X4_BLOCKS_WIDE[mi_size] as usize);
         for y in 0..bh4.min(self.mi_rows.saturating_sub(r)) {
             for x in 0..bw4.min(self.mi_cols.saturating_sub(c)) {
                 let i = self.idx(r + y, c + x);
-                self.mi_size[i] = mi_size as u8;
-                self.skip[i] = skip;
-                self.y_mode[i] = y_mode as u8;
-                self.tx_size[i] = tx_size as u8;
+                let mi = &mut self.mi;
+                mi.mi_size[i] = mi_size as u8;
+                mi.skip[i] = skip;
+                mi.y_mode[i] = mode as u8;
+                mi.tx_size[i] = tx_size as u8;
+                mi.inter_tx_size[i] = tx_size as u8;
+                mi.is_inter[i] = is_inter;
+                mi.ref_frame[i] = ref_frame;
+                mi.mv[i] = mv;
+                mi.written[i] = true;
             }
         }
+    }
+
+    /// The `is_inter` context.
+    pub fn is_inter_ctx(&self, r: usize, c: usize) -> usize {
+        let (avail_u, avail_l) = (r > 0, c > 0);
+        let intra_of = |rr: usize, cc: usize| self.mi.ref_frame[self.idx(rr, cc)][0] <= INTRA_FRAME as i8;
+        if avail_u && avail_l {
+            let (a, l) = (intra_of(r - 1, c), intra_of(r, c - 1));
+            if a && l { 3 } else { (a || l) as usize }
+        } else if avail_u || avail_l {
+            2 * (if avail_u { intra_of(r - 1, c) } else { intra_of(r, c - 1) }) as usize
+        } else {
+            0
+        }
+    }
+
+    /// How often the above and left neighbours use reference frame `frame_type` (`count_refs`).
+    pub fn count_refs(&self, r: usize, c: usize, frame_type: usize) -> usize {
+        let mut n = 0;
+        if r > 0 {
+            let rf = self.mi.ref_frame[self.idx(r - 1, c)];
+            n += (rf[0] == frame_type as i8) as usize + (rf[1] == frame_type as i8) as usize;
+        }
+        if c > 0 {
+            let rf = self.mi.ref_frame[self.idx(r, c - 1)];
+            n += (rf[0] == frame_type as i8) as usize + (rf[1] == frame_type as i8) as usize;
+        }
+        n
     }
 
     /// `reset_block_context()` for a skipped block.
