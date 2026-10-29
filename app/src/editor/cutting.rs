@@ -289,6 +289,7 @@ pub fn ripple_to_playhead(app: &mut StudioApp, ctx: &egui::Context, start: bool)
     let seq = app.doc.seq();
     let (edge, delta) = if start { (m::Edge::Start, t - c.start) } else { (m::Edge::End, t - c.end()) };
     if delta == 0 || t <= c.start || t >= c.end() {
+        toast(ctx, "Move the playhead inside the clip first");
         return false;
     }
     let r = ed::ripple_trim(&mut app.doc.model, seq, c.id, edge, delta);
@@ -595,8 +596,9 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
         }
     }
     // Another tool picked: trim modes belong to the select tool.
-    if app.editor.tool != super::Tool::Select {
+    if app.editor.tool != super::Tool::Select && app.editor.cutting.mode != TrimMode::Off {
         app.editor.cutting.mode = TrimMode::Off;
+        toast(ctx, "Trim mode off: it belongs to the Select tool");
     }
 }
 
