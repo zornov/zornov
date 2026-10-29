@@ -39,7 +39,8 @@ const PRESETS: &[Preset] = &[
 
 /// Up to this many recent projects are shown as picture tiles; more become
 /// a list with their folders and dates.
-const RECENT_TILES: usize = 4;
+/// Recent projects shown before "Show all" (about two rows).
+const RECENT_TILES: usize = 12;
 
 /// Height of the strip at the top kept clear for the window buttons.
 pub const TITLE_BAR_H: f32 = 52.0;
@@ -254,10 +255,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
                     ui.label(egui::RichText::new(crate::i18n::shown("Pick a canvas above to start, open a project, or try a sample below")).font(theme::caption()).color(t.text_2));
                     ui.add_space(theme::space::MD);
                 }
+                // Searching shows every match; otherwise the latest few, unless
+                // the person asked for all of them.
+                let show_all_id = egui::Id::unique("start-show-all-recents");
+                let show_all = !q.is_empty() || ui.ctx().data(|d| d.get_temp::<bool>(show_all_id).unwrap_or(false));
+                let hidden = if show_all { 0 } else { recents.len().saturating_sub(RECENT_TILES) };
+                let recents = &recents[..recents.len() - hidden];
                 // Each project shows a picture from its own media, looked up a
                 // few projects per frame so a long list never stalls a frame.
                 let mut looked = 0;
-                for r in &recents {
+                for r in recents {
                     if looked < 4 && !app.start.covers.contains_key(&r.path) {
                         app.start.covers.insert(r.path.clone(), files::cover_of(&r.path));
                         looked += 1;
@@ -271,24 +278,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
                     ui.add_space(theme::space::SM);
                     ui.label(egui::RichText::new(crate::i18n::shown("Recent projects")).font(theme::section_title()).color(t.text));
                     ui.add_space(theme::space::SM);
-                    if recents.len() > RECENT_TILES {
-                        // A long history reads best as a list: name, where it
-                        // lives and when it was last changed.
-                        for r in &recents {
-                            let place = studio_paths::tilde(r.path.parent().unwrap_or(&r.path));
-                            let line = format!("{place} · {}", files::edited_label(r.edited));
-                            if kit::ListRow::new(&r.name).secondary(&line).icon(Icon::FilmStrip).show(ui).response.clicked() {
-                                open = Some(r.path.clone());
-                            }
-                        }
-                    } else {
+                    {
                         let thumbs = &mut app.thumbs;
                         let badges: Vec<String> = recents.iter().map(|r| view::format_duration(r.length)).collect();
                         let subs: Vec<String> = recents.iter().map(|r| files::edited_label(r.edited)).collect();
+                        // Where each one lives, on hover (same names stay apart).
+                        let tips: Vec<String> = recents.iter().map(|r| studio_paths::tilde(&r.path)).collect();
                         let out = kit::TileGrid::new("recents").min_width(168.0).surface(t.ground).show(
                             ui,
                             recents.len(),
-                            |i| kit::TileInfo { label: recents[i].name.as_str(), badge: Some(badges[i].as_str()), sub: Some(subs[i].as_str()), selected: false, addable: false, progress: None, tip: None, added: false },
+                            |i| kit::TileInfo { label: recents[i].name.as_str(), badge: Some(badges[i].as_str()), sub: Some(subs[i].as_str()), selected: false, addable: false, progress: None, tip: Some(tips[i].as_str()), added: false },
                             |i| i,
                             &mut |p, r, i, hover, _| {
                                 let rec = &recents[i];
@@ -298,6 +297,13 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
                         );
                         if let Some(i) = out.clicked.or(out.double_clicked) {
                             open = Some(recents[i].path.clone());
+                        }
+                    }
+                    if q.is_empty() && (hidden > 0 || show_all) {
+                        ui.add_space(theme::space::SM);
+                        let label = if hidden > 0 { crate::i18n::tf(format!("Show all {} projects", recents.len() + hidden)) } else { crate::i18n::tf("Show fewer".to_owned()) };
+                        if kit::Button::ghost(&label).compact().show(ui).clicked() {
+                            ui.ctx().data_mut(|d| d.insert_temp(show_all_id, hidden > 0));
                         }
                     }
                 }
@@ -524,13 +530,21 @@ mod tests {
         assert!(samples.is_infinite() || templates < samples, "samples last");
     }
 
-    /// More than four recent projects become a list with their folders.
+    /// A long history shows the latest projects as covers, and the rest
+    /// behind "Show all"; search still finds every one.
     #[test]
-    fn a_long_history_is_a_list() {
+    fn a_long_history_shows_the_latest_and_the_rest_on_request() {
         let mut h = Harness::new(&[]);
-        h.app.prefs.recents = (0..6).map(|i| crate::files::Recent { path: format!("/tmp/zq-test/P{i}").into(), name: format!("Zq list {i}"), edited: 0, length: 0, width: 1920, height: 1080 }).collect();
+        h.app.prefs.recents = (0..20).map(|i| crate::files::Recent { path: format!("/tmp/zq-test/P{i}").into(), name: format!("Zq list {i}"), edited: 0, length: 0, width: 1920, height: 1080 }).collect();
         h.frames(3);
         let l = h.labels();
-        assert!((0..6).all(|i| l.iter().any(|s| s == &format!("Zq list {i}"))), "every project is listed: {l:?}");
+        let shown = |l: &[String], i: usize| l.iter().any(|s| s == &format!("Zq list {i}"));
+        assert!((0..super::RECENT_TILES).all(|i| shown(&l, i)), "the latest are shown: {l:?}");
+        assert!(!shown(&l, 19), "the oldest waits behind Show all: {l:?}");
+        assert!(l.iter().any(|s| s == "Show all 20 projects"), "{l:?}");
+        h.app.start.search = "list 19".into();
+        h.frames(3);
+        assert!(shown(&h.labels(), 19), "search finds an old one");
     }
+
 }
