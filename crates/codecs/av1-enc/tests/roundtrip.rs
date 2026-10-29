@@ -273,7 +273,8 @@ fn mp4_decodes_on_videotoolbox_bit_exactly() {
         let v = &movie.tracks[0];
         assert_eq!(&v.fourcc, b"av01");
         assert_eq!((v.width, v.height), (w, h));
-        assert_eq!(v.samples.iter().map(|s| s.sync).collect::<Vec<_>>(), [true, false, false], "only the key frame is a sync sample");
+        // the edges picture has nothing in common with the photo before it: a scene cut, so a key frame
+        assert_eq!(v.samples.iter().map(|s| s.sync).collect::<Vec<_>>(), [true, false, true], "the key frames, and only they, are sync samples");
         let studio_mp4::Codec::Av1 { config } = &v.codec else { panic!("not AV1: {:?}", v.codec) };
         let mut hw = studio_hw::Av1Decoder::new(&config.raw, w, h).expect("a hardware AV1 decoder");
         let mut got = Vec::new();
