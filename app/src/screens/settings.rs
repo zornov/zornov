@@ -96,7 +96,7 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("before-after", "Before / after", "\\"),
     ("export", "Export", "⌘E"),
     ("settings", "Settings", "⌘,"),
-    ("agent", "Open the AI editor", "⌘K"),
+    ("agent", "Open the Assistant", "⌘K"),
     ("all-projects", "All projects", "⇧⌘H"),
     ("overlays", "Viewer overlays", "⇧O"),
     ("macro-record", "Start / stop recording a macro", "⌥⌘R"),
@@ -144,8 +144,10 @@ const LICENCES: &[Licence] = &[
 ];
 
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
+    // Esc while a shortcut is being captured cancels the capture only.
+    let was_capturing = app.settings.capturing.is_some();
     let out = kit::modal(ctx, egui::Id::unique("settings-dialog"), Vec2::new(900.0, 620.0), "Settings", |ui| body(app, ui));
-    if out.close && app.settings.capturing.is_none() {
+    if out.close && !was_capturing && app.settings.capturing.is_none() {
         app.overlay = Overlay::None;
     }
 }
