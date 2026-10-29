@@ -36,6 +36,8 @@ pub struct SettingsState {
     pub lessons_at: f64,
     pub lesson_edit: Option<(u64, String)>,
     pub lesson_clear: bool,
+    /// The shortcuts as they were before "Reset all", for Undo.
+    pub shortcuts_undo: Option<Vec<(String, String)>>,
     /// Settings ▸ Models: the real models folder and its downloads (made
     /// on the first visit; downloads go on when the page is left).
     pub models: Option<crate::services::models::Models>,
@@ -96,7 +98,7 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("before-after", "Before / after", "\\"),
     ("export", "Export", "⌘E"),
     ("settings", "Settings", "⌘,"),
-    ("agent", "Open the AI editor", "⌘K"),
+    ("agent", "Open the Assistant", "⌘K"),
     ("all-projects", "All projects", "⇧⌘H"),
     ("overlays", "Viewer overlays", "⇧O"),
     ("macro-record", "Start / stop recording a macro", "⌥⌘R"),
@@ -128,6 +130,10 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("trim-back-10", "Trim the edit ten frames earlier", "⇧["),
     ("trim-fwd-10", "Trim the edit ten frames later", "⇧]"),
     ("editorial-panel", "Editorial window", "⌥E"),
+    // Clipboard: these arrive as the system's copy, cut and paste events.
+    ("copy", "Copy", "⌘C"),
+    ("cut", "Cut", "⌘X"),
+    ("paste", "Paste", "⌘V"),
 ];
 
 struct Licence {
@@ -144,8 +150,10 @@ const LICENCES: &[Licence] = &[
 ];
 
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
+    // Esc while a shortcut is being captured cancels the capture only.
+    let was_capturing = app.settings.capturing.is_some();
     let out = kit::modal(ctx, egui::Id::unique("settings-dialog"), Vec2::new(900.0, 620.0), "Settings", |ui| body(app, ui));
-    if out.close && app.settings.capturing.is_none() {
+    if out.close && !was_capturing && app.settings.capturing.is_none() {
         app.overlay = Overlay::None;
     }
 }
@@ -219,7 +227,9 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
                 p.language = if i == 0 { String::new() } else { langs[i - 1].tag().to_owned() };
             }
         });
-        let mut scale = p.ui_scale * 100.0;
+        // The value being dragged stays in the field until it is applied.
+        let pending: Option<f32> = ui.data(|d| d.get_temp(egui::Id::unique("pending-scale")));
+        let mut scale = pending.unwrap_or(p.ui_scale * 100.0);
         let out = FieldRow::new("Interface size", &mut scale, 80.0..=200.0).default(100.0).unit("%").step(5.0).scrub(0.5).show(ui);
         // Apply when the gesture ends so the slider does not move under
         // the pointer while the whole UI rescales.
@@ -405,9 +415,12 @@ fn shortcuts(app: &mut StudioApp, ui: &mut egui::Ui) {
     let w = ui.available_width();
     ui.horizontal(|ui| {
         kit::text_field(ui, &mut app.settings.shortcut_query, "Search actions or keys", Some(Icon::MagnifyingGlass), w - 140.0, None);
-        if Button::ghost("Reset all").icon(Icon::ArrowCounterClockwise).show(ui).clicked() {
-            app.prefs.shortcuts.clear();
+        if Button::ghost("Reset all").icon(Icon::ArrowCounterClockwise).show(ui).clicked() && !app.prefs.shortcuts.is_empty() {
+            app.settings.shortcuts_undo = Some(std::mem::take(&mut app.prefs.shortcuts));
             kit::push(ui.ctx(), "Shortcuts reset to defaults", None, None);
+        }
+        if app.settings.shortcuts_undo.is_some() && Button::ghost("Undo reset").show(ui).clicked() {
+            app.prefs.shortcuts = app.settings.shortcuts_undo.take().unwrap_or_default();
         }
     });
     ui.add_space(theme::space::XS);
@@ -535,7 +548,9 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
                     ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
-                    if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
+                    let id = egui::Id::unique(("remove-api-key", account));
+                    let label = if kit::armed(ui.ctx(), id) { "Click again to remove" } else { "Remove" };
+                    if Button::secondary(label).icon(Icon::Trash).show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                         keychain::remove_api_key(account);
                         forget_saved_label(ui, account);
                         st.ai_key_saved = Some(false);
@@ -646,7 +661,9 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                         if Button::ghost("Edit").compact().show(ui).clicked() {
                             st.lesson_edit = Some((l.id, l.text.clone()));
                         }
-                        if Button::ghost("Delete").icon(Icon::Trash).compact().show(ui).clicked() {
+                        let id = egui::Id::unique(("delete-lesson", l.id));
+                        let label = if kit::armed(ui.ctx(), id) { "Click again to delete" } else { "Delete" };
+                        if Button::ghost(label).icon(Icon::Trash).compact().show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                             match store.forget(l.id) {
                                 Ok(()) => {
                                     changed = true;
@@ -1010,6 +1027,28 @@ mod no_account_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Esc while a shortcut is being captured cancels the capture and leaves
+    /// Settings open; the next Esc closes Settings.
+    #[test]
+    fn escape_cancels_a_capture_without_closing_settings() {
+        use crate::app::Overlay;
+        use crate::ui_tests::Harness;
+        let _serial = crate::ui_tests::serial();
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Settings;
+        h.app.settings.page = PAGES.iter().position(|p| p.0 == "Shortcuts").expect("a Shortcuts page");
+        h.frames(3);
+        h.app.settings.capturing = Some(0);
+        h.frames(2);
+        h.key(egui::Key::Escape, egui::Modifiers::NONE);
+        h.frames(2);
+        assert!(h.app.settings.capturing.is_none(), "the capture ended");
+        assert!(matches!(h.app.overlay, Overlay::Settings), "Settings stayed open");
+        h.key(egui::Key::Escape, egui::Modifiers::NONE);
+        h.frames(2);
+        assert!(matches!(h.app.overlay, Overlay::None), "a second Esc closes Settings");
+    }
 
     /// Every "Settings ▸ Page ▸ Section" the app writes names a real page,
     /// and what follows a page is a section of it, not another page.

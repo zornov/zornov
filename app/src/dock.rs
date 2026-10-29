@@ -38,7 +38,7 @@ pub enum Panel {
     Record,
     /// The cutting room's lists: timeline index, checks, takes, sequences, script.
     Editorial,
-    /// The AI editor: its conversations, steps and composer.
+    /// The Assistant: its conversations, steps and composer.
     Ai,
 }
 
@@ -57,7 +57,7 @@ impl Panel {
             Panel::Review => "Review",
             Panel::Record => "Record",
             Panel::Editorial => "Editorial",
-            Panel::Ai => "AI editor",
+            Panel::Ai => "Assistant",
         }
     }
 

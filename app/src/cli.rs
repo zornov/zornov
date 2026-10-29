@@ -31,6 +31,14 @@ pub struct Cli {
     pub scroll: Option<f32>,
     /// Extra free-form flags for visual checks, e.g. `--narrow-inspector`.
     pub flags: Vec<String>,
+    /// `--ui-script FILE --ui-out DIR`: the app drives itself with no window
+    /// (see `ui_script.rs`).
+    pub ui_script: Option<std::path::PathBuf>,
+    pub ui_out: Option<std::path::PathBuf>,
+    /// `--ui-log FILE`: a line a step, `ok` or `failed` and why.
+    pub ui_log: Option<std::path::PathBuf>,
+    /// Pixels per point of the scripted shots (default 2).
+    pub ui_ppp: Option<f32>,
 }
 
 impl Cli {
@@ -66,9 +74,18 @@ impl Cli {
                 "--shot" => c.shot = Some(val()),
                 "--frames" => c.frames = val().parse().unwrap_or(40),
                 "--fresh" => c.fresh = true,
+                "--ui-script" => c.ui_script = Some(val().into()),
+                "--ui-out" => c.ui_out = Some(val().into()),
+                "--ui-log" => c.ui_log = Some(val().into()),
+                "--ui-ppp" => c.ui_ppp = val().parse().ok(),
                 "--scroll" => c.scroll = val().parse().ok(),
                 other => c.flags.push(other.trim_start_matches("--").to_owned()),
             }
+        }
+        // A scripted run is a screenshot run in every way the app cares
+        // about: no dialogs, no saved state, no sounds, no tour.
+        if c.ui_script.is_some() && c.shot.is_none() {
+            c.shot = Some(String::new());
         }
         if c.shot.is_some() {
             c.fresh = true;

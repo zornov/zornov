@@ -514,7 +514,10 @@ impl AgentUi {
                         let (url, _) = a.downloads.remove(i);
                         let short = one_line(url.rsplit('/').next().unwrap_or(&url), 40);
                         match r {
-                            Ok(_) if url.starts_with("converted ") => kit::push(ctx, crate::i18n::tf(format!("Done: {url}")), None, Some(Icon::CheckCircle)),
+                            Ok(content) if url.starts_with("converted ") => match failed_in(&content) {
+                                None => kit::push(ctx, crate::i18n::tf(format!("Done: {url}")), None, Some(Icon::CheckCircle)),
+                                Some(why) => kit::push(ctx, crate::i18n::tf(format!("Could not {}. {}", url.replacen("converted ", "convert ", 1), one_line(&why, 140))), None, Some(Icon::Warning)),
+                            },
                             Ok(_) => kit::push(ctx, crate::i18n::tf(format!("Downloaded {short} into the media bin")), None, Some(Icon::CheckCircle)),
                             Err(e) => kit::push(ctx, crate::i18n::tf(format!("Could not download {short}: {}", one_line(&e, 140))), None, Some(Icon::Warning)),
                         };
@@ -2575,8 +2578,41 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
 }
 
+/// Why a tool that reports `failed` entries (import, make_playable) did not
+/// do everything it was asked: None when nothing failed.
+fn failed_in(content: &[Content]) -> Option<String> {
+    let text = content.iter().find_map(|c| match c {
+        Content::Text(t) => Some(t.as_str()),
+        _ => None,
+    })?;
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let failed = v.get("failed")?.as_array()?;
+    if failed.is_empty() {
+        return None;
+    }
+    let why: Vec<String> = failed
+        .iter()
+        .map(|f| match f {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.get("error").and_then(|e| e.as_str()).map_or_else(|| other.to_string(), str::to_owned),
+        })
+        .collect();
+    Some(why.join("; "))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_converted_import_with_failures_is_not_done() {
+        let ok = vec![Content::Text(r#"{"media":[3],"failed":[]}"#.into())];
+        assert_eq!(failed_in(&ok), None);
+        let bad = vec![Content::Text(r#"{"media":[],"failed":["clip.mxf: no video stream"]}"#.into())];
+        assert_eq!(failed_in(&bad).as_deref(), Some("clip.mxf: no video stream"));
+        let playable = vec![Content::Text(r#"{"made_playable":[],"failed":[{"media":4,"error":"disk full"}]}"#.into())];
+        assert_eq!(failed_in(&playable).as_deref(), Some("disk full"));
+        assert_eq!(failed_in(&[Content::Jpeg(vec![1])]), None);
+    }
+
     use super::*;
 
     /// A panel with a crew plan on the card and a request running.
