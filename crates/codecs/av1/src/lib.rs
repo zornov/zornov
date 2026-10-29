@@ -14,24 +14,24 @@
 
 mod bits;
 mod cdef;
-mod cdf;
+pub mod cdf;
 mod decoder;
-mod frame;
+pub mod frame;
 mod grain;
 pub mod header;
 mod inter;
 mod inter_info;
-mod intra;
+pub mod intra;
 mod mvpred;
 mod par;
 mod postfilter;
 mod restoration;
-mod spec_tables;
+pub mod spec_tables;
 mod state;
 mod stats;
-mod symbol;
+pub mod symbol;
 mod tile;
-mod transform;
+pub mod transform;
 
 pub use decoder::Decoder;
 pub use header::{ColorConfig, FrameHeader, SequenceHeader};
