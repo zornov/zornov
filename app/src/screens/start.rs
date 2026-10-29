@@ -209,7 +209,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     {
         static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
         let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        if last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(3)) {
+        // Tests never read this computer's real list of projects.
+        if !cfg!(test) && last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(3)) {
             *last = Some(std::time::Instant::now());
             files::merge_shared(&mut app.prefs.recents);
         }
