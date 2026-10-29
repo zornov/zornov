@@ -355,6 +355,96 @@ pub struct RefInfo {
     pub grain: FilmGrainParams,
 }
 
+impl RefInfo {
+    /// The reference slot update a decoded frame makes (7.20): what the later frame headers read.
+    pub fn update_from(&mut self, fh: &FrameHeader) {
+        self.valid = true;
+        self.frame_id = fh.current_frame_id;
+        self.upscaled_width = fh.upscaled_width;
+        self.frame_width = fh.frame_width;
+        self.frame_height = fh.frame_height;
+        self.render_width = fh.render_width;
+        self.render_height = fh.render_height;
+        self.mi_cols = fh.mi_cols;
+        self.mi_rows = fh.mi_rows;
+        self.frame_type = fh.frame_type;
+        self.order_hint = fh.order_hint;
+        self.saved_order_hints = fh.order_hints;
+        self.gm_params = fh.gm_params;
+        self.lf_deltas = fh.lf.deltas;
+        self.seg_features = fh.seg.features;
+        self.grain = fh.film_grain.clone();
+    }
+}
+
+/// Reads frame headers one after another without decoding any pictures: the cross-frame state the
+/// headers depend on (reference slots, loop filter deltas, segmentation features, global motion
+/// parameters) is kept the way [`crate::Decoder`] keeps it. For encoders to check the headers they
+/// write, and for tools that only need the headers.
+pub struct HeaderTracker {
+    refs: [RefInfo; NUM_REF_FRAMES],
+    lf_deltas: LoopFilterDeltas,
+    seg_features: SegmentationFeatures,
+    prev_gm_params: [[i32; 6]; 8],
+    current_frame_id: u32,
+}
+
+impl Default for HeaderTracker {
+    fn default() -> Self {
+        HeaderTracker::new()
+    }
+}
+
+impl HeaderTracker {
+    pub fn new() -> HeaderTracker {
+        HeaderTracker {
+            refs: std::array::from_fn(|_| RefInfo::default()),
+            lf_deltas: LoopFilterDeltas::defaults(),
+            seg_features: SegmentationFeatures::default(),
+            prev_gm_params: default_gm_params(),
+            current_frame_id: 0,
+        }
+    }
+
+    /// Parses the uncompressed header at the start of an `OBU_FRAME_HEADER` or `OBU_FRAME` payload
+    /// and applies its effect on the reference state. Returns the header and the number of bits it
+    /// occupies (in an `OBU_FRAME` the tile group starts at the next byte boundary).
+    pub fn parse_frame_header(&mut self, seq: &SequenceHeader, payload: &[u8], temporal_id: u32, spatial_id: u32) -> Result<(FrameHeader, usize)> {
+        let mut r = BitReader::new(payload);
+        let mut st = HeaderState {
+            seq,
+            refs: &mut self.refs,
+            lf_deltas: self.lf_deltas,
+            seg_features: self.seg_features,
+            prev_gm_params: self.prev_gm_params,
+            current_frame_id: self.current_frame_id,
+        };
+        let fh = FrameHeader::parse(&mut r, &mut st, temporal_id, spatial_id)?;
+        self.lf_deltas = st.lf_deltas;
+        self.seg_features = st.seg_features;
+        self.prev_gm_params = st.prev_gm_params;
+        self.current_frame_id = st.current_frame_id;
+        if fh.show_existing_frame {
+            if fh.frame_type == KEY_FRAME as u8 {
+                // reference frame loading process (7.21), then every slot is refreshed (7.20)
+                let info = self.refs[fh.frame_to_show_map_idx].clone();
+                self.lf_deltas = info.lf_deltas;
+                self.seg_features = info.seg_features;
+                for slot in self.refs.iter_mut() {
+                    *slot = info.clone();
+                }
+            }
+        } else {
+            for (i, slot) in self.refs.iter_mut().enumerate() {
+                if (fh.refresh_frame_flags >> i) & 1 == 1 {
+                    slot.update_from(&fh);
+                }
+            }
+        }
+        Ok((fh, r.position()))
+    }
+}
+
 /// A parsed uncompressed frame header with its derived variables.
 #[derive(Debug, Clone, Default)]
 pub struct FrameHeader {
