@@ -309,8 +309,10 @@ pub fn keys(app: &mut StudioApp, ctx: &Context) {
     let frame = app.editor.frame_dur(fps).max(1);
 
     let sel_one = if app.editor.selection.len() == 1 { Some(app.editor.selection[0]) } else { app.editor.selection.first().copied() };
+    // With a trim point set, `[` and `]` are the trim keys (cutting.rs); they step clips only otherwise.
+    let trimming = app.editor.cutting.point.is_some();
     for (key, forward) in [(Key::CloseBracket, true), (Key::OpenBracket, false)] {
-        if pressed(M::NONE, key) {
+        if !trimming && pressed(M::NONE, key) {
             if let Some(id) = step_clip(&app.doc.project, sel_one, app.editor.playhead, forward) {
                 select_and_say(app, ctx, id);
             } else {
