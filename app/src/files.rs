@@ -287,6 +287,21 @@ impl StudioApp {
         }
     }
 
+    /// What the top bar shows about saving: see [`SaveState`].
+    pub fn save_state(&self) -> SaveState {
+        if let Some(e) = autosave_failure() {
+            return SaveState::AutosaveFailed(e);
+        }
+        if self.autosaving.is_some() {
+            return SaveState::Saving;
+        }
+        match (self.doc.dirty(), self.doc.folder.is_some()) {
+            (false, true) => SaveState::Saved,
+            (false, false) => SaveState::Scratch,
+            (true, _) => SaveState::Unsaved,
+        }
+    }
+
     /// Whether the open project has changes nothing has saved.
     pub fn has_unsaved(&self) -> bool {
         self.doc.dirty()
@@ -702,6 +717,21 @@ pub enum Autosaved {
     Failed(String),
 }
 
+/// Where the open project stands with saving, for the top bar.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SaveState {
+    /// Saved in its folder, nothing waiting.
+    Saved,
+    /// Changes not saved yet (autosave will write them when idle).
+    Unsaved,
+    /// An autosave is writing now.
+    Saving,
+    /// The last autosave failed, and why; it retries.
+    AutosaveFailed(String),
+    /// No folder yet (a sample or the demo) and nothing changed.
+    Scratch,
+}
+
 /// What is about to take the open project's place (or close it).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Replace {
@@ -929,6 +959,10 @@ mod tests {
         app.open_folder(&ctx, Some(a));
         assert_eq!(app.doc.project.name, "A edited", "the edit was saved before B replaced it");
         assert!(!app.has_unsaved());
+        assert_eq!(app.save_state(), SaveState::Saved);
+        app.doc.edit("Rename", |p| p.name = "A again".into());
+        assert_eq!(app.save_state(), SaveState::Unsaved);
+        app.doc.undo();
         assert!(app.doc.history.can_undo(), "the undo history came back with the project (opened through the service)");
         let _ = std::fs::remove_dir_all(&dir);
     }
