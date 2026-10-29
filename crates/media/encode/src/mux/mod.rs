@@ -13,8 +13,11 @@
 //! copied behind the index on [`Muxer::finish`]); otherwise `moov` follows
 //! `mdat`. Offsets switch to `co64` and `mdat` to a 64-bit size when needed.
 
+pub mod av1;
+
 use crate::h264::{self, ColorDesc};
 use crate::aac;
+pub use av1::{av1c_from_sequence_header, Av1TrackInfo, SequenceInfo};
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -35,14 +38,21 @@ pub struct Options {
     pub fast_start: bool,
     /// Interleaving chunk length in seconds.
     pub chunk_secs: f64,
+    /// The file carries AV1: `ftyp` lists the `av01` and `iso6` brands
+    /// instead of `avc1`. Required by [`Muxer::add_av1_video`].
+    pub av1: bool,
 }
 
 impl Options {
     pub fn mp4() -> Options {
-        Options { brand: Brand::Mp4, fast_start: true, chunk_secs: 0.5 }
+        Options { brand: Brand::Mp4, fast_start: true, chunk_secs: 0.5, av1: false }
+    }
+    /// `.mp4` for an AV1 video track.
+    pub fn mp4_av1() -> Options {
+        Options { av1: true, ..Options::mp4() }
     }
     pub fn mov() -> Options {
-        Options { brand: Brand::Mov, fast_start: true, chunk_secs: 0.5 }
+        Options { brand: Brand::Mov, fast_start: true, chunk_secs: 0.5, av1: false }
     }
 }
 
@@ -50,6 +60,7 @@ const MOVIE_TIMESCALE: u32 = 1000;
 
 enum Media {
     Video(h264::TrackInfo),
+    Av1(Av1TrackInfo),
     Audio(aac::TrackInfo),
     Text,
 }
@@ -109,7 +120,7 @@ impl Track {
     fn priming(&self) -> u64 {
         match &self.media {
             Media::Audio(a) => a.priming as u64,
-            Media::Video(_) | Media::Text => 0,
+            Media::Video(_) | Media::Av1(_) | Media::Text => 0,
         }
     }
     fn presented_duration(&self) -> u64 {
@@ -153,7 +164,7 @@ impl Muxer {
         let mut out = BufWriter::with_capacity(1 << 20, File::create(&data_path)?);
         let mut payload_start = 0;
         if !opts.fast_start {
-            let ftyp = ftyp(opts.brand);
+            let ftyp = ftyp(opts.brand, opts.av1);
             out.write_all(&ftyp)?;
             // mdat with a 64-bit size patched on finish.
             out.write_all(&1u32.to_be_bytes())?;
@@ -172,6 +183,28 @@ impl Muxer {
     pub fn add_video(&mut self, info: h264::TrackInfo) -> io::Result<usize> {
         let (timescale, delta) = if info.fps_den == 1 { (info.fps_num * 1000, 1000) } else { (info.fps_num, info.fps_den) };
         self.push_track(Media::Video(info), timescale, delta)
+    }
+
+    /// Add an AV1 video track (`av01` + `av1C`); fill it with
+    /// [`Muxer::write_temporal_unit`]. Returns its index.
+    pub fn add_av1_video(&mut self, info: Av1TrackInfo) -> io::Result<usize> {
+        if !self.opts.av1 {
+            return Err(io::Error::other("AV1 tracks need Options::av1 (for the ftyp brands)"));
+        }
+        let (timescale, delta) = if info.fps_den == 1 { (info.fps_num * 1000, 1000) } else { (info.fps_num, info.fps_den) };
+        self.push_track(Media::Av1(info), timescale, delta)
+    }
+
+    /// Append one AV1 temporal unit as a sample: temporal delimiters and
+    /// padding are dropped, and the sample is marked as a sync sample when
+    /// it holds a shown key frame behind a sequence header.
+    pub fn write_temporal_unit(&mut self, track: usize, tu: &[u8]) -> io::Result<()> {
+        if !matches!(self.tracks.get(track).map(|t| &t.media), Some(Media::Av1(_))) {
+            return Err(io::Error::other("not an AV1 track"));
+        }
+        let sample = av1::sample_from_temporal_unit(tu).ok_or_else(|| io::Error::other("malformed AV1 temporal unit"))?;
+        let sync = av1::is_sync_sample(&sample);
+        self.write_sample(track, &sample, sync)
     }
 
     /// Add the AAC track; returns its index.
@@ -305,7 +338,7 @@ impl Muxer {
             return Ok(self.payload_start + self.mdat_len + moov.len() as u64);
         }
         // Fast start: ftyp + moov + mdat header, then the streamed payload.
-        let ftyp = ftyp(brand);
+        let ftyp = ftyp(brand, self.opts.av1);
         let large = self.mdat_len + 8 > u32::MAX as u64;
         let mdat_header = if large { 16 } else { 8 };
         let probe = self.moov(0, false);
@@ -375,14 +408,14 @@ impl Muxer {
 
     #[allow(clippy::too_many_arguments)]
     fn trak(&self, b: &mut Boxes, t: &Track, id: u32, base: u64, co64: bool, mov: bool, now: u64) {
-        let video = matches!(t.media, Media::Video(_));
+        let video = matches!(t.media, Media::Video(_) | Media::Av1(_));
         let text = matches!(t.media, Media::Text);
         let presented = t.presented_duration();
         let movie_dur = to_movie(presented, t.timescale);
         let first_audio = self.tracks.iter().position(|x| matches!(x.media, Media::Audio(_)));
         let index = id as usize - 1;
         let enabled = t.enabled.unwrap_or(match t.media {
-            Media::Video(_) => true,
+            Media::Video(_) | Media::Av1(_) => true,
             Media::Audio(_) => first_audio == Some(index),
             Media::Text => false,
         });
@@ -396,12 +429,16 @@ impl Muxer {
         dur(b, v1, movie_dur);
         b.zeros(8);
         b.u16(if text { 0xFFFF } else { 0 }); // layer (text in front)
-        b.u16(match t.media { Media::Video(_) => 0, Media::Audio(_) => 1, Media::Text => 2 }); // alternate_group
+        b.u16(match t.media { Media::Video(_) | Media::Av1(_) => 0, Media::Audio(_) => 1, Media::Text => 2 }); // alternate_group
         b.u16(if matches!(t.media, Media::Audio(_)) { 0x0100 } else { 0 }); // volume
         b.u16(0);
         matrix(b);
         match &t.media {
             Media::Video(v) => {
+                b.u32(v.width << 16);
+                b.u32(v.height << 16);
+            }
+            Media::Av1(v) => {
                 b.u32(v.width << 16);
                 b.u32(v.height << 16);
             }
@@ -436,14 +473,14 @@ impl Muxer {
         b.u16(0);
         b.close();
         let (handler, name): (&[u8; 4], &str) = match t.media {
-            Media::Video(_) => (b"vide", "VideoHandler"),
+            Media::Video(_) | Media::Av1(_) => (b"vide", "VideoHandler"),
             Media::Audio(_) => (b"soun", "SoundHandler"),
             Media::Text => (b"sbtl", "SubtitleHandler"),
         };
         hdlr(b, if mov { b"mhlr" } else { &[0; 4] }, handler, t.title.as_deref().unwrap_or(name), mov);
         b.open(b"minf");
         match t.media {
-            Media::Video(_) => {
+            Media::Video(_) | Media::Av1(_) => {
                 b.open_full(b"vmhd", 0, 1);
                 b.zeros(8);
                 b.close();
@@ -473,6 +510,7 @@ impl Muxer {
         b.u32(1);
         match &t.media {
             Media::Video(v) => self.avc1(b, t, v, mov),
+            Media::Av1(v) => self.av01(b, t, v, mov),
             Media::Audio(a) => self.mp4a(b, t, a, mov),
             Media::Text => {
                 let info = self.subtitle_info.iter().find(|(i, _)| *i == index).map(|(_, s)| s.clone()).unwrap_or(SubtitleInfo { width: 0, height: 0, font_size: 24 });
@@ -624,6 +662,43 @@ impl Muxer {
         b.close();
     }
 
+    fn av01(&self, b: &mut Boxes, t: &Track, v: &Av1TrackInfo, mov: bool) {
+        b.open(b"av01");
+        b.zeros(6);
+        b.u16(1); // data_reference_index
+        b.u16(0);
+        b.u16(0);
+        b.zeros(12);
+        b.u16(v.width as u16);
+        b.u16(v.height as u16);
+        b.u32(0x0048_0000);
+        b.u32(0x0048_0000);
+        b.u32(0);
+        b.u16(1); // frame_count
+        let name = b"AV1";
+        let mut comp = [0u8; 32];
+        comp[0] = name.len() as u8;
+        comp[1..1 + name.len()].copy_from_slice(name);
+        b.bytes(&comp);
+        b.u16(0x0018);
+        b.u16(0xFFFF);
+        b.open(b"av1C");
+        b.bytes(&v.av1c);
+        b.close();
+        colr(b, &v.color, mov);
+        b.open(b"pasp");
+        b.u32(1);
+        b.u32(1);
+        b.close();
+        let (buffer, max, avg) = self.bitrates(t);
+        b.open(b"btrt");
+        b.u32(buffer);
+        b.u32(max);
+        b.u32(avg);
+        b.close();
+        b.close();
+    }
+
     fn mp4a(&self, b: &mut Boxes, t: &Track, a: &aac::TrackInfo, mov: bool) {
         let (buffer, max, avg) = self.bitrates(t);
         b.open(b"mp4a");
@@ -676,15 +751,16 @@ fn to_movie(ticks: u64, timescale: u32) -> u64 {
     (ticks as u128 * MOVIE_TIMESCALE as u128 / timescale.max(1) as u128) as u64
 }
 
-fn ftyp(brand: Brand) -> Vec<u8> {
+fn ftyp(brand: Brand, av1: bool) -> Vec<u8> {
     let mut b = Boxes::default();
     b.open(b"ftyp");
     match brand {
         Brand::Mp4 => {
             b.bytes(b"isom");
             b.u32(0x200);
-            for c in [b"isom", b"iso2", b"avc1", b"mp41", b"mp42"] {
-                b.bytes(c);
+            let brands: &[&[u8; 4]] = if av1 { &[b"isom", b"iso6", b"av01", b"mp41"] } else { &[b"isom", b"iso2", b"avc1", b"mp41", b"mp42"] };
+            for c in brands {
+                b.bytes(*c);
             }
         }
         Brand::Mov => {

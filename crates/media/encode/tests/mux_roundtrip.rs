@@ -148,7 +148,7 @@ fn mp4_fast_start_round_trip() {
 fn mov_moov_at_end_round_trip() {
     let dir = tmp("mov");
     let path = dir.join("clip.mov");
-    check(&path, Options { brand: Brand::Mov, fast_start: false, chunk_secs: 0.25 }, (30000, 1001));
+    check(&path, Options { brand: Brand::Mov, fast_start: false, chunk_secs: 0.25, av1: false }, (30000, 1001));
     let head = std::fs::read(&path).unwrap();
     assert_eq!(&head[4..12], b"ftypqt  ");
     std::fs::remove_dir_all(dir).unwrap();
