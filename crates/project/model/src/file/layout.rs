@@ -555,7 +555,7 @@ impl ProjectFolder {
                 (name.starts_with('.') && name != ".studio") || matches!(name, "exports" | "cutdowns" | "deliveries" | "_out") || name.ends_with(".parts")
             }
         };
-        fn walk(dir: &Path, root: &Path, skip: &dyn Fn(&str) -> bool, top: bool, out: &mut Vec<PathBuf>) {
+        fn walk(dir: &Path, root: &Path, skip: &dyn Fn(&str) -> bool, top: bool, package: bool, out: &mut Vec<PathBuf>) {
             let Ok(rd) = std::fs::read_dir(dir) else { return };
             let mut entries: Vec<_> = rd.flatten().collect();
             entries.sort_by_key(|e| e.file_name());
@@ -563,19 +563,19 @@ impl ProjectFolder {
                 let name = e.file_name().to_string_lossy().into_owned();
                 // A package skips its own folders only at the top; the
                 // earlier layout skipped these names at any depth.
-                if (top || !PACKAGE_TOP_ONLY.contains(&name.as_str())) && skip(&name) {
+                if (top || !package || !PACKAGE_TOP_ONLY.contains(&name.as_str())) && skip(&name) {
                     continue;
                 }
                 let p = e.path();
                 if p.is_dir() {
-                    walk(&p, root, skip, false, out);
+                    walk(&p, root, skip, false, package, out);
                 } else {
                     out.push(p.strip_prefix(root).unwrap_or(&p).to_path_buf());
                 }
             }
         }
         let mut out = Vec::new();
-        walk(&self.root, &self.root, &skip, true, &mut out);
+        walk(&self.root, &self.root, &skip, true, package, &mut out);
         out
     }
 }
@@ -634,6 +634,23 @@ mod tests {
         assert_eq!(f.state(State::History), PathBuf::from("/p/New.zornov/.zornov/history.jsonl"));
         assert_eq!(f.export_dir(ExportKind::Renders), PathBuf::from("/p/New Exports"));
         assert_eq!(f.export_dir(ExportKind::Stems), PathBuf::from("/p/New Exports/Stems"));
+    }
+
+    #[test]
+    fn portable_files_skip_what_a_render_node_never_needs() {
+        let dir = std::env::temp_dir().join(format!("zornov-portable-{}", std::process::id()));
+        let put = |rel: &str| {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"x").unwrap();
+        };
+        for f in ["project.json", "media/a.mp4", ".hidden/x", "exports/r.mp4", "a.parts/z", "sub/.zornov/y", "sub/ok.txt", "_out/o"] {
+            put(f);
+        }
+        let mut got = ProjectFolder::new(&dir).portable_files();
+        got.sort();
+        assert_eq!(got, vec![PathBuf::from("media/a.mp4"), PathBuf::from("project.json"), PathBuf::from("sub/ok.txt")]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
