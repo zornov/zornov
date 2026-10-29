@@ -50,6 +50,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     window_drag_area(ui, Rect::from_min_size(full.min, Vec2::new(full.width(), TITLE_BAR_H)));
     let dialogs = app.cli.shot.is_none();
     app.files_frame(&ui.ctx().clone());
+    app.recovered_panel(&ui.ctx().clone());
 
     // Shortcuts.
     let cmd = egui::Modifiers::COMMAND;
@@ -247,6 +248,12 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
             ui.add_space(theme::space::XS);
             ui.vertical(|ui| {
                 ui.set_width(content_w);
+                if recents.is_empty() && q.is_empty() {
+                    // First run: say where to begin.
+                    ui.label(egui::RichText::new(crate::i18n::shown("Welcome to Zornov")).font(theme::section_title()).color(t.text));
+                    ui.label(egui::RichText::new(crate::i18n::shown("Pick a canvas above to start, open a project, or try a sample below")).font(theme::caption()).color(t.text_2));
+                    ui.add_space(theme::space::MD);
+                }
                 // Each project shows a picture from its own media, looked up a
                 // few projects per frame so a long list never stalls a frame.
                 let mut looked = 0;

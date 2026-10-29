@@ -17,6 +17,12 @@ use std::path::{Path, PathBuf};
 use crate::view;
 use studio_model as m;
 
+/// An error in front of the person. One place to move onto `kit::push_error`
+/// (ux-feedback's, not on main yet).
+pub(crate) fn say_error(ctx: &egui::Context, text: impl Into<String>) -> u64 {
+    kit::push(ctx, text, None, Some(Icon::Warning))
+}
+
 /// A project on the Start screen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Recent {
@@ -196,7 +202,7 @@ impl StudioApp {
     /// [`StudioApp::give_folder`] that tells the person when it fails.
     pub fn give_folder_or_say(&mut self, ctx: &egui::Context) {
         if let Err(e) = self.try_give_folder() {
-            kit::push(ctx, crate::i18n::tf(format!("{e}; the project is open but not saved yet")), None, Some(Icon::Warning));
+            say_error(ctx, crate::i18n::tf(format!("{e}; the project is open but not saved yet")));
         }
     }
 
@@ -244,7 +250,7 @@ impl StudioApp {
                 match made {
                     Ok(f) => f,
                     Err(e) => {
-                        kit::push(ctx, crate::i18n::tf(format!("Could not create the folder: {e}")), None, Some(Icon::Warning));
+                        say_error(ctx, crate::i18n::tf(format!("Could not create the folder: {e}")));
                         return;
                     }
                 }
@@ -260,7 +266,7 @@ impl StudioApp {
                 kit::push(ctx, crate::i18n::tf(format!("Saved {}", self.doc.project.name)), None, Some(Icon::CheckCircle));
             }
             Err(e) => {
-                kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
+                say_error(ctx, crate::i18n::tf(e));
             }
         }
     }
@@ -279,10 +285,13 @@ impl StudioApp {
             Ok(doc) => {
                 self.adopt(doc);
                 self.remember(&dir);
+                // Work an autosave holds that the saved file does not (a
+                // save failed, or Zornov stopped): offered, never silent.
+                set_offer(ctx, crate::safety::newer_autosave(&dir).map(|s| Offer { path: s.path, at_ms: s.at_ms }));
             }
             Err(e) => {
                 self.prefs.recents.retain(|r| r.path != dir);
-                kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
+                say_error(ctx, crate::i18n::tf(e));
             }
         }
     }
@@ -324,7 +333,7 @@ impl StudioApp {
                 Settled::Clean
             }
             Err(e) => {
-                kit::push(ctx, crate::i18n::tf(format!("{e}; {} is still open", self.doc.project.name)), None, Some(Icon::Warning));
+                say_error(ctx, crate::i18n::tf(format!("{e}; {} is still open", self.doc.project.name)));
                 Settled::Failed
             }
         }
@@ -376,10 +385,10 @@ impl StudioApp {
         }
         ctx.data_mut(|d| d.insert_temp(ran, pass));
         if let Some(note) = crate::prefs::take_notice() {
-            kit::push(ctx, crate::i18n::tf(note), None, Some(Icon::Warning));
+            say_error(ctx, crate::i18n::tf(note));
         }
         if let Some(e) = autosave_health().take_warning() {
-            kit::push(ctx, crate::i18n::tf(format!("Autosave failed: {e}. It retries; Cmd+S saves now")), None, Some(Icon::Warning));
+            say_error(ctx, crate::i18n::tf(format!("Autosave failed: {e}; it retries, and Cmd+S saves now")));
         }
         let quitting = ctx.input(|i| i.viewport().close_requested()) && self.cli.shot.is_none() && !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("files-quit-ok"))).unwrap_or(false);
         if quitting {
@@ -393,6 +402,101 @@ impl StudioApp {
             }
         }
         self.unsaved_dialog(ctx);
+        if pending(ctx).is_none() {
+            self.restore_dialog(ctx);
+        }
+    }
+
+    /// "Found unsaved changes from …": restore them as an edit, or keep
+    /// the saved version.
+    fn restore_dialog(&mut self, ctx: &egui::Context) {
+        let Some(offer) = ctx.data(|d| d.get_temp::<Option<Offer>>(egui::Id::new(OFFER))).flatten() else { return };
+        let when = edited_label(offer.at_ms / 1000).to_lowercase();
+        let mut answer = None;
+        let out = kit::modal(ctx, egui::Id::new("files-restore"), egui::vec2(460.0, 190.0), &crate::i18n::tf(format!("Found unsaved changes from {when}")), |ui| {
+            ui.add_space(theme::space::MD);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(crate::i18n::shown("Zornov was closed before they were saved. Restoring adds them as one step you can undo."));
+            });
+            ui.add_space(theme::space::LG);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                if kit::Button::primary("Restore").show(ui).clicked() {
+                    answer = Some(true);
+                }
+                if kit::Button::secondary("Keep saved version").show(ui).clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if out.close {
+            answer = Some(false);
+        }
+        match answer {
+            Some(true) => {
+                set_offer(ctx, None);
+                self.restore_autosave(ctx, &offer.path);
+            }
+            Some(false) => set_offer(ctx, None),
+            None => {}
+        }
+    }
+
+    /// Takes the project an autosave holds in as one undoable edit, so the
+    /// project reads unsaved. Says so when it cannot.
+    pub(crate) fn restore_autosave(&mut self, ctx: &egui::Context, path: &Path) -> bool {
+        let read = std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|t| m::file::from_json(&t).map_err(|e| e.to_string()));
+        match read.and_then(|file| self.doc.take_in("Recovered changes", &file.project)) {
+            Ok(_) => true,
+            Err(e) => {
+                say_error(ctx, crate::i18n::tf(format!("Could not restore the unsaved changes: {e}")));
+                false
+            }
+        }
+    }
+
+    /// Start screen: projects whose window ended without a clean quit and
+    /// are still waiting, each to open (its unsaved work is offered then)
+    /// or dismiss.
+    pub fn recovered_panel(&mut self, ctx: &egui::Context) {
+        self.recovered_panel_in(ctx, &studio_paths::studio());
+    }
+
+    pub(crate) fn recovered_panel_in(&mut self, ctx: &egui::Context, root: &Path) {
+        let rows = recovered_rows(ctx, root);
+        if rows.is_empty() {
+            return;
+        }
+        let t = theme::tokens(ctx);
+        let mut chosen = None;
+        egui::Area::new(egui::Id::new("files-recovered")).anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(24.0, -24.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+            egui::Frame::new().fill(t.panel).stroke(egui::Stroke::new(1.0, t.line)).corner_radius(egui::CornerRadius::same(theme::radius::PANEL)).inner_margin(egui::Margin::same(12)).show(ui, |ui| {
+                ui.label(egui::RichText::new(crate::i18n::shown("Closed unexpectedly")).font(theme::section_title()).color(t.text));
+                for (name, project, pid) in &rows {
+                    ui.horizontal(|ui| {
+                        ui.label(name);
+                        if kit::Button::secondary("Open").show(ui).clicked() {
+                            chosen = Some((*pid, Some(project.clone())));
+                        }
+                        if kit::Button::ghost("Dismiss").show(ui).clicked() {
+                            chosen = Some((*pid, None));
+                        }
+                    });
+                }
+            });
+        });
+        if let Some((pid, open)) = chosen {
+            self.choose_recovered(ctx, root, pid, open);
+        }
+    }
+
+    pub(crate) fn choose_recovered(&mut self, ctx: &egui::Context, root: &Path, pid: u32, open: Option<PathBuf>) {
+        crate::recover::forget(ctx, root, pid);
+        ctx.data_mut(|d| d.remove::<RecoveredCache>(egui::Id::new(CRASHED)));
+        if let Some(project) = open {
+            self.open_folder(ctx, Some(project));
+        }
     }
 
     /// "Save changes to X?" for a project that has no folder yet.
@@ -446,7 +550,7 @@ impl StudioApp {
                 }
                 // Stay in the dialog: nothing was lost, and Cancel is there.
                 Err(e) => {
-                    kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
+                    say_error(ctx, crate::i18n::tf(e));
                 }
             },
         }
@@ -462,7 +566,7 @@ impl StudioApp {
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
-                kit::push(ctx, crate::i18n::tf(format!("Could not read the file: {e}")), None, Some(Icon::Warning));
+                say_error(ctx, crate::i18n::tf(format!("Could not read the file: {e}")));
                 return;
             }
         };
@@ -472,7 +576,7 @@ impl StudioApp {
         match imported {
             Ok(imp) => {
                 if let Err(e) = project.apply(imp.edit) {
-                    kit::push(ctx, crate::i18n::tf(format!("Import failed: {e:?}")), None, Some(Icon::Warning));
+                    say_error(ctx, crate::i18n::tf(format!("Import failed: {e}")));
                     return;
                 }
                 if let Some(seq) = project.sequences.iter().position(|s| s.id == imp.sequence) {
@@ -489,7 +593,7 @@ impl StudioApp {
                 }
             }
             Err(e) => {
-                kit::push(ctx, crate::i18n::tf(format!("Could not import: {e:?}")), None, Some(Icon::Warning));
+                say_error(ctx, crate::i18n::tf(format!("Could not import: {e}")));
             }
         }
     }
@@ -515,7 +619,7 @@ impl StudioApp {
         if let Some(first) = refuse.first() {
             let name = first.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let more = if refuse.len() > 1 { crate::i18n::tf(format!(" (and {} more)", refuse.len() - 1)) } else { String::new() };
-            kit::push(ctx, crate::i18n::tf(format!("Zornov cannot import {name}{more}: drop video, pictures, sound, Lottie or 3D models")), None, Some(Icon::Warning));
+            say_error(ctx, crate::i18n::tf(format!("Zornov cannot import {name}{more}: drop video, pictures, sound, Lottie or 3D models")));
         }
         if !take.is_empty() {
             self.import_paths(ctx, &take);
@@ -555,8 +659,8 @@ impl StudioApp {
         }
         let n = r.ids.len();
         match (n, r.failed.first()) {
-            (0, Some(f)) => kit::push(ctx, crate::i18n::tf(format!("Could not import {f}")), None, Some(Icon::Warning)),
-            (_, Some(f)) => kit::push(ctx, crate::i18n::tf(format!("Imported {n}; skipped {}", f)), None, Some(Icon::Warning)),
+            (0, Some(f)) => say_error(ctx, crate::i18n::tf(format!("Could not import {f}"))),
+            (_, Some(f)) => say_error(ctx, crate::i18n::tf(format!("Imported {n}; skipped {}", f))),
             (n, None) => kit::push(ctx, crate::i18n::tf(format!("Imported {n} item{}", if n == 1 { "" } else { "s" })), None, Some(Icon::DownloadSimple)),
         };
         r.ids
@@ -682,11 +786,11 @@ pub fn export_otio(app: &mut StudioApp, ctx: &egui::Context) {
                 kit::push(ctx, crate::i18n::tf(format!("Exported OTIO{note}")), None, Some(Icon::CheckCircle));
             }
             Err(e) => {
-                kit::push(ctx, crate::i18n::tf(format!("Could not write: {e}")), None, Some(Icon::Warning));
+                say_error(ctx, crate::i18n::tf(format!("Could not write: {e}")));
             }
         },
         Err(e) => {
-            kit::push(ctx, crate::i18n::tf(format!("Could not export: {e:?}")), None, Some(Icon::Warning));
+            say_error(ctx, crate::i18n::tf(format!("Could not export: {e}")));
         }
     }
     let _ = bridge::SEED_KEY;
@@ -760,6 +864,44 @@ enum Settled {
 }
 
 const PENDING: &str = "files-pending";
+const OFFER: &str = "files-restore-offer";
+const CRASHED: &str = "files-crashed";
+
+/// Unsaved work an autosave holds for the project just opened.
+#[derive(Clone, Debug)]
+struct Offer {
+    path: PathBuf,
+    at_ms: u64,
+}
+
+fn set_offer(ctx: &egui::Context, offer: Option<Offer>) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OFFER), offer));
+}
+
+/// The recovery path restores by itself; it clears the offer a plain open made.
+pub(crate) fn clear_offer(ctx: &egui::Context) {
+    set_offer(ctx, None);
+}
+
+#[derive(Clone)]
+struct RecoveredCache {
+    at: f64,
+    sessions: Vec<crate::safety::Session>,
+}
+
+/// (name, project folder, pid) of each waiting crashed session, looked up
+/// every few seconds.
+fn recovered_rows(ctx: &egui::Context, root: &Path) -> Vec<(String, PathBuf, u32)> {
+    let now = ctx.input(|i| i.time);
+    let id = egui::Id::new(CRASHED);
+    let cache = ctx.data(|d| d.get_temp::<RecoveredCache>(id)).filter(|c| now - c.at < 3.0);
+    let cache = cache.unwrap_or_else(|| {
+        let c = RecoveredCache { at: now, sessions: crate::safety::crashed(root) };
+        ctx.data_mut(|d| d.insert_temp(id, c.clone()));
+        c
+    });
+    cache.sessions.iter().map(|s| (s.project.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), s.project.clone(), s.pid)).collect()
+}
 
 fn pending(ctx: &egui::Context) -> Option<Replace> {
     ctx.data(|d| d.get_temp::<Option<Replace>>(egui::Id::new(PENDING))).flatten()
@@ -1082,6 +1224,60 @@ mod tests {
         assert_eq!(save_target(&a, Some(&a)), SaveTarget::Current);
         assert_eq!(save_target(&b, Some(&a)), SaveTarget::Replaces);
         assert_eq!(save_target(&b, None), SaveTarget::Replaces);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-8: opening a project whose autosave holds unsaved work offers it;
+    /// restoring makes the project unsaved and undoable.
+    #[test]
+    fn unsaved_autosave_work_is_offered_and_restored_as_an_edit() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx, dir) = app_in("offer");
+        let a = saved_project(&dir, "A");
+        let folder = m::file::ProjectFolder::new(&a);
+        let mut d = crate::services::project::open(&a).unwrap();
+        d.edit("Rename", |p| p.name = "A restored".into());
+        let newer = d.model.clone();
+        let when = std::time::SystemTime::now() + std::time::Duration::from_secs(30);
+        let backup = m::file::autosave::write_backup(&folder, &newer, when, 5).unwrap();
+        app.open_folder(&ctx, Some(a));
+        let offer = ctx.data(|d| d.get_temp::<Option<Offer>>(egui::Id::new(OFFER))).flatten();
+        assert_eq!(offer.as_ref().map(|o| o.path.clone()), Some(backup.clone()), "the newer autosave is offered");
+        assert!(!app.has_unsaved(), "nothing is applied without asking");
+        assert!(app.restore_autosave(&ctx, &backup));
+        assert!(app.has_unsaved(), "restored work reads as unsaved");
+        assert_eq!(app.doc.project.name, "A restored");
+        app.doc.undo();
+        assert_eq!(app.doc.project.name, "A", "and one undo takes it back");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-11: sessions that ended without a clean quit are listed on Start,
+    /// and opening or dismissing one takes it off the list.
+    #[test]
+    fn crashed_sessions_are_listed_and_cleared_one_by_one() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx, dir) = app_in("crashed");
+        let a = saved_project(&dir, "A");
+        let b = saved_project(&dir, "B");
+        let home = dir.join("home");
+        let dead = || {
+            let mut c = std::process::Command::new("true").spawn().unwrap();
+            c.wait().unwrap();
+            c.id()
+        };
+        let (p1, p2) = (dead(), dead());
+        assert_ne!(p1, p2);
+        crate::safety::save_session(&home, &crate::safety::Session { pid: p1, project: a.clone(), ..Default::default() });
+        crate::safety::save_session(&home, &crate::safety::Session { pid: p2, project: b.clone(), ..Default::default() });
+        let mut names: Vec<String> = recovered_rows(&ctx, &home).into_iter().map(|r| r.0).collect();
+        names.sort();
+        assert_eq!(names, ["A", "B"]);
+        app.choose_recovered(&ctx, &home, p1, None);
+        assert_eq!(crate::safety::crashed(&home).len(), 1, "dismissed");
+        app.choose_recovered(&ctx, &home, p2, Some(b));
+        assert_eq!(app.doc.project.name, "B", "opened");
+        assert!(crate::safety::crashed(&home).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -65,26 +65,18 @@ impl StudioApp {
         // next time Zornov starts, so none is dropped unseen.
         let Some(session) = found.first().cloned() else { return false };
         let more = found.len() - 1;
-        safety::dismiss(&root, session.pid);
+        forget(ctx, &root, session.pid);
         // Work saved after the last full save (an autosave newer than the project file) wins.
         let newer = safety::newer_autosave(&session.project);
         self.open_folder(ctx, Some(session.project.clone()));
         if self.doc.folder.is_none() {
             return false;
         }
+        crate::files::clear_offer(ctx);
         if let Some(snap) = &newer {
             // As an edit on top of the saved file: the project is unsaved
             // again (quit asks, autosave writes it) and one undo undoes it.
-            match std::fs::read_to_string(&snap.path).map_err(|e| e.to_string()).and_then(|t| studio_model::file::from_json(&t).map_err(|e| e.to_string())) {
-                Ok(file) => {
-                    if let Err(e) = self.doc.take_in("Recovered changes", &file.project) {
-                        kit::push(ctx, crate::i18n::tf(format!("Could not restore your last unsaved changes: {e}")), None, Some(Icon::Warning));
-                    }
-                }
-                Err(e) => {
-                    kit::push(ctx, crate::i18n::tf(format!("Could not read your last unsaved changes: {e}")), None, Some(Icon::Warning));
-                }
-            }
+            self.restore_autosave(ctx, &snap.path);
         }
         let e = &mut self.editor;
         e.playhead = session.playhead.clamp(0, self.doc.project.duration().max(0));
@@ -105,9 +97,14 @@ impl StudioApp {
             1 => "; 1 more project to recover next time".into(),
             n => format!("; {n} more projects to recover next time"),
         };
-        kit::push(ctx, crate::i18n::tf(format!("Zornov closed unexpectedly. {name} is back where you were{}{tail}", if newer.is_some() { ", with your last unsaved changes" } else { "" })), None, Some(Icon::CheckCircle));
+        kit::push(ctx, crate::i18n::tf(format!("Zornov closed unexpectedly; {name} is back where you were{}{tail}", if newer.is_some() { ", with your last unsaved changes" } else { "" })), None, Some(Icon::CheckCircle));
         true
     }
+}
+
+/// A crashed session dealt with: its note goes.
+pub fn forget(_ctx: &egui::Context, root: &std::path::Path, pid: u32) {
+    safety::dismiss(root, pid);
 }
 
 /// A clean quit: there is nothing to recover.
