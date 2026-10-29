@@ -1013,6 +1013,28 @@ mod no_account_tests {
 mod tests {
     use super::*;
 
+    /// Esc while a shortcut is being captured cancels the capture and leaves
+    /// Settings open; the next Esc closes Settings.
+    #[test]
+    fn escape_cancels_a_capture_without_closing_settings() {
+        use crate::app::Overlay;
+        use crate::ui_tests::Harness;
+        let _serial = crate::ui_tests::serial();
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Settings;
+        h.app.settings.page = PAGES.iter().position(|p| p.0 == "Shortcuts").expect("a Shortcuts page");
+        h.frames(3);
+        h.app.settings.capturing = Some(0);
+        h.frames(2);
+        h.key(egui::Key::Escape, egui::Modifiers::NONE);
+        h.frames(2);
+        assert!(h.app.settings.capturing.is_none(), "the capture ended");
+        assert!(matches!(h.app.overlay, Overlay::Settings), "Settings stayed open");
+        h.key(egui::Key::Escape, egui::Modifiers::NONE);
+        h.frames(2);
+        assert!(matches!(h.app.overlay, Overlay::None), "a second Esc closes Settings");
+    }
+
     /// Every "Settings ▸ Page ▸ Section" the app writes names a real page,
     /// and what follows a page is a section of it, not another page.
     #[test]
