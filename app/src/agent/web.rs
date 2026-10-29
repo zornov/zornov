@@ -890,4 +890,12 @@ mod tests {
             assert!(!blocked_ip(ip.parse().unwrap()), "{ip} was blocked");
         }
     }
+
+    #[test]
+    fn a_backslash_ends_the_authority_like_a_slash() {
+        assert_eq!(host_port("http://127.0.0.1\\@evil.com/"), Some(("127.0.0.1".into(), 80)));
+        assert_eq!(host_port("https://evil.com\\@127.0.0.1/"), Some(("evil.com".into(), 443)));
+        assert!(refuse_private("http://127.0.0.1\\@evil.com/").is_err());
+        assert!(refuse_private("http://evil.com\\@127.0.0.1/").is_ok());
+    }
 }
