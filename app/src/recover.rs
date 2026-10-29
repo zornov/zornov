@@ -153,8 +153,9 @@ mod tests {
     #[test]
     fn recovered_changes_are_an_unsaved_undoable_edit() {
         let mut doc = crate::services::project::new_custom("R", 640, 360, 30.0);
-        let mut backup = doc.model.clone();
-        backup.name = "R recovered".into();
+        let mut other = crate::services::project::new_custom("R", 640, 360, 30.0);
+        other.edit("Rename", |p| p.name = "R recovered".into());
+        let backup = other.model.clone();
         assert!(!doc.dirty());
         doc.take_in("Recovered changes", &backup).unwrap();
         assert!(doc.dirty());
