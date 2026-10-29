@@ -472,6 +472,9 @@ pub struct Session {
     next_batch: u32,
     /// How deep in tool calls this is (news of batches goes on the outer one).
     call_depth: u32,
+    /// Headless MCP: whether a result in this session carried outside
+    /// text, which makes the calls `outside::asks_after_outside` names ask.
+    read_outside: bool,
 }
 
 impl Default for Session {
@@ -754,6 +757,7 @@ impl Session {
             model_jobs: Vec::new(),
             next_batch: 1,
             call_depth: 0,
+            read_outside: false,
         }
     }
 

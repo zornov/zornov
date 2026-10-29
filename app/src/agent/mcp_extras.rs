@@ -180,13 +180,15 @@ pub fn answer(session: &mut Session, link: &mut Link, msg: &Value, notify: &mut 
             let name = params["name"].as_str().unwrap_or("").to_owned();
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             let token = params["_meta"]["progressToken"].clone();
-            let r = if name == "export" && !token.is_null() && args.get("wait").and_then(Value::as_bool) != Some(false) {
-                super::guard::run(&name, || export_with_progress(session, &args, &token, notify))
-            } else if !token.is_null() && LONG.contains(&name.as_str()) {
-                with_progress(&token, write_line, || super::guard::run(&name, || session.run(&name, &args)))
-            } else {
-                super::guard::run(&name, || session.run(&name, &args))
-            };
+            let r = session.run_headless(&name, &args, |session| {
+                if name == "export" && !token.is_null() && args.get("wait").and_then(Value::as_bool) != Some(false) {
+                    super::guard::run(&name, || export_with_progress(session, &args, &token, notify))
+                } else if !token.is_null() && LONG.contains(&name.as_str()) {
+                    with_progress(&token, write_line, || super::guard::run(&name, || session.run(&name, &args)))
+                } else {
+                    super::guard::run(&name, || session.run(&name, &args))
+                }
+            });
             let mut result = result_of(r);
             if link.frame_paths {
                 frames_to_files(&mut result, link);
@@ -316,5 +318,65 @@ mod tests {
         let p = PathBuf::from(t["picture_file"].as_str().unwrap());
         assert_eq!(std::fs::read(&p).unwrap(), vec![0xFF, 0xD8, 0xFF, 0xD9]);
         let _ = std::fs::remove_file(p);
+    }
+
+    fn refused(r: Option<Value>) -> String {
+        let r = r.unwrap()["result"].clone();
+        assert_eq!(r["isError"], true, "a call that needs the person's OK must not run headless: {r}");
+        r["content"][0]["text"].as_str().unwrap().to_owned()
+    }
+
+    // Run with HOME pointing at an empty folder: today this call really
+    // switches OpenFX on in the person's settings.
+    #[test]
+    fn headless_does_not_run_what_the_window_would_ask_about() {
+        let (mut s, mut link) = (Session::default(), Link::default());
+        let call = |id: u32, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
+        let (r, _) = ask(&mut s, &mut link, call(1, "plugins", json!({"action": "ofx", "on": true})));
+        let t = refused(r);
+        assert!(t.starts_with("NOT RUN") && t.contains("Load OpenFX"), "{t}");
+        let (r, _) = ask(&mut s, &mut link, call(2, "account", json!({"action": "buy_credits", "pack": "small"})));
+        let t = refused(r);
+        assert!(t.starts_with("NOT RUN") && t.contains("Buy credits"), "{t}");
+        // The agent cannot answer for the person.
+        let (r, _) = ask(&mut s, &mut link, call(3, "plugins", json!({"action": "ofx", "on": true, "user_approved": true})));
+        assert!(refused(r).starts_with("NOT RUN"));
+    }
+
+    #[test]
+    fn after_outside_text_the_lasting_actions_are_refused_too() {
+        let (mut s, mut link) = (Session::default(), Link::default());
+        let call = |id: u32, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
+        let (r, _) = ask(&mut s, &mut link, call(1, "notes", json!({"write": "first note"})));
+        assert!(r.unwrap()["result"]["isError"].is_null(), "no outside text yet: the note is written");
+        // `plugins list` carries the outside-content note, as in the window.
+        let (r, _) = ask(&mut s, &mut link, call(2, "plugins", json!({"action": "list"})));
+        assert!(r.unwrap()["result"]["isError"].is_null());
+        let (r, _) = ask(&mut s, &mut link, call(3, "notes", json!({"write": "second note"})));
+        let t = refused(r);
+        assert!(t.starts_with("NOT RUN") && t.contains("read outside content"), "{t}");
+        // Another session starts clean.
+        let (mut s2, mut link2) = (Session::default(), Link::default());
+        let (r, _) = ask(&mut s2, &mut link2, call(4, "notes", json!({"write": "fresh"})));
+        assert!(r.unwrap()["result"]["isError"].is_null());
+    }
+
+    #[test]
+    fn the_refusal_is_the_windows_own_question() {
+        use crate::agent::brain::needs_ok;
+        for (tool, args) in [
+            ("plugins", json!({"action": "install", "id": "x"})),
+            ("account", json!({"action": "sign_in"})),
+            ("project_care", json!({"action": "clean", "apply": true})),
+            ("save", json!({"path": "/tmp/elsewhere"})),
+        ] {
+            let why = needs_ok(tool, &args, false).unwrap_or_else(|| panic!("{tool} {args} should ask"));
+            let (mut s, mut link) = (Session::default(), Link::default());
+            let (r, _) = ask(&mut s, &mut link, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}));
+            assert!(refused(r).contains(&why));
+        }
+        // The client's own request, as in the window: not asked about.
+        assert!(needs_ok("export", &json!({}), false).is_none() && needs_ok("open", &json!({"path": "p"}), false).is_none());
+        assert!(needs_ok("plugins", &json!({"action": "ofx", "on": false}), false).is_none());
     }
 }
