@@ -2518,7 +2518,7 @@ fn adjustment_results_are_rounded_to_the_document_depth() {
 
 // Ground truth captured from Adobe Photoshop 2026 (27.10.0): a 0..255 ramp pushed through modern
 // (non-legacy) Brightness/Contrast via `executeAction("BrgC", ... useLegacy=false)`. These pin our
-// reverse-engineered curves (see crates/compose/src/adjust.rs modern_* and log/devlog.md).
+// fitted curves (see crates/compose/src/adjust.rs modern_* and log/devlog.md).
 #[test]
 fn modern_contrast_matches_photoshop() {
     // (contrast, [out at x = 0,16,32,64,96,128,160,192,224,255])
