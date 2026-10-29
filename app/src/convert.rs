@@ -42,12 +42,19 @@ pub fn playable(path: &Path) -> bool {
         TrackKind::Video => match &t.codec {
             Codec::Avc { config } => config.bit_depth_luma.unwrap_or(8) == 8 && config.chroma_format.unwrap_or(1) == 1 && !matches!(config.profile_idc, 110 | 122 | 244 | 44),
             Codec::Hevc { .. } => true,
+            Codec::Av1 { config } => av1_plays(config),
             _ => false,
         },
         // Sound Studio cannot decode (Opus, AC-3, ALAC in MP4) is converted too.
         TrackKind::Audio => matches!(t.codec, Codec::Aac { .. }),
         _ => true,
     }) && movie.tracks.iter().any(|t| matches!(t.kind, TrackKind::Video | TrackKind::Audio))
+}
+
+/// AV1 that `Mp4Source` plays as it is (the Mac's AV1 engine, else
+/// `studio-av1`): 8-bit 4:2:0. 10-bit, monochrome and 4:4:4 are converted.
+fn av1_plays(config: &studio_mp4::Av1Config) -> bool {
+    config.bit_depth() == 8 && !config.monochrome && (config.chroma_subsampling_x, config.chroma_subsampling_y) == (1, 1)
 }
 
 /// What a file is, by its bytes (or its name): picture, sound or
@@ -169,5 +176,15 @@ mod tests {
         }
         assert_eq!(kind_of(&dir.join("photo")), Kind::Picture);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AV1 in MP4 plays as it is when it is 8-bit 4:2:0; the rest converts.
+    #[test]
+    fn av1_plays_only_as_8_bit_420() {
+        let cfg = |b1: u8, b2: u8| studio_mp4::Av1Config::parse(&[0x81, b1, b2, 0]).unwrap();
+        assert!(av1_plays(&cfg(0x00, 0x0c)), "8-bit 4:2:0");
+        assert!(!av1_plays(&cfg(0x00, 0x4c)), "10-bit");
+        assert!(!av1_plays(&cfg(0x00, 0x1c)), "monochrome");
+        assert!(!av1_plays(&cfg(0x20, 0x00)), "4:4:4");
     }
 }
