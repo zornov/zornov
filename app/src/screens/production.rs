@@ -8,6 +8,7 @@
 //! is read again when it changes on disk).
 
 use crate::app::{Overlay, StudioApp};
+use crate::icons::Icon;
 use crate::kit;
 use crate::theme;
 use eframe::egui::{self, Color32, Rect, RichText, Vec2};
@@ -52,6 +53,8 @@ pub struct ProductionUi {
     new_target: String,
     new_step: String,
     who: String,
+    // Asked for by the empty state; carried out where the app is at hand.
+    open_story: bool,
 }
 
 type Shared = Arc<Mutex<ProductionUi>>;
@@ -112,41 +115,63 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let out = kit::modal(ctx, egui::Id::new("production-dialog"), Vec2::new(1080.0, 700.0), "Production", |ui| body(ui, &mut st, &story, dir.as_deref()));
     st.story = story;
-    if out.close {
+    let story_panel = std::mem::take(&mut st.open_story);
+    drop(st);
+    if story_panel {
+        app.editor.rail = crate::editor::library::RailItem::Story;
+    }
+    if out.close || story_panel {
         app.overlay = Overlay::None;
     }
 }
 
+/// The tabs worth showing: all of them with a script, otherwise only the
+/// ones that work without one.
+fn visible_tabs(has_script: bool) -> Vec<usize> {
+    (0..TABS.len()).filter(|i| has_script || !matches!(i, 1 | 2)).collect()
+}
+
 fn body(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: Option<&Path>) {
     let t = theme::tokens(ui.ctx());
-    egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
+    let has_script = !story.scenes.is_empty();
+    // Without a script only Overview (which says so), Budget and Tasks have
+    // anything to show; Breakdown and Schedule appear with the script.
+    let shown_tabs = visible_tabs(has_script);
+    if !shown_tabs.contains(&st.tab) {
+        st.tab = 0;
+    }
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(theme::space::LG as i8, theme::space::SM as i8)).show(ui, |ui| {
+        let labels: Vec<&str> = shown_tabs.iter().map(|&i| TABS[i]).collect();
+        let mut at = shown_tabs.iter().position(|&i| i == st.tab).unwrap_or(0);
         kit::scroll_strip(ui, "production-tabs", |ui| {
-            for (i, name) in TABS.iter().enumerate() {
-                if ui.selectable_label(st.tab == i, RichText::new(*name).font(theme::body())).clicked() {
-                    st.tab = i;
-                }
+            if kit::tab_bar(ui, "production-tabs", &mut at, &labels) {
+                st.tab = shown_tabs[at];
             }
         });
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if !st.flash.is_empty() && ui.small_button("✕").clicked() {
-                    st.flash.clear();
-                }
-                kit::label_trunc(ui, RichText::new(&st.flash).font(theme::caption()).color(t.text_2));
+        if !st.flash.is_empty() {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if kit::IconButton::new(Icon::X, "Dismiss").compact().show(ui).clicked() {
+                        st.flash.clear();
+                    }
+                    kit::label_trunc(ui, RichText::new(&st.flash).font(theme::caption()).color(t.text_2));
+                });
             });
-        });
-        ui.separator();
+        }
         let Some(dir) = dir else {
-            ui.add_space(24.0);
-            ui.label("Save the project first: the production office is kept in its folder.");
+            let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+            kit::empty_state(&mut empty, Icon::FilmSlate, "Save the project first. The production office is kept in its folder.", None);
             return;
         };
-        if story.scenes.is_empty() {
-            ui.add_space(24.0);
-            ui.label("There is no script yet. Import a screenplay with the Story tools (or ask the AI), then come back to break it down, schedule it and budget it.");
-            if st.tab != 3 && st.tab != 4 {
-                return;
+        if !has_script && st.tab == 0 {
+            // One empty state instead of five tabs saying the same thing.
+            // (TODO(shell): Story's own import dialog is private to the
+            // editor module; once it is `pub(crate)` this can import in place.)
+            let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+            if kit::empty_state(&mut empty, Icon::FilmSlate, "No script yet. Import a screenplay in Story, then come back to break it down, schedule it and budget it.", Some(("Open Story", Icon::ArrowSquareOut))) {
+                st.open_story = true;
             }
+            return;
         }
         let before = st.prod.clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_v(ui, |ui| match st.tab {
@@ -769,6 +794,13 @@ mod tests {
             out.textures_delta.clear();
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tabs_without_content_stay_hidden_until_there_is_a_script() {
+        let names = |has| visible_tabs(has).into_iter().map(|i| TABS[i]).collect::<Vec<_>>();
+        assert_eq!(names(false), ["Overview", "Budget", "Tasks"]);
+        assert_eq!(names(true), TABS);
     }
 
     #[test]
