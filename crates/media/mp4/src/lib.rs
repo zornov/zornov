@@ -25,7 +25,7 @@
 //! - `boxes`: `moov`-level boxes (`mvhd`, `tkhd`, `elst`, `mdhd`, `hdlr`, `trex`).
 //! - `stbl`: sample tables and their expansion into [`Sample`]s.
 //! - `stsd`: sample entries (visual / sound) and their child boxes.
-//! - [`codec`]: `avcC` / `hvcC` decoder configuration records.
+//! - [`codec`]: `avcC` / `hvcC` / `av1C` decoder configuration records.
 //! - [`aac`]: `esds` descriptors and `AudioSpecificConfig`.
 //! - `fragment`: `moof` / `traf` / `trun` expansion.
 //! - [`demux`]: the public [`Demuxer`], [`Movie`], [`Track`] and timing helpers.
@@ -45,7 +45,7 @@ mod stsd;
 pub use aac::AudioSpecificConfig;
 pub use boxes::matrix_rotation;
 pub use r#box::FourCC;
-pub use codec::{AvcConfig, HevcConfig, HevcNalArray};
+pub use codec::{Av1Config, AvcConfig, HevcConfig, HevcNalArray};
 pub use demux::{
     open, sample_for_time, Bitrate, ChannelLayout, Codec, ColorInfo, Demuxer, Edit, Movie,
     Sample, SeekPoint, Track, TrackKind,

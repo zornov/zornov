@@ -1,8 +1,8 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Video decoder configuration records: `avcC` (ISO/IEC 14496-15 §5.3.3) and
-//! `hvcC` (§8.3.3).
+//! Video decoder configuration records: `avcC` (ISO/IEC 14496-15 §5.3.3),
+//! `hvcC` (§8.3.3) and `av1C` (AV1-ISOBMFF §2.3).
 
 use crate::r#box::Reader;
 use crate::error::{Error, Result};
@@ -214,6 +214,63 @@ impl HevcConfig {
     }
 }
 
+/// Parsed `AV1CodecConfigurationRecord` (the payload of `av1C`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Av1Config {
+    pub seq_profile: u8,
+    /// `seq_level_idx_0` of the first operating point.
+    pub seq_level_idx_0: u8,
+    pub seq_tier_0: u8,
+    pub high_bitdepth: bool,
+    pub twelve_bit: bool,
+    pub monochrome: bool,
+    pub chroma_subsampling_x: u8,
+    pub chroma_subsampling_y: u8,
+    pub chroma_sample_position: u8,
+    /// `initial_presentation_delay_minus_one + 1`, when signalled.
+    pub initial_presentation_delay: Option<u8>,
+    /// `configOBUs`: at most one sequence header OBU, with its size field.
+    pub config_obus: Vec<u8>,
+    /// The whole record as stored in the file.
+    pub raw: Vec<u8>,
+}
+
+impl Av1Config {
+    pub fn parse(data: &[u8]) -> Result<Self> {
+        let mut r = Reader::new(data, "av1C");
+        let b0 = r.u8()?;
+        if b0 != 0x81 {
+            return Err(Error::malformed("av1C marker/version != 1/1"));
+        }
+        let b1 = r.u8()?;
+        let b2 = r.u8()?;
+        let b3 = r.u8()?;
+        Ok(Av1Config {
+            seq_profile: b1 >> 5,
+            seq_level_idx_0: b1 & 0x1f,
+            seq_tier_0: b2 >> 7,
+            high_bitdepth: b2 & 0x40 != 0,
+            twelve_bit: b2 & 0x20 != 0,
+            monochrome: b2 & 0x10 != 0,
+            chroma_subsampling_x: (b2 >> 3) & 1,
+            chroma_subsampling_y: (b2 >> 2) & 1,
+            chroma_sample_position: b2 & 3,
+            initial_presentation_delay: (b3 & 0x10 != 0).then_some((b3 & 0xf) + 1),
+            config_obus: r.rest().to_vec(),
+            raw: data.to_vec(),
+        })
+    }
+
+    /// Bits per sample of the coded video: 8, 10 or 12.
+    pub fn bit_depth(&self) -> u8 {
+        match (self.high_bitdepth, self.twelve_bit) {
+            (true, true) => 12,
+            (true, false) => 10,
+            _ => 8,
+        }
+    }
+}
+
 fn read_u16_nals(r: &mut Reader<'_>, n: usize) -> Result<Vec<Vec<u8>>> {
     let mut out = Vec::new();
     for _ in 0..n {
@@ -237,5 +294,21 @@ mod tests {
         assert_eq!(c.chroma_format, Some(1));
         assert_eq!(c.annex_b_parameter_sets(), [0, 0, 0, 1, 0x67, 1, 2, 0, 0, 0, 1, 0x68, 9]);
         assert!(AvcConfig::parse(&rec[..9]).is_err());
+    }
+
+    #[test]
+    fn av1c_fields() {
+        // Main profile, level 5.1 (13), 10-bit 4:2:0, delay 3, one 2-byte OBU.
+        let rec = [0x81, 13, 0x4c, 0x12, 0x0a, 0x00];
+        let c = Av1Config::parse(&rec).unwrap();
+        assert_eq!((c.seq_profile, c.seq_level_idx_0, c.seq_tier_0), (0, 13, 0));
+        assert_eq!(c.bit_depth(), 10);
+        assert_eq!((c.chroma_subsampling_x, c.chroma_subsampling_y, c.chroma_sample_position), (1, 1, 0));
+        assert!(!c.monochrome);
+        assert_eq!(c.initial_presentation_delay, Some(3));
+        assert_eq!(c.config_obus, [0x0a, 0x00]);
+        assert_eq!(c.raw, rec);
+        assert!(Av1Config::parse(&rec[..3]).is_err());
+        assert!(Av1Config::parse(&[0x01, 0, 0, 0]).is_err());
     }
 }

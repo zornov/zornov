@@ -3,11 +3,11 @@
 
 //! Sample descriptions (`stsd`): visual and sound sample entries, including
 //! QuickTime version-1/2 sound descriptions and their child boxes
-//! (`avcC`, `hvcC`, `esds`, `wave`, `chan`, `pasp`, `colr`, `btrt`).
+//! (`avcC`, `hvcC`, `av1C`, `esds`, `wave`, `chan`, `pasp`, `colr`, `btrt`).
 
 use crate::aac::{parse_esds, AudioSpecificConfig};
 use crate::r#box::{find, Boxes, FourCC, Reader};
-use crate::codec::{AvcConfig, HevcConfig};
+use crate::codec::{Av1Config, AvcConfig, HevcConfig};
 use crate::demux::{Bitrate, ChannelLayout, Codec, ColorInfo, TrackKind};
 use crate::error::{Error, Result};
 
@@ -81,6 +81,9 @@ fn parse_visual(fourcc: FourCC, data: &[u8]) -> Result<SampleEntry> {
             b"hvcC" if matches!(&fourcc, b"hvc1" | b"hev1") => {
                 e.codec = Codec::Hevc { config: HevcConfig::parse(b.data)? };
             }
+            b"av1C" if &fourcc == b"av01" => {
+                e.codec = Codec::Av1 { config: Av1Config::parse(b.data)? };
+            }
             b"pasp" => {
                 let mut p = Reader::new(b.data, "pasp");
                 let (h, v) = (p.u32()?, p.u32()?);
@@ -93,10 +96,10 @@ fn parse_visual(fourcc: FourCC, data: &[u8]) -> Result<SampleEntry> {
             _ => {}
         }
     }
-    if matches!(&fourcc, b"avc1" | b"avc3" | b"hvc1" | b"hev1")
+    if matches!(&fourcc, b"avc1" | b"avc3" | b"hvc1" | b"hev1" | b"av01")
         && matches!(e.codec, Codec::Other(_))
     {
-        return Err(Error::Missing("avcC/hvcC decoder configuration"));
+        return Err(Error::Missing("avcC/hvcC/av1C decoder configuration"));
     }
     Ok(e)
 }
