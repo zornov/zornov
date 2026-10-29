@@ -78,10 +78,12 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     };
 
     // Right-aligned, against the Jobs bell: the name gives way first, and
-    // the save state ("Edited") before it.
+    // the save state ("Unsaved") before it.
     let room = (gap - used - 6.0).max(0.0);
     let name_w = kit::text_width(ui, &app.doc.project.name, theme::control_medium()).min(240.0) + 16.0;
-    let status_w = if room >= name_w.min(120.0) + 60.0 { 60.0 } else { 0.0 };
+    let state = SaveState::of(app.doc.folder.is_some(), app.doc.dirty(), autosave_failed(&ctx));
+    let want_w = kit::text_width(ui, state.label(), theme::caption()) + 12.0;
+    let status_w = if room >= name_w.min(120.0) + want_w { want_w } else { 0.0 };
     let w = (name_w + status_w).min(room);
     if w >= 40.0 {
         let slot = Rect::from_min_size(egui::pos2(right_start - 12.0 - w, r.top()), Vec2::new(w, r.height()));
@@ -225,15 +227,74 @@ fn project_name(app: &mut StudioApp, ui: &mut egui::Ui, max_w: f32, with_status:
     if resp.double_clicked() || (resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
         app.editor.renaming_project = Some(name);
     }
-    let status = match (&app.doc.folder, app.doc.dirty()) {
-        (None, _) => "Not saved",
-        (Some(_), true) => "Edited",
-        (Some(_), false) => "Saved",
-    };
     if !with_status {
         return;
     }
-    ui.label(egui::RichText::new(status).font(theme::caption()).color(t.text_2));
+    let state = SaveState::of(app.doc.folder.is_some(), app.doc.dirty(), autosave_failed(ui.ctx()));
+    let colour = match state {
+        SaveState::Failed => t.danger,
+        SaveState::Unsaved => t.warn,
+        _ => t.text_2,
+    };
+    let label = ui.label(egui::RichText::new(state.label()).font(theme::caption()).color(colour));
+    if let Some(hint) = state.hint() {
+        label.on_hover_text(hint);
+    }
+}
+
+/// What the top bar says about the project's file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SaveState {
+    /// No folder yet: Save asks for one.
+    NotSaved,
+    /// Edits since the last save; autosave will take them.
+    Unsaved,
+    Saved,
+    /// The last autosave could not write.
+    Failed,
+}
+
+impl SaveState {
+    pub(crate) fn of(has_folder: bool, dirty: bool, autosave_failed: bool) -> Self {
+        match (has_folder, dirty) {
+            (false, _) => Self::NotSaved,
+            (true, true) if autosave_failed => Self::Failed,
+            (true, true) => Self::Unsaved,
+            (true, false) => Self::Saved,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::NotSaved => "Not saved",
+            Self::Unsaved => "Unsaved",
+            Self::Saved => "Saved",
+            Self::Failed => "Autosave failed",
+        }
+    }
+
+    pub(crate) fn hint(self) -> Option<&'static str> {
+        match self {
+            Self::NotSaved => Some("Save as… to choose where this project lives"),
+            Self::Unsaved => Some("Autosave writes your changes shortly. Save now with the save key"),
+            Self::Failed => Some("Your changes are not on disk. Save as… to a folder you can write to"),
+            Self::Saved => None,
+        }
+    }
+}
+
+fn autosave_failed_id() -> egui::Id {
+    egui::Id::new("autosave-failed")
+}
+
+/// Whether the last autosave failed. The project service sets it with
+/// [`set_autosave_failed`]; a later successful save clears it.
+pub(crate) fn autosave_failed(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(autosave_failed_id())).unwrap_or(false)
+}
+
+pub(crate) fn set_autosave_failed(ctx: &egui::Context, failed: bool) {
+    ctx.data_mut(|d| d.insert_temp(autosave_failed_id(), failed));
 }
 
 struct Item {
@@ -443,4 +504,29 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
             jobs.cancel(id);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_state_names_each_case() {
+        assert_eq!(SaveState::of(false, true, false).label(), "Not saved");
+        assert_eq!(SaveState::of(true, true, false).label(), "Unsaved");
+        assert_eq!(SaveState::of(true, false, false).label(), "Saved");
+        assert_eq!(SaveState::of(true, true, true).label(), "Autosave failed");
+        // Once nothing is pending the failure no longer matters.
+        assert_eq!(SaveState::of(true, false, true), SaveState::Saved);
+    }
+
+    #[test]
+    fn autosave_failure_flag_round_trips() {
+        let ctx = egui::Context::default();
+        assert!(!autosave_failed(&ctx));
+        set_autosave_failed(&ctx, true);
+        assert!(autosave_failed(&ctx));
+        set_autosave_failed(&ctx, false);
+        assert!(!autosave_failed(&ctx));
+    }
 }
