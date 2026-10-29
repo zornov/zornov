@@ -405,6 +405,10 @@ impl StudioApp {
             }
         }
         let Some(path) = self.cli.shot.clone() else { return };
+        // A scripted run takes its pictures itself.
+        if self.cli.ui_script.is_some() {
+            return;
+        }
         // Wait for background thumbnails so the picture is complete.
         let settled = self.frame >= self.cli.frames as u64 && self.thumbs.pending() == 0;
         if settled && !self.shot_requested {
