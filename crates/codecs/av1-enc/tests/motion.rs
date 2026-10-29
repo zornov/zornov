@@ -494,3 +494,48 @@ fn an_odd_new_vector_difference_is_rejected() {
     let d = InterDecision { mi_row: 0, mi_col: 0, w4: 16, h4: 16, mode: NEWMV, ref_frame: 1, ref_mv_idx: 0, mv: [3, 0], skip: true, coefs: vec![] };
     tw.write_inter_block(&d);
 }
+
+/// The inter coder takes intra blocks where prediction from the reference fails: content that
+/// appears from nowhere (a new bright square) is coded intra, the static rest inter.
+#[test]
+fn the_decider_codes_new_content_as_intra_blocks() {
+    use studio_av1_enc::motion::InterFrameCoder;
+    let (w, h) = (128usize, 128usize);
+    let a = picture(w, h, 1);
+    let mut b = a.clone();
+    // a bright, flat square in the second frame only, away from anything in the first
+    for y in 40..72 {
+        for x in 40..72 {
+            b.planes[0][y * b.stride[0] + x] = 235;
+        }
+    }
+    for p in 1..3 {
+        for y in 20..36 {
+            for x in 20..36 {
+                b.planes[p][y * b.stride[p] + x] = 100 + 30 * p as u16;
+            }
+        }
+    }
+    let mut enc = Encoder::new(Config { rate: RateMode::Cqp(60), speed: 9, ..Config::new(w as u32, h as u32) }).unwrap();
+    enc.push_frame(&a, 0).unwrap();
+    let mut refs = RefStore::default();
+    refs.refresh(1, Arc::new(to_framebuf(enc.reconstruction().unwrap())));
+    let mut recon = FrameBuf::new(w as u32, h as u32, 8);
+    recon.quant = QuantInfo { base_q_idx: 60, ..Default::default() };
+    recon.enable_intra_edge_filter = false;
+    let mut coder = InterFrameCoder::new(&b, &refs, [0; 7], 4, true);
+    let (mut intra, mut inter) = (0, 0);
+    for sr in 0..2 {
+        for sc in 0..2 {
+            // 16x16 blocks, so that the flat square has interior blocks
+            for blk in coder.decide_sb(&mut recon, SbPos { col: sc, row: sr }).blocks {
+                match blk {
+                    BlockMode::Intra(_) => intra += 1,
+                    BlockMode::Inter(_) => inter += 1,
+                }
+            }
+        }
+    }
+    eprintln!("{intra} intra and {inter} inter blocks");
+    assert!(intra > 0 && inter > 0, "both kinds are chosen ({intra} intra, {inter} inter)");
+}

@@ -6,12 +6,13 @@
 //! [`InterFrameCoder`] decides the blocks of one inter frame at a fixed quantiser: a uniform block
 //! size (the fixed partition of phase (a), cut to `block4`), a motion search against the previous
 //! reconstruction, and for each block a comparison of `NEARESTMV`, `GLOBALMV`, `NEARMV` and the
-//! searched `NEWMV` by squared error plus lambda times the estimated bits. Every candidate is
-//! coded in full (prediction, transform, quantisation, reconstruction), so the winner's
-//! reconstruction is exactly what the decoder will produce.
+//! searched `NEWMV`, and intra prediction (`DC_PRED` first, the mode search when that is
+//! competitive), by squared error plus lambda times the estimated bits. Every candidate is coded
+//! in full (prediction, transform, quantisation, reconstruction), so the winner's reconstruction
+//! is exactly what the decoder will produce.
 //!
-//! Limits of this version: LAST as the only reference, inter blocks only (8x8 and up),
-//! `TX_MODE_LARGEST`, luma `DCT_DCT`, and `base_q_idx > 0`.
+//! Limits of this version: LAST as the only reference, blocks of 8x8 and up, `TX_MODE_LARGEST`,
+//! luma `DCT_DCT` for inter blocks, and `base_q_idx > 0`.
 
 pub mod mvpred;
 pub mod search;
@@ -21,8 +22,9 @@ use std::sync::Arc;
 use studio_av1::mvpred::MvFrame;
 use studio_av1::spec_tables::*;
 
+use crate::mode::intra as intra_mode;
 use crate::mode::partition::Shape;
-use crate::mode::rdcost::{coef_bits, lambda};
+use crate::mode::rdcost::{coef_bits, lambda, mode_bits as intra_mode_bits};
 use crate::recon::{FrameBuf, RefStore};
 use crate::syntax::ctx::ContextState;
 use crate::transform::forward_transform;
@@ -100,6 +102,7 @@ impl<'a> InterFrameCoder<'a> {
         assert!(recon.quant.base_q_idx > 0, "the inter coder does not handle lossless frames");
         let (r0, c0) = (sb.row as usize * SB4, sb.col as usize * SB4);
         if self.block4 != 0 {
+            recon.begin_sb(sb);
             return self.code_sb(recon, r0, c0, self.block4).0;
         }
         // try the uniform partitions, go back to the saved state after each, keep the cheapest
@@ -107,12 +110,14 @@ impl<'a> InterFrameCoder<'a> {
         let mut best: Option<(f64, usize)> = None;
         for size in [16, 8, 4] {
             self.ctx.restore_region(&saved);
+            recon.begin_sb(sb);
             let (_, cost) = self.code_sb(recon, r0, c0, size);
             if best.is_none_or(|b| cost < b.0) {
                 best = Some((cost, size));
             }
         }
         self.ctx.restore_region(&saved);
+        recon.begin_sb(sb);
         self.code_sb(recon, r0, c0, best.expect("a size was tried").1).0
     }
 
@@ -124,14 +129,14 @@ impl<'a> InterFrameCoder<'a> {
         let mut blocks = Vec::with_capacity(shapes.len());
         let mut total = 0.0;
         for shape in shapes {
-            let (d, cost) = self.decide_block(recon, shape);
+            let (b, cost) = self.decide_block(recon, shape);
             total += cost;
-            blocks.push(BlockMode::Inter(d));
+            blocks.push(b);
         }
         (InterSbDecision { blocks }, total)
     }
 
-    fn decide_block(&mut self, recon: &mut FrameBuf, shape: Shape) -> (InterDecision, f64) {
+    fn decide_block(&mut self, recon: &mut FrameBuf, shape: Shape) -> (BlockMode, f64) {
         let (r, c, w4, h4) = shape;
         let stack = find_stack(&self.ctx.mi, &self.mv_frame, shape, 1);
         let lam = lambda(recon.quant.base_q_idx, recon.bit_depth);
@@ -171,12 +176,35 @@ impl<'a> InterFrameCoder<'a> {
                 best = Some((cost, d));
             }
         }
-        let (cost, d) = best.expect("at least one candidate");
-        // put the winner back into the reconstruction (the last candidate tried is in there now)
-        recon.reconstruct_inter_block(self.refs, &self.ref_idx, &d);
+        let (inter_cost, inter) = best.expect("at least one candidate");
+
+        // intra: DC first; the full mode search only when DC is in the running
         let ms = block_size_of(w4, h4);
-        self.ctx.store_inter_block(r, c, ms, d.mode, d.skip, MAX_TX_SIZE_RECT[ms] as usize, d.ref_frame as i8, d.mv);
-        (d, cost)
+        let intra_bits = |d: &crate::types::BlockDecision| 1.0 + intra_mode_bits(d.y_mode) + intra_mode_bits(d.uv_mode) + if d.skip { 0.5 } else { d.coefs.iter().map(|b| coef_bits(&b.levels, b.eob)).sum::<f64>() };
+        let dc = intra_mode::code_block(self.src, recon, shape, DC_PRED, DC_PRED);
+        let dc_cost = self.sse(recon, shape) + lam * intra_bits(&dc);
+        let mut best_intra = (dc_cost, dc);
+        if dc_cost < 1.5 * inter_cost {
+            let (y, uv) = intra_mode::search_modes(self.src, recon, shape);
+            if (y, uv) != (DC_PRED, DC_PRED) {
+                let d = intra_mode::code_block(self.src, recon, shape, y, uv);
+                let cost = self.sse(recon, shape) + lam * intra_bits(&d);
+                if cost < best_intra.0 {
+                    best_intra = (cost, d);
+                }
+            }
+        }
+        if best_intra.0 < inter_cost {
+            // intra wins: put it back into the reconstruction (the last thing coded may differ)
+            recon.reconstruct_block(&best_intra.1);
+            let d = best_intra.1;
+            self.ctx.store_block(r, c, ms, d.y_mode, d.skip, MAX_TX_SIZE_RECT[ms] as usize);
+            return (BlockMode::Intra(d), best_intra.0);
+        }
+        // put the winner back into the reconstruction
+        recon.reconstruct_inter_block(self.refs, &self.ref_idx, &inter);
+        self.ctx.store_inter_block(r, c, ms, inter.mode, inter.skip, MAX_TX_SIZE_RECT[ms] as usize, inter.ref_frame as i8, inter.mv);
+        (BlockMode::Inter(inter), inter_cost)
     }
 
     fn coef_rate(&self, d: &InterDecision) -> f64 {
