@@ -144,24 +144,27 @@ install.)
 
 Everyday CI (`.github/workflows/build.yml`) runs on pull requests into `main`
 and pushes to `main`: the licence, credit, workflow and asset checks on Linux,
-and the full tests and packages for Windows and Linux. **macOS is not built in
-CI**: it is built, tested, signed and notarized by hand on a Mac. A change to
-documentation only skips the builds. The one required check is `ci-ok`.
+and the full tests and packages for Windows and Linux (x86_64 on every run,
+arm64 on pushes to `main`). **macOS is not built in CI**: it is built,
+tested, signed and notarized by hand on a Mac. A change to documentation only
+skips the builds. The one required check is `ci-ok`.
 
 A release:
 
 1. On the Mac: `cargo xtask release-mac` makes the signed, notarized DMG, its
    update archive and its feed entry (`dist/release/entries/macos-*.json`).
 2. Push the version tag (`vX.Y.Z`). `.github/workflows/release.yml` builds
-   Windows (zip + MSI), Linux (tar.gz, `.deb`, AppImage) and the Claude
-   Desktop extension (`.mcpb`, in the Linux job) and attaches them,
+   Windows (zip + MSI), Linux for x86_64 and arm64 (tar.gz, `.deb`, AppImage,
+   each on a native runner of its architecture) and the Claude
+   Desktop extension (`.mcpb`, in the x86_64 Linux job) and attaches them,
    with their feed entries, to the run. (A manual run can also build macOS on
    a hosted Mac, if the macOS secrets below exist; it is off by default.)
 3. Put the run's `entries/*.json` next to the Mac's in `dist/release/entries/`,
    run `cargo xtask feed` on the Mac, and attach `feed.json`, the DMG and every
    package to the GitHub release.
 4. Also attach the fixed-name copies (`Zornov-mac.dmg`, `Zornov-windows.msi`,
-   `Zornov-linux.AppImage`, `Zornov-linux.deb`, `Zornov.mcpb`). zornov.com's
+   `Zornov-linux.AppImage`, `Zornov-linux.deb`, `Zornov-linux-arm64.AppImage`,
+   `Zornov-linux-arm64.deb`, `Zornov.mcpb`). zornov.com's
    download buttons and [Terminal and headless use](terminal.md#claude-desktop)
    link to `releases/latest/download/<that name>`, so they start the download
    straight away and keep working for every new version.

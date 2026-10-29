@@ -234,6 +234,42 @@ jobs:
           name: zornov-Linux
           path: dist/*.tar.gz
 
+  linux-arm64:
+    # The same build, tests and package on an arm64 runner, from the same
+    # image. On main only, beside the x86_64 job: the code is the same on both
+    # except the NEON kernels, which the Mac tests, so pull requests skip the
+    # wait and a break still shows up before a release tag.
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Make room
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-arm64-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      - name: Build the image
+        run: docker build -t zornov-linux docker
+      - name: Test, check the test data, package
+        run: |
+          mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/cache/home -e CARGO_TARGET_DIR=/work/target \
+            -e CARGO_INCREMENTAL -e CARGO_PROFILE_DEV_DEBUG -e CARGO_PROFILE_TEST_DEBUG -e CARGO_TERM_COLOR \
+            -v "$PWD:/work" \
+            -v "$HOME/.cargo/registry:/usr/local/cargo/registry" \
+            -v "$HOME/.cargo/git:/usr/local/cargo/git" \
+            zornov-linux sh -c 'cargo test --release --workspace && cargo xtask assets-check && cargo xtask package-linux'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zornov-Linux-arm64
+          path: dist/*.tar.gz
+
   clippy:
     # Clippy on its own runner, beside the Linux tests rather than before
     # them. It fails on its errors only; its warnings are being fixed over time
@@ -268,7 +304,7 @@ jobs:
     # The one required check: green when every job above passed or was skipped
     # on purpose (documentation only). A cancelled run was replaced by a newer
     # one, so it warns instead of failing.
-    needs: [changes, deny, workflows, assets, windows, windows-package, linux, clippy]
+    needs: [changes, deny, workflows, assets, windows, windows-package, linux, linux-arm64, clippy]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

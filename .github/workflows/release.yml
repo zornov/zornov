@@ -121,7 +121,18 @@ jobs:
             dist/release/entries/*.json
 
   linux:
-    runs-on: ubuntu-24.04
+    # Each architecture builds natively on its own runner (GitHub's arm64
+    # runners are free for public repositories); the packages take their
+    # architecture from the machine that builds them.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -131,10 +142,12 @@ jobs:
         with:
           toolchain: "1.99.1"
       - name: Build packages
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libfuse2
-          curl -fsSL -o "$RUNNER_TEMP/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage"
           chmod +x "$RUNNER_TEMP/appimagetool"
           echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
       - name: Packages (Linux)
@@ -147,15 +160,21 @@ jobs:
       # The Claude Desktop extension: one file for every system, so it is
       # made here once. It starts the Zornov the person installed.
       - name: Claude Desktop extension
+        if: matrix.arch == 'x86_64'
         run: cargo xtask package-mcpb
+      # x86_64 keeps the names zornov.com already links to; arm64 adds
+      # -arm64 (Debian's name for it, which the .deb uses too).
       - name: Fixed download names (Linux)
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          cp dist/release/Zornov-*.AppImage dist/release/Zornov-linux.AppImage
-          cp dist/release/zornov_*.deb dist/release/Zornov-linux.deb
-          cp dist/release/Zornov-*.mcpb dist/release/Zornov.mcpb
+          suffix=""; [ "$ARCH" = aarch64 ] && suffix="-arm64"
+          cp dist/release/Zornov-*.AppImage "dist/release/Zornov-linux$suffix.AppImage"
+          cp dist/release/zornov_*.deb "dist/release/Zornov-linux$suffix.deb"
+          if [ "$ARCH" = x86_64 ]; then cp dist/release/Zornov-*.mcpb dist/release/Zornov.mcpb; fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: zornov-linux
+          name: zornov-linux-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/release/*.deb
