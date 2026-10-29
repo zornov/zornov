@@ -21,6 +21,7 @@
 //! the project is not saved yet), named after the page or file.
 
 use std::path::{Path, PathBuf};
+use studio_model as m;
 
 /// Longest a download may take, seconds.
 const MAX_SECS: &str = "1800";
@@ -35,8 +36,14 @@ const FILE_EXT: &[&str] = &[
 
 /// Where downloads go for a project in `home` (or none yet).
 pub fn folder_for(home: Option<&Path>) -> PathBuf {
+    folder_for_kind(home, m::file::MediaKind::Other)
+}
+
+/// Where a download of `kind` goes for a project in `home` (or none yet): a
+/// package sorts it with the rest of its media.
+pub fn folder_for_kind(home: Option<&Path>, kind: m::file::MediaKind) -> PathBuf {
     match home {
-        Some(h) => h.join("Downloads"),
+        Some(h) => m::file::ProjectFolder::new(h).download_dir(kind),
         None => studio_paths::studio().join("Downloads"),
     }
 }
@@ -122,7 +129,7 @@ pub fn resolve_local(home: Option<&Path>, s: &str) -> Result<PathBuf, String> {
         let downloads = folder_for(home);
         let mut roots: Vec<PathBuf> = Vec::new();
         if let Some(h) = home {
-            roots.extend(["", "Downloads", "Models", "media", "Media"].iter().map(|d| h.join(d)));
+            roots.extend(m::file::ProjectFolder::new(h).lookup_roots());
         }
         roots.push(downloads.clone());
         for r in roots {
@@ -151,7 +158,7 @@ pub fn resolve_local(home: Option<&Path>, s: &str) -> Result<PathBuf, String> {
             }
         }
     }
-    let dl = home.map(|h| h.join("Downloads")).unwrap_or_else(|| folder_for(None));
+    let dl = folder_for(home);
     let mut held: Vec<String> = std::fs::read_dir(&dl).into_iter().flatten().flatten().filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     held.sort();
     held.truncate(20);

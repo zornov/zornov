@@ -211,7 +211,7 @@ pub fn scene_found(doc: &Doc, t: Time, floor_px: f64, hidden: &std::collections:
 /// Where a project keeps its worlds.
 pub fn worlds_dir(doc: &Doc) -> std::path::PathBuf {
     match doc.folder.as_ref() {
-        Some(f) => f.root().join("Worlds"),
+        Some(f) => f.worlds_dir(),
         None => std::env::temp_dir().join("Zornov Worlds"),
     }
 }

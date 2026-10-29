@@ -85,7 +85,7 @@ impl Autosave {
 /// Writes `backups/autosave-<milliseconds since epoch>.json` and deletes
 /// all but the newest `keep` backups. Returns the new backup's path.
 pub fn write_backup(folder: &ProjectFolder, project: &Project, at: SystemTime, keep: usize) -> Result<PathBuf, FileError> {
-    let dir = folder.backups_dir();
+    let dir = folder.versions_dir();
     std::fs::create_dir_all(&dir)?;
     let mut ms = at.duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     // Two backups in the same millisecond get consecutive names.
@@ -116,7 +116,7 @@ fn backup_time(path: &Path) -> Option<u64> {
 
 /// Backups in the folder, newest first.
 pub fn list_backups(folder: &ProjectFolder) -> Result<Vec<PathBuf>, FileError> {
-    let dir = folder.backups_dir();
+    let dir = folder.versions_dir();
     if !dir.exists() {
         return Ok(Vec::new());
     }

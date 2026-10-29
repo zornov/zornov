@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use crate::doc::Doc;
 use crate::view::{self, LaneKind, SEC};
+use studio_model as m;
 pub use studio_plugins::{Host, Imported, Installed, catalogue, ofx};
 
 /// The plugin host for Studio's plugin folder.
@@ -96,7 +97,7 @@ pub fn project_json(p: &view::Project) -> Value {
 /// Studio's cache for an unsaved project.
 fn imports_dir(doc: &Doc) -> PathBuf {
     match &doc.folder {
-        Some(f) => f.root().join("Imported"),
+        Some(f) => f.generated_dir(m::file::MadeKind::Imported),
         None => studio_paths::cache().join("plugin-imports"),
     }
 }

@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use studio_model as m;
 
 /// Biggest picture sent along as a reference.
 const MAX_PICTURE_BYTES: u64 = 20 << 20;
@@ -361,7 +362,7 @@ pub fn free_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
 /// Where generated media is saved: `<project>/Generated`, or Studio's own
 /// folder for a project not saved yet.
 pub fn generated_dir(project: Option<&Path>) -> PathBuf {
-    project.map(|h| h.join("Generated")).unwrap_or_else(|| studio_paths::studio().join("Generated"))
+    project.map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Visuals)).unwrap_or_else(|| studio_paths::studio().join("Generated"))
 }
 
 /// Pictures from words by Codex, saved in `dir` (the editor's Generate card).

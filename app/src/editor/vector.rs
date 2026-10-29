@@ -932,7 +932,7 @@ impl Host for AppHost<'_> {
 
 fn vector_dir(app: &StudioApp) -> PathBuf {
     match &app.doc.folder {
-        Some(f) => f.root().join("Vector"),
+        Some(f) => studio_model::file::ProjectFolder::new(f.root()).media_of(studio_model::file::MediaKind::Vector),
         None => std::env::temp_dir().join("studio-vector"),
     }
 }

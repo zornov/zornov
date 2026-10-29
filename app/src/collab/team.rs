@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use studio_model as m;
 
 pub fn file(root: &Path) -> PathBuf {
-    root.join("team.json")
+    m::file::ProjectFolder::new(root).state(m::file::State::Team)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

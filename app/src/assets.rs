@@ -300,7 +300,7 @@ impl Store {
             let path = Path::new(&item.path);
             let existed = self.q("SELECT id FROM assets WHERE path = ?", &[item.path.clone().into()])?.first().map(|r| r[0].int());
             let id = if path.is_file() {
-                let source = if path.starts_with(folder.join("media")) { None } else { None::<&str> };
+                let source = if path.starts_with(m::file::ProjectFolder::new(folder).media_root()) { None } else { None::<&str> };
                 let id = self.add_file(path, source)?;
                 if existed.is_none() {
                     out.added += 1;

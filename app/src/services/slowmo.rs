@@ -130,7 +130,7 @@ pub fn plan(doc: &crate::doc::Doc, id: u32, method: Method, full: bool) -> Resul
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     // Tests never write into the person's Studio folder.
     let home = if cfg!(test) { std::env::temp_dir().join("studio-tests") } else { studio_paths::studio() };
-    let dir = doc.folder.as_ref().map(|f| f.root().join("Slow motion")).unwrap_or_else(|| home.join("Slow motion"));
+    let dir = doc.folder.as_ref().map(|f| f.generated_dir(m::file::MadeKind::SlowMotion)).unwrap_or_else(|| home.join("Slow motion"));
     let file = dir.join(format!("clip-{id}-x{factor}-{stamp}.mp4"));
     Ok(SlowJob { clip: id, footage: f, range, factor, slow, size, flow_size, method, file })
 }

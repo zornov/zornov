@@ -173,7 +173,7 @@ pub fn take(doc: &mut Doc, home: Option<&std::path::Path>, id: u32, path: &std::
         audio.drain(..cut.min(audio.len()));
         start = 0.0;
     }
-    let dir = home.map(|h| h.join("ADR")).unwrap_or_else(|| studio_paths::cache().join("adr"));
+    let dir = home.map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Adr)).unwrap_or_else(|| studio_paths::cache().join("adr"));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let wav = studio_media::wav::Wav { sample_rate: rate, channels: 2, samples: audio.iter().flat_map(|s| [*s, *s]).collect() };
     let file = crate::files::write_once(&dir, &format!("cue{id:03}"), "wav", &studio_media::wav::encode_pcm16(&wav)).map_err(|e| format!("could not write the take: {e}"))?;

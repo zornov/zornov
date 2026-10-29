@@ -17,7 +17,7 @@ use studio_model as m;
 
 /// Where a project's notes are kept.
 pub fn file(root: &Path) -> PathBuf {
-    root.join("review").join("comments.json")
+    m::file::ProjectFolder::new(root).state(m::file::State::Comments)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]

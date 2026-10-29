@@ -11,6 +11,7 @@
 use super::{Session, f, micros, secs};
 use serde_json::{Value, json};
 use std::f32::consts::PI;
+use studio_model as m;
 
 pub(super) const RATE: u32 = 48_000;
 
@@ -337,7 +338,7 @@ impl Session {
         let (l, r) = if bed { ambience(kind, dur, seed)? } else { make(kind, dur, seed)? };
         let samples: Vec<f32> = l.iter().zip(r.iter()).flat_map(|(a, b)| [*a, *b]).collect();
         let wav = studio_media::wav::Wav { sample_rate: RATE, channels: 2, samples };
-        let dir = self.home.clone().map(|h| h.join("sfx")).unwrap_or_else(|| studio_paths::cache().join("made-sfx"));
+        let dir = self.home.clone().map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Sounds)).unwrap_or_else(|| studio_paths::cache().join("made-sfx"));
         let path = crate::files::write_once(&dir, &format!("{kind}-{dur:.2}s"), "wav", &studio_media::wav::encode_pcm16(&wav)).map_err(|e| format!("could not write the sound: {e}"))?;
         let report = crate::services::project::import_media(&mut self.doc, &[path.clone()]);
         let media = *report.ids.first().ok_or("the made sound could not be imported")?;
@@ -370,7 +371,7 @@ impl Session {
         }
         .max(0.0);
         let wav = studio_media::wav::Wav { sample_rate: 44_100, channels: 2, samples: mono.iter().flat_map(|s| [*s, *s]).collect() };
-        let dir = self.home.clone().map(|h| h.join("sfx")).unwrap_or_else(|| studio_paths::cache().join("made-sfx"));
+        let dir = self.home.clone().map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Sounds)).unwrap_or_else(|| studio_paths::cache().join("made-sfx"));
         let name: String = describe.chars().filter(|c| c.is_alphanumeric() || *c == ' ').take(32).collect::<String>().trim().replace(' ', "-");
         let path = crate::files::write_once(&dir, &name, "wav", &studio_media::wav::encode_pcm16(&wav)).map_err(|e| format!("could not write the sound: {e}"))?;
         let report = crate::services::project::import_media(&mut self.doc, &[path.clone()]);

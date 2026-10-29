@@ -10,6 +10,7 @@
 use super::{Session, f, micros, secs};
 use crate::view::{self, ClipKind, SEC};
 use serde_json::{Value, json};
+use studio_model as m;
 
 /// One spoken word, in timeline seconds.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -281,7 +282,7 @@ impl Session {
         let words = spoken.words.clone();
         // Stored once per distinct line and voice, words beside it.
         let wav = studio_media::wav::Wav { sample_rate: speech_rate, channels: 2, samples: samples.iter().flat_map(|s| [*s, *s]).collect() };
-        let dir = self.home.clone().map(|h| h.join("voice")).unwrap_or_else(|| studio_paths::cache().join("made-voice"));
+        let dir = self.home.clone().map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Voice)).unwrap_or_else(|| studio_paths::cache().join("made-voice"));
         let path = crate::files::write_once(&dir, "line", "wav", &studio_media::wav::encode_pcm16(&wav)).map_err(|e| format!("could not write the narration: {e}"))?;
         let _ = std::fs::write(path.with_extension("words.json"), serde_json::to_vec(&words).unwrap_or_default());
         // Its phonemes, timed on the sound (word times fence them in only

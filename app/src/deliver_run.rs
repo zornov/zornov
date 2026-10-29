@@ -108,7 +108,7 @@ pub fn plan_job(doc: &Doc, job: &JobSpec) -> Result<Plan, String> {
     let last = ((b as f64 / US * fps).ceil() as u64).max(first + 1);
     let kind = deliv.map_or(Kind::File, |d| d.kind);
     let out = if job.out.as_os_str().is_empty() {
-        let dir = job.project.join("exports");
+        let dir = studio_model::file::ProjectFolder::new(&job.project).export_dir(studio_model::file::ExportKind::Renders);
         let _ = std::fs::create_dir_all(&dir);
         if kind == Kind::File { svc::free_path(&dir, &sanitize(&job.name), preset.format) } else { dir }
     } else {
@@ -297,24 +297,7 @@ impl wire::NodeWorker for AppWorker {
 
 /// Files of a project folder a node needs (everything but caches and output).
 fn project_files(root: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, root: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        for e in rd.flatten() {
-            let p = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') && name != ".studio" || name == "exports" || name == "cutdowns" || name == "deliveries" || name.ends_with(".parts") || name == "_out" {
-                continue;
-            }
-            if p.is_dir() {
-                walk(&p, root, out);
-            } else {
-                out.push(p.strip_prefix(root).unwrap_or(&p).to_path_buf());
-            }
-        }
-    }
-    let mut v = Vec::new();
-    walk(root, root, &mut v);
-    v
+    studio_model::file::ProjectFolder::new(root).portable_files()
 }
 
 /// The project, ready to send: its folder's files, and media that live

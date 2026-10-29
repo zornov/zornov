@@ -251,7 +251,7 @@ impl Session {
 
     fn production_out_dir(&self) -> PathBuf {
         match self.production_dir() {
-            Some(d) => d.join("production"),
+            Some(d) => studio_model::file::ProjectFolder::new(d).generated_dir(studio_model::file::MadeKind::Production),
             None => studio_paths::cache().join("production"),
         }
     }

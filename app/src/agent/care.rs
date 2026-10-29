@@ -500,7 +500,7 @@ impl Session {
                 let days = a.get("shared_cache_days").and_then(Value::as_u64).unwrap_or(30);
                 let mut o = safety::CleanOptions { keep_autosaves: Some(a.get("keep_autosaves").and_then(Value::as_u64).unwrap_or(10) as usize), shared_cache_days: if days == 0 { None } else { Some(days) }, ..Default::default() };
                 // Files other projects name are theirs too.
-                o.other_projects = std::fs::read_dir(studio_paths::studio().join("Projects")).map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("project.json").is_file() && *p != root).collect()).unwrap_or_default();
+                o.other_projects = std::fs::read_dir(studio_paths::studio().join("Projects")).map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| m::file::ProjectFolder::is_project(p) && *p != root).collect()).unwrap_or_default();
                 let plan = safety::clean_plan(&root, &o);
                 if a.get("apply").and_then(Value::as_bool).unwrap_or(false) {
                     let freed = safety::clean_apply(&root, &o, &plan)?;

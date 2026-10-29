@@ -26,6 +26,23 @@ use studio_live::record::{InputSpec, LiveRecording, RecordSpec, Recorder, demo_c
 use studio_live::source::{Consent, Kind, open_audio, parse_id};
 use studio_live::switcher::{Corner, Layout, TitleKind, Transition};
 use studio_live::vo::{LiveVo, VoSpec};
+use studio_model as m;
+
+/// Where a recording (`Recordings`, `Footage`) or voice-over kept with a
+/// project goes. Earlier folders kept each at the top; a package keeps them
+/// under `Media/`.
+fn rec_in_project(home: &Path, sub: &str) -> PathBuf {
+    let pf = m::file::ProjectFolder::new(home);
+    let legacy = pf.layout() == m::file::Layout::Legacy;
+    match sub {
+        "Voice-over" if legacy => home.join(sub),
+        "Voice-over" => pf.media_of(m::file::MediaKind::Recordings).join(sub),
+        "Recordings" => pf.media_of(m::file::MediaKind::Recordings),
+        "Footage" if legacy => home.join(sub),
+        "Footage" => pf.media_of(m::file::MediaKind::Footage),
+        _ => home.join(sub),
+    }
+}
 
 enum ProdMode {
     Sim(Box<Production>),
@@ -108,7 +125,10 @@ impl Session {
     }
 
     fn rec_dir(&self, sub: &str) -> PathBuf {
-        self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf())).map(|h| h.join(sub)).unwrap_or_else(|| std::env::temp_dir().join("studio-recordings").join(sub))
+        match self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf())) {
+            Some(h) => rec_in_project(&h, sub),
+            None => std::env::temp_dir().join("studio-recordings").join(sub),
+        }
     }
 
     /// The `capture` tool.
