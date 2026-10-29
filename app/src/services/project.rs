@@ -94,11 +94,20 @@ fn file_hash(path: &Path) -> Option<u64> {
     Some(bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x0100_0000_01b3)))
 }
 
+/// Writes `saved` as the undo history of the project file as it is on
+/// disk now. A save and an autosave both call it, so the history survives
+/// either.
+pub fn keep_history_of(folder: &m::file::ProjectFolder, saved: &m::SavedHistory) -> std::io::Result<()> {
+    let project_hash = file_hash(&folder.project_file()).ok_or_else(|| std::io::Error::other("the project file cannot be read"))?;
+    super::journal::keep(&journal_file(folder), project_hash, saved)?;
+    // The journal holds it now; the old whole-file copy would go stale.
+    let _ = std::fs::remove_file(history_file(folder));
+    Ok(())
+}
+
 fn keep_history(doc: &mut Doc, folder: &m::file::ProjectFolder) {
-    let Some(project_hash) = file_hash(&folder.project_file()) else { return };
-    if super::journal::keep(&journal_file(folder), project_hash, &doc.history.snapshot()).is_ok() {
-        // The journal holds it now; the old whole-file copy would go stale.
-        let _ = std::fs::remove_file(history_file(folder));
+    if let Err(e) = keep_history_of(folder, &doc.history.snapshot()) {
+        doc.error = Some(format!("Saved, but the undo history could not be kept: {e}"));
     }
 }
 

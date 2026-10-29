@@ -274,7 +274,7 @@ pub fn add_content(app: &mut StudioApp, ctx: &egui::Context, index: usize, at: O
         p.resolve_overlap(clip_id);
     }) {
         app.editor.selection = vec![clip_id];
-        app.editor.undo_toast = Some(kit::push(ctx, crate::i18n::tf(format!("Added {name}")), Some("Undo"), Some(Icon::Plus)));
+        super::toast_undo(&mut app.editor, ctx, crate::i18n::tf(format!("Added {name}")), Icon::Plus);
     }
 }
 

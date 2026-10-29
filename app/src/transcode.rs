@@ -277,6 +277,16 @@ fn prores_yuv(f: &studio_prores::Frame) -> Yuv420 {
 
 /// Converts `src` into an H.264 + AAC MP4 at `dst`.
 pub fn to_mp4(src: &Path, dst: &Path) -> Result<(), String> {
+    to_mp4_with(src, dst, &mut |_| true)
+}
+
+/// The text of the error a cancelled conversion ends with.
+pub const CANCELLED: &str = "Cancelled";
+
+/// [`to_mp4`] reporting how far it is (0..1, once per picture); `progress`
+/// returning false cancels: the half-made file is removed and the error is
+/// [`CANCELLED`].
+pub fn to_mp4_with(src: &Path, dst: &Path, progress: &mut dyn FnMut(f32) -> bool) -> Result<(), String> {
     let mut s = open(src)?;
     let (vcodec, vtrack, vats, fps) = s.video.clone().ok_or("no video stream to convert")?;
     if vats.is_empty() {
@@ -318,6 +328,10 @@ pub fn to_mp4(src: &Path, dst: &Path) -> Result<(), String> {
     let mut audio_track = None;
     let mut first_err = None;
     for (i, at) in vats.iter().enumerate() {
+        if !progress(i as f32 / vats.len() as f32) {
+            let _ = std::fs::remove_file(&part);
+            return Err(CANCELLED.into());
+        }
         let data = s.read(vtrack, at.index)?;
         let pts = ((at.secs - t0) * 1e6).round() as i64;
         let pics = match dec.decode(&data, pts) {

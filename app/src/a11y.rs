@@ -10,11 +10,11 @@
 //!   ([`describe_clip`], [`clip_node`]); a clip that receives keyboard focus
 //!   is selected and the playhead moves to it.
 //! * [`landmark`] marks the main regions (Library, Viewer, Inspector,
-//!   Timeline); F6 and Shift+F6 move between them.
+//!   Timeline, plus any docked panel that is showing); F6 and Shift+F6 move between the regions on screen.
 //! * [`keys`] adds the keyboard commands for working without a pointer.
 //!
 //! Keyboard map (also in Help ▸ Keyboard):
-//! `[` / `]` previous / next clip · `↑` / `↓` previous / next edit point ·
+//! `[` / `]` previous / next clip (trim keys while a trim point is set) · `↑` / `↓` previous / next edit point ·
 //! `⌥↑` / `⌥↓` clip on the lane above / below · `⌥←` / `⌥→` nudge the
 //! selection one frame (`⇧` one second) · `⌥.` say where you are ·
 //! `F6` / `⇧F6` next / previous region · `F1` help · `⌥1`–`⌥6` workspaces.
@@ -180,7 +180,7 @@ impl Region {
             Region::Review => "Review",
             Region::Record => "Record",
             Region::Editorial => "Editorial",
-            Region::Ai => "AI editor",
+            Region::Ai => "Assistant",
         }
     }
     fn id(self) -> Id {
@@ -309,8 +309,10 @@ pub fn keys(app: &mut StudioApp, ctx: &Context) {
     let frame = app.editor.frame_dur(fps).max(1);
 
     let sel_one = if app.editor.selection.len() == 1 { Some(app.editor.selection[0]) } else { app.editor.selection.first().copied() };
+    // With a trim point set, `[` and `]` are the trim keys (cutting.rs); they step clips only otherwise.
+    let trimming = app.editor.cutting.point.is_some();
     for (key, forward) in [(Key::CloseBracket, true), (Key::OpenBracket, false)] {
-        if pressed(M::NONE, key) {
+        if !trimming && pressed(M::NONE, key) {
             if let Some(id) = step_clip(&app.doc.project, sel_one, app.editor.playhead, forward) {
                 select_and_say(app, ctx, id);
             } else {

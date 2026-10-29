@@ -78,6 +78,7 @@ impl FrameBuf {
             }
         }
         assert!(coefs.next().is_none(), "more coefficient blocks than planes");
+        self.mark_inter_block(mi_row, mi_col, bw4, bh4);
     }
 
     /// Dequantisation (7.12.3) and inverse transform (7.13.3), added to the prediction with

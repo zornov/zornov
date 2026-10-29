@@ -545,3 +545,51 @@ fn the_view_menu_toggles_the_inspector() {
         assert_eq!(panel_shown(&d.h.app, &ctx, Panel::Inspector, false), want);
     }
 }
+
+#[test]
+fn closing_a_panel_gives_its_keys_back_to_the_editor() {
+    let mut d = Drive::new(big());
+    let ctx = d.h.ctx.clone();
+    ctx.data_mut(|x| x.insert_temp(scope_id(), KeyScope::Panel(Panel::Sound)));
+    close_panel(&mut d.h.app, &ctx, Panel::Sound, false);
+    assert_eq!(ctx.data(|x| x.get_temp::<KeyScope>(scope_id())), Some(KeyScope::Editor));
+    // A panel that is not on screen cannot keep the keys either.
+    assert_eq!(live_scope(KeyScope::Panel(Panel::Review), &[Panel::Timeline]), KeyScope::Editor);
+    assert_eq!(live_scope(KeyScope::Panel(Panel::Timeline), &[Panel::Timeline]), KeyScope::Panel(Panel::Timeline));
+}
+
+#[test]
+fn switching_workspace_gives_the_keys_back_to_the_editor() {
+    let mut d = Drive::new(big());
+    let ctx = d.h.ctx.clone();
+    ctx.data_mut(|x| x.insert_temp(scope_id(), KeyScope::Panel(Panel::Review)));
+    let w = crate::workspaces::all().remove(0);
+    crate::workspaces::switch(&mut d.h.app, &ctx, &w);
+    assert_eq!(ctx.data(|x| x.get_temp::<KeyScope>(scope_id())), Some(KeyScope::Editor));
+}
+
+#[test]
+fn a_cut_that_is_gone_leaves_the_inspector_on_the_project() {
+    let mut d = Drive::new(big());
+    d.h.app.editor.selection.clear();
+    d.h.app.editor.selected_cut = Some(987_654);
+    d.frames(3);
+    assert_eq!(d.h.app.editor.selected_cut, None);
+}
+
+#[test]
+fn a_panel_floated_last_run_comes_back_floated() {
+    let h = Harness::new(&["--screen", "editor"]);
+    let ctx = h.ctx.clone();
+    let mut d = Drive { h, frame: eframe::Frame::_new_kittest(), t: 0.0, size: big() };
+    // As the memory of the last run: Review was floated, and is off now.
+    set_floated(&ctx, Panel::Review, true);
+    crate::editor::review::set_open(false);
+    d.frames(3);
+    assert!(crate::editor::review::is_open(), "Review is open again");
+    assert!(!d.h.app.editor.dock.contains(Panel::Review), "in its own window, not docked");
+    // Closing it is remembered too.
+    close_panel(&mut d.h.app, &ctx, Panel::Review, false);
+    d.frames(3);
+    assert!(!floated(&ctx, Panel::Review));
+}

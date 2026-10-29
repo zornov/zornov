@@ -205,32 +205,85 @@ fn entries(f: &Facts) -> Vec<Entry> {
         v.push(e(Section::Arrange, "Send to back", Icon::Stack, None, true, Act::Restack(Stack::Bottom)));
     }
     if f.many {
-        v.push(e(Section::Link, "Group", Icon::Stack, None, true, Act::Group));
-        v.push(e(Section::Link, "Link", Icon::LinkSimple, None, true, Act::Link));
+        v.push(e(Section::Link, "Group", Icon::Stack, Some("group"), true, Act::Group));
+        v.push(e(Section::Link, "Link", Icon::LinkSimple, Some("link"), true, Act::Link));
         v.push(e(Section::Link, "Nest into a sequence", Icon::Stack, None, true, Act::Nest));
     }
     if f.grouped {
-        v.push(e(Section::Link, "Ungroup", Icon::Stack, None, true, Act::Ungroup));
+        v.push(e(Section::Link, "Ungroup", Icon::Stack, Some("ungroup"), true, Act::Ungroup));
     }
     if f.linked {
-        v.push(e(Section::Link, "Unlink", Icon::LinkSimple, None, true, Act::Unlink));
+        v.push(e(Section::Link, "Unlink", Icon::LinkSimple, Some("unlink"), true, Act::Unlink));
     }
     if f.picture_with_sound {
         v.push(e(Section::Audio, "Detach sound", Icon::SpeakerHigh, None, true, Act::Detach));
     }
     if f.media_clip {
-        v.push(e(Section::Time, "Freeze frame at playhead", Icon::Pause, None, f.inside, Act::Freeze));
-        v.push(e(Section::Time, "Reverse", Icon::Repeat, None, true, Act::Reverse));
+        v.push(e(Section::Time, "Freeze frame at playhead", Icon::Pause, Some("freeze"), f.inside, Act::Freeze));
+        v.push(e(Section::Time, "Reverse", Icon::Repeat, Some("reverse"), true, Act::Reverse));
     }
     if f.one {
-        v.push(e(Section::Look, "Copy look", Icon::Palette, None, true, Act::CopyLook));
-        v.push(e(Section::Look, "Paste look", Icon::Palette, None, f.can_paste_look, Act::PasteLook));
+        v.push(e(Section::Look, "Copy look", Icon::Palette, Some("copy-look"), true, Act::CopyLook));
+        v.push(e(Section::Look, "Paste look", Icon::Palette, Some("paste-look"), f.can_paste_look, Act::PasteLook));
     }
     v.push(e(Section::Clip, if f.all_on { "Disable" } else { "Enable" }, Icon::Eye, None, true, Act::Enabled(!f.all_on)));
     v.push(e(Section::Clip, "Add marker", Icon::Flag, Some("marker"), true, Act::Marker));
     v.push(e(Section::Clip, "Show in Inspector", Icon::Faders, None, true, Act::Inspector));
     v.push(Entry { section: Section::Delete, label: "Delete", icon: Icon::Trash, hint: Some("delete"), enabled: true, danger: true, act: Act::Delete });
     v
+}
+
+/// A keyboard action that is otherwise a clip-menu row (group, link, freeze,
+/// reverse, look copy/paste) run on the selection.
+pub fn key_action(app: &mut StudioApp, ctx: &egui::Context, id: &str) {
+    let ids = app.editor.selection.clone();
+    let act = match id {
+        "group" => Act::Group,
+        "ungroup" => Act::Ungroup,
+        "link" => Act::Link,
+        "unlink" => Act::Unlink,
+        "freeze" => Act::Freeze,
+        "reverse" => Act::Reverse,
+        "copy-look" => Act::CopyLook,
+        "paste-look" => Act::PasteLook,
+        _ => return,
+    };
+    let many = ids.len() > 1;
+    let one = ids.len() == 1;
+    let why = match act {
+        _ if ids.is_empty() => Some("Select a clip first"),
+        Act::Group | Act::Link if !many => Some("Select two or more clips"),
+        Act::CopyLook | Act::PasteLook if !one => Some("Select one clip"),
+        Act::PasteLook if !held(ctx).look.is_some() => Some("Nothing to paste: copy a look first"),
+        _ => None,
+    };
+    if let Some(w) = why {
+        kit::push(ctx, w, None, Some(Icon::Info));
+        return;
+    }
+    let at = app.editor.playhead;
+    run(app, ctx, &ids, at, act);
+}
+
+/// ⌘C / ⌘X on the selection (the same as the clip menu's Copy and Cut).
+pub fn copy_selection(app: &mut StudioApp, ctx: &egui::Context, cut: bool) {
+    let ids = app.editor.selection.clone();
+    if ids.is_empty() {
+        kit::push(ctx, if cut { "Select a clip to cut" } else { "Select a clip to copy" }, None, Some(Icon::Info));
+        return;
+    }
+    let at = app.editor.playhead;
+    run(app, ctx, &ids, at, if cut { Act::Cut } else { Act::Copy });
+}
+
+/// ⌘V: paste at the playhead, or say there is nothing to paste.
+pub fn paste_selection(app: &mut StudioApp, ctx: &egui::Context) {
+    if !can_paste(ctx) {
+        kit::push(ctx, "Nothing to paste: copy a clip first", None, Some(Icon::Info));
+        return;
+    }
+    let at = app.editor.playhead;
+    paste_at(app, ctx, at);
 }
 
 /// Whether the menu has copied clips to paste.
@@ -245,6 +298,8 @@ pub fn paste_at(app: &mut StudioApp, ctx: &egui::Context, at: Time) {
         let old: Vec<u32> = app.doc.project.clips.iter().map(|c| c.id).collect();
         if app.doc.apply("Paste", m::Edit::Paste { seq, at, clipboard: Box::new(cb), mode: m::PasteMode::Insert }) {
             app.editor.selection = app.doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
+            let n = app.editor.selection.len();
+            super::toast_undo(&mut app.editor, ctx, if n == 1 { "Pasted clip".to_owned() } else { format!("Pasted {n} clips") }, Icon::DownloadSimple);
         }
     }
 }
@@ -313,13 +368,23 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
         Act::Marker => super::run(app, ctx, Action::Marker),
         Act::Delete => super::run(app, ctx, Action::Delete),
         Act::Copy | Act::Cut => {
-            if let Ok(cb) = m::Clipboard::copy(&app.doc.model, seq, &clips) {
-                let mut h = held(ctx);
-                h.clips = Some(cb);
-                hold(ctx, h);
-                kit::push(ctx, "Copied", None, Some(Icon::Copy));
-                if matches!(act, Act::Cut) {
-                    super::run(app, ctx, Action::Delete);
+            match m::Clipboard::copy(&app.doc.model, seq, &clips) {
+                Ok(cb) => {
+                    let mut h = held(ctx);
+                    h.clips = Some(cb);
+                    hold(ctx, h);
+                    if matches!(act, Act::Cut) {
+                        app.editor.selection = ids.to_vec();
+                        // "Cut" is said only once the clips are really gone.
+                        if !super::delete_selected(&mut app.editor, &mut app.doc, ctx, true) {
+                            kit::push(ctx, "Copied, but could not remove the clips", None, Some(Icon::Warning));
+                        }
+                    } else {
+                        kit::push(ctx, if ids.len() == 1 { "Copied clip".to_owned() } else { format!("Copied {} clips", ids.len()) }, None, Some(Icon::Copy));
+                    }
+                }
+                Err(e) => {
+                    kit::push(ctx, format!("Could not copy: {e}"), None, Some(Icon::Warning));
                 }
             }
         }
@@ -387,16 +452,79 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
         }
         Act::Inspector => app.editor.open_panel(crate::dock::Panel::Inspector),
         Act::Restack(how) => {
-            let Some(op) = ids.first().and_then(|id| restack_op(&app.doc.project, *id, how)) else { return };
-            let doc = std::mem::replace(&mut app.doc, crate::agent::Session::default().doc);
-            let mut s = crate::agent::Session::new(doc);
-            let r = s.edit(&[op], "Restack", false);
-            app.doc = s.doc;
-            if let Err(e) = r {
-                kit::push(ctx, e, None, Some(Icon::Warning));
+            let Some(op) = ids.first().and_then(|id| restack_op(&app.doc.project, *id, how)) else {
+                kit::push(ctx, "Nothing to restack against here", None, Some(Icon::Warning));
+                return;
+            };
+            match restack(app, ids[0], &op) {
+                Ok(done) => {
+                    super::toast_undo(&mut app.editor, ctx, done, Icon::Stack);
+                }
+                Err(e) => {
+                    kit::push(ctx, e, None, Some(Icon::Warning));
+                }
             }
         }
     }
+}
+
+/// Move a clip to the lane the `restack_op` asks for, adding a lane when
+/// none is free there: one plain edit, one undo step.
+fn restack(app: &mut StudioApp, id: u32, op: &serde_json::Value) -> Result<String, String> {
+    use crate::view::LaneKind;
+    let (lane, new_at) = {
+        let p = &app.doc.project;
+        let c = p.clip(id).ok_or("That clip is gone")?;
+        let idx = |l: u32| p.lanes.iter().position(|x| x.id == l);
+        let spine = p.spine();
+        let spine_i = spine.and_then(idx).unwrap_or(p.lanes.len());
+        let free = |l: u32| !p.clips.iter().any(|o| o.id != id && o.lane == l && o.start < c.end() && c.start < o.end());
+        let visual = |i: usize| p.lanes.get(i).is_some_and(|l| l.kind == LaneKind::Visual && !l.locked && Some(l.id) != spine);
+        let lane_of = |o: u64| p.clip(o as u32).map(|c| c.lane);
+        if let Some(o) = op.get("in_front_of").and_then(|v| v.as_u64()) {
+            let oi = lane_of(o).and_then(idx).ok_or("That clip has no lane")?;
+            ((0..oi).rev().find(|&i| visual(i) && free(p.lanes[i].id)).map(|i| p.lanes[i].id), oi)
+        } else if let Some(o) = op.get("behind").and_then(|v| v.as_u64()) {
+            let ol = lane_of(o).ok_or("That clip has no lane")?;
+            if Some(ol) == spine {
+                return Err("Nothing goes behind the main lane".into());
+            }
+            let oi = idx(ol).ok_or("That clip has no lane")?;
+            ((oi + 1..spine_i).find(|&i| visual(i) && free(p.lanes[i].id)).map(|i| p.lanes[i].id), oi + 1)
+        } else if op.get("to").and_then(|v| v.as_str()) == Some("top") {
+            let busy = (0..spine_i).filter(|&i| p.lanes.get(i).is_some_and(|l| l.kind == LaneKind::Visual) && !free(p.lanes[i].id)).min();
+            let top = busy.unwrap_or(spine_i);
+            ((0..top).rev().find(|&i| visual(i) && free(p.lanes[i].id)).map(|i| p.lanes[i].id), top)
+        } else {
+            (spine_i.checked_sub(1).filter(|&i| visual(i) && free(p.lanes[i].id)).map(|i| p.lanes[i].id), spine_i)
+        }
+    };
+    if lane.is_some_and(|l| app.doc.project.clip(id).is_some_and(|c| c.lane == l)) {
+        return Err("Already there".into());
+    }
+    app.doc.begin_batch("Restack");
+    let lane_id = match lane {
+        Some(l) => l,
+        None => {
+            let lid = app.doc.alloc_id();
+            let seq = app.doc.seq();
+            if !app.doc.apply("Add lane", m::Edit::AddLane { seq, lane: m::Lane::new(m::LaneId(lid), m::LaneKind::Visual, "Overlay"), index: Some(new_at) }) {
+                let why = app.doc.error.take().unwrap_or_else(|| "Could not add a lane".into());
+                app.doc.rollback_batch();
+                return Err(why);
+            }
+            lid as u32
+        }
+    };
+    let e = super::cutting::move_edit(app, vec![m::ClipId(id as u64)], 0, Some(m::LaneId(lane_id as u64)));
+    let ok = app.doc.apply("Restack", e);
+    if !ok {
+        let why = app.doc.error.take().unwrap_or_else(|| "Could not move the clip".into());
+        app.doc.rollback_batch();
+        return Err(why);
+    }
+    app.doc.commit_batch();
+    Ok("Restacked clip".into())
 }
 
 #[cfg(test)]
@@ -459,5 +587,30 @@ mod tests {
         let op = restack_op(&s.doc.project, a, Stack::Forward).expect("an op");
         s.edit(&[op], "forward", false).expect("restack");
         assert!(lanes(&s, a) < lanes(&s, b), "a is over b again");
+    }
+
+    /// Restack is a plain edit: one undo step, authored by the person, and
+    /// a lane is added when none is free.
+    #[test]
+    fn restack_is_one_plain_undo_step() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Stack", 320, 180, 24.0));
+        s.edit(&[json!({"op": "card", "colour": "#ff0000", "at": 0.0, "duration": 3.0, "lane": "overlay", "width": 100, "height": 100}), json!({"op": "card", "colour": "#00ff00", "at": 0.0, "duration": 3.0, "lane": "overlay", "width": 100, "height": 100})], "cards", false).unwrap();
+        app.doc = s.doc;
+        let lane_pos = |app: &StudioApp, id: u32| app.doc.project.lanes.iter().position(|l| Some(l.id) == app.doc.project.clip(id).map(|c| c.lane)).unwrap();
+        let ids: Vec<u32> = app.doc.project.clips.iter().filter(|c| c.name.contains("card")).map(|c| c.id).collect();
+        let (a, b) = if lane_pos(&app, ids[0]) < lane_pos(&app, ids[1]) { (ids[0], ids[1]) } else { (ids[1], ids[0]) };
+        let steps = app.doc.history_len();
+        let op = restack_op(&app.doc.project, a, Stack::Bottom).expect("an op");
+        let done = restack(&mut app, a, &op).expect("restacked");
+        assert_eq!(done, "Restacked clip");
+        assert!(lane_pos(&app, a) > lane_pos(&app, b));
+        assert_eq!(app.doc.history_len(), steps + 1, "one undo step, lane included");
+        assert!(app.doc.can_undo());
+        assert!(app.doc.undo().is_some());
+        assert!(lane_pos(&app, a) < lane_pos(&app, b), "undo puts it back");
     }
 }
