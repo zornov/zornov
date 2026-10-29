@@ -391,6 +391,23 @@ fn relink_from_folder(app: &mut StudioApp, ctx: &egui::Context) {
     kit::push(ctx, res.message(), None, Some(if res.done.is_empty() { Icon::Info } else { Icon::Check }));
 }
 
+/// Open the media menu for `media` where the pointer is now. The place is
+/// kept, so the menu stays put while the pointer moves.
+fn open_media_menu(ctx: &egui::Context, media: u32) {
+    let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new("media-menu-for"), media);
+        d.insert_temp(egui::Id::new("media-menu-at"), at);
+        d.remove::<(String, String)>(egui::Id::new("media-menu-fields"));
+    });
+    kit::set_open(ctx, egui::Id::new("media-menu"), true);
+}
+
+/// Where the media menu opened.
+fn media_menu_anchor(ctx: &egui::Context) -> egui::Pos2 {
+    ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("media-menu-at"))).unwrap_or_default()
+}
+
 /// Right-click on a bin item: add it, or (when its file is gone) relink it.
 fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collections::HashSet<u32>) {
     let id = egui::Id::new("media-menu");
@@ -402,7 +419,7 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
         kit::set_open(ctx, id, false);
         return;
     };
-    let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
+    let at = media_menu_anchor(ctx);
     let (mut add_it, mut relink_it, mut proxy_it, mut cancel_it) = (false, false, false, false);
     let is_video = app.doc.project.media[index].kind == MediaKind::Video;
     let making = crate::services::proxies::progress_of(media).is_some();
@@ -612,11 +629,7 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
     let ctx = ui.ctx().clone();
     if rail == RailItem::Media {
         if let Some(k) = out.secondary {
-            ctx.data_mut(|d| {
-                d.insert_temp(egui::Id::new("media-menu-for"), app.doc.project.media[items[k]].id);
-                d.remove::<(String, String)>(egui::Id::new("media-menu-fields"));
-            });
-            kit::set_open(&ctx, egui::Id::new("media-menu"), true);
+            open_media_menu(&ctx, app.doc.project.media[items[k]].id);
         }
         media_menu(app, &ctx, &offline);
     }
@@ -1257,6 +1270,17 @@ pub fn apply_to(app: &mut StudioApp, ctx: &egui::Context, d: LibDrag, clip: u32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_menu_stays_where_it_opened_while_the_pointer_moves() {
+        let ctx = egui::Context::default();
+        let at = |x: f32, y: f32| egui::RawInput { events: vec![egui::Event::PointerMoved(egui::pos2(x, y))], ..Default::default() };
+        ctx.run_ui(at(120.0, 80.0), |ui| open_media_menu(ui.ctx(), 7)).textures_delta.clear();
+        ctx.run_ui(at(400.0, 300.0), |_| {}).textures_delta.clear();
+        ctx.run_ui(at(410.0, 320.0), |_| {}).textures_delta.clear();
+        assert_eq!(media_menu_anchor(&ctx), egui::pos2(120.0, 80.0));
+        assert!(kit::is_open(&ctx, egui::Id::new("media-menu")));
+    }
 
     #[test]
     fn long_media_goes_in_whole() {
