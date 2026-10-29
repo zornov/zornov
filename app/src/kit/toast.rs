@@ -108,11 +108,6 @@ pub fn recent(ctx: &egui::Context) -> Vec<Toast> {
     ctx.data(|d| d.get_temp::<Queue>(qid()).map(|q| q.history.iter().rev().cloned().collect()).unwrap_or_default())
 }
 
-/// Forget the recent list.
-pub fn clear_recent(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Queue>(qid()).history.clear());
-}
-
 /// Draw the toasts stacked above the bottom centre of `area`, newest at the
 /// bottom. Returns the id of a toast whose action was clicked.
 pub fn show(ctx: &egui::Context, area: Rect, bottom_offset: f32) -> Option<u64> {

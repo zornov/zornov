@@ -46,6 +46,7 @@ pub fn enqueue(doc: &mut crate::doc::Doc, name: &str, preset: &str, qc: bool) ->
 pub fn section(ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
     let (q, nodes) = snapshot();
+    recent_notifications(ui);
     if q.jobs.is_empty() && nodes == 0 {
         return;
     }
@@ -113,6 +114,23 @@ pub fn section(ui: &mut egui::Ui) {
             }
         }
         SNAP.with(|s| *s.borrow_mut() = None);
+    }
+}
+
+/// The last few toasts, so a message that has gone can still be read.
+fn recent_notifications(ui: &mut egui::Ui) {
+    let t = theme::tokens(ui.ctx());
+    let recent = kit::recent(ui.ctx());
+    if recent.is_empty() {
+        return;
+    }
+    kit::menu_heading(ui, "Recent notifications");
+    for n in recent.iter().take(5) {
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
+        let colour = if n.level == kit::Level::Warning { t.danger } else { t.text_2 };
+        if kit::paint_text_clipped(ui.painter(), egui::pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, &n.text, theme::caption(), colour, r.width() - 12.0) {
+            resp.on_hover_text(&n.text);
+        }
     }
 }
 
