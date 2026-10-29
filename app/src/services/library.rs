@@ -268,6 +268,157 @@ pub fn starts_word(text: &str, w: &str) -> bool {
     false
 }
 
+// --- import results ---------------------------------------------------------
+
+fn files(n: usize) -> String {
+    format!("{n} file{}", if n == 1 { "" } else { "s" })
+}
+
+/// The toast for an import: what was added, what was already in the
+/// project, and every file that failed with its reason. The bool is true
+/// when something went wrong (show it as a warning).
+pub fn import_summary(r: &super::project::ImportReport) -> (String, bool) {
+    let added = r.ids.len().saturating_sub(r.reused);
+    let failed = r.failed.len();
+    let reasons = match r.failed.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [a, b] if failed == 2 => format!("{a}; {b}"),
+        [a, b, ..] => format!("{a}; {b}; and {} more", failed - 2),
+    };
+    let text = match (added, r.reused, failed) {
+        (0, 0, 0) => "Nothing to import".to_string(),
+        (0, 0, _) => format!("Could not import {reasons}"),
+        (0, k, 0) => format!("{} already in the project", if k == 1 { "That file is".to_string() } else { format!("All {k} files are") }),
+        (n, 0, 0) => format!("Imported {}", files(n)),
+        (n, k, 0) => format!("Imported {}; {k} already in the project", files(n)),
+        (n, k, _) => format!("Imported {}{}; could not import {reasons}", files(n), if k > 0 { format!(" ({k} already in the project)") } else { String::new() }),
+    };
+    (text, failed > 0)
+}
+
+// --- offline media and relinking -------------------------------------------
+
+/// Whether the file behind a media path is gone. Media without a file
+/// (generated, sample) and frame sequences are never offline.
+pub fn is_offline(path: &str) -> bool {
+    !path.is_empty() && !studio_imageio::sequence::Sequence::is_pattern(std::path::Path::new(path)) && !std::path::Path::new(path).is_file()
+}
+
+type OfflineCache = Option<(std::time::Instant, u64, Arc<std::collections::HashSet<u32>>)>;
+
+/// The bin's media whose files are gone from disk. The disk is looked at
+/// again every two seconds, not every frame, so a drive coming back (or
+/// going) shows soon without a stat per tile per frame.
+pub fn offline_ids(media: &[view::MediaItem]) -> Arc<std::collections::HashSet<u32>> {
+    use std::hash::{Hash, Hasher};
+    static CACHE: Mutex<OfflineCache> = Mutex::new(None);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for x in media {
+        (x.id, &x.path).hash(&mut h);
+    }
+    let sig = h.finish();
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, s, set)) = cache.as_ref() {
+        if *s == sig && at.elapsed() < std::time::Duration::from_secs(2) {
+            return set.clone();
+        }
+    }
+    let set: Arc<std::collections::HashSet<u32>> = Arc::new(media.iter().filter(|x| x.path.as_ref().is_some_and(|p| is_offline(&p.to_string_lossy()))).map(|x| x.id).collect());
+    *cache = Some((std::time::Instant::now(), sig, set.clone()));
+    set
+}
+
+/// `item` pointed at `to`, with `to`'s own probe (length, size, tracks).
+/// A file of another kind (a picture for a video) is refused.
+fn pointed_at(item: &m::MediaItem, to: &std::path::Path) -> Result<m::MediaItem, String> {
+    let pr = crate::media_io::probe(to).map_err(|e| format!("Could not read {}: {e}", to.file_name().map_or_else(|| to.display().to_string(), |n| n.to_string_lossy().into_owned())))?;
+    if pr.kind != item.info.kind {
+        return Err(format!("{} is not the same kind of file as {}", to.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()), item.name));
+    }
+    let mut out = item.clone();
+    out.path = to.display().to_string();
+    out.info = m::MediaInfo { kind: pr.kind, container: pr.container, duration: pr.duration.or(item.info.duration), video: pr.video, audio: pr.audio, extra: item.info.extra.clone() };
+    Ok(out)
+}
+
+/// Point media item `id` at the file `to`: one undo step.
+pub fn relink(doc: &mut Doc, id: u32, to: &std::path::Path) -> Result<String, Refusal> {
+    let Some(item) = doc.model.media.iter().find(|x| x.id.0 == id as u64).cloned() else { return Err(Refusal("That media is no longer in the project".into())) };
+    let new = pointed_at(&item, to).map_err(Refusal)?;
+    let ok = doc.apply("Relink media", m::Edit::SetMedia { item: Box::new(new) });
+    commit(ok, doc, "Relink media", format!("Relinked {}", item.name), vec![]).map(|o| o.message)
+}
+
+/// What a search for offline media found.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Relinked {
+    /// Names of the media pointed at a file found in the folders.
+    pub done: Vec<String>,
+    /// Names still offline: not found, or found but unreadable.
+    pub left: Vec<String>,
+}
+
+impl Relinked {
+    /// The one-line result for a toast.
+    pub fn message(&self) -> String {
+        let (n, k) = (self.done.len(), self.left.len());
+        match (n, k) {
+            (0, 0) => "Nothing is offline".into(),
+            (0, k) => format!("Found none of the {k} offline file{} in that folder", if k == 1 { "" } else { "s" }),
+            (n, 0) => format!("Relinked {n} file{}", if n == 1 { "" } else { "s" }),
+            (n, k) => format!("Relinked {n} file{}; {k} still offline", if n == 1 { "" } else { "s" }),
+        }
+    }
+}
+
+/// Look in `dirs` (and their folders, a few levels down) for each offline
+/// media item's file by name, and point the ones found at it, as one undo
+/// step. Nothing changes when nothing is found.
+pub fn relink_in(doc: &mut Doc, dirs: &[PathBuf]) -> Relinked {
+    let offline: Vec<m::MediaItem> = doc.model.media.iter().filter(|x| is_offline(&x.path)).cloned().collect();
+    let mut out = Relinked::default();
+    if offline.is_empty() {
+        return out;
+    }
+    let wanted: HashMap<String, usize> = offline.iter().enumerate().filter_map(|(i, x)| std::path::Path::new(&x.path).file_name().map(|n| (n.to_string_lossy().to_lowercase(), i))).collect();
+    let mut found: HashMap<usize, PathBuf> = HashMap::new();
+    let mut stack: Vec<(PathBuf, usize)> = dirs.iter().map(|d| (d.clone(), 0)).collect();
+    let mut seen = 0usize;
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.filter_map(|e| e.ok()) {
+            seen += 1;
+            if seen > 200_000 {
+                stack.clear();
+                break;
+            }
+            let (p, Ok(ft)) = (e.path(), e.file_type()) else { continue };
+            if ft.is_dir() {
+                if depth < 6 && !e.file_name().to_string_lossy().starts_with('.') {
+                    stack.push((p, depth + 1));
+                }
+            } else if let Some(&i) = wanted.get(&e.file_name().to_string_lossy().to_lowercase()) {
+                found.entry(i).or_insert(p);
+            }
+        }
+    }
+    let mut edits = Vec::new();
+    for (i, item) in offline.iter().enumerate() {
+        match found.get(&i).map(|to| pointed_at(item, to)) {
+            Some(Ok(new)) => {
+                edits.push(m::Edit::SetMedia { item: Box::new(new) });
+                out.done.push(item.name.clone());
+            }
+            _ => out.left.push(item.name.clone()),
+        }
+    }
+    if !edits.is_empty() && !doc.apply("Relink media", m::Edit::Batch { edits }) {
+        out.left.append(&mut out.done);
+    }
+    out
+}
+
 #[cfg(test)]
 mod word_tests {
     #[test]
@@ -694,7 +845,9 @@ pub fn add_content(doc: &mut Doc, index: usize, at: Time, lane: Option<u32>) -> 
         }
     });
     let Some(lane) = lane else { return Err(Refusal("No lane for that item".into())) };
-    let media_id = doc.alloc_id() as u32;
+    // The same sticker or sound dragged twice is the same media, not a copy.
+    let known = doc.project.media.iter().find(|x| x.path.as_deref() == Some(path.as_path())).map(|x| x.id);
+    let media_id = known.unwrap_or_else(|| doc.alloc_id() as u32);
     let clip_id = doc.alloc_id() as u32;
     let mi = view::MediaItem { id: media_id, name: e.name.clone(), kind, dur, width: w, height: h, fps: 30.0, seed: media_id, path: Some(path) };
     let mut clip = new_clip(at, dur, if kind == MediaKind::Audio { ClipKind::Audio } else { ClipKind::Video }, &e.name, Some(media_id));
@@ -706,7 +859,9 @@ pub fn add_content(doc: &mut Doc, index: usize, at: Time, lane: Option<u32>) -> 
     }
     let label = format!("Add {}", e.name);
     let ok = doc.edit(&label, |p| {
-        p.media.push(mi);
+        if known.is_none() {
+            p.media.push(mi);
+        }
         p.clips.push(clip);
         p.resolve_overlap(clip_id);
     });
@@ -872,5 +1027,68 @@ mod tests {
         let clip = doc.project.clip(out.select[0]).unwrap();
         let media = doc.project.media(clip.media.unwrap()).unwrap();
         assert!(media.path.as_ref().unwrap().exists());
+    }
+
+    fn png(path: &std::path::Path, rgb: u8) {
+        std::fs::write(path, studio_media::png::encode(&studio_media::RgbaImage { width: 2, height: 2, pixels: vec![rgb, 0, 0, 255].repeat(4) })).unwrap();
+    }
+
+    /// A file that moved is flagged offline, found again by name in a chosen
+    /// folder, and relinked as one undo step; a file of another kind is refused.
+    #[test]
+    fn offline_media_is_flagged_and_relinks_from_a_folder() {
+        let dir = std::env::temp_dir().join(format!("studio-relink-{}", std::process::id()));
+        let (old, new) = (dir.join("old"), dir.join("new/deep"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        let (a, b) = (old.join("a.png"), old.join("b.png"));
+        png(&a, 255);
+        png(&b, 128);
+        let mut doc = crate::agent::Session::new(crate::services::project::new_custom("Relink", 640, 360, 30.0)).doc;
+        let r = crate::services::project::import_media(&mut doc, &[a.clone(), b.clone()]);
+        assert_eq!(r.ids.len(), 2, "{:?}", r.failed);
+        assert!(offline_ids(&doc.project.media).is_empty());
+        // Both move; only a.png arrives in the new folder.
+        std::fs::rename(&a, new.join("a.png")).unwrap();
+        std::fs::remove_file(&b).unwrap();
+        let gone = offline_ids_fresh(&doc);
+        assert_eq!(gone.len(), 2, "both are flagged");
+        let res = relink_in(&mut doc, &[dir.join("new")]);
+        assert_eq!((res.done.clone(), res.left.clone()), (vec!["a.png".to_string()], vec!["b.png".to_string()]));
+        assert_eq!(res.message(), "Relinked 1 file; 1 still offline");
+        assert_eq!(offline_ids_fresh(&doc).len(), 1);
+        doc.undo();
+        assert_eq!(offline_ids_fresh(&doc).len(), 2, "one undo puts both back offline");
+        // Relinking one by hand; a sound is not a picture.
+        let msg = relink(&mut doc, r.ids[1], &new.join("a.png")).unwrap();
+        assert_eq!(msg, "Relinked b.png");
+        std::fs::write(new.join("tone.wav"), b"x").unwrap();
+        assert!(relink(&mut doc, r.ids[0], &new.join("tone.wav")).is_err());
+        assert!(relink(&mut doc, 9999, &new.join("a.png")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn offline_cache_follows_the_files_not_the_frame() {
+        assert!(!is_offline(""));
+        assert!(is_offline("/no/such/file.mp4"));
+    }
+
+    fn offline_ids_fresh(doc: &Doc) -> Vec<u32> {
+        doc.project.media.iter().filter(|x| x.path.as_ref().is_some_and(|p| is_offline(&p.to_string_lossy()))).map(|x| x.id).collect()
+    }
+
+    #[test]
+    fn import_summary_tells_added_reused_and_every_failure() {
+        use super::super::project::ImportReport as R;
+        let r = |ids: &[u32], reused: usize, failed: &[&str]| R { ids: ids.to_vec(), reused, failed: failed.iter().map(|s| s.to_string()).collect() };
+        assert_eq!(import_summary(&r(&[1, 2], 0, &[])), ("Imported 2 files".into(), false));
+        assert_eq!(import_summary(&r(&[1], 0, &[])).0, "Imported 1 file");
+        assert_eq!(import_summary(&r(&[1], 1, &[])).0, "That file is already in the project");
+        assert_eq!(import_summary(&r(&[1, 2], 2, &[])).0, "All 2 files are already in the project");
+        assert_eq!(import_summary(&r(&[1, 2, 3], 1, &[])).0, "Imported 2 files; 1 already in the project");
+        assert_eq!(import_summary(&r(&[], 0, &["a.png: bad"])), ("Could not import a.png: bad".into(), true));
+        assert_eq!(import_summary(&r(&[], 0, &["a: x", "b: y", "c: z", "d: w"])).0, "Could not import a: x; b: y; and 2 more");
+        assert_eq!(import_summary(&r(&[1, 2], 1, &["a: x"])).0, "Imported 1 file (1 already in the project); could not import a: x");
     }
 }
