@@ -758,7 +758,7 @@ pub fn add(doc: &mut Doc, panel: Panel, index: usize, at: Time, lane: Option<u32
     clip.lane = lane;
     let name = clip.name.clone();
     let spine = p.spine() == Some(lane);
-    let cut = p.clips.iter().filter(|c| c.lane == lane).flat_map(|c| [c.start, c.end()]).min_by_key(|x| (x - at).abs()).unwrap_or(0);
+    let cut = snap_to_cut(p, lane, at);
     let new_id = doc.alloc_id() as u32;
     clip.id = new_id;
     let ok = if spine {
@@ -773,6 +773,13 @@ pub fn add(doc: &mut Doc, panel: Panel, index: usize, at: Time, lane: Option<u32
         })
     };
     commit(ok, doc, "Add clip", format!("Added {name}"), vec![new_id])
+}
+
+/// Where an item dropped at `at` on the main lane lands: the nearest cut
+/// (start or end of a clip) on that lane, or 0 on an empty lane. The drop
+/// ghost uses the same function, so what is drawn is what happens.
+pub fn snap_to_cut(p: &view::Project, lane: u32, at: Time) -> Time {
+    p.clips.iter().filter(|c| c.lane == lane).flat_map(|c| [c.start, c.end()]).min_by_key(|x| (x - at).abs()).unwrap_or(0)
 }
 
 /// An adjustment clip carrying an effect or look over `start..start + dur`.
@@ -1027,6 +1034,11 @@ mod tests {
         let clip = doc.project.clip(out.select[0]).unwrap();
         let media = doc.project.media(clip.media.unwrap()).unwrap();
         assert!(media.path.as_ref().unwrap().exists());
+        // The same item again is another clip of the same media, not a copy.
+        let media_count = doc.project.media.len();
+        let again = add_content(&mut doc, stickers[0] as usize, 2 * SEC, None).unwrap();
+        assert_eq!(doc.project.media.len(), media_count, "no duplicate media on a repeat drag");
+        assert_eq!(doc.project.clip(again.select[0]).unwrap().media, Some(media.id));
     }
 
     fn png(path: &std::path::Path, rgb: u8) {
@@ -1090,5 +1102,22 @@ mod tests {
         assert_eq!(import_summary(&r(&[], 0, &["a.png: bad"])), ("Could not import a.png: bad".into(), true));
         assert_eq!(import_summary(&r(&[], 0, &["a: x", "b: y", "c: z", "d: w"])).0, "Could not import a: x; b: y; and 2 more");
         assert_eq!(import_summary(&r(&[1, 2], 1, &["a: x"])).0, "Imported 1 file (1 already in the project); could not import a: x");
+    }
+
+    /// Adding to the main lane lands exactly where `snap_to_cut` says (the
+    /// drop ghost's position), and later clips move along.
+    #[test]
+    fn main_lane_drops_land_where_the_ghost_says() {
+        let mut doc = demo();
+        let spine = doc.project.spine().unwrap();
+        let mut main: Vec<_> = doc.project.clips.iter().filter(|c| c.lane == spine).cloned().collect();
+        main.sort_by_key(|c| c.start);
+        let want = main[1].end();
+        let near = want + SEC / 10;
+        assert_eq!(snap_to_cut(&doc.project, spine, near), want);
+        let before = doc.project.clips.len();
+        let out = add(&mut doc, Panel::Media, 0, near, None).unwrap();
+        assert_eq!(doc.project.clips.len(), before + 1);
+        assert_eq!(doc.project.clip(out.select[0]).unwrap().start, want);
     }
 }
