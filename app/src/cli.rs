@@ -61,7 +61,7 @@ impl Cli {
                 }
                 "--project" => c.project = Some(val()),
                 "--open" => c.open = Some(val().into()),
-                path if !path.starts_with("--") && std::path::Path::new(path).join("project.json").is_file() => c.open = Some(path.into()),
+                path if !path.starts_with("--") && studio_model::file::ProjectFolder::is_project(std::path::Path::new(path)) => c.open = Some(path.into()),
                 "--select" => c.select = val().parse().ok(),
                 "--shot" => c.shot = Some(val()),
                 "--frames" => c.frames = val().parse().unwrap_or(40),

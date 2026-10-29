@@ -19,6 +19,7 @@ use super::{Content, Session};
 use serde_json::{Value, json};
 use std::io::Write;
 use std::path::PathBuf;
+use studio_model as m;
 
 fn usage() -> i32 {
     eprintln!("usage: zornov agent [--project DIR] [--out DIR] TOOL [JSON-ARGS]\n       zornov agent [--project DIR] -        (one {{\"tool\", \"args\"}} per stdin line)\n       zornov mcp [--project DIR]\ntools: guide, summary, inspect, media, catalogue, edit, check, undo, redo, new_project, open, save, import, download, ai, analyse, frame, contact_sheet, export, export_status, qc, deliver, queue, bundle, cutdown, edit_schema");
@@ -132,7 +133,7 @@ pub fn agent(args: &[String]) -> i32 {
             return 1;
         }
     };
-    let out_dir = o.out.clone().map(|p| std::path::absolute(&p).unwrap_or(p)).or_else(|| o.project.as_ref().map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()).join("agent-frames"))).unwrap_or_else(|| std::env::temp_dir().join("studio-agent"));
+    let out_dir = o.out.clone().map(|p| std::path::absolute(&p).unwrap_or(p)).or_else(|| o.project.as_ref().map(|p| m::file::ProjectFolder::new(std::path::absolute(p).unwrap_or_else(|_| p.clone())).agent_frames_dir())).unwrap_or_else(|| std::env::temp_dir().join("studio-agent"));
     let mut stdout = std::io::stdout().lock();
     let mut one = |s: &mut Session, tool: &str, args: &Value| -> bool {
         let r = match &window {

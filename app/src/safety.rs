@@ -138,7 +138,7 @@ fn stamp(name: &str) -> Option<(&'static str, u64, String)> {
 /// Every snapshot of a project, newest first: autosaves, restore points and
 /// the ones the person kept.
 pub fn history(folder: &Path) -> Vec<Snapshot> {
-    let dir = ProjectFolder::new(folder).backups_dir();
+    let dir = ProjectFolder::new(folder).versions_dir();
     let mut out: Vec<Snapshot> = std::fs::read_dir(dir)
         .map(|r| r.filter_map(|e| e.ok()).collect::<Vec<_>>())
         .unwrap_or_default()
@@ -160,11 +160,11 @@ pub fn history(folder: &Path) -> Vec<Snapshot> {
 /// chose. Autosave never prunes these.
 pub fn keep_snapshot(folder: &Path, project: &m::Project, label: &str) -> Result<PathBuf, String> {
     let pf = ProjectFolder::new(folder);
-    std::fs::create_dir_all(pf.backups_dir()).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(pf.versions_dir()).map_err(|e| e.to_string())?;
     let label: String = label.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect::<String>().trim_matches('_').chars().take(40).collect();
     let mut ms = now_ms();
     let path = loop {
-        let p = pf.backups_dir().join(format!("{NAMED}{ms:016}{}.json", if label.is_empty() { String::new() } else { format!("-{label}") }));
+        let p = pf.versions_dir().join(format!("{NAMED}{ms:016}{}.json", if label.is_empty() { String::new() } else { format!("-{label}") }));
         if !p.exists() {
             break p;
         }
@@ -216,8 +216,8 @@ pub fn restore(folder: &Path, snap: &Snapshot) -> Result<PathBuf, String> {
     let file = m::file::from_json(&text).map_err(|e| e.to_string())?;
     let point = match std::fs::read_to_string(pf.project_file()).ok().and_then(|t| m::file::from_json(&t).ok()) {
         Some(cur) => {
-            std::fs::create_dir_all(pf.backups_dir()).map_err(|e| e.to_string())?;
-            let p = pf.backups_dir().join(format!("{RESTORE}{:016}.json", now_ms()));
+            std::fs::create_dir_all(pf.versions_dir()).map_err(|e| e.to_string())?;
+            let p = pf.versions_dir().join(format!("{RESTORE}{:016}.json", now_ms()));
             m::file::write_atomic(&p, m::file::to_json(&cur).as_bytes()).map_err(|e| e.to_string())?;
             Some(p)
         }
@@ -245,7 +245,7 @@ pub struct Session {
 }
 
 fn sessions_dir(root: &Path) -> PathBuf {
-    root.join("Sessions")
+    ProjectFolder::new(root).state(m::file::State::Sessions)
 }
 
 #[cfg(windows)]
@@ -337,7 +337,7 @@ pub fn referenced(folder: &Path) -> HashSet<PathBuf> {
     let mut all = Vec::new();
     strings_of(&v, &mut all);
     let root = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-    let skip: HashSet<PathBuf> = [root.clone(), root.join("cache"), root.join("backups"), root.join("media")].into_iter().collect();
+    let skip: HashSet<PathBuf> = ProjectFolder::new(&root).own_dirs().into_iter().collect();
     for s in all {
         if s.is_empty() || s.len() > 4096 || s.contains('\n') {
             continue;
@@ -428,6 +428,7 @@ pub fn collect(folder: &Path, dest: &Path, opts: &CollectOptions) -> Result<Coll
         return Err(format!("{} is not empty; collect into a new or empty folder", dest.display()));
     }
     let src_root = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+    let skips = pf.archive_skips(opts.with_cache);
     if let Ok(d) = std::fs::canonicalize(dest.parent().unwrap_or(dest)) {
         if d.starts_with(&src_root) {
             return Err("the destination is inside the project; choose a folder outside it".into());
@@ -465,14 +466,14 @@ pub fn collect(folder: &Path, dest: &Path, opts: &CollectOptions) -> Result<Coll
         let in_project = canon.strip_prefix(&src_root).ok().map(Path::to_path_buf);
         if let Some(rel) = &in_project {
             let top = rel.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
-            if top == "backups" || (top == "cache" && !opts.with_cache) || top == "project.json" {
+            if skips.contains(&top.as_str()) {
                 continue;
             }
         }
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let to = match in_project {
             Some(rel) => dest.join(rel),
-            None if is_media => dest.join("media").join(unique_name(&mut taken_media, &name)),
+            None if is_media => ProjectFolder::new(dest).media_root().join(unique_name(&mut taken_media, &name)),
             None => dest.join("assets").join(unique_name(&mut taken_assets, &name)),
         };
         plan.insert(s, to);
@@ -487,10 +488,10 @@ pub fn collect(folder: &Path, dest: &Path, opts: &CollectOptions) -> Result<Coll
             }
         }
     }
-    for extra in ["agent-notes.md"] {
-        let sf = folder.join(extra);
+    {
+        let (sf, st) = (pf.state(m::file::State::AgentNotes), ProjectFolder::new(dest).state(m::file::State::AgentNotes));
         if sf.is_file() {
-            sidecars.push((sf, dest.join(extra)));
+            sidecars.push((sf, st));
         }
     }
     let need: u64 = plan.keys().map(|p| std::fs::metadata(p).map_or(0, |m| m.len())).sum::<u64>() + sidecars.iter().map(|(s, _)| std::fs::metadata(s).map_or(0, |m| m.len())).sum::<u64>();
@@ -704,9 +705,10 @@ pub fn backup(folder: &Path, dest: &Path, keep: usize, with_media: bool) -> Resu
     }
     std::fs::create_dir_all(&snap).map_err(|e| e.to_string())?;
     m::file::write_atomic(&snap.join(m::file::PROJECT_FILE), text.as_bytes()).map_err(|e| e.to_string())?;
-    for extra in ["agent-notes.md"] {
-        if folder.join(extra).is_file() {
-            let _ = std::fs::copy(folder.join(extra), snap.join(extra));
+    {
+        let notes = pf.state(m::file::State::AgentNotes);
+        if notes.is_file() {
+            let _ = std::fs::copy(&notes, snap.join("agent-notes.md"));
         }
     }
     let man = json!({"project": folder.display().to_string(), "created": when(now_ms()), "media": manifest, "with_media": with_media});
@@ -735,7 +737,7 @@ pub fn backup(folder: &Path, dest: &Path, keep: usize, with_media: bool) -> Resu
         }
     }
     // When, for the health check.
-    let _ = std::fs::write(folder.join(".last-backup.json"), json!({"at_ms": now_ms(), "to": dest.display().to_string(), "snapshot": out.snapshot}).to_string());
+    let _ = std::fs::write(pf.state(m::file::State::LastBackup), json!({"at_ms": now_ms(), "to": dest.display().to_string(), "snapshot": out.snapshot}).to_string());
     Ok(out)
 }
 
@@ -777,7 +779,7 @@ pub fn restore_backup(dest: &Path, folder: &Path, snapshot: &str, into: &Path) -
         let (Some(store), Some(orig)) = (it["store"].as_str(), it["path"].as_str()) else { continue };
         let src = root.join("media").join(store);
         let name = unique_name(&mut taken, it["name"].as_str().unwrap_or(store));
-        let to = into.join("media").join(name);
+        let to = ProjectFolder::new(into).media_root().join(name);
         copy_verified(&src, &to)?;
         map.insert(orig.to_owned(), to.display().to_string());
         restored += 1;
@@ -867,13 +869,13 @@ pub fn health(folder: &Path, backup_to: Option<&Path>) -> Value {
     if damaged > 0 {
         add("warning", "damaged-snapshots", format!("{damaged} snapshot{} cannot be read", if damaged == 1 { "" } else { "s" }), "harmless; clean removes old ones");
     }
-    let last_backup = std::fs::read_to_string(folder.join(".last-backup.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let last_backup = std::fs::read_to_string(pf.state(m::file::State::LastBackup)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
     match (&last_backup, backup_to) {
         (None, _) => add("warning", "never-backed-up", "this project has never been backed up to another folder or drive".into(), "project_care action \"backup\" with to: a folder on another drive"),
         (Some(b), _) if now_ms().saturating_sub(b["at_ms"].as_u64().unwrap_or(0)) > 7 * 86_400_000 => add("info", "backup-old", format!("the last backup was {}", when(b["at_ms"].as_u64().unwrap_or(0))), "back up again"),
         _ => {}
     }
-    let (cache, backups) = (dir_size(&pf.cache_dir()), dir_size(&pf.backups_dir()));
+    let (cache, backups) = (dir_size(&pf.cache_dir()), dir_size(&pf.versions_dir()));
     let total = dir_size(folder);
     if cache > (2 << 30) || (cache > (200 << 20) && cache > total / 2) {
         add("info", "big-cache", format!("caches take {}", human(cache)), "project_care action \"clean\" frees them (they are rebuilt when needed)");
@@ -1037,7 +1039,7 @@ pub fn clean_apply(folder: &Path, o: &CleanOptions, plan: &Plan) -> Result<u64, 
     for p in &o.other_projects {
         protected.extend(referenced(p));
     }
-    let allowed = [ProjectFolder::new(folder).cache_dir(), ProjectFolder::new(folder).backups_dir(), o.shared_cache.clone()];
+    let allowed = [ProjectFolder::new(folder).cache_dir(), ProjectFolder::new(folder).versions_dir(), o.shared_cache.clone()];
     let mut freed = 0;
     for d in &plan.items {
         let canon = std::fs::canonicalize(&d.path).unwrap_or_else(|_| d.path.clone());
@@ -1264,7 +1266,7 @@ mod tests {
         pf.save(&p).unwrap();
         for i in 0..8u64 {
             let name = format!("autosave-{:016}.json", 1000 + i);
-            std::fs::write(pf.backups_dir().join(name), m::file::to_json(&pf.document(&p, &Default::default()))).unwrap();
+            std::fs::write(pf.versions_dir().join(name), m::file::to_json(&pf.document(&p, &Default::default()))).unwrap();
         }
         let named = keep_snapshot(&root, &p, "milestone").unwrap();
         let shared = d.join("shared-cache");
