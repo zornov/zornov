@@ -205,32 +205,64 @@ fn entries(f: &Facts) -> Vec<Entry> {
         v.push(e(Section::Arrange, "Send to back", Icon::Stack, None, true, Act::Restack(Stack::Bottom)));
     }
     if f.many {
-        v.push(e(Section::Link, "Group", Icon::Stack, None, true, Act::Group));
-        v.push(e(Section::Link, "Link", Icon::LinkSimple, None, true, Act::Link));
+        v.push(e(Section::Link, "Group", Icon::Stack, Some("group"), true, Act::Group));
+        v.push(e(Section::Link, "Link", Icon::LinkSimple, Some("link"), true, Act::Link));
         v.push(e(Section::Link, "Nest into a sequence", Icon::Stack, None, true, Act::Nest));
     }
     if f.grouped {
-        v.push(e(Section::Link, "Ungroup", Icon::Stack, None, true, Act::Ungroup));
+        v.push(e(Section::Link, "Ungroup", Icon::Stack, Some("ungroup"), true, Act::Ungroup));
     }
     if f.linked {
-        v.push(e(Section::Link, "Unlink", Icon::LinkSimple, None, true, Act::Unlink));
+        v.push(e(Section::Link, "Unlink", Icon::LinkSimple, Some("unlink"), true, Act::Unlink));
     }
     if f.picture_with_sound {
         v.push(e(Section::Audio, "Detach sound", Icon::SpeakerHigh, None, true, Act::Detach));
     }
     if f.media_clip {
-        v.push(e(Section::Time, "Freeze frame at playhead", Icon::Pause, None, f.inside, Act::Freeze));
-        v.push(e(Section::Time, "Reverse", Icon::Repeat, None, true, Act::Reverse));
+        v.push(e(Section::Time, "Freeze frame at playhead", Icon::Pause, Some("freeze"), f.inside, Act::Freeze));
+        v.push(e(Section::Time, "Reverse", Icon::Repeat, Some("reverse"), true, Act::Reverse));
     }
     if f.one {
-        v.push(e(Section::Look, "Copy look", Icon::Palette, None, true, Act::CopyLook));
-        v.push(e(Section::Look, "Paste look", Icon::Palette, None, f.can_paste_look, Act::PasteLook));
+        v.push(e(Section::Look, "Copy look", Icon::Palette, Some("copy-look"), true, Act::CopyLook));
+        v.push(e(Section::Look, "Paste look", Icon::Palette, Some("paste-look"), f.can_paste_look, Act::PasteLook));
     }
     v.push(e(Section::Clip, if f.all_on { "Disable" } else { "Enable" }, Icon::Eye, None, true, Act::Enabled(!f.all_on)));
     v.push(e(Section::Clip, "Add marker", Icon::Flag, Some("marker"), true, Act::Marker));
     v.push(e(Section::Clip, "Show in Inspector", Icon::Faders, None, true, Act::Inspector));
     v.push(Entry { section: Section::Delete, label: "Delete", icon: Icon::Trash, hint: Some("delete"), enabled: true, danger: true, act: Act::Delete });
     v
+}
+
+/// A keyboard action that is otherwise a clip-menu row (group, link, freeze,
+/// reverse, look copy/paste) run on the selection.
+pub fn key_action(app: &mut StudioApp, ctx: &egui::Context, id: &str) {
+    let ids = app.editor.selection.clone();
+    let act = match id {
+        "group" => Act::Group,
+        "ungroup" => Act::Ungroup,
+        "link" => Act::Link,
+        "unlink" => Act::Unlink,
+        "freeze" => Act::Freeze,
+        "reverse" => Act::Reverse,
+        "copy-look" => Act::CopyLook,
+        "paste-look" => Act::PasteLook,
+        _ => return,
+    };
+    let many = ids.len() > 1;
+    let one = ids.len() == 1;
+    let why = match act {
+        _ if ids.is_empty() => Some("Select a clip first"),
+        Act::Group | Act::Link if !many => Some("Select two or more clips"),
+        Act::CopyLook | Act::PasteLook if !one => Some("Select one clip"),
+        Act::PasteLook if !held(ctx).look.is_some() => Some("Nothing to paste: copy a look first"),
+        _ => None,
+    };
+    if let Some(w) = why {
+        kit::push(ctx, w, None, Some(Icon::Info));
+        return;
+    }
+    let at = app.editor.playhead;
+    run(app, ctx, &ids, at, act);
 }
 
 /// ⌘C / ⌘X on the selection (the same as the clip menu's Copy and Cut).

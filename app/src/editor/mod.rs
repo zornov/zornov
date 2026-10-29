@@ -677,6 +677,7 @@ const EDITOR_KEYS: &[&str] = &[
     "redo", "undo", "duplicate", "select-all", "export", "zoom-in", "zoom-out", "fit", "clear-range", "play", "stop", "shuttle-fwd", "shuttle-back", "frame-back", "frame-fwd", "select", "blade", "slip", "range", "snap", "fullscreen", "in", "out", "split", "marker", "delete",
     "macro-record", "macro-run", "workspace-edit", "workspace-colour", "workspace-audio", "workspace-vfx", "workspace-motion", "workspace-production",
     "panel-library", "panel-inspector", "panel-timeline", "agent", "overlays", "all-projects",
+    "second-back", "second-fwd", "to-start", "to-end", "group", "ungroup", "link", "unlink", "freeze", "reverse", "copy-look", "paste-look",
 ];
 
 fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
@@ -695,18 +696,6 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     let free = crate::keymap::owner(ctx).is_none();
     let extra_zoom = pressed(M::COMMAND, Key::Plus);
     let extra_delete = free && pressed(M::NONE, Key::Delete);
-    if free && pressed(M::SHIFT, Key::ArrowLeft) {
-        app.editor.playhead = (app.editor.playhead - SEC).max(0);
-    }
-    if free && pressed(M::SHIFT, Key::ArrowRight) {
-        app.editor.playhead += SEC;
-    }
-    if free && pressed(M::NONE, Key::Home) {
-        app.editor.playhead = 0;
-    }
-    if free && pressed(M::NONE, Key::End) {
-        app.editor.playhead = app.doc.project.duration();
-    }
     // ⌘C / ⌘X / ⌘V arrive as clipboard events, not key presses.
     if free {
         let (copy, cut, paste) = ctx.input(|i| (i.events.iter().any(|e| matches!(e, egui::Event::Copy)), i.events.iter().any(|e| matches!(e, egui::Event::Cut)), i.events.iter().any(|e| matches!(e, egui::Event::Paste(_)))));
@@ -777,6 +766,11 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
             "split" => run(app, ctx, Action::Split),
             "marker" => run(app, ctx, Action::Marker),
             "delete" => run(app, ctx, Action::Delete),
+            "second-back" => app.editor.playhead = (app.editor.playhead - SEC).max(0),
+            "second-fwd" => app.editor.playhead = (app.editor.playhead + SEC).min(crate::services::transport::duration(&app.doc)),
+            "to-start" => app.editor.playhead = 0,
+            "to-end" => app.editor.playhead = crate::services::transport::duration(&app.doc),
+            "group" | "ungroup" | "link" | "unlink" | "freeze" | "reverse" | "copy-look" | "paste-look" => clip_menu::key_action(app, ctx, id),
             "agent" => {
                 agent_panel::open(app);
                 return;

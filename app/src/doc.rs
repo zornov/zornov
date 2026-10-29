@@ -490,6 +490,7 @@ impl Doc {
         self.history.take_undo(i);
         self.history.record_undone(m::Step { label: step.label.clone(), inverse: redo, author: step.author });
         self.rebase_after(i, &step.inverse, &mut old);
+        self.history_touched = self.clips_of(&step.inverse).unwrap_or_default();
         self.refresh();
         if !out.conflicts.is_empty() {
             let kept: Vec<String> = out.conflicts.iter().take(4).map(|c| format!("{} {}", c.what, if c.name.is_empty() { c.id.to_string() } else { c.name.clone() })).collect();
@@ -545,6 +546,7 @@ impl Doc {
         let undo = self.model.apply(step.inverse.clone()).map_err(|e| format!("Could not redo {}: {e}", step.label.to_lowercase()))?;
         self.history.take_redo(i);
         self.history.record_redone(m::Step { label: step.label.clone(), inverse: undo, author: step.author });
+        self.history_touched = self.clips_of(&step.inverse).unwrap_or_default();
         self.refresh();
         Ok(Some(step.label))
     }
@@ -789,6 +791,23 @@ mod tests {
         d.redo();
         assert_eq!(d.take_history_touched(), vec![a]);
         assert!(d.take_history_touched().is_empty());
+    }
+
+    /// Undoing a person's step from under a later agent step still says
+    /// which clips it changed.
+    #[test]
+    fn undo_from_under_an_agent_step_reports_the_clips() {
+        let mut d = Doc::from_view(&view::demo());
+        let (a, b) = first_two_free_clips(&d);
+        let seq = d.seq();
+        assert!(d.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(a as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        d.as_author(m::Author::Agent { request: 1, call: 1 }, |d| {
+            assert!(d.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(b as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        });
+        assert!(d.undo().is_some());
+        assert_eq!(d.take_history_touched(), vec![a]);
+        assert!(d.redo().is_some());
+        assert_eq!(d.take_history_touched(), vec![a]);
     }
 
     #[test]

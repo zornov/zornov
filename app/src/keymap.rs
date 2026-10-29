@@ -60,11 +60,34 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, key))
 }
 
+/// Editing keys that have an id (so they can be rebound, and show in
+/// menus) but no row in Settings ▸ Shortcuts yet: (id, name, default).
+// TODO(settings): move these rows into `SHORTCUTS` and delete this table.
+pub const EXTRA: &[(&str, &str, &str)] = &[
+    ("second-back", "Back one second", "⇧←"),
+    ("second-fwd", "Forward one second", "⇧→"),
+    ("to-start", "Go to start", "Home"),
+    ("to-end", "Go to end", "End"),
+    ("group", "Group clips", "⌘G"),
+    ("ungroup", "Ungroup clips", "⇧⌘G"),
+    ("link", "Link clips", "⇧⌘L"),
+    ("unlink", "Unlink clips", "⌥⇧⌘L"),
+    ("freeze", "Freeze frame at playhead", "⌥F"),
+    ("reverse", "Reverse clip", "⌃R"),
+    ("copy-look", "Copy look", "⌥⌘C"),
+    ("paste-look", "Paste look", "⌥⌘V"),
+];
+
+/// Every action with keys: the Settings table, then [`EXTRA`].
+fn table() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
+    SHORTCUTS.iter().chain(EXTRA.iter())
+}
+
 /// The keys of an action: the person's, or the default.
 pub fn keys<'a>(prefs: &'a Prefs, id: &str) -> Option<&'a str> {
     match prefs.shortcuts.iter().find(|(a, _)| a == id) {
         Some((_, k)) => Some(k.as_str()).filter(|k| !k.is_empty()),
-        None => SHORTCUTS.iter().find(|(a, _, _)| *a == id).map(|(_, _, d)| *d).filter(|d| !d.is_empty()),
+        None => table().find(|(a, _, _)| *a == id).map(|(_, _, d)| *d).filter(|d| !d.is_empty()),
     }
 }
 
@@ -73,7 +96,7 @@ pub fn keys<'a>(prefs: &'a Prefs, id: &str) -> Option<&'a str> {
 /// their own handlers). Shortcuts with more modifiers are tried first, so
 /// ⇧⌘Z is redo, not undo.
 pub fn pressed(ctx: &egui::Context, prefs: &Prefs, ids: &[&str]) -> Vec<&'static str> {
-    let mut table: Vec<(&'static str, KeyboardShortcut)> = SHORTCUTS.iter().filter(|(id, _, _)| ids.contains(id)).filter_map(|(id, _, _)| Some((*id, parse(keys(prefs, id)?)?))).collect();
+    let mut table: Vec<(&'static str, KeyboardShortcut)> = table().filter(|(id, _, _)| ids.contains(id)).filter_map(|(id, _, _)| Some((*id, parse(keys(prefs, id)?)?))).collect();
     let count = |m: Modifiers| m.ctrl as u8 + m.alt as u8 + m.shift as u8 + (m.command || m.mac_cmd) as u8;
     table.sort_by_key(|(_, k)| std::cmp::Reverse(count(k.modifiers)));
     let mut out = Vec::new();
@@ -152,7 +175,7 @@ pub fn scoped<'a>(ctx: &egui::Context, prefs: &Prefs, ids: &[&'a str]) -> Vec<&'
 /// Actions sharing a shortcut: (keys, actions) for every clash.
 pub fn conflicts(prefs: &Prefs) -> Vec<(String, Vec<&'static str>)> {
     let mut by: Vec<(KeyboardShortcut, String, Vec<&'static str>)> = Vec::new();
-    for (id, _, _) in SHORTCUTS {
+    for (id, _, _) in table() {
         let Some(k) = keys(prefs, id) else { continue };
         let Some(s) = parse(k) else { continue };
         match by.iter_mut().find(|(x, _, _)| *x == s) {
@@ -217,12 +240,25 @@ pub fn hint(prefs: &Prefs, id: &str) -> String {
 
 /// The display name of an action.
 pub fn name(id: &str) -> &'static str {
-    SHORTCUTS.iter().find(|(a, _, _)| *a == id).map_or("", |(_, n, _)| *n)
+    table().find(|(a, _, _)| *a == id).map_or("", |(_, n, _)| *n)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extra_keys_parse_and_clash_with_nothing() {
+        let prefs = Prefs::default();
+        for (id, _, d) in EXTRA {
+            assert!(parse(d).is_some(), "{id}: {d}");
+            assert!(SHORTCUTS.iter().all(|(o, _, _)| o != id), "{id} is listed twice");
+            assert_eq!(keys(&prefs, id), Some(*d));
+        }
+        let clash: Vec<_> = conflicts(&prefs).into_iter().filter(|(_, ids)| ids.iter().any(|i| EXTRA.iter().any(|e| e.0 == *i))).collect();
+        assert!(clash.is_empty(), "{clash:?}");
+        assert_eq!(name("group"), "Group clips");
+    }
 
     #[test]
     fn reads_what_settings_writes() {
