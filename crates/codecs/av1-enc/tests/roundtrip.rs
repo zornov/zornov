@@ -223,7 +223,7 @@ fn bench_1080p_single_thread() {
     let load = std::process::Command::new("sysctl").args(["-n", "vm.loadavg"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     eprintln!("vm.loadavg before: {load}");
     for speed in [9u8, 6] {
-        let mut enc = Encoder::new(Config { rate: RateMode::Cqp(100), speed, threads: 1, ..Config::new(1920, 1080) }).unwrap();
+        let mut enc = Encoder::new(Config { rate: RateMode::Cqp(100), speed, keyint: 1, threads: 1, ..Config::new(1920, 1080) }).unwrap();
         let n = 5;
         let t = std::time::Instant::now();
         let mut bytes = 0;
@@ -231,7 +231,7 @@ fn bench_1080p_single_thread() {
             bytes += enc.push_frame(&img, i).unwrap()[0].data.len();
         }
         let secs = t.elapsed().as_secs_f64();
-        eprintln!("1080p speed {speed}: {:.2} fps over {n} frames, {} B/frame", n as f64 / secs, bytes / n as usize);
+        eprintln!("1080p key frames, speed {speed}: {:.2} fps over {n} frames, {} B/frame", n as f64 / secs, bytes / n as usize);
     }
     let load = std::process::Command::new("sysctl").args(["-n", "vm.loadavg"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     eprintln!("vm.loadavg after: {load}");
@@ -370,6 +370,27 @@ fn intra_bytes_at(curve: &[(f64, f64)], psnr: f64) -> Option<f64> {
         }
     }
     best
+}
+
+/// Speed of the P frames, for the gate report (same command as the key frame benchmark).
+#[test]
+#[ignore = "benchmark: run in release mode and read the printed numbers"]
+fn bench_1080p_p_frames_single_thread() {
+    let frames = moving_sequence(Motion::Pan(3.0, 2.0), 1920, 1080, 6);
+    let load = || std::process::Command::new("sysctl").args(["-n", "vm.loadavg"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    eprintln!("vm.loadavg before: {}", load());
+    for speed in [9u8, 6] {
+        let mut enc = Encoder::new(Config { rate: RateMode::Cqp(100), speed, threads: 1, ..Config::new(1920, 1080) }).unwrap();
+        enc.push_frame(&frames[0], 0).unwrap();
+        let t = std::time::Instant::now();
+        let mut bytes = 0;
+        for (i, f) in frames.iter().enumerate().skip(1) {
+            bytes += enc.push_frame(f, i as i64).unwrap()[0].data.len();
+        }
+        let secs = t.elapsed().as_secs_f64();
+        eprintln!("1080p P frames, speed {speed}: {:.2} fps over {} frames, {} B/frame", (frames.len() - 1) as f64 / secs, frames.len() - 1, bytes / (frames.len() - 1));
+    }
+    eprintln!("vm.loadavg after: {}", load());
 }
 
 /// The phase (b) gate: on moving content, key frame plus P frames spend clearly fewer bytes than
