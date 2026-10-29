@@ -152,17 +152,85 @@ impl Default for Prefs {
 
 const KEY: &str = "studio-prefs";
 
+static NOTICE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// What the person should hear about the settings they started with, once.
+pub fn take_notice() -> Option<String> {
+    NOTICE.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Settings that no longer read as a whole: every setting that still does
+/// is kept (the tour stays done, the shortcuts stay), the rest is default.
+fn salvage(raw: &str) -> Prefs {
+    let Ok(serde_json::Value::Object(found)) = serde_json::from_str::<serde_json::Value>(raw) else { return Prefs::default() };
+    let Ok(serde_json::Value::Object(mut base)) = serde_json::to_value(Prefs::default()) else { return Prefs::default() };
+    for (key, value) in found {
+        let mut trial = base.clone();
+        trial.insert(key, value);
+        if serde_json::from_value::<Prefs>(serde_json::Value::Object(trial.clone())).is_ok() {
+            base = trial;
+        }
+    }
+    serde_json::from_value(serde_json::Value::Object(base)).unwrap_or_default()
+}
+
+/// Reads the settings; an unreadable copy is kept in `dir` and reported.
+fn read_in(raw: Option<String>, dir: &std::path::Path) -> (Prefs, Option<String>) {
+    let Some(raw) = raw else { return (Prefs::default(), None) };
+    match serde_json::from_str(&raw) {
+        Ok(p) => (p, None),
+        Err(e) => {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let copy = dir.join(format!("settings-unreadable-{stamp}.json"));
+            let kept = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&copy, &raw)).is_ok();
+            let tail = if kept { format!("; the old settings are kept in {}", copy.display()) } else { String::new() };
+            (salvage(&raw), Some(format!("Some settings could not be read ({e}) and went back to their defaults{tail}")))
+        }
+    }
+}
+
 impl Prefs {
     pub fn load(storage: Option<&dyn eframe::Storage>) -> Self {
-        storage
-            .and_then(|s| s.get_string(KEY))
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        let (prefs, note) = read_in(storage.and_then(|s| s.get_string(KEY)), &studio_paths::studio());
+        if note.is_some() {
+            *NOTICE.lock().unwrap_or_else(|e| e.into_inner()) = note;
+        }
+        prefs
     }
 
     pub fn save(&self, storage: &mut dyn eframe::Storage) {
-        if let Ok(s) = serde_json::to_string(self) {
-            storage.set_string(KEY, s);
+        match serde_json::to_string(self) {
+            Ok(s) => storage.set_string(KEY, s),
+            Err(e) => eprintln!("zornov: settings were not saved: {e}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unreadable_settings_keep_what_still_reads_and_are_reported() {
+        let dir = std::env::temp_dir().join(format!("zornov-prefs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // One wrong value among good ones: the tour stays done.
+        let raw = r#"{"tour_done":true,"autosave":"yes please","tips_on":false}"#.to_owned();
+        let (p, note) = read_in(Some(raw.clone()), &dir);
+        assert!(p.tour_done && !p.tips_on, "settings that read are kept");
+        assert!(p.autosave, "the one that did not read is the default");
+        let note = note.expect("the person is told");
+        assert!(note.contains("settings-unreadable-"), "{note}");
+        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(std::fs::read_to_string(kept[0].path()).unwrap(), raw, "the old file is kept as it was");
+        // Whole nonsense gives defaults and still tells.
+        let (p, note) = read_in(Some("not json".into()), &dir);
+        assert_eq!(p.tour_done, Prefs::default().tour_done);
+        assert!(note.is_some());
+        // Nothing stored, or a good copy: no note.
+        assert!(read_in(None, &dir).1.is_none());
+        assert!(read_in(serde_json::to_string(&Prefs::default()).ok(), &dir).1.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
