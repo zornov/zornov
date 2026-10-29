@@ -572,7 +572,7 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
                 kit::Slider::new("Size", &mut e.brush, 1.0..=500.0).default(10.0).unit("px").logarithmic(true).with_value().width(140.0).show(ui);
             }
             Tool::Pen | Tool::Curvature => {
-                if kit::Button::secondary("Finish").shortcut("Enter").compact().show(ui).clicked() {
+                if kit::Button::secondary("Finish").compact().show(ui).on_hover_text("Finish the path (Enter)").clicked() {
                     e.finish_path(false);
                 }
                 if kit::Button::ghost("Close path").compact().show(ui).clicked() {
@@ -622,31 +622,31 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
         let mut clear = false;
         menu_popover(ui, "Arrange", |ui| {
             let mut hit = false;
-            let mut item = |ui: &mut egui::Ui, label: &str, on: bool, op: Value| {
+            let mut act = |ui: &mut egui::Ui, label: &str, on: bool, op: Value| {
                 if kit::MenuItem::new(label).enabled(on).show(ui).clicked() {
                     ops_to_run.push(op);
                     hit = true;
                 }
             };
             if let Some(&first) = sel.first() {
-                item(ui, "Bring to front", one, json!({"op": "arrange", "id": first, "how": "front"}));
-                item(ui, "Send to back", one, json!({"op": "arrange", "id": first, "how": "back"}));
+                act(ui, "Bring to front", one, json!({"op": "arrange", "id": first, "how": "front"}));
+                act(ui, "Send to back", one, json!({"op": "arrange", "id": first, "how": "back"}));
             } else {
-                item(ui, "Bring to front", false, Value::Null);
-                item(ui, "Send to back", false, Value::Null);
+                act(ui, "Bring to front", false, Value::Null);
+                act(ui, "Send to back", false, Value::Null);
             }
             let id0 = sel.first().copied().unwrap_or(0);
             kit::menu_separator(ui);
-            item(ui, "Group", many, json!({"op": "group", "ids": sel}));
-            item(ui, "Ungroup", one, json!({"op": "ungroup", "id": id0}));
-            item(ui, "Clip with the front shape", many, json!({"op": "clip", "ids": sel}));
+            act(ui, "Group", many, json!({"op": "group", "ids": sel}));
+            act(ui, "Ungroup", one, json!({"op": "ungroup", "id": id0}));
+            act(ui, "Clip with the front shape", many, json!({"op": "clip", "ids": sel}));
             kit::menu_separator(ui);
-            item(ui, "Outline type", one, json!({"op": "outline_text", "id": id0}));
-            item(ui, "Outline stroke", one, json!({"op": "outline_stroke", "id": id0}));
-            item(ui, "Expand", one, json!({"op": "expand", "id": id0}));
-            item(ui, "Trace image into shapes", one, json!({"op": "trace", "id": id0, "preset": "6 colors"}));
-            item(ui, "Add drop shadow", one, json!({"op": "effect", "ids": sel, "effect": {"type": "drop_shadow", "dx": 6, "dy": 8, "blur": 18, "color": "#00000059"}}));
-            item(ui, "Repeat around a circle", one, json!({"op": "repeat", "ids": sel, "kind": "radial", "count": 8}));
+            act(ui, "Outline type", one, json!({"op": "outline_text", "id": id0}));
+            act(ui, "Outline stroke", one, json!({"op": "outline_stroke", "id": id0}));
+            act(ui, "Expand", one, json!({"op": "expand", "id": id0}));
+            act(ui, "Trace image into shapes", one, json!({"op": "trace", "id": id0, "preset": "6 colors"}));
+            act(ui, "Add drop shadow", one, json!({"op": "effect", "ids": sel, "effect": {"type": "drop_shadow", "dx": 6, "dy": 8, "blur": 18, "color": "#00000059"}}));
+            act(ui, "Repeat around a circle", one, json!({"op": "repeat", "ids": sel, "kind": "radial", "count": 8}));
             hit
         });
         ui.add_space(theme::space::GAP);
