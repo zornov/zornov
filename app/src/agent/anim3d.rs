@@ -226,10 +226,12 @@ fn shape_names(r: &Rig, name: &str) -> Vec<String> {
 pub(super) fn interp(ease: &str) -> Result<m::Interp, String> {
     Ok(match ease {
         "smooth" | "auto" => m::Interp::Auto,
+        "spline" => m::Interp::Spline,
+        "through" => m::Interp::Through,
         "linear" => m::Interp::Linear,
         "hold" | "step" | "snap" => m::Interp::Hold,
         "ease" | "ease_in_out" => m::Interp::Ease,
-        other => return Err(format!("ease \"{other}\": smooth, linear, ease or hold")),
+        other => return Err(format!("ease \"{other}\": smooth, spline, through, linear, ease or hold")),
     })
 }
 

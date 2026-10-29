@@ -94,7 +94,7 @@ pub fn op_fields(op: &str) -> Option<&'static [&'static str]> {
         "delete" => &["clips", "ripple"],
         "move" => &["clips", "by", "to", "lane"],
         "set" => &["clip", "at", "anchor", "x", "y", "scale", "fit", "rotation", "opacity", "stroke", "stroke_width", "volume", "pan", "fade_in", "fade_out", "speed", "exposure", "contrast", "saturation", "temperature", "tint", "start", "duration", "text", "style", "text_size", "colour", "name", "muted", "backing", "clips", "reveal", "exit", "loop", "unit_motion", "animators", "animator", "runs", "path", "kerning", "font", "weight", "italic"],
-        "animate" => &["clip", "clips", "property", "properties", "keys", "ease", "relative", "timeline", "wiggle", "pulse", "path", "arc", "curve", "formula"],
+        "animate" => &["clip", "clips", "property", "properties", "keys", "ease", "tcb", "relative", "timeline", "wiggle", "pulse", "path", "arc", "curve", "formula"],
         "stagger" => &["clips", "each", "amount", "from", "by", "origin", "spread", "animate", "use_move"],
         "keys" => &["clip", "clips", "property", "remove", "move", "curve"],
         "driver" => &["clip", "property", "from", "vars", "expr", "multiply", "add", "delay", "remove", "enabled"],
