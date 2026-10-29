@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::r#box::{find, read_top_header, require, Boxes, FourCC, TopBox};
 use crate::boxes::{self, Trex};
-use crate::codec::{AvcConfig, HevcConfig};
+use crate::codec::{Av1Config, AvcConfig, HevcConfig};
 use crate::error::{Error, Result};
 use crate::fragment::{parse_moof, FragTarget};
 use crate::stbl::SampleTable;
@@ -40,6 +40,8 @@ pub enum Codec {
     Avc { config: AvcConfig },
     /// H.265 (`hvc1` / `hev1`).
     Hevc { config: HevcConfig },
+    /// AV1 (`av01`).
+    Av1 { config: Av1Config },
     /// AAC from `mp4a` + `esds`. `object_type` is 2 for LC, 5 for HE (SBR),
     /// 29 for HE v2 (PS); `sample_rate` / `channels` describe the decoded
     /// output (SBR doubles the core rate, PS upmixes mono to stereo).
