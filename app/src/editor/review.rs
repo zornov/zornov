@@ -6,8 +6,8 @@
 //! ruler and as boxes on the picture.
 //!
 //! Everything is read from and written to the project folder through
-//! [`crate::collab`], so what the AI editor (or a sync) writes shows up
-//! here within a second, and what is written here the AI reads.
+//! [`crate::collab`], so what the Assistant (or a sync) writes shows up
+//! here within a second, and what is written here the Assistant reads.
 
 use crate::app::StudioApp;
 use crate::collab::{self, comments, delta, package, sync, team, versions};
@@ -181,7 +181,7 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
         let close = Rect::from_center_size(egui::pos2(r.right() - 22.0, r.top() + 22.0), Vec2::splat(24.0));
         let inner = r.shrink2(Vec2::new(16.0, 12.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
-        child.set_clip_rect(r);
+        child.set_clip_rect(inner.expand2(Vec2::new(0.0, 12.0)).intersect(r));
         body(app, &mut child);
         // Drag onto the editor to dock it.
         let grip = Rect::from_center_size(close.center() - Vec2::new(28.0, 0.0), Vec2::splat(22.0));
@@ -199,20 +199,15 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     ui.add_space(6.0);
     let has_root = with(|u| u.root.is_some());
     if !has_root {
-        ui.label(egui::RichText::new("Save the project to start reviewing: notes, versions and the team are kept in its folder.").color(t.text_2));
+        ui.label(egui::RichText::new("Save the project to start reviewing: notes, versions and the team are kept in its folder").color(t.text_2));
         return;
     }
-    kit::scroll_strip(ui, "review-tabs", |ui| {
-        for (tab, name) in [(Tab::Notes, "Notes"), (Tab::Versions, "Versions"), (Tab::Team, "Team"), (Tab::Share, "Share")] {
-            let on = with(|u| u.tab == tab);
-            if ui.selectable_label(on, name).clicked() {
-                with(|u| u.tab = tab);
-            }
-        }
-    });
-    ui.add_space(4.0);
-    kit::hline(ui, ui.max_rect().left()..=ui.max_rect().right(), ui.cursor().top());
-    ui.add_space(8.0);
+    let tabs = [Tab::Notes, Tab::Versions, Tab::Team, Tab::Share];
+    let mut at = tabs.iter().position(|x| with(|u| u.tab == *x)).unwrap_or(0);
+    if kit::tab_bar(ui, "review-tabs", &mut at, &["Notes", "Versions", "Team", "Share"]) {
+        with(|u| u.tab = tabs[at]);
+    }
+    ui.add_space(theme::space::SM);
     if let Some(s) = with(|u| u.status.clone()) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(&s).color(t.text_2).font(theme::caption()));
@@ -294,7 +289,7 @@ fn notes_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         u.store.list(&app.doc.model, f).into_iter().cloned().collect()
     });
     if notes.is_empty() {
-        ui.label(egui::RichText::new("No notes yet. Notes made here, by the AI or by a reviewer's package show up in this list and on the timeline.").color(t.text_2));
+        ui.label(egui::RichText::new("No notes yet. Notes made here, by the Assistant or by a reviewer's package show up in this list and on the timeline").color(t.text_2));
     }
     for c in notes {
         let (at, gone) = c.time_in(&app.doc.model);
@@ -365,7 +360,7 @@ fn note_actions(app: &mut StudioApp, ui: &mut egui::Ui, c: &comments::Comment, m
                 save_store(u);
             });
         }
-        if ui.small_button("Ask the AI").on_hover_text("Puts this note in the AI editor's message box").clicked() {
+        if ui.small_button("Ask the Assistant").on_hover_text("Puts this note in the Assistant's message box").clicked() {
             let (at, _) = c.time_in(&app.doc.model);
             let ask = format!("Please address review note {} at {:.2}s: \"{}\". When done, resolve it with comments (say what changed).", c.id, at as f64 / SEC as f64, c.text);
             let a = app.agent.get_or_insert_with(|| super::agent_panel::AgentUi::new(ui.ctx()));
@@ -427,14 +422,14 @@ fn versions_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
     let now = collab::fingerprint(&app.doc.model);
     ui.label(egui::RichText::new(format!("Branch: {line} · {} cuts in this project", app.doc.model.sequences.len())).font(theme::caption()).color(t.text_2));
     if list.is_empty() {
-        ui.label(egui::RichText::new("No versions yet. A version is the whole edit as it is now, to compare with, go back to, or branch an alternate cut from.").color(t.text_2));
+        ui.label(egui::RichText::new("No versions yet. A version is the whole edit as it is now, to compare with, go back to, or branch an alternate cut from").color(t.text_2));
     }
     for v in list.iter().rev() {
         egui::Frame::new().fill(t.raised).corner_radius(CornerRadius::same(6)).inner_margin(8.0).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let mark = if v.fingerprint == now { " · matches now" } else if current.as_deref() == Some(v.id.as_str()) { " · current" } else { "" };
             ui.label(egui::RichText::new(format!("{} {}{mark}", v.id, v.name)).color(t.text));
-            ui.label(egui::RichText::new(format!("{} · {} clips · {:.1} s · {}", v.author, v.clips, v.duration as f64 / SEC as f64, v.branch)).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(format!("{} · {} · {:.1} s · {}", v.author, if v.clips == 1 { "1 clip".to_owned() } else { format!("{} clips", v.clips) }, v.duration as f64 / SEC as f64, v.branch)).font(theme::caption()).color(t.text_2));
             if !v.note.is_empty() {
                 ui.label(egui::RichText::new(&v.note).font(theme::caption()).color(t.text_2));
             }
@@ -502,12 +497,12 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
     let role = with(|u| u.team.role_of(&me));
     ui.label(egui::RichText::new(format!("You are {me}: {}", role.name())).color(t.text));
     if !role.can_edit() {
-        ui.label(egui::RichText::new("Reviewers add notes; edits are made by editors.").font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new("Reviewers add notes; edits are made by editors").font(theme::caption()).color(t.text_2));
     }
     ui.add_space(8.0);
     let members = with(|u| u.team.members.clone());
     if members.is_empty() {
-        ui.label(egui::RichText::new("Just you so far. Add people to give them roles; anyone not on the team then reviews.").color(t.text_2));
+        ui.label(egui::RichText::new("Just you so far. Add people to give them roles; anyone not on the team then reviews").color(t.text_2));
     }
     for mem in &members {
         ui.horizontal_wrapped(|ui| {
@@ -556,12 +551,12 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
     let seq = app.doc.model.active_sequence.0;
     let locks = with(|u| u.team.locks.clone());
     if locks.is_empty() {
-        ui.label(egui::RichText::new("Nothing is held. Lock what you are working on so nobody else's edit changes it.").font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new("Nothing is held. Lock what you are working on so nobody else's edit changes it").font(theme::caption()).color(t.text_2));
     }
     for l in &locks {
         ui.horizontal_wrapped(|ui| {
             let what = match (l.lane, l.clip) {
-                (Some(id), _) => format!("lane {}", app.doc.project.lane(id as u32).map(|x| x.name.clone()).unwrap_or_else(|| id.to_string())),
+                (Some(id), _) => format!("track {}", app.doc.project.lane(id as u32).map(|x| x.name.clone()).unwrap_or_else(|| id.to_string())),
                 (_, Some(id)) => format!("clip #{id} {}", app.doc.project.clip(id as u32).map(|c| c.name.clone()).unwrap_or_default()),
                 _ => "?".into(),
             };
@@ -590,7 +585,7 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
             }
             let lanes: Vec<(u32, String)> = app.doc.project.lanes.iter().map(|l| (l.id, l.name.clone())).collect();
-            ui.menu_button("Lock a lane", |ui| {
+            ui.menu_button("Lock a track", |ui| {
                 kit::popup_body(ui, |ui| {
                     for (id, name) in lanes {
                         if ui.button(&name).clicked() {
