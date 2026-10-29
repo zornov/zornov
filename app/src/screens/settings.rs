@@ -36,6 +36,10 @@ pub struct SettingsState {
     pub lessons_at: f64,
     pub lesson_edit: Option<(u64, String)>,
     pub lesson_clear: bool,
+    /// The destructive button clicked once and waiting for its second click.
+    pub armed: Option<String>,
+    /// The shortcuts as they were before "Reset all", for Undo.
+    pub shortcuts_undo: Option<Vec<(String, String)>>,
     /// Settings ▸ Models: the real models folder and its downloads (made
     /// on the first visit; downloads go on when the page is left).
     pub models: Option<crate::services::models::Models>,
@@ -45,6 +49,21 @@ pub struct SettingsState {
     /// Settings ▸ Account: the plan, the cloud, credits, receipts, marketplace.
     #[cfg(feature = "commerce")]
     pub account: crate::screens::account::AccountState,
+}
+
+/// A button that cannot be taken back asks for a second click: the first
+/// arms `key` (its label should say so), the second does it.
+fn confirmed(armed: &mut Option<String>, key: &str, clicked: bool) -> bool {
+    if !clicked {
+        return false;
+    }
+    if armed.as_deref() == Some(key) {
+        *armed = None;
+        true
+    } else {
+        *armed = Some(key.to_owned());
+        false
+    }
 }
 
 const PAGES: &[(&str, Icon)] = &[
@@ -221,7 +240,9 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
                 p.language = if i == 0 { String::new() } else { langs[i - 1].tag().to_owned() };
             }
         });
-        let mut scale = p.ui_scale * 100.0;
+        // The value being dragged stays in the field until it is applied.
+        let pending: Option<f32> = ui.data(|d| d.get_temp(egui::Id::unique("pending-scale")));
+        let mut scale = pending.unwrap_or(p.ui_scale * 100.0);
         let out = FieldRow::new("Interface size", &mut scale, 80.0..=200.0).default(100.0).unit("%").step(5.0).scrub(0.5).show(ui);
         // Apply when the gesture ends so the slider does not move under
         // the pointer while the whole UI rescales.
@@ -407,9 +428,12 @@ fn shortcuts(app: &mut StudioApp, ui: &mut egui::Ui) {
     let w = ui.available_width();
     ui.horizontal(|ui| {
         kit::text_field(ui, &mut app.settings.shortcut_query, "Search actions or keys", Some(Icon::MagnifyingGlass), w - 140.0, None);
-        if Button::ghost("Reset all").icon(Icon::ArrowCounterClockwise).show(ui).clicked() {
-            app.prefs.shortcuts.clear();
+        if Button::ghost("Reset all").icon(Icon::ArrowCounterClockwise).show(ui).clicked() && !app.prefs.shortcuts.is_empty() {
+            app.settings.shortcuts_undo = Some(std::mem::take(&mut app.prefs.shortcuts));
             kit::push(ui.ctx(), "Shortcuts reset to defaults", None, None);
+        }
+        if app.settings.shortcuts_undo.is_some() && Button::ghost("Undo reset").show(ui).clicked() {
+            app.prefs.shortcuts = app.settings.shortcuts_undo.take().unwrap_or_default();
         }
     });
     ui.add_space(theme::space::XS);
@@ -537,7 +561,9 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
                     ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
-                    if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
+                    let sure = st.armed.as_deref() == Some("api-key");
+                    let clicked = Button::secondary(if sure { "Remove the key?" } else { "Remove" }).icon(Icon::Trash).show(ui).clicked();
+                    if confirmed(&mut st.armed, "api-key", clicked) {
                         keychain::remove_api_key(account);
                         forget_saved_label(ui, account);
                         st.ai_key_saved = Some(false);
@@ -648,7 +674,10 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                         if Button::ghost("Edit").compact().show(ui).clicked() {
                             st.lesson_edit = Some((l.id, l.text.clone()));
                         }
-                        if Button::ghost("Delete").icon(Icon::Trash).compact().show(ui).clicked() {
+                        let key = format!("lesson-{}", l.id);
+                        let sure = st.armed.as_deref() == Some(key.as_str());
+                        let clicked = Button::ghost(if sure { "Delete it?" } else { "Delete" }).icon(Icon::Trash).compact().show(ui).clicked();
+                        if confirmed(&mut st.armed, &key, clicked) {
                             match store.forget(l.id) {
                                 Ok(()) => {
                                     changed = true;
@@ -1015,6 +1044,16 @@ mod tests {
 
     /// Esc while a shortcut is being captured cancels the capture and leaves
     /// Settings open; the next Esc closes Settings.
+    #[test]
+    fn a_destructive_button_needs_its_second_click() {
+        let mut armed = None;
+        assert!(!confirmed(&mut armed, "a", false));
+        assert!(!confirmed(&mut armed, "a", true), "first click arms");
+        assert!(!confirmed(&mut armed, "b", true), "another button re-arms");
+        assert!(confirmed(&mut armed, "b", true), "second click does it");
+        assert_eq!(armed, None);
+    }
+
     #[test]
     fn escape_cancels_a_capture_without_closing_settings() {
         use crate::app::Overlay;
