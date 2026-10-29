@@ -109,7 +109,7 @@ fn build_in() -> Vec<Workspace> {
         docking(with(ws("Audio", "Mix sound: audio tools, a tall timeline and level controls.", (true, 320.0), (true, 300.0), (true, Some(460.0)), "Audio"), false, "Audio"), Panel::Sound, Some(Panel::Timeline), Zone::Right),
         with(ws("Effects", "Effects, masks and tracking on a large viewer.", (true, 320.0), (true, 400.0), (true, Some(220.0)), "Effects"), false, "Adjust"),
         with(ws("Motion", "Titles, shapes and animation with keyframes close at hand.", (true, 320.0), (true, 340.0), (true, Some(280.0)), "Motions"), false, "Animation"),
-        // The AI editor a tab with the Library (showing); Review notes,
+        // The Assistant a tab with the Library (showing); Review notes,
         // versions and the team a tab with the Inspector.
         showing(showing(docking(docking(ws("Review", "Plan and review: your media and the AI editor, a short timeline.", (true, 380.0), (true, 300.0), (true, Some(200.0)), "AI"), Panel::Review, Some(Panel::Inspector), Zone::Tab), Panel::Ai, Some(Panel::Library), Zone::Tab), Panel::Ai), Panel::Review),
     ]
@@ -282,7 +282,16 @@ pub fn tree_of(w: &Workspace) -> crate::dock::Tree {
 /// Lays the window out as `w` (and remembers it as the layout).
 pub fn apply(app: &mut StudioApp, w: &Workspace) {
     let ed = &mut app.editor;
+    // The timeline's zoom and scroll belong to the project, not the layout:
+    // switching must not throw them away (`set_tree` asks for a refit). A
+    // timeline still following the window keeps fitting by itself.
+    let (pps, scroll, keep) = (ed.px_per_sec, ed.tl_scroll, !ed.auto_fit);
     ed.set_tree(tree_of(w));
+    if keep {
+        ed.px_per_sec = pps;
+        ed.tl_scroll = scroll;
+        ed.fit_pending = false;
+    }
     ed.rail = rail(&w.rail);
     app.prefs.workspace = w.name.clone();
 }
@@ -291,6 +300,7 @@ pub fn apply(app: &mut StudioApp, w: &Workspace) {
 /// "Colour workspace" for a screen reader.
 pub fn switch(app: &mut StudioApp, ctx: &eframe::egui::Context, w: &Workspace) {
     apply(app, w);
+    crate::editor::dock_ui::reset_key_scope(ctx);
     // Scopes docked in the tree show there; otherwise over the picture.
     if !app.editor.dock.contains(crate::dock::Panel::Scopes) {
         crate::editor::scopes::set_on(ctx, w.scopes);
@@ -448,7 +458,30 @@ mod tests {
         assert_eq!(audio.find(Panel::Sound).unwrap()[..1], audio.find(Panel::Timeline).unwrap()[..1], "in the timeline's zone");
         let review = by("Review");
         assert!(review.is_showing(Panel::Review) && review.find(Panel::Review) == review.find(Panel::Inspector), "review notes with the Inspector");
-        assert!(review.is_showing(Panel::Ai) && review.find(Panel::Ai) == review.find(Panel::Library), "the AI editor with the Library");
+        assert!(review.is_showing(Panel::Ai) && review.find(Panel::Ai) == review.find(Panel::Library), "the Assistant with the Library");
         assert_eq!(by("Edit"), crate::dock::Tree::legacy((true, 340.0), (true, 300.0), (true, Some(300.0))));
+    }
+
+    /// Switching workspace keeps the selection, the playhead and a zoomed
+    /// timeline where they were.
+    #[test]
+    fn switching_workspace_keeps_selection_playhead_and_timeline_view() {
+        let ctx = eframe::egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        app.editor.px_per_sec = 91.0;
+        app.editor.tl_scroll = eframe::egui::vec2(333.0, 12.0);
+        app.editor.auto_fit = false;
+        app.editor.selection = vec![3, 4];
+        app.editor.playhead = 5 * crate::view::SEC;
+        for w in build_in() {
+            switch(&mut app, &ctx, &w);
+            assert_eq!(app.editor.px_per_sec, 91.0, "zoom after {}", w.name);
+            assert_eq!(app.editor.tl_scroll, eframe::egui::vec2(333.0, 12.0), "scroll after {}", w.name);
+            assert!(!app.editor.fit_pending, "no refit after {}", w.name);
+            assert_eq!(app.editor.playhead, 5 * crate::view::SEC, "playhead after {}", w.name);
+            assert_eq!(app.editor.selection, vec![3, 4], "selection after {}", w.name);
+        }
     }
 }

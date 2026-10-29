@@ -211,6 +211,8 @@ pub fn close_panel(app: &mut StudioApp, ctx: &egui::Context, p: Panel, narrow: b
     if app.editor.dock.contains(p) || app.editor.dock.is_popped(p) {
         app.editor.dock.close(p);
     }
+    // The keys were that panel's: they go back to the editor.
+    reset_key_scope(ctx);
     if FLAGGED.contains(&p) {
         set_flag(app, ctx, p, false);
         app.editor.dock_flags[flag_slot(p)] = if app.editor.dock.contains(p) { Some(false) } else { None };
@@ -311,6 +313,20 @@ fn keeps_own_keys(p: Panel) -> bool {
     !matches!(p, Panel::Timeline | Panel::Viewer | Panel::Scopes)
 }
 
+/// Gives the keyboard back to the editor (a panel closed, the layout changed).
+pub fn reset_key_scope(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(scope_id(), KeyScope::Editor));
+}
+
+/// The keyboard's owner after `scope` when the panels now drawn are `shown`:
+/// a panel that is no longer on screen cannot keep the keys.
+fn live_scope(scope: KeyScope, shown: &[Panel]) -> KeyScope {
+    match scope {
+        KeyScope::Panel(p) if !shown.contains(&p) => KeyScope::Editor,
+        s => s,
+    }
+}
+
 /// Follows clicks to find the keyboard's owner, and tells the key dispatcher
 /// (`crate::keymap::claim`) when it is not the editor.
 fn track_key_scope(ctx: &egui::Context) {
@@ -324,6 +340,8 @@ fn track_key_scope(ctx: &egui::Context) {
         ctx.data_mut(|d| d.insert_temp(scope_id(), scope));
     }
     let scope = ctx.data(|d| d.get_temp::<KeyScope>(scope_id())).unwrap_or(KeyScope::Editor);
+    let shown: Vec<Panel> = ctx.data(|d| d.get_temp::<Vec<(Panel, Rect)>>(rects_id())).unwrap_or_default().into_iter().map(|(p, _)| p).collect();
+    let scope = live_scope(scope, &shown);
     use crate::keymap::{KeyOwner, claim};
     match scope {
         // A window that is still open: what is typed there is its own.
