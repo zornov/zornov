@@ -107,9 +107,22 @@ fn writable(dir: &Path) -> bool {
     ok
 }
 
+/// Where [`stage`] keeps the archive for the staged folder `dest`
+/// (`staged` -> `staged.tar.gz`, beside it).
+pub fn kept_archive(dest: &Path) -> PathBuf {
+    let mut n = dest.as_os_str().to_owned();
+    n.push(".tar.gz");
+    PathBuf::from(n)
+}
+
 /// Unpacks the update archive at `archive` into `dest` (emptied first) and
-/// checks it carries its manifest.
+/// checks it carries its manifest. A copy of the archive is kept beside
+/// `dest` ([`kept_archive`]) and outlives the original: the signed hash
+/// covers the archive, not the unpacked tree, so [`apply_pending`] installs
+/// from the kept copy, not from `dest`.
 pub fn stage(archive: &Path, dest: &Path) -> Result<(), String> {
+    let kept = kept_archive(dest);
+    std::fs::copy(archive, &kept).map_err(|e| format!("cannot keep the update archive: {e}"))?;
     unpack(archive, dest).map_err(|e| format!("the update: {e}"))?;
     if !dest.join(MANIFEST).is_file() {
         return Err("the update archive has no manifest".into());
@@ -120,11 +133,15 @@ pub fn stage(archive: &Path, dest: &Path) -> Result<(), String> {
 /// Unpacks the `.tar.gz` at `archive` into `dest` (emptied first). Entries
 /// that would land outside `dest` are refused.
 pub fn unpack(archive: &Path, dest: &Path) -> Result<(), String> {
+    unpack_from(std::fs::File::open(archive).map_err(|e| format!("{}: {e}", archive.display()))?, dest)
+}
+
+fn unpack_from(archive: impl std::io::Read, dest: &Path) -> Result<(), String> {
     if dest.exists() {
         std::fs::remove_dir_all(dest).map_err(|e| format!("cannot clear {}: {e}", dest.display()))?;
     }
     std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-    let gz = flate2::read::GzDecoder::new(std::fs::File::open(archive).map_err(|e| format!("{}: {e}", archive.display()))?);
+    let gz = flate2::read::GzDecoder::new(archive);
     let mut tar = tar::Archive::new(gz);
     tar.set_preserve_permissions(true);
     for e in tar.entries().map_err(|e| format!("the archive is damaged: {e}"))? {
@@ -296,6 +313,7 @@ pub fn apply_pending(public_key_hex: &str, current_version: &str, target: Option
     let fail = |why: String| {
         let _ = std::fs::write(updates_dir().join("last-error.txt"), &why);
         if p.staged.is_dir() {
+            let _ = std::fs::remove_file(kept_archive(&p.staged));
             let _ = std::fs::remove_dir_all(&p.staged);
         } else {
             let _ = std::fs::remove_file(&p.staged);
@@ -308,18 +326,11 @@ pub fn apply_pending(public_key_hex: &str, current_version: &str, target: Option
     if p.platform != target.feed_key() || p.kind != target.kind() || !feed::is_newer(&p.version, current_version) {
         return fail(format!("update {} is not an upgrade for this {current_version} ({})", p.version, target.feed_key()));
     }
-    let done = match target {
-        Target::Folder(install) => swap(&p.staged, install).map(|()| {
-            let _ = std::fs::remove_dir_all(&p.staged);
+    let done = install_with(&p, target).inspect(|a| {
+        if matches!((a, target), (Applied::Installed(_), Target::Folder(_))) {
             let _ = std::fs::write(updates_dir().join("cleanup"), b"");
-            Applied::Installed(p.version.clone())
-        }),
-        Target::AppImage(file) => check_file(&p).and_then(|()| replace_file(&p.staged, file)).map(|()| {
-            let _ = std::fs::remove_file(&p.staged);
-            Applied::Installed(p.version.clone())
-        }),
-        Target::Msi => check_file(&p).and_then(|()| run_msi(&p.staged)).map(|()| Applied::Handed(p.version.clone())),
-    };
+        }
+    });
     match done {
         Ok(a) => {
             let _ = std::fs::remove_file(updates_dir().join("last-error.txt"));
@@ -327,6 +338,42 @@ pub fn apply_pending(public_key_hex: &str, current_version: &str, target: Option
         }
         Err(e) => fail(e),
     }
+}
+
+/// Puts `p` in for `target`; the signature and the version were checked by
+/// the caller. Touches only `p.staged`, the target and the kept archive.
+fn install_with(p: &Pending, target: &Target) -> Result<Applied, String> {
+    match target {
+        Target::Folder(install) => restage(p).and_then(|()| swap(&p.staged, install)).map(|()| {
+            let _ = std::fs::remove_dir_all(&p.staged);
+            let _ = std::fs::remove_file(kept_archive(&p.staged));
+            Applied::Installed(p.version.clone())
+        }),
+        Target::AppImage(file) => check_file(p).and_then(|()| replace_file(&p.staged, file)).map(|()| {
+            let _ = std::fs::remove_file(&p.staged);
+            Applied::Installed(p.version.clone())
+        }),
+        Target::Msi => check_file(p).and_then(|()| run_msi(&p.staged)).map(|()| Applied::Handed(p.version.clone())),
+    }
+}
+
+/// Unpacks the kept archive into `p.staged` afresh, once it matches the
+/// signed size and hash, so what is swapped in is what was signed whatever
+/// happened to the staged folder since. The archive is read into memory once
+/// (it is bounded by the signed size) and hashed and unpacked from those
+/// same bytes, so it cannot change between the check and the use.
+fn restage(p: &Pending) -> Result<(), String> {
+    use std::io::Read;
+    let bad = || "the waiting update does not match its signature; it was discarded".to_owned();
+    let kept = kept_archive(&p.staged);
+    let file = std::fs::File::open(&kept).map_err(|e| format!("the waiting update's archive is gone: {}: {e}", kept.display()))?;
+    let mut bytes = Vec::new();
+    file.take(p.entry.size.saturating_add(1)).read_to_end(&mut bytes).map_err(|e| format!("{}: {e}", kept.display()))?;
+    if bytes.len() as u64 != p.entry.size || !feed::sha256_hex(&bytes).eq_ignore_ascii_case(&p.entry.sha256) {
+        return Err(bad());
+    }
+    unpack_from(bytes.as_slice(), &p.staged).map_err(|e| format!("the update: {e}"))?;
+    manifest(&p.staged).map(|_| ())
 }
 
 /// A staged installer or AppImage is used as downloaded, so its bytes are
@@ -511,6 +558,69 @@ mod tests {
         std::fs::create_dir_all(&m).unwrap();
         std::fs::write(m.join(MANIFEST), "../evil\n").unwrap();
         assert!(manifest(&m).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A signed folder update staged from a real archive, ready to install.
+    fn staged_update(d: &Path) -> (Pending, PathBuf) {
+        let arc = archive(d, &[("studio", "signed"), ("content/a.txt", "A2")], Some("studio\ncontent/a.txt\n"));
+        let data = std::fs::read(&arc).unwrap();
+        let (kp, _) = feed::tests::keypair();
+        let entry = feed::tests::signed(&kp, &feed::platform(), "0.2.0", &data);
+        let (staged, install) = (d.join("staged"), d.join("install"));
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("studio"), "old").unwrap();
+        stage(&arc, &staged).unwrap();
+        std::fs::remove_file(&arc).unwrap(); // as state::fetch does
+        (Pending { version: "0.2.0".into(), platform: feed::platform(), staged, entry, kind: String::new() }, install)
+    }
+
+    #[test]
+    fn a_tampered_staged_folder_is_replaced_by_the_signed_archive() {
+        let d = scratch("tree");
+        let (p, install) = staged_update(&d);
+        std::fs::write(p.staged.join("studio"), "evil").unwrap();
+        std::fs::write(p.staged.join("content/a.txt"), "evil").unwrap();
+        assert_eq!(install_with(&p, &Target::Folder(install.clone())).unwrap(), Applied::Installed("0.2.0".into()));
+        assert_eq!(std::fs::read_to_string(install.join("studio")).unwrap(), "signed");
+        assert_eq!(std::fs::read_to_string(install.join("content/a.txt")).unwrap(), "A2");
+        assert!(!kept_archive(&p.staged).exists(), "kept archive removed after a swap");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_tampered_or_missing_kept_archive_aborts_the_swap() {
+        let d = scratch("kept");
+        let (p, install) = staged_update(&d);
+        let kept = kept_archive(&p.staged);
+        let mut bytes = std::fs::read(&kept).unwrap();
+        let last = bytes.len() / 2;
+        bytes[last] ^= 0xff;
+        std::fs::write(&kept, &bytes).unwrap();
+        assert!(install_with(&p, &Target::Folder(install.clone())).is_err());
+        assert_eq!(std::fs::read_to_string(install.join("studio")).unwrap(), "old");
+        assert!(!install.join("content").exists());
+        std::fs::remove_file(&kept).unwrap();
+        assert!(install_with(&p, &Target::Folder(install.clone())).is_err(), "missing archive");
+        assert_eq!(std::fs::read_to_string(install.join("studio")).unwrap(), "old");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_tampered_staged_appimage_is_refused_and_the_target_kept() {
+        let d = scratch("appimg");
+        let (staged, file) = (d.join("Zornov.AppImage.new"), d.join("Zornov.AppImage"));
+        std::fs::write(&staged, "genuine").unwrap();
+        std::fs::write(&file, "old").unwrap();
+        let (kp, _) = feed::tests::keypair();
+        let entry = feed::tests::signed(&kp, "linux-x86_64-appimage", "0.2.0", b"genuine");
+        let p = Pending { version: "0.2.0".into(), platform: "linux-x86_64-appimage".into(), staged: staged.clone(), entry, kind: "appimage".into() };
+        std::fs::write(&staged, "malware").unwrap();
+        assert!(install_with(&p, &Target::AppImage(file.clone())).is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "old");
+        std::fs::write(&staged, "genuine").unwrap();
+        install_with(&p, &Target::AppImage(file.clone())).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "genuine");
         let _ = std::fs::remove_dir_all(&d);
     }
 }
