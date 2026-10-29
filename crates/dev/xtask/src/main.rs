@@ -11,6 +11,10 @@
 //! cargo xtask sbs REF SHOT OUT [WIDTH]   a reference above a Studio shot
 //! cargo xtask signing           the local signing identity (made once)
 //! cargo xtask release-mac       Developer ID signed, notarized DMG (docs/releasing.md)
+//! cargo xtask check-release [APP] [--no-notarize] [--record-size [--allow-growth]]
+//!                               fails on a Zornov.app with host paths, symbols,
+//!                               wrong entitlements, signing, libraries or a
+//!                               binary over packaging/macos/size-budget.conf
 //! cargo xtask package-deb       dist/release/zornov_<ver>_<arch>.deb
 //! cargo xtask package-appimage  dist/release/Zornov-<ver>-<arch>.AppImage
 //! cargo xtask package-msi       dist/release/Zornov-<ver>-windows-<arch>.msi
@@ -33,6 +37,7 @@
 //! `STUDIO_BUNDLE_LIBRARY=1`.
 
 mod assets;
+mod check_release;
 mod licenses;
 mod mcpb;
 mod pkg;
@@ -50,6 +55,7 @@ fn main() -> ExitCode {
         Some("package-windows") => package_windows(),
         Some("sbs") => sbs(&args[1..]),
         Some("release-mac") => release::release_mac(&args[1..]),
+        Some("check-release") => check_release::check_release(&args[1..]),
         Some("package-deb") => pkg::package_deb(),
         Some("package-appimage") => pkg::package_appimage(),
         Some("package-msi") => pkg::package_msi(),
@@ -63,7 +69,7 @@ fn main() -> ExitCode {
         Some("headers") => headers(args.get(1).is_some_and(|a| a == "--check")),
         #[cfg(target_os = "macos")]
         Some("signing") => signing::identity().map(|s| format!("signing with \"{}\" ({}) from {}", signing::NAME, s.hash, signing::keychain().display())),
-        _ => Err("usage: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
+        _ => Err("usage: cargo xtask bundle | release-mac | check-release [APP] [--no-notarize] [--record-size [--allow-growth]] | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
     };
     match r {
         Ok(out) => {

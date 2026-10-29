@@ -33,6 +33,7 @@
 use super::{Content, Session};
 use crate::view;
 use serde_json::{Map, Value, json};
+use studio_model as m;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -292,7 +293,7 @@ pub fn end_session() {
 
 /// The folder traces of a project go to.
 pub fn dir_of(project: &Path) -> PathBuf {
-    project.join(".zornov").join("agent-trace")
+    m::file::ProjectFolder::new(project).state(m::file::State::AgentTrace)
 }
 
 /// A session name as a file name (no separators, no dots in front).

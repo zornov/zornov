@@ -353,6 +353,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, area: Rect) -> bool
     outliner(app, ui, body, &objs);
     crate::editor::model_edit::input::end_frame(&ctx);
     super::save(&app.doc);
+    if super::save_waiting() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
     true
 }
 

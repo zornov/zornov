@@ -23,6 +23,7 @@ use super::{Content, Session};
 use serde_json::{Value, json};
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use studio_model as m;
 
 /// Every edit op, by the name you type.
 pub(super) const OPS: &[&str] = &[
@@ -128,7 +129,7 @@ pub(crate) fn parse(words: &[String]) -> Result<(String, Value), String> {
 
 /// The project folder for `here`: itself or the nearest parent with one.
 fn find_project(here: &Path) -> Option<PathBuf> {
-    here.ancestors().find(|d| d.join("project.json").is_file()).map(Path::to_path_buf)
+    here.ancestors().find(|d| m::file::ProjectFolder::is_project(d)).map(Path::to_path_buf)
 }
 
 struct Style {
@@ -155,7 +156,7 @@ impl Style {
 
 /// Runs one command and prints what came back. False on an error.
 fn run_one(s: &mut Session, dir: Option<&Path>, cmd: &str, args: &Value, st: &Style, raw: bool) -> bool {
-    let out_dir = dir.map(|d| d.join("agent-frames")).unwrap_or_else(|| std::env::temp_dir().join("studio-agent"));
+    let out_dir = dir.map(|d| m::file::ProjectFolder::new(d).agent_frames_dir()).unwrap_or_else(|| std::env::temp_dir().join("studio-agent"));
     // For a person, the timeline as lines rather than data.
     let cmd = if !raw && cmd == "summary" { "script" } else { cmd };
     // With the project open in a Studio window, the command runs there:
@@ -362,7 +363,7 @@ fn new_project(args: &[String], st: &Style) -> i32 {
         Some(n) => here.join(n),
         None => here.clone(),
     };
-    if dir.join("project.json").is_file() {
+    if m::file::ProjectFolder::is_project(&dir) {
         eprintln!("{} there is already a project in {}", st.red("error:"), dir.display());
         return 1;
     }
@@ -753,7 +754,7 @@ pub fn main(argv: &[String]) -> Option<i32> {
         None if !std::io::stdin().is_terminal() => return None,
         Some("--window") => return None,
         Some(f) if f.starts_with("--") && !matches!(f, "--help" | "--json" | "--project") => return None,
-        Some(p) if Path::new(p).join("project.json").is_file() => return None,
+        Some(p) if m::file::ProjectFolder::is_project(Path::new(p)) => return None,
         _ => {}
     }
     // --project DIR and --json may come anywhere.

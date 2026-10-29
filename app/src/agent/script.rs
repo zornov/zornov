@@ -8,6 +8,7 @@
 use super::{Session, secs};
 use crate::view::{self, ClipKind, LaneKind};
 use serde_json::{Value, json};
+use studio_model as m;
 
 fn t(v: view::Time) -> String {
     format!("{:6.2}", secs(v))
@@ -177,7 +178,7 @@ impl Session {
     }
 
     fn notes_path(&self) -> Option<std::path::PathBuf> {
-        self.home.as_ref().map(|h| h.join("agent-notes.md")).or_else(|| self.doc.folder.as_ref().map(|f| f.root().join("agent-notes.md")))
+        self.home.as_ref().map(|h| m::file::ProjectFolder::new(h).state(m::file::State::AgentNotes)).or_else(|| self.doc.folder.as_ref().map(|f| m::file::ProjectFolder::new(f.root()).state(m::file::State::AgentNotes)))
     }
 
     pub(super) fn notes_text(&self) -> Option<String> {

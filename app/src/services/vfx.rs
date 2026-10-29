@@ -342,7 +342,7 @@ pub fn camera_file(run: &SolveRun) -> CameraFile {
 pub fn cameras_dir(doc: &Doc) -> PathBuf {
     // Tests never write into the person's Studio folder.
     let home = if cfg!(test) { std::env::temp_dir().join("studio-tests") } else { studio_paths::studio() };
-    let d = doc.folder.as_ref().map(|f| f.root().join("Cameras")).unwrap_or_else(|| home.join("Cameras"));
+    let d = doc.folder.as_ref().map(|f| f.generated_dir(m::file::MadeKind::Cameras)).unwrap_or_else(|| home.join("Cameras"));
     let _ = std::fs::create_dir_all(&d);
     d
 }
@@ -464,7 +464,10 @@ pub fn bake_clean_plate(doc: &Doc, id: u32, samples: usize, moving: bool, ctx: &
         hole[i] = warped.iter().all(|(_, u)| u[i] <= 0.5);
     }
     let out = if hole.iter().any(|&b| b) { studio_fx::comp::clean::inpaint_image(&out, &hole, 7, 4) } else { out };
-    let dir = cameras_dir(doc).with_file_name("Clean plates");
+    let dir = match &doc.folder {
+        Some(f) => f.generated_dir(m::file::MadeKind::CleanPlates),
+        None => cameras_dir(doc).with_file_name("Clean plates"),
+    };
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(format!("clip-{id}-{}.png", stamp()));
     let png = studio_media::png::encode(&studio_media::RgbaImage { width: w as u32, height: h as u32, pixels: out.to_srgb8() });
@@ -486,7 +489,10 @@ pub fn bake_depth(doc: &Doc, id: u32, ctx: &JobCtx) -> Result<String, String> {
     let store = studio_ai::store::ModelStore::default();
     let mut est = studio_ai::features::depth::DepthEstimator::load(&store).map_err(|e| format!("the depth model is not available: {e}"))?;
     let mut frames = super::cutout::RgbaFrames::open(&ft, size, &range)?;
-    let dir = cameras_dir(doc).with_file_name("Depth");
+    let dir = match &doc.folder {
+        Some(f) => f.generated_dir(m::file::MadeKind::Depth),
+        None => cameras_dir(doc).with_file_name("Depth"),
+    };
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join(format!("clip-{id}-{}.smatte", stamp()));
     let n = (range.end - range.start) as usize;

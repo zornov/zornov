@@ -28,8 +28,17 @@ impl Session {
     /// scratch folder with no project.
     fn vector_dir(&self) -> PathBuf {
         match self.vector_root() {
-            Some(h) => h.join("Vector"),
+            Some(h) => m::file::ProjectFolder::new(h).media_of(m::file::MediaKind::Vector),
             None => std::env::temp_dir().join("studio-vector"),
+        }
+    }
+
+    /// Where renders of a document in `dir` go: a project's own vector folder
+    /// renders to the project's exports, any other folder beside the document.
+    fn renders_dir(&self, dir: &Path) -> PathBuf {
+        match self.vector_root() {
+            Some(h) if dir == self.vector_dir() => m::file::ProjectFolder::new(h).export_dir(m::file::ExportKind::VectorRenders),
+            _ => dir.join("renders"),
         }
     }
 
@@ -60,8 +69,9 @@ impl Session {
             }
             (d, path.clone())
         };
-        let ctx = Context { base_dir: Some(self.vector_root().unwrap_or_else(|| dir.clone())), out_dir: Some(dir.join("renders")) };
-        let _ = std::fs::create_dir_all(dir.join("renders"));
+        let renders = self.renders_dir(&dir);
+        let ctx = Context { base_dir: Some(self.vector_root().unwrap_or_else(|| dir.clone())), out_dir: Some(renders.clone()) };
+        let _ = std::fs::create_dir_all(&renders);
         let results = match a.get("ops") {
             Some(o) => ops::apply_all(&mut doc, o, &ctx)?,
             None => Value::Null,

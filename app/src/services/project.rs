@@ -78,12 +78,12 @@ struct KeptHistory {
 }
 
 fn history_file(folder: &m::file::ProjectFolder) -> PathBuf {
-    folder.cache_dir().join("history.json")
+    folder.state(m::file::State::HistoryOld)
 }
 
 /// The append-only journal that replaced `history.json`.
 fn journal_file(folder: &m::file::ProjectFolder) -> PathBuf {
-    folder.cache_dir().join("history.jsonl")
+    folder.state(m::file::State::History)
 }
 
 fn file_hash(path: &Path) -> Option<u64> {

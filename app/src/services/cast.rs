@@ -65,7 +65,7 @@ fn slug(s: &str) -> String {
 
 /// The library's folder in a project folder.
 pub fn library(project: &Path) -> PathBuf {
-    project.join("Characters")
+    m::file::ProjectFolder::new(project).media_of(m::file::MediaKind::Characters)
 }
 
 /// A character's folder.

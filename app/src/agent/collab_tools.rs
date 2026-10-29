@@ -259,7 +259,7 @@ impl Session {
         let who = st(a, "as").map(str::to_owned).unwrap_or_else(collab::identity);
         match action.as_str() {
             "package" => {
-                let parent = st(a, "path").map(PathBuf::from).unwrap_or_else(|| root.join("Review"));
+                let parent = st(a, "path").map(PathBuf::from).unwrap_or_else(|| m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Review));
                 let dir = package::folder_in(&parent, &self.doc.model.active().name);
                 let store = comments::Store::load(&root)?;
                 let index = versions::Index::load(&root)?;

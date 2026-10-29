@@ -380,7 +380,7 @@ impl Session {
         let folder = match st(a, "out") {
             Some(p) => PathBuf::from(p),
             None => {
-                let base = root.join("deliveries");
+                let base = m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Deliveries);
                 let _ = std::fs::create_dir_all(&base);
                 let mut n = 1;
                 loop {
@@ -719,7 +719,7 @@ impl Session {
             }
         }
         // Save as a project of its own.
-        let out_root = root.join("cutdowns");
+        let out_root = m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Cutdowns);
         std::fs::create_dir_all(&out_root).map_err(|e| e.to_string())?;
         let dir = free_dir(&out_root, &sanitize(&base));
         let seq = cp.doc.seq();

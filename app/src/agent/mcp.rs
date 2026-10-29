@@ -291,11 +291,27 @@ pub(crate) fn result_of(r: Result<Vec<Content>, String>) -> Value {
     }
 }
 
+impl Session {
+    /// A tool call with no window to ask in: what the window's gate would
+    /// ask about is refused (see [`super::brain::needs_ok`]), otherwise
+    /// `run` makes the call. A result with outside text turns the
+    /// post-outside questions on for the rest of the session.
+    pub(crate) fn run_headless(&mut self, name: &str, args: &Value, run: impl FnOnce(&mut Session) -> Result<Vec<Content>, String>) -> Result<Vec<Content>, String> {
+        if let Some(why) = super::brain::needs_ok(name, args, self.read_outside) {
+            return Err(super::brain::not_run(&why));
+        }
+        let r = run(self);
+        if r.as_ref().is_ok_and(|parts| super::outside::carries(parts)) {
+            self.read_outside = true;
+        }
+        r
+    }
+}
+
 /// Handles one JSON-RPC message; `None` for notifications.
 pub fn handle(session: &mut Session, msg: &Value) -> Option<Value> {
     handle_with(msg, &mut |name, args| {
-        let r = super::guard::run(name, || session.run(name, args));
-        result_of(r)
+        result_of(session.run_headless(name, args, |s| super::guard::run(name, || s.run(name, args))))
     })
 }
 
@@ -474,5 +490,13 @@ mod tests {
         }
         let g = handle(&mut s, &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "guide", "arguments": {}}})).unwrap();
         assert!(g["result"]["content"][0]["text"].as_str().unwrap().contains("Skills"), "the core guide lists the skills");
+    }
+
+    #[test]
+    fn the_plain_handler_refuses_what_needs_the_person_too() {
+        let mut s = Session::default();
+        let r = handle(&mut s, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "plugins", "arguments": {"action": "ofx", "on": true}}})).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().starts_with("NOT RUN"));
     }
 }

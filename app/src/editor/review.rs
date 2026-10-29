@@ -72,7 +72,7 @@ fn stamp(p: &Path) -> Option<std::time::SystemTime> {
 }
 
 fn files(root: &Path) -> [PathBuf; 3] {
-    [comments::file(root), root.join("versions").join("index.json"), team::file(root)]
+    [comments::file(root), m::file::ProjectFolder::new(root).review_versions_dir().join("index.json"), team::file(root)]
 }
 
 /// Every frame: follows the project folder (reloading what changed on
@@ -389,7 +389,7 @@ fn export_notes(app: &mut StudioApp, format: &str, ext: &str) {
             Ok(t) => t,
             Err(e) => return u.status = Some(e),
         };
-        let dir = root.join("Review");
+        let dir = m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Review);
         let path = dir.join(format!("{} notes.{ext}", app.doc.project.name));
         let r = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text));
         u.status = Some(match r {
@@ -624,7 +624,7 @@ fn share_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         let index = with(|u| u.index.clone());
         let now = collab::fingerprint(&app.doc.model);
         let version = index.versions.iter().rev().find(|v| v.fingerprint == now).map(|v| (v.id.clone(), v.name.clone()));
-        let dir = package::folder_in(&root.join("Review"), &app.doc.model.active().name);
+        let dir = package::folder_in(&m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Review), &app.doc.model.active().name);
         let r = package::write(&dir, &app.doc.model, &store, version.as_ref().map(|(a, b)| (a.as_str(), b.as_str())), &me, None);
         with(|u| u.status = Some(r.map(|_| format!("Wrote {}", studio_paths::tilde(&dir))).unwrap_or_else(|e| e)));
     }

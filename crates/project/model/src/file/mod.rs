@@ -3,15 +3,11 @@
 
 //! The project file format and project folders.
 //!
-//! A project lives in a folder:
-//!
-//! ```text
-//! My Video/
-//!   project.json   the document (this module)
-//!   media/         optional copies of imported media
-//!   cache/         thumbnails, waveforms, proxies — safe to delete
-//!   backups/       rolling autosaves (see [`autosave`])
-//! ```
+//! A project lives in a folder, either the `.zornov` package or the mixed
+//! folder earlier versions made; see [`layout`] for both. [`ProjectFolder`]
+//! is the only code that knows where anything is kept, and [`convert`] turns
+//! an old folder into a package. `project.json` is the document (this
+//! module); rolling autosaves are in [`autosave`].
 //!
 //! `project.json` is `{"format": "studio-project", "version": N,
 //! "project": {...}}`. Fields this version does not understand — at the top
@@ -22,6 +18,8 @@
 //! the previous file intact.
 
 pub mod autosave;
+pub mod convert;
+pub mod layout;
 pub mod migrate;
 
 use crate::edit::Violation;
@@ -32,6 +30,7 @@ use std::fmt;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
+pub use layout::{ExportKind, Layout, MadeKind, MediaKind, State, PACKAGE_EXT, PACKAGE_LAYOUT};
 pub use migrate::CURRENT_VERSION;
 
 /// The value of the top-level `format` field.
@@ -80,6 +79,14 @@ pub enum FileError {
     Changed {
         on_disk: u64,
     },
+    /// The package was made by a newer Zornov, whose layout this build does
+    /// not know; nothing was read or written.
+    LayoutTooNew {
+        /// Layout number in the package.
+        found: u64,
+        /// Newest layout this build reads.
+        supported: u64,
+    },
 }
 
 impl fmt::Display for FileError {
@@ -92,6 +99,7 @@ impl fmt::Display for FileError {
             FileError::Migration(e) => write!(f, "could not upgrade the project: {e}"),
             FileError::Invalid(v) => write!(f, "project is damaged: {v}"),
             FileError::Changed { .. } => write!(f, "the project was saved by someone else since it was opened"),
+            FileError::LayoutTooNew { found, supported } => write!(f, "project package was made by a newer Zornov (layout {found}; this version reads up to {supported})"),
         }
     }
 }
@@ -183,21 +191,54 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectFolder {
     root: PathBuf,
+    /// The package layout number in `.zornov/package.json`; 0 for a folder
+    /// of the earlier layout.
+    layout_number: u64,
 }
 
 impl ProjectFolder {
-    /// Refers to an existing or future folder at `root`.
+    /// Refers to an existing or future folder at `root`, and finds out
+    /// which layout it follows (one small file read).
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        let root = root.into();
+        let layout_number = layout::read_marker(&root).unwrap_or(0);
+        Self { root, layout_number }
     }
 
-    /// Creates the folder and its sub-folders if missing.
+    /// Creates the folder and its sub-folders if missing, in the earlier
+    /// layout (see [`ProjectFolder::create_package`] for the new one).
     pub fn create(root: impl Into<PathBuf>) -> std::io::Result<Self> {
         let f = Self::new(root);
-        for d in [f.root.clone(), f.media_dir(), f.cache_dir(), f.backups_dir()] {
+        for d in [f.root.clone(), f.media_dir(), f.cache_dir(), f.versions_dir()] {
             std::fs::create_dir_all(d)?;
         }
         Ok(f)
+    }
+
+    /// Creates a `.zornov` package at `root`: its folders, then the marker
+    /// that makes it one. Fails if `root` already holds a `project.json`.
+    pub fn create_package(root: impl Into<PathBuf>) -> std::io::Result<Self> {
+        let root = root.into();
+        if root.join(PROJECT_FILE).exists() {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, format!("{} already holds a project", root.display())));
+        }
+        let mut f = Self { root, layout_number: layout::PACKAGE_LAYOUT };
+        let mut dirs = vec![f.root.clone(), f.root.join(layout::STATE_DIR), f.generated_dir(MadeKind::Visuals), f.worlds_dir(), f.versions_dir(), f.review_versions_dir(), f.cache_dir()];
+        dirs.extend(MediaKind::ALL.iter().map(|k| f.media_of(*k)));
+        for d in dirs {
+            std::fs::create_dir_all(d)?;
+        }
+        write_atomic(&f.root.join(layout::STATE_DIR).join(layout::MARKER_FILE), layout::marker_text().as_bytes())?;
+        f.layout_number = layout::PACKAGE_LAYOUT;
+        Ok(f)
+    }
+
+    /// Refuses a package made by a newer layout than this build knows.
+    fn check_layout(&self) -> Result<(), FileError> {
+        if self.layout_number > layout::PACKAGE_LAYOUT {
+            return Err(FileError::LayoutTooNew { found: self.layout_number, supported: layout::PACKAGE_LAYOUT });
+        }
+        Ok(())
     }
 
     /// The folder itself.
@@ -210,24 +251,28 @@ impl ProjectFolder {
         self.root.join(PROJECT_FILE)
     }
 
-    /// Copied media.
+    /// All copied media (`Media/`, or `media/` in the earlier layout); same
+    /// as [`ProjectFolder::media_root`]. [`ProjectFolder::media_of`] picks a
+    /// folder by kind.
     pub fn media_dir(&self) -> PathBuf {
-        self.root.join("media")
+        self.media_root()
     }
 
     /// Disposable caches (thumbnails, waveforms, proxies).
     pub fn cache_dir(&self) -> PathBuf {
-        self.root.join("cache")
+        self.pick("Cache", "cache")
     }
 
-    /// Rolling autosave backups.
+    /// Rolling autosave backups; the old name of
+    /// [`ProjectFolder::versions_dir`].
     pub fn backups_dir(&self) -> PathBuf {
-        self.root.join("backups")
+        self.versions_dir()
     }
 
     /// Saves `project` atomically, keeping `extra` top-level fields (pass
     /// those from the loaded [`ProjectFile`] to preserve them).
     pub fn save_with(&self, project: &Project, extra: &Extra) -> Result<(), FileError> {
+        self.check_layout()?;
         std::fs::create_dir_all(&self.root)?;
         let file = self.document(project, extra);
         write_atomic(&self.project_file(), to_json(&file).as_bytes())?;
@@ -247,6 +292,7 @@ impl ProjectFolder {
     /// sessions on one project cannot both save over the same version, and
     /// the second learns of the first ([`FileError::Changed`]).
     pub fn save_if(&self, project: &Project, extra: &Extra, expected: Option<u64>) -> Result<u64, FileError> {
+        self.check_layout()?;
         std::fs::create_dir_all(&self.root)?;
         let _turn = self.lock()?;
         if let Some(want) = expected
@@ -270,16 +316,26 @@ impl ProjectFolder {
     /// `.project.lock`, locked by the operating system, so a process that
     /// dies lets go of it.
     pub fn lock(&self) -> std::io::Result<std::fs::File> {
-        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join(".project.lock"))?;
+        let f = self.open_state_file(State::Lock)?;
         f.lock()?;
         Ok(f)
+    }
+
+    /// Opens (making it if missing, and its folder) a state file that
+    /// serves as a lock.
+    fn open_state_file(&self, what: State) -> std::io::Result<std::fs::File> {
+        let path = self.state(what);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path)
     }
 
     /// Says this process has the project open, until the file returned is
     /// dropped (a shared hold on `.project.open`; the operating system lets
     /// go of it when the process ends, however it ends).
     pub fn hold_open(&self) -> std::io::Result<std::fs::File> {
-        let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join(".project.open"))?;
+        let f = self.open_state_file(State::Open)?;
         f.lock_shared()?;
         Ok(f)
     }
@@ -291,7 +347,7 @@ impl ProjectFolder {
     /// files) must not run while it is shared.
     pub fn open_elsewhere(&self, mine: &mut Option<std::fs::File>) -> bool {
         *mine = None;
-        let Ok(f) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join(".project.open")) else { return true };
+        let Ok(f) = self.open_state_file(State::Open) else { return true };
         let alone = f.try_lock().is_ok();
         let _ = f.unlock();
         if f.lock_shared().is_ok() {
@@ -309,6 +365,7 @@ impl ProjectFolder {
     /// [`ProjectFolder::load`], with the [`stamp_of`] the bytes it read (to
     /// hand to [`ProjectFolder::save_if`]).
     pub fn load_stamped(&self) -> Result<(ProjectFile, u64), FileError> {
+        self.check_layout()?;
         let bytes = std::fs::read(self.project_file())?;
         let stamp = stamp_of(&bytes);
         let text = String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;

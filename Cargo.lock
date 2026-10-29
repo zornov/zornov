@@ -5760,6 +5760,7 @@ dependencies = [
  "studio-encode",
  "studio-h264",
  "studio-hevc",
+ "studio-hw",
  "studio-mp4",
  "studio-sound",
 ]

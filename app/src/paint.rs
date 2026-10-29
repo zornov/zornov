@@ -17,6 +17,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use studio_canvas::Canvas;
 use studio_canvas::flipbook::Flipbook;
+use studio_model as m;
 
 static CANVAS: OnceLock<Mutex<Canvas>> = OnceLock::new();
 
@@ -29,7 +30,7 @@ pub fn canvas() -> MutexGuard<'static, Canvas> {
 /// Where a project's pictures are kept.
 pub fn pictures_dir(project_root: Option<&Path>) -> PathBuf {
     match project_root {
-        Some(r) => r.join("Pictures"),
+        Some(r) => m::file::ProjectFolder::new(r).media_of(m::file::MediaKind::Pictures),
         None => studio_paths::studio().join("Pictures"),
     }
 }

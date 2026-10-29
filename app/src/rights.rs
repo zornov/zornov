@@ -265,17 +265,14 @@ fn wants_licence_note(r: &Rights, asset_source: &str) -> bool {
     asset_source != "downloaded" && r.url.is_empty()
 }
 
-/// Folders Zornov writes what it makes into (sound effects, sung and
-/// spoken lines, generated pictures and video), in the project or, with no
-/// project, under the cache as `made-…`.
-const MADE_DIRS: &[&str] = &["sfx", "sung", "voice", "foley", "music", "Generated"];
-
 /// Whether Zornov made this file itself: its own sounds, voices and
 /// generations are the project's to use, and were reported as "no licence".
+/// Those are the project's folders for what it makes, or, with no project,
+/// Studio's own folder or the cache as `made-…`.
 pub fn made_here(path: &Path, folder: &Path) -> bool {
     let cache = studio_paths::cache();
     let under = |root: &Path| path.parent().is_some_and(|p| p.starts_with(root));
-    MADE_DIRS.iter().any(|d| under(&folder.join(d)))
+    m::file::ProjectFolder::new(folder).is_made_here(path)
         || under(&studio_paths::studio().join("Generated"))
         || path.parent().and_then(|p| p.strip_prefix(&cache).ok()).and_then(|r| r.components().next()).is_some_and(|c| c.as_os_str().to_string_lossy().starts_with("made-"))
 }

@@ -168,133 +168,20 @@ impl VideoQc {
 
     /// Analyse the next picture.
     pub fn push(&mut self, pic: &Picture) {
-        let (w, h) = match pic {
-            Picture::Planes { w, h, .. } | Picture::Rgba { w, h, .. } => (*w, *h),
-        };
-        if w == 0 || h == 0 {
-            return;
+        if let Some(a) = analyse(pic) {
+            self.commit(a);
         }
-        self.size = (w, h);
-        let step = (w.max(h) / 960).max(1);
-        let gamma = lut_gamma();
-        let mut lum = vec![0f32; GW * GH];
-        let mut red = vec![0f32; GW * GH];
-        let mut cnt = vec![0f32; GW * GH];
-        let (mut n, mut under, mut over, mut cout, mut illegal) = (0u32, 0u32, 0u32, 0u32, 0u32);
-        let (mut sum_yn, mut max_yn) = (0f64, 0f32);
-        // Rows / columns that are all black, for bars.
-        let mut row_black = vec![true; h.div_ceil(step)];
-        let mut col_black = vec![true; w.div_ceil(step)];
-        let mut y = 0;
-        while y < h {
-            let mut x = 0;
-            while x < w {
-                let (yn, r, g, b);
-                match pic {
-                    Picture::Planes { y: yp, u, v, cw, ch, full_range, .. } => {
-                        let yc = yp[y * w + x] as f32;
-                        let cx = (x * cw / w).min(cw - 1);
-                        let cy = (y * ch / h).min(ch - 1);
-                        let cb = u[cy * cw + cx] as f32;
-                        let cr = v[cy * cw + cx] as f32;
-                        let (ys, cs) = if *full_range { (1.0, 1.0) } else { (255.0 / 219.0, 255.0 / 224.0) };
-                        let yy = if *full_range { yc } else { (yc - 16.0) * ys };
-                        let pb = (cb - 128.0) * cs;
-                        let pr = (cr - 128.0) * cs;
-                        r = yy + 1.5748 * pr;
-                        g = yy - 0.1873 * pb - 0.4681 * pr;
-                        b = yy + 1.8556 * pb;
-                        yn = (yy / 255.0).clamp(0.0, 1.0);
-                        if !full_range {
-                            if yc < 16.0 {
-                                under += 1;
-                            }
-                            if yc > 235.0 {
-                                over += 1;
-                            }
-                            if cb < 16.0 || cb > 240.0 || cr < 16.0 || cr > 240.0 {
-                                cout += 1;
-                            }
-                        }
-                        // EBU R 103: -5 % .. 105 % of the RGB range.
-                        if r < -12.75 || g < -12.75 || b < -12.75 || r > 267.75 || g > 267.75 || b > 267.75 {
-                            illegal += 1;
-                        }
-                    }
-                    Picture::Rgba { px, .. } => {
-                        let i = (y * w + x) * 4;
-                        r = px[i] as f32;
-                        g = px[i + 1] as f32;
-                        b = px[i + 2] as f32;
-                        yn = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
-                        // A colour channel stuck at an end while another is not:
-                        // a clipped, out-of-gamut colour.
-                        let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
-                        if (mx >= 255.0 && mn < 200.0) || (mn <= 0.0 && mx > 60.0) {
-                            illegal += 1;
-                        }
-                    }
-                }
-                n += 1;
-                sum_yn += yn as f64;
-                max_yn = max_yn.max(yn);
-                if yn > 0.08 {
-                    row_black[y / step] = false;
-                    col_black[x / step] = false;
-                }
-                let (rc, gc, bc) = (r.clamp(0.0, 255.0) as usize, g.clamp(0.0, 255.0) as usize, b.clamp(0.0, 255.0) as usize);
-                let (rl, gl, bl) = (gamma[rc.min(255)], gamma[gc.min(255)], gamma[bc.min(255)]);
-                let l = 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
-                let cell = (y * GH / h) * GW + (x * GW / w);
-                lum[cell] += l;
-                // ITU-R BT.1702 red metric: saturated red only.
-                let sum = rl + gl + bl;
-                if sum > 1e-6 && rl / sum >= 0.8 {
-                    red[cell] += (rl - gl - bl) * 320.0;
-                }
-                cnt[cell] += 1.0;
-                x += step;
-            }
-            y += step;
-        }
-        for i in 0..GW * GH {
-            if cnt[i] > 0.0 {
-                lum[i] /= cnt[i];
-                red[i] /= cnt[i];
-            }
-        }
-        let nf = n.max(1) as f32;
-        let bars = |flags: &[bool], from_start: bool| {
-            let it: Box<dyn Iterator<Item = &bool>> = if from_start { Box::new(flags.iter()) } else { Box::new(flags.iter().rev()) };
-            let k = it.take_while(|b| **b).count();
-            // Every row black is "no picture", not a bar.
-            if k == flags.len() { 0.0 } else { k as f32 / flags.len() as f32 }
-        };
-        let st = FrameStat {
-            illegal_share: illegal as f32 / nf,
-            luma_under: under as f32 / nf,
-            luma_over: over as f32 / nf,
-            chroma_out: cout as f32 / nf,
-            mean_yn: (sum_yn / n.max(1) as f64) as f32,
-            max_yn,
-            bars_top: bars(&row_black, true),
-            bars_bottom: bars(&row_black, false),
-            bars_left: bars(&col_black, true),
-            bars_right: bars(&col_black, false),
-        };
+    }
+
+    /// Take the analysis of the next picture, in picture order: the checks
+    /// that compare a picture with the one before it.
+    pub fn commit(&mut self, a: FrameAnalysis) {
+        let FrameAnalysis { size, st, lum, red, sig, pattern } = a;
+        self.size = size;
         let idx = self.stats.len() as u64;
         self.stats.push(st);
 
         // Frozen: the 32 x 18 signature equals the last frame's.
-        let sig: Vec<f32> = (0..18)
-            .flat_map(|gy| {
-                let lum = &lum;
-                (0..32).map(move |gx| {
-                    let a = [(2 * gy) * GW + 2 * gx, (2 * gy) * GW + 2 * gx + 1, (2 * gy + 1) * GW + 2 * gx, (2 * gy + 1) * GW + 2 * gx + 1];
-                    a.iter().map(|&i| lum[i]).sum::<f32>() / 4.0
-                })
-            })
-            .collect();
         let same = self.prev_sig.as_ref().is_some_and(|p| p.iter().zip(&sig).map(|(a, b)| (a - b).abs()).sum::<f32>() / sig.len() as f32 <= 0.0004);
         self.frozen.push(same);
 
@@ -341,36 +228,179 @@ impl VideoQc {
             }
         }
 
-        // Pattern: regular stripes (five light-dark pairs) over a quarter of the rows or columns.
-        let alt = |get: &dyn Fn(usize) -> f32, n: usize| -> bool {
-            let (mut run, mut best, mut last) = (0u32, 0u32, 0i8);
-            for i in 1..n {
-                let d = get(i) - get(i - 1);
-                let s = if d >= 0.1 { 1 } else if d <= -0.1 { -1 } else { 0 };
-                if s != 0 && s == -last {
-                    run += 1;
-                } else if s != 0 {
-                    run = 1;
-                } else {
-                    run = 0;
-                }
-                if s != 0 {
-                    last = s;
-                } else {
-                    last = 0;
-                }
-                best = best.max(run);
-            }
-            best >= 10
-        };
-        let rows = (0..GH).filter(|&gy| alt(&|i| lum[gy * GW + i], GW)).count();
-        let cols = (0..GW).filter(|&gx| alt(&|i| lum[i * GW + gx], GH)).count();
-        self.pattern.push(rows * 4 >= GH || cols * 4 >= GW);
+        self.pattern.push(pattern);
 
         self.prev_lum = Some(lum);
         self.prev_red = Some(red);
         self.prev_sig = Some(sig);
     }
+}
+
+/// What one picture says on its own: the per-frame numbers and the grids
+/// the temporal checks compare. Independent of every other picture, so
+/// pictures can be analysed on several threads and committed in order.
+pub struct FrameAnalysis {
+    size: (usize, usize),
+    st: FrameStat,
+    lum: Vec<f32>,
+    red: Vec<f32>,
+    sig: Vec<f32>,
+    pattern: bool,
+}
+
+/// Analyse one picture; `None` for an empty one.
+pub fn analyse(pic: &Picture) -> Option<FrameAnalysis> {
+    let (w, h) = match pic {
+        Picture::Planes { w, h, .. } | Picture::Rgba { w, h, .. } => (*w, *h),
+    };
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let step = (w.max(h) / 960).max(1);
+    let gamma = lut_gamma();
+    let mut lum = vec![0f32; GW * GH];
+    let mut red = vec![0f32; GW * GH];
+    let mut cnt = vec![0f32; GW * GH];
+    let (mut n, mut under, mut over, mut cout, mut illegal) = (0u32, 0u32, 0u32, 0u32, 0u32);
+    let (mut sum_yn, mut max_yn) = (0f64, 0f32);
+    // Rows / columns that are all black, for bars.
+    let mut row_black = vec![true; h.div_ceil(step)];
+    let mut col_black = vec![true; w.div_ceil(step)];
+    // Where each sampled column / row lands in the chroma planes and the
+    // 64 x 36 grid, worked out once instead of per pixel.
+    let (pcw, pch) = match pic {
+        Picture::Planes { cw, ch, .. } => (*cw, *ch),
+        Picture::Rgba { .. } => (w, h),
+    };
+    let xs: Vec<(usize, usize, usize)> = (0..w).step_by(step).map(|x| (x, (x * pcw / w).min(pcw - 1), x * GW / w)).collect();
+    let ys: Vec<(usize, usize, usize)> = (0..h).step_by(step).map(|y| (y, (y * pch / h).min(pch - 1), (y * GH / h) * GW)).collect();
+    for (ry, &(y, cy, cell_row)) in ys.iter().enumerate() {
+        for (rx, &(x, cx, cell_col)) in xs.iter().enumerate() {
+            let (yn, r, g, b);
+            match pic {
+                Picture::Planes { y: yp, u, v, cw, full_range, .. } => {
+                    let yc = yp[y * w + x] as f32;
+                    let cb = u[cy * cw + cx] as f32;
+                    let cr = v[cy * cw + cx] as f32;
+                    let (ys, cs) = if *full_range { (1.0, 1.0) } else { (255.0 / 219.0, 255.0 / 224.0) };
+                    let yy = if *full_range { yc } else { (yc - 16.0) * ys };
+                    let pb = (cb - 128.0) * cs;
+                    let pr = (cr - 128.0) * cs;
+                    r = yy + 1.5748 * pr;
+                    g = yy - 0.1873 * pb - 0.4681 * pr;
+                    b = yy + 1.8556 * pb;
+                    yn = (yy / 255.0).clamp(0.0, 1.0);
+                    if !full_range {
+                        if yc < 16.0 {
+                            under += 1;
+                        }
+                        if yc > 235.0 {
+                            over += 1;
+                        }
+                        if cb < 16.0 || cb > 240.0 || cr < 16.0 || cr > 240.0 {
+                            cout += 1;
+                        }
+                    }
+                    // EBU R 103: -5 % .. 105 % of the RGB range.
+                    if r < -12.75 || g < -12.75 || b < -12.75 || r > 267.75 || g > 267.75 || b > 267.75 {
+                        illegal += 1;
+                    }
+                }
+                Picture::Rgba { px, .. } => {
+                    let i = (y * w + x) * 4;
+                    r = px[i] as f32;
+                    g = px[i + 1] as f32;
+                    b = px[i + 2] as f32;
+                    yn = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+                    // A colour channel stuck at an end while another is not:
+                    // a clipped, out-of-gamut colour.
+                    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+                    if (mx >= 255.0 && mn < 200.0) || (mn <= 0.0 && mx > 60.0) {
+                        illegal += 1;
+                    }
+                }
+            }
+            n += 1;
+            sum_yn += yn as f64;
+            max_yn = max_yn.max(yn);
+            if yn > 0.08 {
+                row_black[ry] = false;
+                col_black[rx] = false;
+            }
+            let (rc, gc, bc) = (r.clamp(0.0, 255.0) as usize, g.clamp(0.0, 255.0) as usize, b.clamp(0.0, 255.0) as usize);
+            let (rl, gl, bl) = (gamma[rc.min(255)], gamma[gc.min(255)], gamma[bc.min(255)]);
+            let l = 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
+            let cell = cell_row + cell_col;
+            lum[cell] += l;
+            // ITU-R BT.1702 red metric: saturated red only.
+            let sum = rl + gl + bl;
+            if sum > 1e-6 && rl / sum >= 0.8 {
+                red[cell] += (rl - gl - bl) * 320.0;
+            }
+            cnt[cell] += 1.0;
+        }
+    }
+    for i in 0..GW * GH {
+        if cnt[i] > 0.0 {
+            lum[i] /= cnt[i];
+            red[i] /= cnt[i];
+        }
+    }
+    let nf = n.max(1) as f32;
+    let bars = |flags: &[bool], from_start: bool| {
+        let it: Box<dyn Iterator<Item = &bool>> = if from_start { Box::new(flags.iter()) } else { Box::new(flags.iter().rev()) };
+        let k = it.take_while(|b| **b).count();
+        // Every row black is "no picture", not a bar.
+        if k == flags.len() { 0.0 } else { k as f32 / flags.len() as f32 }
+    };
+    let st = FrameStat {
+        illegal_share: illegal as f32 / nf,
+        luma_under: under as f32 / nf,
+        luma_over: over as f32 / nf,
+        chroma_out: cout as f32 / nf,
+        mean_yn: (sum_yn / n.max(1) as f64) as f32,
+        max_yn,
+        bars_top: bars(&row_black, true),
+        bars_bottom: bars(&row_black, false),
+        bars_left: bars(&col_black, true),
+        bars_right: bars(&col_black, false),
+    };
+    let sig: Vec<f32> = (0..18)
+        .flat_map(|gy| {
+            let lum = &lum;
+            (0..32).map(move |gx| {
+                let a = [(2 * gy) * GW + 2 * gx, (2 * gy) * GW + 2 * gx + 1, (2 * gy + 1) * GW + 2 * gx, (2 * gy + 1) * GW + 2 * gx + 1];
+                a.iter().map(|&i| lum[i]).sum::<f32>() / 4.0
+            })
+        })
+        .collect();
+    // Pattern: regular stripes (five light-dark pairs) over a quarter of the rows or columns.
+    let alt = |get: &dyn Fn(usize) -> f32, n: usize| -> bool {
+        let (mut run, mut best, mut last) = (0u32, 0u32, 0i8);
+        for i in 1..n {
+            let d = get(i) - get(i - 1);
+            let s = if d >= 0.1 { 1 } else if d <= -0.1 { -1 } else { 0 };
+            if s != 0 && s == -last {
+                run += 1;
+            } else if s != 0 {
+                run = 1;
+            } else {
+                run = 0;
+            }
+            if s != 0 {
+                last = s;
+            } else {
+                last = 0;
+            }
+            best = best.max(run);
+        }
+        best >= 10
+    };
+    let rows = (0..GH).filter(|&gy| alt(&|i| lum[gy * GW + i], GW)).count();
+    let cols = (0..GW).filter(|&gx| alt(&|i| lum[i * GW + gx], GH)).count();
+    let pattern = rows * 4 >= GH || cols * 4 >= GW;
+
+    Some(FrameAnalysis { size: (w, h), st, lum, red, sig, pattern })
 }
 
 /// Runs of at least `min_len` consecutive true flags as `(first, last+1)`.

@@ -463,7 +463,7 @@ impl Session {
     fn lay(&mut self, l: &[f32], r: &[f32], name: &str, at: f64, lane: &Value, volume: Option<f64>) -> Result<String, String> {
         let samples: Vec<f32> = l.iter().zip(r.iter()).flat_map(|(a, b)| [*a, *b]).collect();
         let wav = studio_media::wav::Wav { sample_rate: RATE, channels: 2, samples };
-        let dir = self.home.clone().map(|h| h.join("sfx")).unwrap_or_else(|| studio_paths::cache().join("made-sfx"));
+        let dir = self.home.clone().map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Sounds)).unwrap_or_else(|| studio_paths::cache().join("made-sfx"));
         let file: String = name.chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect();
         let path = crate::files::write_once(&dir, &file, "wav", &studio_media::wav::encode_pcm16(&wav)).map_err(|e| format!("could not write the sound: {e}"))?;
         let report = crate::services::project::import_media(&mut self.doc, &[path]);

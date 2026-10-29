@@ -227,10 +227,10 @@ pub struct State {
 }
 
 fn state_file(root: &Path) -> PathBuf {
-    root.join("sync").join("state.json")
+    m::file::ProjectFolder::new(root).state(m::file::State::Sync).join("state.json")
 }
 fn base_file(root: &Path) -> PathBuf {
-    root.join("sync").join("base.json")
+    m::file::ProjectFolder::new(root).state(m::file::State::Sync).join("base.json")
 }
 
 impl State {
@@ -239,7 +239,7 @@ impl State {
     }
     fn save(&self, root: &Path, base: &m::Project) -> Result<(), String> {
         let doc = m::file::ProjectFolder::new(root).document(base, &m::Extra::new());
-        std::fs::create_dir_all(root.join("sync")).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(m::file::ProjectFolder::new(root).state(m::file::State::Sync)).map_err(|e| e.to_string())?;
         m::file::write_atomic(&base_file(root), m::file::to_json(&doc).as_bytes()).map_err(|e| format!("could not keep the sync base: {e}"))?;
         write_json(&state_file(root), self)
     }

@@ -33,6 +33,7 @@ use studio_world::walk::{Explorer, Pose, Route};
 /// Metres to Studio pixels (a hundred to the metre).
 const PX: f64 = 100.0;
 
+use crate::editor::world_edit::WorldJob;
 use vp::world::{read_spec, save_spec, world_file_of};
 
 fn pair(v: Option<&Value>) -> Option<[f32; 2]> {
@@ -167,21 +168,47 @@ impl Session {
     /// Saves and builds a spec: the file and the world.
     fn make_world(&mut self, spec: &WorldSpec) -> Result<(String, Arc<studio_world::world::World>), String> {
         let path = save_spec(&self.doc, spec)?;
-        let world = Arc::new(studio_world::build::build(spec, &FileLibrary)?);
-        studio_render::world_scene::remember(&path, world.clone());
+        let world = build_saved(&path, spec)?;
         Ok((path, world))
     }
 
-    /// Replaces the spec a world clip shows with an edited one (the
-    /// Inspector's World section): saved, built, and set on the clip.
+    /// Replaces the spec a world clip shows with an edited one: saved,
+    /// built, and set on the clip. The Inspector does the same in steps
+    /// (`stage_world`, `build_staged` on a worker, `apply_world`).
     pub(crate) fn replace_world(&mut self, clip: u32, spec: &WorldSpec) -> Result<String, String> {
-        let mut mc = self.model_clip(clip).ok_or_else(|| format!("no clip {clip}"))?;
-        let (path, world) = self.make_world(spec)?;
-        set_world_file(&mut mc, &path);
-        let seq = self.doc.seq();
-        let ok = self.doc.apply("Edit world", m::Edit::SetClip { seq, clip: Box::new(mc) });
-        self.check(ok, "")?;
-        Ok(path + &format!("\n{}", studio_world::build::describe(&world)))
+        let job = Self::stage_world(&self.doc, clip, spec)?;
+        let summary = Self::build_staged(&job)?;
+        Self::apply_world(&mut self.doc, clip, &job.path)?;
+        Ok(job.path + &format!("\n{summary}"))
+    }
+
+    /// The cheap first step of a world edit, for the UI thread: the spec is
+    /// saved and the file it will be known by is named.
+    pub(crate) fn stage_world(doc: &Doc, clip: u32, spec: &WorldSpec) -> Result<WorldJob, String> {
+        if !doc.model.sequences.iter().any(|q| q.clip(m::ClipId(clip as u64)).is_some()) {
+            return Err(format!("no clip {clip}"));
+        }
+        Ok(WorldJob { path: save_spec(doc, spec)?, spec: spec.clone() })
+    }
+
+    /// The slow step, which needs no document and can run on any thread:
+    /// builds the world and keeps it for the viewers. Says what is in it.
+    pub(crate) fn build_staged(job: &WorldJob) -> Result<String, String> {
+        Ok(studio_world::build::describe(&*build_saved(&job.path, &job.spec)?))
+    }
+
+    /// The last step, for the UI thread: the clip shows the built world, as
+    /// one undo step. The clip is read as it is now, so nothing else about
+    /// it is touched. `false` if the clip is gone (nothing was done).
+    pub(crate) fn apply_world(doc: &mut Doc, clip: u32, path: &str) -> Result<bool, String> {
+        let Some(mut mc) = doc.model.sequences.iter().find_map(|q| q.clip(m::ClipId(clip as u64))).cloned() else { return Ok(false) };
+        set_world_file(&mut mc, path);
+        let seq = doc.seq();
+        doc.apply("Edit world", m::Edit::SetClip { seq, clip: Box::new(mc) });
+        match doc.error.take() {
+            Some(e) => Err(e),
+            None => Ok(true),
+        }
     }
 
     pub(super) fn edit_world(&mut self, op: &Value) -> Result<String, String> {
@@ -493,6 +520,12 @@ impl Session {
     }
 }
 
+fn build_saved(path: &str, spec: &WorldSpec) -> Result<Arc<studio_world::world::World>, String> {
+    let world = Arc::new(studio_world::build::build(spec, &FileLibrary)?);
+    studio_render::world_scene::remember(path, world.clone());
+    Ok(world)
+}
+
 fn ex_fov(p: &Pose) -> f32 {
     p.fov
 }
@@ -587,5 +620,69 @@ mod tests {
         assert!(world.scatters.iter().map(|s| s.instances.len()).sum::<usize>() > 100 && world.terrain.is_some());
         // A project picture can be the reference too (by media id); an unknown one is refused clearly.
         assert!(s.edit(&[json!({"op": "build_world", "preset": "meadow", "reference": 9999})], "x", false).is_err());
+    }
+
+    /// The Inspector's edit in steps: while the world builds the clip keeps
+    /// the old one, then it shows the new one in a single undoable step, and
+    /// the document is whole throughout.
+    #[test]
+    fn a_world_edit_swaps_the_clip_to_the_built_world_in_one_step() {
+        let _lock = vp::test_lock();
+        let mut s = session();
+        s.edit(&[json!({"op": "build_world", "preset": "meadow", "size": 100, "quality": "fast", "seed": 1})], "w", false).unwrap();
+        let (clip, old) = s.world_clip(&json!({})).unwrap();
+        let id = clip.id.0 as u32;
+        let clips = |s: &Session| s.doc.model.sequences.iter().map(|q| q.clips.len()).sum::<usize>();
+        let before = clips(&s);
+        let mut spec = studio_world::build::materialize(&read_spec(&old).unwrap()).unwrap();
+        spec.fog = Some(0.01);
+        let job = Session::stage_world(&s.doc, id, &spec).unwrap();
+        assert_ne!(job.path, old);
+        // Staged and being built: the clip still shows the old world.
+        assert_eq!(world_file_of(&s.model_clip(id).unwrap()).as_deref(), Some(old.as_str()));
+        let said = Session::build_staged(&job).unwrap();
+        assert!(!said.is_empty());
+        assert_eq!(world_file_of(&s.model_clip(id).unwrap()).as_deref(), Some(old.as_str()));
+        assert_eq!(Session::apply_world(&mut s.doc, id, &job.path), Ok(true));
+        assert_eq!(world_file_of(&s.model_clip(id).unwrap()).as_deref(), Some(job.path.as_str()));
+        assert_eq!(clips(&s), before);
+        assert!(studio_render::world_scene::load(&job.path).is_some());
+        // One undo gives the old world back.
+        s.doc.undo();
+        assert_eq!(world_file_of(&s.model_clip(id).unwrap()).as_deref(), Some(old.as_str()));
+        // A clip that is gone is left alone, and an unknown one is not staged.
+        assert_eq!(Session::apply_world(&mut s.doc, 9999, &job.path), Ok(false));
+        assert!(Session::stage_world(&s.doc, 9999, &spec).is_err());
+    }
+
+    /// `cargo test --release -p studio-app -- --ignored world_edit_ui_cost --nocapture`
+    #[test]
+    #[ignore]
+    fn world_edit_ui_cost() {
+        let _lock = vp::test_lock();
+        let mut s = session();
+        s.edit(&[json!({"op": "build_world", "preset": "village", "seed": 1})], "w", false).unwrap();
+        let id = s.doc.model.sequences.iter().flat_map(|q| q.clips.iter()).find(|c| world_file_of(c).is_some()).map(|c| c.id.0 as u32).unwrap();
+        for seed in 2..5u64 {
+            let mut spec: WorldSpec = serde_json::from_value(json!({"preset": "village", "seed": seed})).unwrap();
+            spec.fog = Some(seed as f32 * 0.001);
+            let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
+            // Before: the whole edit on the UI thread.
+            let t = std::time::Instant::now();
+            s.replace_world(id, &spec).unwrap();
+            let inline = ms(t);
+            // After: the UI thread saves the spec and later swaps the clip; a worker builds.
+            spec.seed = Some(seed as u32 + 100);
+            let t = std::time::Instant::now();
+            let job = Session::stage_world(&s.doc, id, &spec).unwrap();
+            let stage = ms(t);
+            let t = std::time::Instant::now();
+            Session::build_staged(&job).unwrap();
+            let build = ms(t);
+            let t = std::time::Instant::now();
+            Session::apply_world(&mut s.doc, id, &job.path).unwrap();
+            let apply = ms(t);
+            eprintln!("world edit: inline replace_world {inline:.0} ms on the UI thread; staged: UI {:.1} ms (stage {stage:.1} + apply {apply:.1}), worker {build:.0} ms", stage + apply);
+        }
     }
 }

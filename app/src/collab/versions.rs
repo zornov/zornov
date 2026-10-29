@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use studio_model as m;
 
 fn dir(root: &Path) -> PathBuf {
-    root.join("versions")
+    m::file::ProjectFolder::new(root).review_versions_dir()
 }
 
 /// One saved version.
