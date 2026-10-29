@@ -54,10 +54,16 @@ const PAGES: &[(&str, Icon)] = &[
     ("Shortcuts", Icon::Keyboard),
     ("AI", Icon::Sparkle),
     ("Models", Icon::Cpu),
+    // After Models so the numbers other screens jump to (Shortcuts 3, Models
+    // 5) stay put; the nav lists the pages in `NAV` order.
+    ("Editing", Icon::Scissors),
     #[cfg(feature = "commerce")]
     ("Account", Icon::Star),
     ("About", Icon::Info),
 ];
+
+/// The order the pages are listed in.
+const NAV: &[&str] = &["General", "Editing", "Playback", "Storage", "Shortcuts", "AI", "Models", "Account", "About"];
 
 /// The default shortcut map (ours, spec §60).
 pub const SHORTCUTS: &[(&str, &str, &str)] = &[
@@ -138,7 +144,7 @@ const LICENCES: &[Licence] = &[
 ];
 
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
-    let out = kit::modal(ctx, egui::Id::unique("settings-dialog"), Vec2::new(760.0, 560.0), "Settings", |ui| body(app, ui));
+    let out = kit::modal(ctx, egui::Id::unique("settings-dialog"), Vec2::new(900.0, 620.0), "Settings", |ui| body(app, ui));
     if out.close && app.settings.capturing.is_none() {
         app.overlay = Overlay::None;
     }
@@ -147,57 +153,40 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
 fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
     let r = ui.max_rect();
-    // Pages as a row of tabs along the top; the active one is filled.
-    let nav = Rect::from_min_size(r.min + Vec2::new(16.0, 6.0), Vec2::new(r.width() - 32.0, 28.0));
-    // More pages than the width: the row scrolls sideways.
-    let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(nav).id_salt("settings-tabs"));
-    bar.set_clip_rect(nav.intersect(ui.clip_rect()));
-    kit::scroll_strip(&mut bar, "settings-tabs-scroll", |ui| {
-        let natural: f32 = PAGES.iter().map(|(n, _)| kit::text_width(ui, n, theme::body()) + 26.0).sum();
-        let (row, _) = ui.allocate_exact_size(Vec2::new(natural.max(nav.width()), nav.height()), Sense::hover());
-        let mut x = row.left();
-        for (i, (name, _icon)) in PAGES.iter().enumerate() {
-            let w = kit::text_width(ui, name, theme::body()) + 22.0;
-            let rr = Rect::from_min_size(egui::pos2(x, row.top()), Vec2::new(w, row.height()));
-            x += w + 4.0;
-            let resp = ui.interact(rr, egui::Id::unique(("settings-tab", i)), Sense::click());
-            let st = kit::State::from_response(ui, &resp, None);
-            let sel = app.settings.page == i;
-            let p = ui.painter();
-            let cr = CornerRadius::same(theme::radius::CONTROL);
-            if sel {
-                p.rect_filled(rr, cr, t.accent_soft);
-            } else if st.hover > 0.0 {
-                p.rect_filled(rr, cr, theme::alpha(t.alt, st.hover));
-            }
-            p.text(rr.center(), Align2::CENTER_CENTER, *name, theme::body(), if sel { t.accent } else { t.text });
-            if st.focused {
-                kit::focus_ring(p, rr, cr, &t);
-            }
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, sel, *name));
-            if resp.clicked() {
-                app.settings.page = i;
-            }
+    // A column of pages on the left, the page on the right.
+    let nav_w = 176.0;
+    let nav = Rect::from_min_max(r.min, egui::pos2(r.left() + nav_w, r.bottom()));
+    ui.painter().rect_filled(nav, 0, t.ground);
+    kit::vline(ui, nav.right(), nav.top()..=nav.bottom());
+    let mut nui = ui.new_child(egui::UiBuilder::new().max_rect(nav.shrink(theme::space::SM)).id_salt("settings-nav"));
+    nui.spacing_mut().item_spacing.y = theme::space::XXS;
+    for name in NAV {
+        let Some(index) = PAGES.iter().position(|(n, _)| n == name) else { continue };
+        let sel = app.settings.page == index;
+        if kit::ListRow::new(name).icon(PAGES[index].1).selected(sel).show(&mut nui).response.clicked() {
+            app.settings.page = index;
         }
-    });
-    let _ = icons::paint;
-    let nav = Rect::from_min_max(egui::pos2(r.left(), r.top()), egui::pos2(r.left(), nav.bottom() + 8.0));
-    let content = Rect::from_min_max(egui::pos2(r.left(), nav.bottom()), r.max);
+    }
+    let content = Rect::from_min_max(egui::pos2(nav.right() + 1.0, r.top()), r.max);
     let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(content).id_salt(("settings-page", app.settings.page)));
+    let page = PAGES.get(app.settings.page).map_or("About", |p| p.0);
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_v(&mut cui, |ui| {
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 16)).show(ui, |ui| {
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(theme::space::XL as i8, theme::space::LG as i8)).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = theme::space::SECTION_GAP;
-            match app.settings.page {
-                0 => general(app, ui),
-                1 => playback(app, ui),
-                2 => storage(app, ui),
-                3 => shortcuts(app, ui),
-                4 => ai(app, ui),
-                5 => models(app, ui),
+            kit::set_label_width(ui.ctx(), kit::LABEL_W_WIDE);
+            match page {
+                "General" => general(app, ui),
+                "Editing" => editing(app, ui),
+                "Playback" => playback(app, ui),
+                "Storage" => storage(app, ui),
+                "Shortcuts" => shortcuts(app, ui),
+                "AI" => ai(app, ui),
+                "Models" => models(app, ui),
                 #[cfg(feature = "commerce")]
-                6 => crate::screens::account::page(&mut app.settings.account, ui),
+                "Account" => crate::screens::account::page(&mut app.settings.account, ui),
                 _ => about(app, ui),
             }
+            kit::set_label_width(ui.ctx(), kit::LABEL_W);
         });
     });
 }
@@ -207,7 +196,7 @@ fn note(ui: &mut egui::Ui, text: &str) {
     ui.add_space(-4.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().interact_size.y = 14.0;
-        ui.add_space(kit::LABEL_W);
+        ui.add_space(kit::label_width(ui.ctx()));
         ui.add(egui::Label::new(egui::RichText::new(text).font(theme::caption()).color(t.text_2)).wrap());
     });
 }
@@ -270,13 +259,17 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
         });
         note(ui, "Short hints about what you can do next, one at a time.");
         ui.horizontal(|ui| {
-            ui.add_space(kit::LABEL_W);
+            ui.add_space(kit::label_width(ui.ctx()));
             if Button::secondary("Replay the welcome tour").show(ui).clicked() {
                 p.tour_done = false;
                 p.tips_seen.clear();
             }
         });
     });
+}
+
+fn editing(app: &mut StudioApp, ui: &mut egui::Ui) {
+    let p = &mut app.prefs;
     Section::new("set-editing", "Editing").icon(Icon::Scissors).fixed().show(ui, |ui| {
         kit::labeled_row(ui, "Hover scrub", |ui| {
             kit::toggle(ui, &mut p.hover_scrub, "Hover scrub", None);
@@ -286,6 +279,14 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::toggle(ui, &mut p.autosave, "Autosave", None);
         });
         note(ui, "Saves 30 seconds after the last change and keeps 20 backups.");
+        kit::labeled_row(ui, "Snapping", |ui| {
+            kit::toggle(ui, &mut p.snapping, "Snapping", None);
+        });
+        note(ui, "Clips and the playhead jump to edit points, markers and each other as you drag.");
+        kit::labeled_row(ui, "Magnetic main lane", |ui| {
+            kit::toggle(ui, &mut p.magnetic, "Magnetic main lane", None);
+        });
+        note(ui, "Trimming a clip on the main track moves the clips after it, so no gaps are left.");
     });
 }
 
@@ -318,32 +319,37 @@ fn storage(app: &mut StudioApp, ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
     let p = &mut app.prefs;
     let mut clean = false;
+    let mut picked: Option<(usize, String)> = None;
     Section::new("set-storage", "Folders").icon(Icon::Folder).fixed().show(ui, |ui| {
-        for (label, path) in [("Cache", &p.cache_dir), ("Proxies", &p.proxy_dir)] {
+        for (i, (label, path)) in [("Cache", &p.cache_dir), ("Proxies", &p.proxy_dir)].into_iter().enumerate() {
             kit::labeled_row(ui, label, |ui| {
                 let (rr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 92.0, 28.0), Sense::hover());
-                ui.painter().rect_filled(rr, CornerRadius::same(6), kit::field_fill(ui));
+                ui.painter().rect_filled(rr, CornerRadius::same(theme::radius::PANEL), kit::field_fill(ui));
                 icons::paint(ui.painter(), Rect::from_center_size(egui::pos2(rr.left() + 16.0, rr.center().y), Vec2::splat(16.0)), Icon::Folder, 16.0, t.text_2);
-                kit::paint_text_clipped(ui.painter(), egui::pos2(rr.left() + 32.0, rr.center().y), Align2::LEFT_CENTER, &studio_paths::tilde(std::path::Path::new(path.as_str())), theme::control(), t.text, rr.width() - 40.0);
+                kit::paint_text_clipped(ui.painter(), egui::pos2(rr.left() + 32.0, rr.center().y), Align2::LEFT_CENTER, &studio_paths::tilde(std::path::Path::new(path.as_str())), theme::body(), t.text, rr.width() - 40.0);
                 if Button::secondary("Change…").compact().show(ui).clicked() {
-                    kit::push(ui.ctx(), "Folder picker arrives with file dialogs", None, Some(Icon::Info));
+                    if let Some(dir) = rfd::FileDialog::new().set_title(format!("{label} folder")).pick_folder() {
+                        picked = Some((i, dir.display().to_string()));
+                    }
                 }
             });
         }
     });
-    Section::new("set-usage", "Disk use").icon(Icon::HardDrives).fixed().show(ui, |ui| {
-        for (label, used, cap) in [("Frame cache", 3.4f32, p.cache_gb), ("Proxies", 12.8, 64.0), ("Thumbnails", 0.6, 4.0)] {
+    match picked {
+        Some((0, d)) => p.cache_dir = d,
+        Some((_, d)) => p.proxy_dir = d,
+        None => {}
+    }
+    Section::new("set-usage", "Caches on this computer").icon(Icon::HardDrives).fixed().show(ui, |ui| {
+        for (label, path) in [("Cache", p.cache_dir.clone()), ("Proxies", p.proxy_dir.clone())] {
             kit::labeled_row(ui, label, |ui| {
-                let (rr, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 92.0, 28.0), Sense::hover());
-                let bar = Rect::from_min_size(egui::pos2(rr.left(), rr.center().y - 3.0), Vec2::new(rr.width(), 6.0));
-                ui.painter().rect_filled(bar, CornerRadius::same(3), kit::field_fill(ui));
-                ui.painter().rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * (used / cap).min(1.0), 6.0)), CornerRadius::same(3), t.accent);
-                ui.label(egui::RichText::new(format!("{used:.1} GB")).font(theme::body()).color(t.text_2));
+                let bytes = folder_bytes(ui.ctx(), &path);
+                ui.label(egui::RichText::new(crate::safety::human(bytes)).font(theme::body()).color(t.text_2));
             });
         }
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
         ui.horizontal(|ui| {
-            ui.add_space(kit::LABEL_W);
+            ui.add_space(kit::label_width(ui.ctx()));
             clean = Button::secondary("Clean up cache").icon(Icon::Trash).show(ui).clicked();
         });
         note(ui, "Removes cached frames, waveforms and proxies. Projects and media are not touched.");
@@ -352,6 +358,31 @@ fn storage(app: &mut StudioApp, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         crate::screens::library_safety::clean_for(app, &ctx);
     }
+}
+
+/// The size of what a folder holds, looked at again every few seconds (a
+/// walk of a large cache is not something to do every frame).
+fn folder_bytes(ctx: &egui::Context, path: &str) -> u64 {
+    fn walk(p: &std::path::Path, depth: u8) -> u64 {
+        let Ok(rd) = std::fs::read_dir(p) else { return 0 };
+        rd.filter_map(|e| e.ok())
+            .map(|e| match e.metadata() {
+                Ok(m) if m.is_dir() && depth < 8 => walk(&e.path(), depth + 1),
+                Ok(m) => m.len(),
+                Err(_) => 0,
+            })
+            .sum()
+    }
+    let id = egui::Id::new(("settings-folder-bytes", path));
+    let now = ctx.input(|i| i.time);
+    if let Some((at, n)) = ctx.data(|d| d.get_temp::<(f64, u64)>(id)) {
+        if now - at < 10.0 {
+            return n;
+        }
+    }
+    let n = walk(std::path::Path::new(path), 0);
+    ctx.data_mut(|d| d.insert_temp(id, (now, n)));
+    n
 }
 
 fn key_badge(ui: &mut egui::Ui, text: &str, active: bool) -> egui::Response {
@@ -379,7 +410,7 @@ fn shortcuts(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::push(ui.ctx(), "Shortcuts reset to defaults", None, None);
         }
     });
-    ui.add_space(4.0);
+    ui.add_space(theme::space::XS);
     let q = app.settings.shortcut_query.to_lowercase();
     // Capture a new key combination.
     if let Some(i) = app.settings.capturing {
@@ -445,9 +476,9 @@ fn shortcuts(app: &mut StudioApp, ui: &mut egui::Ui) {
             });
         }
         if shown == 0 {
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             ui.label(egui::RichText::new(crate::i18n::shown("No actions match.")).font(theme::body()).color(t.text_2));
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
         }
     });
 }
@@ -629,10 +660,10 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                     });
                 }
             });
-            ui.add_space(4.0);
+            ui.add_space(theme::space::XS);
         }
         ui.horizontal(|ui| {
-            ui.add_space(kit::LABEL_W);
+            ui.add_space(kit::label_width(ui.ctx()));
             if st.lesson_clear {
                 ui.label(egui::RichText::new(crate::i18n::tf(format!("Delete all {} lessons?", all.len()))).font(theme::caption()).color(t.text_2));
                 if Button::secondary("Delete all").icon(Icon::Trash).compact().show(ui).clicked() {
@@ -711,12 +742,12 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
         }
         kit::labeled_row(ui, "Never use Mac voices", |ui| {
             if forced_off() {
-                ui.label(egui::RichText::new(crate::i18n::shown("Off by STUDIO_NO_SYSTEM_VOICE")).font(theme::body()));
+                ui.label(egui::RichText::new(crate::i18n::shown("Always on (set outside the app)")).font(theme::body()));
             } else {
                 kit::toggle(ui, &mut v.mac_voice_off, "Never use Mac voices", None);
             }
         });
-        note(ui, "On: no agent can speak with the Mac's built-in voices, even by asking for one by name; narration comes only from the service above, or not at all. Holds for the AI editor, the studio command and Claude Code / Codex alike. STUDIO_NO_SYSTEM_VOICE=1 in the environment forces it on.");
+        note(ui, "On: no agent can speak with the Mac's built-in voices, even by asking for one by name; narration comes only from the service above, or not at all. Holds for the assistant, the command line tool and Claude Code or Codex alike. It can also be switched on from outside the app, and then this setting is locked.");
         let sound_saved = *st.sound_key_saved.get_or_insert_with(|| keychain::api_key(keychain::ELEVENLABS).is_some());
         let (status, sound_note) = described_sounds(sound_saved);
         kit::labeled_row(ui, "Described sounds", |ui| {
@@ -819,7 +850,7 @@ fn models(app: &mut StudioApp, ui: &mut egui::Ui) {
     use studio_ai::ModelStatus;
     let t = theme::tokens(ui.ctx());
     ui.label(egui::RichText::new(crate::i18n::shown("These AI features run on this computer. Models download once to Movies ▸ Studio ▸ Models and stay there; nothing is uploaded. (The AI editor in Settings ▸ AI is the exception: it is Claude or ChatGPT / Codex.)")).font(theme::body()).color(t.text_2));
-    ui.add_space(4.0);
+    ui.add_space(theme::space::XS);
     // What is installed is read from the models folder itself (it was a
     // fixed list, and a finished "download" was forgotten on quitting).
     let now = ui.input(|i| i.time);
@@ -920,7 +951,7 @@ fn models(app: &mut StudioApp, ui: &mut egui::Ui) {
                 ui.ctx().request_repaint();
             }
         }
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
     }
     if reread {
         app.settings.model_rows_at = f64::NEG_INFINITY;
@@ -955,14 +986,14 @@ fn about(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
             });
             if open {
-                ui.add_space(6.0);
+                ui.add_space(theme::space::SM);
                 egui::ScrollArea::vertical().id_salt(("licence", i)).max_height(200.0).show_v(ui, |ui| {
                     ui.add(egui::Label::new(egui::RichText::new(l.text).font(theme::mono_small()).color(t.text_2)).wrap());
                 });
             }
         });
     }
-    ui.add_space(4.0);
+    ui.add_space(theme::space::XS);
     ui.label(egui::RichText::new(crate::i18n::shown("Library content shows its own source and licence in each item's info.")).font(theme::caption()).color(t.text_2));
     ui.label(egui::RichText::new(crate::i18n::shown("Zornov™ is a trademark of Ashrox LLC.")).font(theme::caption()).color(t.text_2));
 }
@@ -1028,6 +1059,17 @@ mod tests {
 
     /// A service that cannot speak hands the line to a Mac voice when the
     /// Mac voices are allowed (`voice_service::speak_with`); the note says so.
+    /// Every page in the nav exists, and every page is in the nav.
+    #[test]
+    fn the_nav_lists_every_page_once() {
+        for (name, _) in PAGES {
+            assert_eq!(NAV.iter().filter(|n| *n == name).count(), 1, "{name} is in the nav once");
+        }
+        assert!(PAGES.iter().any(|(n, _)| *n == "Editing"), "Editing has a page");
+        assert_eq!(PAGES[3].0, "Shortcuts", "other screens jump to page 3");
+        assert_eq!(PAGES[5].0, "Models", "other screens jump to page 5");
+    }
+
     #[test]
     fn the_voice_note_says_what_happens_when_a_service_fails() {
         let on = voice_note("ElevenLabs", "elevenlabs.io", true);
