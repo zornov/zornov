@@ -773,13 +773,13 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
                     let seq = app.doc.seq();
                     let _ = seq;
                     let edit = super::cutting::trim_edit(app, id, left, step, spine);
-                    if app.doc.apply_gesture("tl-trim", "Trim", edit) {
+                    if app.doc.apply_gesture(&format!("tl-trim-{id}-{origin_start}-{origin_dur}-{left}"), "Trim", edit) {
                         if let Some(TlDrag::Trim { applied: a, .. }) = &mut app.editor.tl_drag {
                             *a = want;
                         }
                     } else {
-                        // Out of media or blocked: stay where we are, quietly.
-                        app.doc.error = None;
+                        // Out of media or blocked: stay where we are; say why once, on release.
+                        note_refused(&ctx, app.doc.error.take());
                     }
                 }
             }
@@ -793,12 +793,12 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
                     let step = want - applied;
                     if step != 0 {
                         let seq = app.doc.seq();
-                        if app.doc.apply_gesture("tl-slip", "Slip", m::Edit::Slip { seq, clip: m::ClipId(id as u64), delta: step }) {
+                        if app.doc.apply_gesture(&format!("tl-slip-{id}-{origin_in}"), "Slip", m::Edit::Slip { seq, clip: m::ClipId(id as u64), delta: step }) {
                             if let Some(TlDrag::Slip { applied: a, .. }) = &mut app.editor.tl_drag {
                                 *a = want;
                             }
                         } else {
-                            app.doc.error = None;
+                            note_refused(&ctx, app.doc.error.take());
                         }
                     }
                 }
@@ -847,8 +847,14 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
         }
     }
     if released {
+        // The drag's edits are one undo step from here on, whatever has
+        // keyboard focus.
+        app.doc.end_gesture();
         app.editor.tl_drag = None;
         app.editor.snap_line = None;
+        if let Some(why) = ctx.data_mut(|d| d.remove_temp::<String>(refused_id())) {
+            kit::push(&ctx, why, None, Some(Icon::Warning));
+        }
     }
 
     // Optional hover-scrub: preview frames without moving the playhead.
@@ -866,6 +872,18 @@ fn hover_scrub(enabled: bool, dragging: bool, playing: bool, under_pointer: Opti
 
 /// Send the move the user just finished dragging.
 #[allow(clippy::too_many_arguments)]
+fn refused_id() -> egui::Id {
+    egui::Id::new("tl-refused")
+}
+
+/// A trim or slip the model refused mid-drag: the clip stays put, and the
+/// reason is shown once when the pointer is released.
+fn note_refused(ctx: &egui::Context, why: Option<String>) {
+    if let Some(w) = why.filter(|w| !w.is_empty()) {
+        ctx.data_mut(|d| d.insert_temp(refused_id(), w));
+    }
+}
+
 fn commit_move(app: &mut StudioApp, ctx: &egui::Context, proj: &Project, ids: &[u32], origin: &[(u32, Time, u32)], delta: Time, off: i32, lane_ids: &[u32]) {
     let seq = app.doc.seq();
     let spine = proj.spine();
@@ -918,7 +936,7 @@ fn commit_move(app: &mut StudioApp, ctx: &egui::Context, proj: &Project, ids: &[
         ok
     };
     if ok {
-        kit::push(ctx, crate::i18n::tf(format!("Moved {}", if ids.len() == 1 { "clip".to_owned() } else { format!("{} clips", ids.len()) })), Some("Undo"), Some(Icon::ArrowsOutCardinal));
+        super::toast_undo(&mut app.editor, ctx, crate::i18n::tf(format!("Moved {}", if ids.len() == 1 { "clip".to_owned() } else { format!("{} clips", ids.len()) })), Icon::ArrowsOutCardinal);
     }
 }
 
@@ -1680,5 +1698,29 @@ mod tests {
         assert_eq!(ruler_label(12, 24.0), "00:00:12");
         assert_eq!(ruler_label(36, 24.0), "00:01:12");
         assert_eq!(ruler_label(3600 * 24 + 5, 24.0), "01:00:00:05");
+    }
+
+    /// The Move toast's Undo button is the toast the move pushed, and it
+    /// takes the move back.
+    #[test]
+    fn the_move_toast_undoes_the_move() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Move", 320, 180, 24.0));
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#ffcc00", "at": 2.0, "duration": 2.0, "lane": "overlay", "width": 100, "height": 100})], "card", false).unwrap();
+        app.doc = s.doc;
+        let proj = app.doc.project.clone();
+        let c = proj.clips.iter().find(|c| c.name.contains("card")).unwrap();
+        let (id, start, lane) = (c.id, c.start, c.lane);
+        let lane_ids: Vec<u32> = proj.lanes.iter().map(|l| l.id).collect();
+        commit_move(&mut app, &ctx, &proj, &[id], &[(id, start, lane)], SEC, 0, &lane_ids);
+        assert_eq!(app.doc.project.clip(id).unwrap().start, start + SEC);
+        let toast = kit::recent(&ctx).into_iter().next().unwrap();
+        assert_eq!((toast.text.as_str(), toast.action.as_deref()), ("Moved clip", Some("Undo")));
+        assert_eq!(app.editor.undo_toast, Some(toast.id));
+        assert!(app.doc.undo().is_some());
+        assert_eq!(app.doc.project.clip(id).unwrap().start, start);
     }
 }

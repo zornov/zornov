@@ -29,6 +29,8 @@ pub struct Doc {
     pub project: std::sync::Arc<Project>,
     view_time: Time,
     gesture: Option<String>,
+    /// The clips the last undo or redo changed (for restoring selection).
+    history_touched: Vec<u32>,
     /// Bumped whenever the view is rebuilt.
     pub revision: u64,
     /// Bumped when the project itself changes (not when the view only
@@ -65,7 +67,7 @@ pub struct Synced {
 impl Doc {
     pub fn new(model: m::Project) -> Self {
         let project = std::sync::Arc::new(bridge::view_of(&model, 0));
-        let mut d = Self { model, history: m::History::new(), project, view_time: 0, gesture: None, revision: 0, edits: 0, error: None, folder: None, slot: Default::default(), keyed: Vec::new(), guard: None, synced: None, open_hold: None };
+        let mut d = Self { model, history: m::History::new(), project, view_time: 0, gesture: None, history_touched: Vec::new(), revision: 0, edits: 0, error: None, folder: None, slot: Default::default(), keyed: Vec::new(), guard: None, synced: None, open_hold: None };
         d.index();
         d
     }
@@ -340,6 +342,11 @@ impl Doc {
         edits
     }
 
+    /// The clips the last undo or redo changed; empty when unknown.
+    pub fn take_history_touched(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.history_touched)
+    }
+
     /// Close the open gesture (pointer released).
     pub fn end_gesture(&mut self) {
         if self.gesture.take().is_some() && self.history.in_transaction() {
@@ -463,6 +470,7 @@ impl Doc {
         if i + 1 == steps.len() && !self.history.in_transaction() {
             let r = self.history.undo(&mut self.model).map_err(|e| e.to_string());
             let done = self.history.last_redo().cloned();
+            self.history_touched = done.as_ref().and_then(|e| self.clips_of(e)).unwrap_or_default();
             self.refresh_for(done.as_ref().filter(|_| r.as_ref().is_ok_and(|l| l.is_some())));
             return r;
         }
@@ -482,6 +490,7 @@ impl Doc {
         self.history.take_undo(i);
         self.history.record_undone(m::Step { label: step.label.clone(), inverse: redo, author: step.author });
         self.rebase_after(i, &step.inverse, &mut old);
+        self.history_touched = self.clips_of(&step.inverse).unwrap_or_default();
         self.refresh();
         if !out.conflicts.is_empty() {
             let kept: Vec<String> = out.conflicts.iter().take(4).map(|c| format!("{} {}", c.what, if c.name.is_empty() { c.id.to_string() } else { c.name.clone() })).collect();
@@ -529,6 +538,7 @@ impl Doc {
         if i + 1 == steps.len() && !self.history.in_transaction() {
             let r = self.history.redo(&mut self.model).map_err(|e| e.to_string());
             let done = self.history.last_undo().cloned();
+            self.history_touched = done.as_ref().and_then(|e| self.clips_of(e)).unwrap_or_default();
             self.refresh_for(done.as_ref().filter(|_| r.as_ref().is_ok_and(|l| l.is_some())));
             return r;
         }
@@ -536,6 +546,7 @@ impl Doc {
         let undo = self.model.apply(step.inverse.clone()).map_err(|e| format!("Could not redo {}: {e}", step.label.to_lowercase()))?;
         self.history.take_redo(i);
         self.history.record_redone(m::Step { label: step.label.clone(), inverse: undo, author: step.author });
+        self.history_touched = self.clips_of(&step.inverse).unwrap_or_default();
         self.refresh();
         Ok(Some(step.label))
     }
@@ -734,6 +745,69 @@ mod tests {
         let back = Doc::new(loaded.project);
         assert_eq!(back.project.clips.len(), d.project.clips.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn first_two_free_clips(d: &Doc) -> (u32, u32) {
+        let spine = d.project.spine();
+        let v: Vec<u32> = d.project.clips.iter().filter(|c| Some(c.lane) != spine).map(|c| c.id).collect();
+        (v[0], v[1])
+    }
+
+    /// Two trims, each its own gesture key, undo one at a time; a
+    /// cancelled one leaves the earlier trim alone.
+    #[test]
+    fn each_trim_is_its_own_undo_step() {
+        let mut d = Doc::from_view(&view::demo());
+        let (a, b) = first_two_free_clips(&d);
+        let seq = d.seq();
+        let dur = |d: &Doc, id| d.project.clip(id).unwrap().dur;
+        let (da, db) = (dur(&d, a), dur(&d, b));
+        let trim = |id: u32, delta| m::Edit::Trim { seq, clip: m::ClipId(id as u64), edge: m::Edge::End, delta, ripple: false };
+        assert!(d.apply_gesture(&format!("tl-trim-{a}"), "Trim", trim(a, -SEC / 4)));
+        d.end_gesture();
+        assert!(d.apply_gesture(&format!("tl-trim-{b}"), "Trim", trim(b, -SEC / 4)));
+        d.end_gesture();
+        assert_eq!(d.history_len(), 2);
+        // A third, cancelled with Esc: only it goes back.
+        assert!(d.apply_gesture(&format!("tl-trim-{a}-2"), "Trim", trim(a, -SEC / 10)));
+        d.cancel_gesture();
+        assert_eq!(dur(&d, a), da - SEC / 4);
+        assert_eq!(d.history_len(), 2);
+        d.undo();
+        assert_eq!(dur(&d, b), db);
+        assert_eq!(dur(&d, a), da - SEC / 4, "the earlier trim of the other clip stays");
+        d.undo();
+        assert_eq!(dur(&d, a), da);
+    }
+
+    #[test]
+    fn undo_reports_the_clips_it_changed() {
+        let mut d = Doc::from_view(&view::demo());
+        let (a, _) = first_two_free_clips(&d);
+        let seq = d.seq();
+        assert!(d.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(a as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        d.undo();
+        assert_eq!(d.take_history_touched(), vec![a]);
+        d.redo();
+        assert_eq!(d.take_history_touched(), vec![a]);
+        assert!(d.take_history_touched().is_empty());
+    }
+
+    /// Undoing a person's step from under a later agent step still says
+    /// which clips it changed.
+    #[test]
+    fn undo_from_under_an_agent_step_reports_the_clips() {
+        let mut d = Doc::from_view(&view::demo());
+        let (a, b) = first_two_free_clips(&d);
+        let seq = d.seq();
+        assert!(d.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(a as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        d.as_author(m::Author::Agent { request: 1, call: 1 }, |d| {
+            assert!(d.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(b as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        });
+        assert!(d.undo().is_some());
+        assert_eq!(d.take_history_touched(), vec![a]);
+        assert!(d.redo().is_some());
+        assert_eq!(d.take_history_touched(), vec![a]);
     }
 
     #[test]
