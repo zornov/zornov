@@ -10,7 +10,7 @@
 
 use crate::app::StudioApp;
 use crate::icons::Icon;
-use crate::kit::{self, Button, IconButton};
+use crate::kit::{self, Button, IconButton, Segment};
 use crate::theme;
 use eframe::egui::{self, Color32, CornerRadius, Rect, RichText, Stroke};
 use serde_json::{Value, json};
@@ -18,6 +18,24 @@ use studio_model as m;
 use studio_model::story::{self as st, fountain, import, times};
 use std::path::Path;
 use crate::kit::ShowNoted;
+
+const GAP: f32 = theme::space::GAP;
+// Gaps between cards and blocks, in steps of the kit gap.
+const GAP_2: f32 = GAP * 2.0;
+// TODO(kit): card padding; the kit has no card-frame helper.
+const CARD_PAD: i8 = 6;
+// TODO(kit): shot-size badge colours (wide to tight); no category tokens in theme.
+const KIND_WIDE: Color32 = Color32::from_rgb(70, 130, 180);
+const KIND_MEDIUM: Color32 = Color32::from_rgb(80, 160, 140);
+const KIND_CLOSE: Color32 = Color32::from_rgb(170, 140, 60);
+const KIND_TIGHT: Color32 = Color32::from_rgb(190, 90, 70);
+
+/// An internal name (`close_up`) as people read it (`Close up`).
+fn human(name: &str) -> String {
+    let s = name.replace('_', " ");
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
 
 /// The categories of the section.
 pub const GROUPS: &[&str] = &["Shots", "Script", "Places", "Cast", "Check"];
@@ -46,7 +64,7 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, args: Value, label: &str) {
     let msg = match r {
         Err(e) => Some(e),
         Ok(_) => match crate::agent::live::forward(&mut s.doc, n) {
-            None => Some("the change could not be applied".into()),
+            None => Some("The change could not be applied".into()),
             Some(edits) if edits.is_empty() => None,
             Some(edits) => {
                 app.doc.begin_batch(label);
@@ -92,10 +110,10 @@ fn edit_shot(app: &mut StudioApp, id: &str, f: impl FnOnce(&mut st::Shot)) {
 
 fn kind_colour(k: st::ShotKind, t: &theme::Tokens) -> Color32 {
     match k.tightness() {
-        0 => Color32::from_rgb(70, 130, 180),
-        1 => Color32::from_rgb(80, 160, 140),
-        2 | 3 => Color32::from_rgb(170, 140, 60),
-        4 => Color32::from_rgb(190, 90, 70),
+        0 => KIND_WIDE,
+        1 => KIND_MEDIUM,
+        2 | 3 => KIND_CLOSE,
+        4 => KIND_TIGHT,
         _ => t.danger,
     }
 }
@@ -111,7 +129,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, has: bool) {
                 let mut s = now(app);
                 let done = s.plan(false);
                 if done.is_empty() {
-                    kit::push(&ctx, "Every scene already has shots".to_owned(), None, None);
+                    kit::push(&ctx, "Every scene already has shots", None, None);
                 } else {
                     set_story(app, s, "Plan shots");
                 }
@@ -141,11 +159,11 @@ pub fn panel(app: &mut StudioApp, ui: &mut egui::Ui, chip: usize, body: Rect) {
         egui::ScrollArea::vertical().id_salt(("story-empty", chip)).auto_shrink([false, false]).show_v(&mut bui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: pad as i8, right: pad as i8, top: 6, bottom: 8 }).show(ui, |ui| {
                 ui.label(RichText::new("Write or paste your story or narration below, or bring in a file (text, Markdown, Fountain, SRT, VTT, Word) or drop it here. Zornov breaks it into scenes and lines you can time, plan and build the timeline from.").font(theme::body()).color(t.text_2));
-                ui.add_space(4.0);
+                ui.add_space(GAP);
                 if Button::secondary("Import script").icon(Icon::DownloadSimple).compact().show(ui).clicked() {
                     import_dialog(app, &ctx);
                 }
-                ui.add_space(8.0);
+                ui.add_space(GAP_2);
                 script_text(app, ui, &story, &t, &ctx);
             });
         });
@@ -156,10 +174,10 @@ pub fn panel(app: &mut StudioApp, ui: &mut egui::Ui, chip: usize, body: Rect) {
     egui::ScrollArea::vertical().id_salt(("story-scroll", chip)).auto_shrink([false, false]).show_v(&mut bui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: pad as i8, right: pad as i8, top: 2, bottom: 8 }).show(ui, |ui| {
             toolbar(app, ui, !story.scenes.is_empty());
-            ui.add_space(4.0);
+            ui.add_space(GAP);
             let head = format!("{} · {} scenes · {} shots · {:.0}s planned", if story.title.is_empty() { "Story" } else { &story.title }, story.scenes.len(), story.timings().len(), secs(story.duration()));
             ui.label(RichText::new(head).font(theme::body_medium()).color(t.text));
-            ui.add_space(4.0);
+            ui.add_space(GAP);
             match chip {
                 0 => shots(app, ui, &story, &t),
                 1 => script(app, ui, &story, &t, &ctx),
@@ -177,14 +195,14 @@ fn shots(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::T
     let playhead = app.editor.playhead as m::Micros;
     let issues = story.check();
     for (si, sc) in story.scenes.iter().enumerate() {
-        ui.add_space(6.0);
+        ui.add_space(GAP_2);
         let place = story.place_of(sc).map(|p| format!(" · {}{}", p.ambience.as_deref().map(|a| format!("{a} · ")).unwrap_or_default(), p.surface.as_deref().unwrap_or(""))).unwrap_or_default();
         ui.label(RichText::new(format!("{}  {}", sc.id, fountain::slug_line(story, sc).trim_start_matches('.'))).font(theme::body_medium()).color(t.text));
         if !sc.summary.is_empty() || !place.is_empty() {
             ui.label(RichText::new(format!("{}{}", sc.summary, place)).font(theme::caption()).color(t.text_2));
         }
         if sc.shots.is_empty() {
-            ui.label(RichText::new("No shots yet: Plan shots").font(theme::caption()).color(t.warn));
+            ui.label(RichText::new("No shots yet: use Plan shots").font(theme::caption()).color(t.warn));
             continue;
         }
         for (i, sh) in sc.shots.iter().enumerate() {
@@ -196,32 +214,26 @@ fn shots(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::T
                 .fill(if here { t.accent_soft } else { t.raised })
                 .stroke(Stroke::new(1.0, if problem { t.warn } else { t.line }))
                 .corner_radius(CornerRadius::same(theme::radius::CONTROL))
-                .inner_margin(egui::Margin::same(6));
+                .inner_margin(egui::Margin::same(CARD_PAD));
             let r = frame.show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
                     let k = kind_colour(sh.kind, t);
-                    ui.label(RichText::new(format!(" {} ", sh.kind.abbrev())).font(theme::caption()).color(Color32::WHITE).background_color(k));
+                    ui.label(RichText::new(format!(" {} ", sh.kind.abbrev())).font(theme::caption()).color(t.on_clip).background_color(k));
                     ui.label(RichText::new(&sh.id).font(theme::body_medium()).color(t.text));
-                    let mut kind = sh.kind;
-                    egui::ComboBox::from_id_salt(("shot-kind", &sh.id)).selected_text(kind.name().replace('_', " ")).width(110.0).show_ui(ui, |ui| {
-                        crate::kit::note_list(ui);
-                        for k in st::ShotKind::ALL {
-                            ui.selectable_value(&mut kind, k, k.name().replace('_', " "));
-                        }
-                    });
-                    if kind != sh.kind {
+                    let kinds: Vec<String> = st::ShotKind::ALL.iter().map(|k| human(k.name())).collect();
+                    let kind_names: Vec<&str> = kinds.iter().map(String::as_str).collect();
+                    let cur = st::ShotKind::ALL.iter().position(|k| *k == sh.kind).unwrap_or(0);
+                    if let Some(i) = kit::menu_button(ui, &format!("shot-kind-{}", sh.id), cur, &kind_names, 130.0, None) {
+                        let kind = st::ShotKind::ALL[i];
                         edit_shot(app, &sh.id, |x| x.kind = kind);
                         app.doc.end_gesture();
                     }
-                    let mut cam = sh.camera;
-                    egui::ComboBox::from_id_salt(("shot-cam", &sh.id)).selected_text(cam.name().replace('_', " ")).width(80.0).show_ui(ui, |ui| {
-                        crate::kit::note_list(ui);
-                        for c in st::CameraMove::ALL {
-                            ui.selectable_value(&mut cam, c, c.name().replace('_', " "));
-                        }
-                    });
-                    if cam != sh.camera {
+                    let cams: Vec<String> = st::CameraMove::ALL.iter().map(|c| human(c.name())).collect();
+                    let cam_names: Vec<&str> = cams.iter().map(String::as_str).collect();
+                    let cur = st::CameraMove::ALL.iter().position(|c| *c == sh.camera).unwrap_or(0);
+                    if let Some(i) = kit::menu_button(ui, &format!("shot-cam-{}", sh.id), cur, &cam_names, 110.0, None) {
+                        let cam = st::CameraMove::ALL[i];
                         edit_shot(app, &sh.id, |x| x.camera = cam);
                         app.doc.end_gesture();
                     }
@@ -236,7 +248,7 @@ fn shots(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::T
                         app.doc.end_gesture();
                     }
                     if !sh.clips.is_empty() {
-                        ui.label(RichText::new("on timeline").font(theme::caption()).color(t.accent));
+                        ui.label(RichText::new("On timeline").font(theme::caption()).color(t.accent));
                     }
                 });
                 let who = if sh.subjects.is_empty() { String::new() } else { format!("{} · ", sh.subjects.join(" + ")) };
@@ -256,7 +268,7 @@ fn shots(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::T
                 app.editor.playhead = start as crate::view::Time;
                 app.editor.selection = sh.clips.iter().map(|c| c.0 as u32).collect();
             }
-            ui.add_space(3.0);
+            ui.add_space(GAP);
         }
     }
 }
@@ -411,12 +423,14 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::
     let mode_id = egui::Id::unique("story-script-text-mode");
     let mut as_text = ui.data(|d| d.get_temp::<bool>(mode_id)).unwrap_or(false);
     ui.horizontal_wrapped(|ui| {
-        ui.selectable_value(&mut as_text, false, "Lines");
-        ui.selectable_value(&mut as_text, true, "Text");
+        let mut mode = usize::from(as_text);
+        if kit::segmented(ui, "story-script-mode", &mut mode, &[Segment::text("Lines"), Segment::text("Text")], None, None).changed() {
+            as_text = mode == 1;
+        }
         ui.label(RichText::new("Put a time in front of the words, like [0:12-0:18]. Lines without one follow their shot, or are paced by reading speed.").font(theme::caption()).color(t.text_2));
     });
     ui.data_mut(|d| d.insert_temp(mode_id, as_text));
-    ui.add_space(4.0);
+    ui.add_space(GAP);
     if as_text {
         script_text(app, ui, story, t, ctx);
     } else {
@@ -493,7 +507,7 @@ fn script_lines(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &t
     let focus_id = egui::Id::unique("story-focus-next");
     let want_focus = ui.data(|d| d.get_temp::<(usize, usize)>(focus_id));
     for (si, sc) in story.scenes.iter().enumerate() {
-        ui.add_space(8.0);
+        ui.add_space(GAP_2);
         let hkey = format!("script-h-{si}");
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(format!("Scene {}", sc.id)).font(theme::body_medium()).color(t.text));
@@ -542,7 +556,7 @@ fn script_lines(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &t
                 .fill(if here { t.accent_soft } else { t.raised })
                 .stroke(Stroke::new(1.0, t.line))
                 .corner_radius(CornerRadius::same(theme::radius::CONTROL))
-                .inner_margin(egui::Margin::same(6));
+                .inner_margin(egui::Margin::same(CARD_PAD));
             frame.show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
@@ -553,13 +567,11 @@ fn script_lines(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &t
                         }
                     }
                     let mut kind = l.kind;
-                    let name = KINDS.iter().find(|k| k.0 == kind).map_or("", |k| k.1);
-                    egui::ComboBox::from_id_salt(("line-kind", si, li)).selected_text(name).width(88.0).show_ui(ui, |ui| {
-                        kit::note_list(ui);
-                        for (k, name) in KINDS {
-                            ui.selectable_value(&mut kind, k, name);
-                        }
-                    });
+                    let kind_names: Vec<&str> = KINDS.iter().map(|k| k.1).collect();
+                    let cur = KINDS.iter().position(|k| k.0 == kind).unwrap_or(0);
+                    if let Some(i) = kit::menu_button(ui, &format!("line-kind-{si}-{li}"), cur, &kind_names, 110.0, None) {
+                        kind = KINDS[i].0;
+                    }
                     if kind != l.kind {
                         edit_script(app, key.clone(), "Line kind", |s| {
                             let line = &mut s.scenes[si].lines[li];
@@ -595,8 +607,8 @@ fn script_lines(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &t
                         }
                     }
                     match &shot {
-                        Some(s) => ui.label(RichText::new(format!("shot {s}")).font(theme::caption()).color(t.accent)),
-                        None => ui.label(RichText::new("no shot").font(theme::caption()).color(t.text_2)),
+                        Some(s) => ui.label(RichText::new(format!("Shot {s}")).font(theme::caption()).color(t.accent)),
+                        None => ui.label(RichText::new("No shot").font(theme::caption()).color(t.text_2)),
                     };
                     if IconButton::new(Icon::CaretUp, "Move up").compact().show(ui).clicked() && li > 0 {
                         act = Some(Act::MoveLine(si, li, li - 1));
@@ -689,10 +701,10 @@ fn script_lines(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &t
                     }
                 });
             });
-            ui.add_space(3.0);
+            ui.add_space(GAP);
         }
     }
-    ui.add_space(8.0);
+    ui.add_space(GAP_2);
     if Button::secondary("Add scene").icon(Icon::Plus).compact().show(ui).clicked() {
         act = Some(Act::AddScene(story.scenes.len().checked_sub(1)));
     }
@@ -740,8 +752,7 @@ fn field(ui: &mut egui::Ui, label: &str, value: &str, id: String) -> (Option<Str
     let mut v = value.to_owned();
     let mut out = None;
     let mut done = false;
-    ui.horizontal(|ui| {
-        ui.add_sized([72.0, 18.0], egui::Label::new(RichText::new(label).font(theme::caption())));
+    kit::labeled_row(ui, label, |ui| {
         let r = ui.add(egui::TextEdit::singleline(&mut v).id_salt(id).desired_width(f32::INFINITY));
         if r.changed() {
             out = Some(v.clone());
@@ -756,11 +767,11 @@ fn places(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::
         ui.label(RichText::new("No places yet: scene headings (EXT. MEADOW - DAWN) make them").font(theme::caption()).color(t.text_2));
     }
     for p in &story.places {
-        ui.add_space(6.0);
+        ui.add_space(GAP_2);
         ui.label(RichText::new(format!("{}{}", if p.name.is_empty() { &p.id } else { &p.name }, if p.interior { " (inside)" } else { "" })).font(theme::body_medium()).color(t.text));
         let mut change: Option<(String, String)> = None;
         let mut done = false;
-        for (k, v) in [("backdrop", p.backdrop.clone().unwrap_or_default()), ("ambience", p.ambience.clone().unwrap_or_default()), ("light", p.light.clone()), ("surface", p.surface.clone().unwrap_or_default()), ("notes", p.notes.clone())] {
+        for (k, v) in [("Backdrop", p.backdrop.clone().unwrap_or_default()), ("Ambience", p.ambience.clone().unwrap_or_default()), ("Light", p.light.clone()), ("Surface", p.surface.clone().unwrap_or_default()), ("Notes", p.notes.clone())] {
             let (c, d) = field(ui, k, &v, format!("place-{}-{k}", p.id));
             if let Some(c) = c {
                 change = Some((k.to_owned(), c));
@@ -772,10 +783,10 @@ fn places(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::
             if let Some(x) = s.places.iter_mut().find(|x| x.id == p.id) {
                 let opt = |v: &str| (!v.trim().is_empty()).then(|| v.to_owned());
                 match k.as_str() {
-                    "backdrop" => x.backdrop = opt(&v),
-                    "ambience" => x.ambience = opt(&v),
-                    "surface" => x.surface = opt(&v),
-                    "light" => x.light = v,
+                    "Backdrop" => x.backdrop = opt(&v),
+                    "Ambience" => x.ambience = opt(&v),
+                    "Surface" => x.surface = opt(&v),
+                    "Light" => x.light = v,
                     _ => x.notes = v,
                 }
             }
@@ -792,7 +803,7 @@ fn cast(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::To
         ui.label(RichText::new("No characters yet: the speakers of the script become the cast").font(theme::caption()).color(t.text_2));
     }
     for c in &story.cast {
-        ui.add_space(6.0);
+        ui.add_space(GAP_2);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(if c.name.is_empty() { &c.id } else { &c.name }).font(theme::body_medium()).color(t.text));
             let mut size32 = c.size as f32;
@@ -810,7 +821,7 @@ fn cast(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::To
         });
         let mut change: Option<(String, String)> = None;
         let mut done = false;
-        for (k, v) in [("look", c.look.clone()), ("references", c.references.join(", ")), ("cast item", c.cast_item.clone().unwrap_or_default()), ("voice", c.voice.clone().unwrap_or_default()), ("personality", c.personality.clone()), ("moves", c.moves.join(", "))] {
+        for (k, v) in [("Look", c.look.clone()), ("References", c.references.join(", ")), ("Cast item", c.cast_item.clone().unwrap_or_default()), ("Voice", c.voice.clone().unwrap_or_default()), ("Personality", c.personality.clone()), ("Moves", c.moves.join(", "))] {
             let (ch, d) = field(ui, k, &v, format!("cast-{}-{k}", c.id));
             if let Some(ch) = ch {
                 change = Some((k.to_owned(), ch));
@@ -823,11 +834,11 @@ fn cast(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::To
                 let list = |v: &str| v.split(',').map(|w| w.trim().to_owned()).filter(|w| !w.is_empty()).collect::<Vec<_>>();
                 let opt = |v: &str| (!v.trim().is_empty()).then(|| v.to_owned());
                 match k.as_str() {
-                    "look" => x.look = v,
-                    "references" => x.references = list(&v),
-                    "cast item" => x.cast_item = opt(&v),
-                    "voice" => x.voice = opt(&v),
-                    "personality" => x.personality = v,
+                    "Look" => x.look = v,
+                    "References" => x.references = list(&v),
+                    "Cast item" => x.cast_item = opt(&v),
+                    "Voice" => x.voice = opt(&v),
+                    "Personality" => x.personality = v,
                     _ => x.moves = list(&v),
                 }
             }
@@ -865,7 +876,7 @@ fn check(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &theme::T
                 }
             }
         }
-        ui.add_space(4.0);
+        ui.add_space(GAP);
     }
 }
 

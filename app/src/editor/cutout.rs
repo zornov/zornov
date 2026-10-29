@@ -26,6 +26,13 @@ use crate::services::cutout::{self, CutJob, CutResult, Pick};
 use crate::theme;
 use crate::view::{ClipKind, Time};
 
+// TODO(kit): canvas marks for the object pick; the theme has no success colour
+// or on-canvas outline token.
+const MARK_IN: Color32 = Color32::from_rgb(74, 222, 128);
+const MARK_EDGE: Color32 = Color32::BLACK;
+/// How strongly the preview tints what would be taken (0..255).
+const PREVIEW_ALPHA: f32 = 120.0;
+
 /// What the Pick tool's clicks do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CutTool {
@@ -103,7 +110,7 @@ fn long_busy() -> bool {
 /// Starts removing the background (the people in the shot) of clip `id`.
 pub fn start_people(app: &StudioApp, ctx: &egui::Context, id: u32) -> Result<String, String> {
     if long_busy() {
-        return Err("a cut-out is already running".into());
+        return Err("A cut-out is already running".into());
     }
     let job = cutout::plan(&app.doc, id, None, 0.6, 1)?;
     cutout::models_ready(&job)?;
@@ -118,9 +125,9 @@ pub fn start_people(app: &StudioApp, ctx: &egui::Context, id: u32) -> Result<Str
 
 fn start_object(app: &StudioApp, ctx: &egui::Context, roto: bool) -> Result<(), String> {
     if long_busy() {
-        return Err("a cut-out is already running".into());
+        return Err("A cut-out is already running".into());
     }
-    let p = picking().lock().ok().and_then(|p| p.clone()).ok_or("pick the object first")?;
+    let p = picking().lock().ok().and_then(|p| p.clone()).ok_or("Pick the object first")?;
     let fps = (app.doc.project.fps as f64).max(1.0);
     let frames = app.doc.project.clip(p.clip).map_or(0.0, |c| c.dur as f64 / 1e6 * fps);
     let step = if !roto || frames <= 90.0 { 1 } else if frames <= 240.0 { 2 } else { 3 };
@@ -208,7 +215,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
                             app.doc.apply("Roto", m::Edit::SetClip { seq, clip: Box::new(mc) });
                             clear_pick();
                             set_tool(ctx, CutTool::Off);
-                            kit::push(ctx, crate::i18n::tf(format!("Roto mask {n}: keyed on {} frames. Edit its points with Pins ▸ Mask.", outlines.len())), None, Some(Icon::Path));
+                            kit::push(ctx, crate::i18n::tf(format!("Roto mask {n} added on {} frames, edit its points with Pins ▸ Mask", outlines.len())), None, Some(Icon::Path));
                         }
                         Err(e) => {
                             kit::push(ctx, e, None, Some(Icon::Warning));
@@ -278,12 +285,14 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
             *g = Some(Picking { clip: id, at: now, ..Default::default() });
         }
     }
+    let tk = theme::tokens(&ctx);
     let p = ui.painter().with_clip_rect(area);
     let cur = picking().lock().ok().and_then(|g| g.clone()).unwrap_or_default();
     // The preview: SAM's mask over the layer, tinted.
     if let (Some(mask), Some(geo)) = (&cur.preview, crate::editor::xform::geo(&app.doc.project, &app.doc.model, id, now)) {
         let (w, h) = (mask.width, mask.height);
-        let px: Vec<Color32> = mask.data.iter().map(|&a| Color32::from_rgba_unmultiplied(56, 189, 248, (a.clamp(0.0, 1.0) * 120.0) as u8)).collect();
+        let [tr, tg, tb, _] = tk.select.to_srgba_unmultiplied();
+        let px: Vec<Color32> = mask.data.iter().map(|&a| Color32::from_rgba_unmultiplied(tr, tg, tb, (a.clamp(0.0, 1.0) * PREVIEW_ALPHA) as u8)).collect();
         let img = egui::ColorImage::new([w, h], px);
         let tex = ctx.load_texture("cut-preview", img, egui::TextureOptions::LINEAR);
         let s = geo.source();
@@ -297,15 +306,15 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
         p.add(egui::Shape::mesh(mesh));
     }
     for c in &cur.pick.inside {
-        p.circle_filled(screen(*c), 5.0, Color32::from_rgb(74, 222, 128));
-        p.circle_stroke(screen(*c), 5.0, Stroke::new(1.5, Color32::BLACK));
+        p.circle_filled(screen(*c), 5.0, MARK_IN);
+        p.circle_stroke(screen(*c), 5.0, Stroke::new(1.5, MARK_EDGE));
     }
     for c in &cur.pick.outside {
-        p.circle_filled(screen(*c), 5.0, Color32::from_rgb(239, 68, 68));
-        p.circle_stroke(screen(*c), 5.0, Stroke::new(1.5, Color32::BLACK));
+        p.circle_filled(screen(*c), 5.0, tk.danger);
+        p.circle_stroke(screen(*c), 5.0, Stroke::new(1.5, MARK_EDGE));
     }
     if let Some([a, b]) = cur.pick.corners {
-        p.rect_stroke(Rect::from_two_pos(screen(a), screen(b)), 0, Stroke::new(1.5, Color32::from_rgb(74, 222, 128)), egui::StrokeKind::Middle);
+        p.rect_stroke(Rect::from_two_pos(screen(a), screen(b)), 0, Stroke::new(1.5, MARK_IN), egui::StrokeKind::Middle);
     }
     let resp = ui.interact(area, egui::Id::unique("canvas-cut-pick"), Sense::click_and_drag());
     let drag_id = egui::Id::unique("canvas-cut-drag");
@@ -317,7 +326,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
     let mut changed = false;
     if let Some(a) = ui.data(|d| d.get_temp::<Pos2>(drag_id)) {
         if let Some(b) = resp.interact_pointer_pos().or(resp.hover_pos()) {
-            p.rect_stroke(Rect::from_two_pos(a, b), 0, Stroke::new(1.0, Color32::from_rgb(74, 222, 128)), egui::StrokeKind::Middle);
+            p.rect_stroke(Rect::from_two_pos(a, b), 0, Stroke::new(1.0, MARK_IN), egui::StrokeKind::Middle);
             if resp.drag_stopped() {
                 ui.data_mut(|d| d.remove::<Pos2>(drag_id));
                 if (b - a).length() > 8.0
@@ -391,7 +400,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 c.meta.remove("matte");
                 app.doc.apply("Remove cut-out", m::Edit::SetClip { seq, clip: Box::new(c) });
             }
-            ui.add_space(6.0);
+            ui.add_space(theme::space::GAP * 2.0);
         }
         if let Some((label, pr)) = busy_with(id) {
             ui.horizontal_wrapped(|ui| {
@@ -412,7 +421,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         }
         // People.
         let b = ui.add_enabled_ui(modnet, |ui| Button::secondary("Remove background").icon(Icon::Sparkle).show(ui)).inner;
-        let b = kit::tip(b, if modnet { "Keep the people, drop everything behind them" } else { "Install MODNet in Settings ▸ Models" }, None);
+        let b = kit::tip(b, if modnet { "Keep the people, drop everything behind them" } else { "Install the Remove background model in Settings ▸ Models" }, None);
         if b.clicked() {
             match start_people(app, &ctx, id) {
                 Ok(msg) => {
@@ -439,10 +448,10 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             });
         });
         if !sam {
-            ui.label(egui::RichText::new(crate::i18n::shown("Picking objects needs SAM 2.1 (Settings ▸ Models).")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown("Picking objects needs the Object cut-out model (Settings ▸ Models)")).font(theme::caption()).color(t.text_2));
         } else if picking_now {
             let have = picking().lock().ok().and_then(|p| p.as_ref().map(|p| !p.pick.is_empty())).unwrap_or(false);
-            ui.label(egui::RichText::new(crate::i18n::shown("Click the object (⌥-click what is not it, or drag a box round it). The blue tint is what will be taken.")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown("Click the object (⌥-click what is not it, or drag a box round it). The tinted area is what will be taken")).font(theme::caption()).color(t.text_2));
             ui.add_enabled_ui(have, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if Button::primary("Cut out").icon(Icon::MagicWand).compact().show(ui).clicked()
