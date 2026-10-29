@@ -20,7 +20,7 @@ use studio_model as m;
 /// An error in front of the person. One place to move onto `kit::push_error`
 /// (ux-feedback's, not on main yet).
 pub(crate) fn say_error(ctx: &egui::Context, text: impl Into<String>) -> u64 {
-    kit::push(ctx, text, None, Some(Icon::Warning))
+    kit::push_error(ctx, text)
 }
 
 /// A project on the Start screen.
@@ -385,6 +385,9 @@ impl StudioApp {
         }
         ctx.data_mut(|d| d.insert_temp(ran, pass));
         if let Some(note) = crate::prefs::take_notice() {
+            say_error(ctx, crate::i18n::tf(note));
+        }
+        if let Some(note) = crate::recover::take_protection_notice() {
             say_error(ctx, crate::i18n::tf(note));
         }
         if let Some(e) = autosave_health().take_warning() {
@@ -1268,8 +1271,8 @@ mod tests {
         };
         let (p1, p2) = (dead(), dead());
         assert_ne!(p1, p2);
-        crate::safety::save_session(&home, &crate::safety::Session { pid: p1, project: a.clone(), ..Default::default() });
-        crate::safety::save_session(&home, &crate::safety::Session { pid: p2, project: b.clone(), ..Default::default() });
+        crate::safety::save_session(&home, &crate::safety::Session { pid: p1, project: a.clone(), ..Default::default() }).unwrap();
+        crate::safety::save_session(&home, &crate::safety::Session { pid: p2, project: b.clone(), ..Default::default() }).unwrap();
         let mut names: Vec<String> = recovered_rows(&ctx, &home).into_iter().map(|r| r.0).collect();
         names.sort();
         assert_eq!(names, ["A", "B"]);
