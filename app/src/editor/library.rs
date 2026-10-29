@@ -48,6 +48,16 @@ impl RailItem {
             RailItem::Story => "Story",
         }
     }
+    /// The name shown on the tab (the glossary's); `name` stays the key
+    /// that saved workspaces use.
+    pub fn label(self) -> &'static str {
+        match self {
+            RailItem::Motions => "Animations",
+            RailItem::Cuts => "Transitions",
+            RailItem::Ai => "Tools",
+            other => other.name(),
+        }
+    }
     pub fn icon(self) -> Icon {
         match self {
             RailItem::Media => Icon::FilmStrip,
@@ -80,7 +90,7 @@ impl RailItem {
             RailItem::Looks => catalogue::LOOK_GROUPS,
             RailItem::Audio if crate::content::find_dir().is_some() => super::library_content::AUDIO_GROUPS,
             RailItem::Audio => view::SOUND_GROUPS,
-            RailItem::Ai => &["AI editor", "All tools", "Installed", "Available"],
+            RailItem::Ai => &["All tools", "Installed", "Available"],
             RailItem::Story => super::story::GROUPS,
         }
     }
@@ -101,34 +111,59 @@ pub const TABS_H: f32 = 50.0;
 /// Width of the category column.
 pub const CATEGORY_W: f32 = 84.0;
 
+/// Width of the overflow cell.
+const MORE_W: f32 = 36.0;
+
+/// How many of the tabs fit across `avail` (all of them when they do, else
+/// as many as leave room for the overflow cell).
+fn tabs_that_fit(widths: &[f32], avail: f32) -> usize {
+    let all: f32 = 6.0 + widths.iter().map(|w| w + 2.0).sum::<f32>();
+    if all <= avail {
+        return widths.len();
+    }
+    let mut x = 6.0 + MORE_W + 2.0;
+    let mut n = 0;
+    for w in widths {
+        x += w + 2.0;
+        if x > avail {
+            break;
+        }
+        n += 1;
+    }
+    n.max(1)
+}
+
 /// The section tabs: a row of icon-over-label tabs, the active one in the
-/// accent. Number keys 1-9 switch sections; clicking the active one
-/// collapses the library.
+/// accent. Number keys 1-9 and 0 switch sections; clicking the active one
+/// collapses the library. The tabs that do not fit are in a "…" menu, so
+/// none is ever out of reach.
 pub fn rail(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
-    let widths: Vec<f32> = RailItem::ALL.iter().map(|item| (ui.fonts_mut(|f| f.layout_no_wrap(item.name().to_string(), theme::caption(), t.text).size().x) + 14.0).max(40.0)).collect();
-    let natural = 6.0 + widths.iter().map(|w| w + 2.0).sum::<f32>() + 4.0;
-    // A library narrower than its tabs scrolls them sideways.
-    let mut strip = ui.new_child(egui::UiBuilder::new().max_rect(r).id_salt("lib-rail"));
-    strip.set_clip_rect(r.intersect(ui.clip_rect()));
-    kit::scroll_strip(&mut strip, "lib-rail-scroll", |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(natural.max(r.width()), r.height()), Sense::hover());
-        rail_cells(app, ui, area, &widths);
-    });
+    let widths: Vec<f32> = RailItem::ALL.iter().map(|item| (ui.fonts_mut(|f| f.layout_no_wrap(item.label().to_string(), theme::caption(), t.text).size().x) + 14.0).max(40.0)).collect();
+    let fit = tabs_that_fit(&widths, r.width());
+    rail_cells(app, ui, r, &widths, fit);
     ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, t.line));
 }
 
-fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32]) {
+fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32], fit: usize) {
     let t = theme::tokens(ui.ctx());
-    let ed = &mut app.editor;
-    let mut open_ai = false;
+    let mut open_tool: Option<RailItem> = None;
     let mut x = r.left() + 6.0;
     for (item, w) in RailItem::ALL.into_iter().zip(widths.iter().copied()) {
-        let name = item.name();
+        // Keys reach every section, shown as a tab or not.
+        let key_hit = !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8, egui::Key::Num9, egui::Key::Num0][item.index()])));
+        if key_hit {
+            open_tool = Some(item);
+        }
+        if item.index() >= fit {
+            continue;
+        }
+        let name = item.label();
         let cell = Rect::from_min_size(egui::pos2(x, r.top() + 4.0), Vec2::new(w, r.height() - 8.0));
         let resp = ui.interact(cell, egui::Id::unique(("rail", item.index())), Sense::click());
         let st = kit::State::from_response(ui, &resp, None);
-        let active = ed.rail == item && ed.dock.is_open(crate::dock::Panel::Library);
+        let active = app.editor.rail == item && app.editor.dock.is_open(crate::dock::Panel::Library);
         let p = ui.painter();
         let fg = if active { t.accent } else { theme::mix(t.text, t.text, st.hover) };
         let ir = Rect::from_center_size(egui::pos2(cell.center().x, cell.top() + 13.0), Vec2::splat(16.0));
@@ -139,22 +174,39 @@ fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32]) {
         }
         resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, active, name));
         let resp = kit::tip(resp, name, Some(item.shortcut()));
-        let key_hit = !ui.ctx().egui_wants_keyboard_input()
-            && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8, egui::Key::Num9, egui::Key::Num0][item.index()])));
-        if resp.clicked() || key_hit {
-            ed.rail = item;
-            if item == RailItem::Ai {
-                // The AI editor is a panel of its own: this opens (or shows) it,
-                // and the Library keeps the AI tools.
-                open_ai = true;
-            } else {
-                ed.open_panel(crate::dock::Panel::Library);
-            }
+        if resp.clicked() {
+            open_tool = Some(item);
         }
         x += w + 2.0;
     }
-    if open_ai {
-        super::agent_panel::open(app);
+    if fit < RailItem::ALL.len() {
+        let cell = Rect::from_min_size(egui::pos2(x, r.top() + 4.0), Vec2::new(MORE_W, r.height() - 8.0));
+        let resp = ui.interact(cell, egui::Id::new("rail-more"), Sense::click());
+        let st = kit::State::from_response(ui, &resp, None);
+        let hidden_active = app.editor.rail.index() >= fit && app.editor.dock.is_open(crate::dock::Panel::Library);
+        let fg = if hidden_active { t.accent } else { theme::mix(t.text, t.text, st.hover) };
+        icons::paint(ui.painter(), Rect::from_center_size(cell.center(), Vec2::splat(16.0)), Icon::DotsThree, 16.0, fg);
+        if st.focused {
+            kit::focus_ring(ui.painter(), cell, CornerRadius::same(theme::radius::CONTROL), &t);
+        }
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "More sections"));
+        let resp = kit::tip(resp, "More sections", None);
+        let id = egui::Id::new("rail-more-menu");
+        if resp.clicked() {
+            kit::toggle_open(ui.ctx(), id);
+        }
+        kit::popover(ui.ctx(), id, cell, kit::Side::BelowRight, 180.0, |ui| {
+            for item in RailItem::ALL.into_iter().filter(|i| i.index() >= fit) {
+                if kit::MenuItem::new(item.label()).icon(item.icon()).shortcut(item.shortcut()).checked(app.editor.rail == item).show(ui).clicked() {
+                    open_tool = Some(item);
+                    kit::set_open(ui.ctx(), id, false);
+                }
+            }
+        });
+    }
+    if let Some(item) = open_tool {
+        app.editor.rail = item;
+        app.editor.open_panel(crate::dock::Panel::Library);
     }
 }
 
@@ -202,19 +254,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let rail = app.editor.rail;
     // Category column on the left, content on the right.
     let col = Rect::from_min_max(egui::pos2(r.left(), tabs.bottom()), egui::pos2(r.left() + CATEGORY_W, r.bottom()));
-    let mut chip = app.editor.library_chip[rail.index()].min(rail.groups().len().saturating_sub(1));
+    // The tools keep their old chip numbers (1 All tools, 2 Installed, 3
+    // Available; 0 was "AI editor", now only the assistant panel), so the
+    // saved chip and the assistant's own jump to "All tools" still agree.
+    let off = usize::from(rail == RailItem::Ai);
+    let mut chip = app.editor.library_chip[rail.index()].saturating_sub(off).min(rail.groups().len().saturating_sub(1));
     categories(ui, col, rail.groups(), &mut chip);
     ui.painter().vline(col.right() - 0.5, col.y_range(), Stroke::new(1.0, t.line));
-    if rail == RailItem::Ai && chip == 0 {
-        // "AI editor" opens the AI editor's own panel; the Library goes on
-        // with the AI tools.
-        super::agent_panel::open(app);
-        chip = 1;
-        app.editor.library_chip[rail.index()] = chip;
-    }
     if rail == RailItem::Story {
         // The production plan: storyboard, script, places, cast, check.
-        app.editor.library_chip[rail.index()] = chip;
+        app.editor.library_chip[rail.index()] = chip + off;
         let area = Rect::from_min_max(egui::pos2(col.right(), tabs.bottom() + 6.0), r.max - Vec2::new(0.0, 4.0));
         super::story::panel(app, ui, chip, area);
         return;
@@ -242,11 +291,11 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
     let search = Rect::from_min_size(inner.min, Vec2::new(search_w, 26.0));
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(search));
-    let hint = crate::i18n::tf(format!("Search {}", rail.name().to_lowercase()));
-    kit::text_field(&mut sui, &mut app.editor.library_query, if rail == RailItem::Ai { "Search AI tools" } else { &hint }, Some(Icon::MagnifyingGlass), search_w, None);
+    let hint = crate::i18n::tf(format!("Search {}", rail.label().to_lowercase()));
+    kit::text_field(&mut sui, &mut app.editor.library_query, if rail == RailItem::Ai { "Search tools" } else { &hint }, Some(Icon::MagnifyingGlass), search_w, None);
     let chips_r = Rect::from_min_max(egui::pos2(inner.left(), search.bottom()), egui::pos2(inner.right(), search.bottom()));
     let r = Rect::from_min_max(egui::pos2(inner.left() - pad, r.top()), r.max);
-    app.editor.library_chip[rail.index()] = chip;
+    app.editor.library_chip[rail.index()] = chip + off;
 
     let body = Rect::from_min_max(egui::pos2(r.left(), chips_r.bottom() + 12.0), r.max - Vec2::new(0.0, 4.0));
     let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(body));
@@ -313,6 +362,10 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
         .iter()
         .enumerate()
         .filter(|(i, name)| {
+            // Tools that cannot run yet are not listed.
+            if rail == RailItem::Ai && !ai_runnable(name) {
+                return false;
+            }
             let in_group = chip == 0
                 || match rail {
                     RailItem::Media => {
@@ -325,7 +378,7 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
                     }
                     // Installed: it runs now (its model is in the models
                     // folder, or it needs none). It was a fixed list.
-                    RailItem::Ai => chip == 1 || (chip == 2) == ai_feature(view::AI_TOOLS[*i].name).map(crate::services::models::feature).is_some_and(|r| r.ready),
+                    RailItem::Ai => (chip == 1) == ai_feature(view::AI_TOOLS[*i].name).map(crate::services::models::feature).is_some_and(|r| r.ready),
                     RailItem::Text => studio_text::styles::StyleCategory::ALL.get(chip - 1) == Some(&studio_text::styles::catalogue()[*i].category),
                     RailItem::Motions => catalogue::motions()[*i].group == chip,
                     RailItem::Effects => catalogue::effects()[*i].group == chip,
@@ -707,6 +760,12 @@ pub fn ai_runner() -> &'static std::sync::Mutex<crate::services::ai_run::AiRunne
 }
 
 /// The `studio-ai` feature behind an AI panel tile.
+/// Whether the tool does something today: it has an action here, or it is
+/// one of the two Inspector tools run from this list.
+fn ai_runnable(name: &str) -> bool {
+    crate::services::ai_run::Action::for_tool(name).is_some() || (cfg!(feature = "render") && matches!(name, "Remove background" | "Smooth slow motion"))
+}
+
 fn ai_feature(name: &str) -> Option<studio_ai::features::Feature> {
     use studio_ai::features::Feature as F;
     Some(match name {
@@ -753,7 +812,7 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
         let note = match (&row, action) {
             (Some(r), None) if cut && !r.ready => format!("{} {}", tool.blurb, r.note),
             (_, None) if cut => format!("{} {}", tool.blurb, if tool.name == "Remove background" { "People stay, the rest goes; Inspector ▸ Cut out picks objects." } else { "On the selected slowed clip (speed under 1, or a ramp)." }),
-            (_, None) => format!("{} Coming to this panel soon.", tool.blurb),
+            (_, None) => tool.blurb.to_owned(),
             (Some(r), Some(_)) if !r.ready => format!("{} {}", tool.blurb, r.note),
             _ => tool.blurb.to_owned(),
         };
@@ -764,7 +823,7 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
         kit::on_card(&mut bui);
         let enabled = (action.is_some() || cut) && ready && !running;
         bui.add_enabled_ui(enabled, |bui| {
-            let label = if running { "Running" } else if action.is_none() && !cut { "Soon" } else if ready { "Run" } else { "Needs model" };
+            let label = if running { "Running" } else if ready { "Run" } else { "Needs model" };
             let b = Button::secondary(label).icon(Icon::PlayFill).busy(running).min_width(btn_w).show(bui);
             let tip = if !ready && (action.is_some() || cut) { "Install the model in Settings ▸ Models".to_owned() } else if cut { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first video clip" })) } else { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first clip with sound" })) };
             let b = kit::tip(b, &tip, None);
@@ -1080,5 +1139,56 @@ mod tests {
         assert_eq!(media_clip_len(MediaKind::Video, 90 * SEC), 90 * SEC);
         assert_eq!(media_clip_len(MediaKind::Audio, 180 * SEC), 180 * SEC);
         assert_eq!(media_clip_len(MediaKind::Image, 0), 4 * SEC);
+    }
+
+    #[test]
+    fn rail_tabs_that_do_not_fit_go_to_the_overflow_menu() {
+        let widths = vec![50.0; RailItem::ALL.len()];
+        // Wide enough: every tab shows and there is no "…".
+        assert_eq!(tabs_that_fit(&widths, 700.0), RailItem::ALL.len());
+        // The default library width: some tabs, never none, never all, and
+        // the tabs plus the "…" cell fit across.
+        let n = tabs_that_fit(&widths, 340.0);
+        assert!((1..RailItem::ALL.len()).contains(&n), "{n}");
+        assert!(6.0 + MORE_W + 2.0 + n as f32 * 52.0 <= 340.0);
+        // Hopelessly narrow: still one tab and the menu.
+        assert_eq!(tabs_that_fit(&widths, 20.0), 1);
+    }
+
+    #[test]
+    fn tool_labels_follow_the_glossary_and_keys_stay() {
+        assert_eq!(RailItem::Cuts.label(), "Transitions");
+        assert_eq!(RailItem::Motions.label(), "Animations");
+        assert_eq!(RailItem::Ai.label(), "Tools");
+        // Saved workspaces keep finding their section by the old key.
+        assert_eq!(RailItem::Ai.name(), "AI");
+        assert!(!RailItem::Ai.groups().iter().any(|g| g.contains("AI editor")));
+    }
+
+    #[test]
+    fn tools_list_has_no_unfinished_entries() {
+        for t in view::AI_TOOLS.iter().filter(|t| !ai_runnable(t.name)) {
+            assert!(matches!(t.name, "Trim silences" | "Smart reframe" | "Scene cuts" | "Remove background" | "Smooth slow motion"), "{}", t.name);
+        }
+        assert!(ai_runnable("Auto captions") && !ai_runnable("Scene cuts"));
+    }
+
+    /// Library ▸ Tools ▸ Available crashed the signed app: listing the
+    /// bundled plugins compiled WebAssembly, which hardened runtime kills
+    /// without the JIT entitlement. Draw every Tools chip headless, in a
+    /// narrow library, and keep the sections reachable.
+    #[test]
+    fn every_tools_chip_draws_headless() {
+        use crate::ui_tests::Harness;
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.frames(3);
+        for chip in 1..=3 {
+            h.app.editor.rail = RailItem::Ai;
+            h.app.editor.library_chip[RailItem::Ai.index()] = chip;
+            h.app.editor.open_panel(crate::dock::Panel::Library);
+            h.frames(3);
+            assert_eq!(h.app.editor.rail, RailItem::Ai);
+            assert_eq!(h.app.editor.library_chip[RailItem::Ai.index()], chip, "chip {chip} kept");
+        }
     }
 }
