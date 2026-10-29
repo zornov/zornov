@@ -200,7 +200,9 @@ pub fn menu_separator(ui: &mut Ui) {
 pub fn menu_heading(ui: &mut Ui, text: &str) {
     let t = theme::tokens(ui.ctx());
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());
-    paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 8.0), r.center().y + 2.0), crate::i18n::start_center(), text, theme::caption(), t.text_2, r.width() - 16.0);
+    // Group labels are small capitals.
+    let text = tl(text).to_uppercase();
+    paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 8.0), r.center().y + 2.0), crate::i18n::start_center(), &text, theme::micro(), t.text_2, r.width() - 16.0);
 }
 
 /// What a modal reported this frame.

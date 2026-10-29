@@ -95,15 +95,15 @@ fn doc(d: &Db, kind: &str, owner: &str, place: &str, body: &str) -> Result<(), S
 /// The project folders Studio knows: the Projects folder, Home's list, and
 /// `current` (the one being edited, wherever it is).
 fn project_folders(current: Option<&Path>) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(studio_paths::studio().join("Projects")).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("project.json").is_file()).collect()).unwrap_or_default();
+    let mut out: Vec<PathBuf> = std::fs::read_dir(studio_paths::studio().join("Projects")).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| m::file::ProjectFolder::is_project(p)).collect()).unwrap_or_default();
     if let Ok(list) = std::fs::read_to_string(studio_paths::studio().join("recent-projects.txt")) {
         for l in list.lines().map(PathBuf::from) {
-            if l.join("project.json").is_file() && !crate::files::is_temporary(&l) && !out.contains(&l) {
+            if m::file::ProjectFolder::is_project(&l) && !crate::files::is_temporary(&l) && !out.contains(&l) {
                 out.push(l);
             }
         }
     }
-    if let Some(c) = current.filter(|c| c.join("project.json").is_file()) {
+    if let Some(c) = current.filter(|c| m::file::ProjectFolder::is_project(c)) {
         if !out.iter().any(|p| p == c) {
             out.push(c.to_path_buf());
         }
@@ -118,11 +118,11 @@ pub fn refresh(current: Option<&Path>) -> Result<usize, String> {
     let mut n = 0;
     tx(d, || {
         for folder in project_folders(current) {
-            if changed(d, &folder.join("project.json"))? {
+            if changed(d, &m::file::ProjectFolder::new(&folder).project_file())? {
                 index_project(d, &folder)?;
                 n += 1;
             }
-            let notes = folder.join("agent-notes.md");
+            let notes = m::file::ProjectFolder::new(&folder).state(m::file::State::AgentNotes);
             if notes.is_file() && changed(d, &notes)? {
                 let owner = folder.display().to_string();
                 d.run("DELETE FROM docs WHERE kind = 'note' AND owner = ?", &[owner.clone().into()])?;

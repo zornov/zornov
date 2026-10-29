@@ -6,6 +6,51 @@
 //! This is the single source of colours, spacing, radii and type sizes for
 //! the whole app. Widgets ask for tokens with [`tokens`] instead of writing
 //! colour literals, so the light and dark themes stay in step.
+//!
+//! # Tokens
+//!
+//! **Spacing** ([`space`], 4-pt base). Use these for every `add_space`,
+//! `item_spacing` and margin instead of a number:
+//!
+//! | Token | px | Use |
+//! |---|---|---|
+//! | `space::NONE` | 0 | flush |
+//! | `space::XXS` | 2 | hairline gaps, stacked captions |
+//! | `space::XS` | 4 | icon and label, chip padding |
+//! | `space::SM` | 8 | gap between rows in a section, control padding |
+//! | `space::MD` | 12 | section padding |
+//! | `space::LG` | 16 | panel padding, between sections |
+//! | `space::XL` | 24 | dialog padding |
+//! | `space::XXL` | 32 | start-screen gutters |
+//!
+//! **Control and row heights** ([`space`]): `CONTROL_H` 24 (default),
+//! `CONTROL_H_DENSE` 20 (timeline toolbar, mixer), `CONTROL_H_LARGE` 28
+//! (dialog buttons); rows `ROW_H` 26 (inspector), `ROW_H_LIST` 22 (lists),
+//! `ROW_H_BIN` 32 (bin list view).
+//!
+//! **Type** (functions returning a [`FontId`]; Manrope, JetBrains Mono for
+//! numbers): [`dialog_title`] 20 bold (screen and dialog titles),
+//! [`section_title`] 14 semibold (panel and section headers), [`control`]
+//! 13 (button text, tabs), [`body`] 12 (labels, list rows), [`caption`] 11
+//! (metadata and hints, in `text_2`), [`micro`] 10 semibold (capital group
+//! labels), [`timecode`] 13 mono (values and timecode), [`number`] 12.5 mono,
+//! [`mono_small`] 11 mono.
+//!
+//! **Colour roles** (fields of [`Tokens`]):
+//! - surfaces: `ground` (window), `panel`, `raised` (cards, popovers),
+//!   `sunken` (fields, canvas), `alt` (hover and selected rows)
+//! - lines: `line`, `line_strong`, `focus` (the 2 px focus ring)
+//! - text: `text`, `text_2` (secondary), `text_3` (disabled and placeholder,
+//!   3:1 on panels)
+//! - accent: `accent` is for the primary action, selection and the active
+//!   tab only. Other roles have their own colour: `playhead`, `graph_wire`,
+//!   `graph_node`, `link` and `ai` are never the accent
+//! - status: `ok`, `warn`, `danger`, `info`. Red is for destructive or
+//!   failed, never for advice
+//! - media kinds: `video`, `audio`, `title`, `fx`, `model3d`, `marker`
+//!
+//! **Radii** ([`radius`]): `PANEL`/`CARD` 6, `CONTROL`/`CHIP`/`CLIP` 4,
+//! `SMALL` 2, `DIALOG` 8, `PILL` 255 (fully round).
 
 use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Shadow, Stroke, Theme, Visuals};
 use std::sync::Arc;
@@ -23,8 +68,14 @@ pub struct Tokens {
     /// lanes, the player surround.
     pub alt: Color32,
     pub line: Color32,
+    /// A stronger divider: dividers between zones, field borders on hover.
+    pub line_strong: Color32,
+    /// The keyboard focus ring.
+    pub focus: Color32,
     pub text: Color32,
     pub text_2: Color32,
+    /// Disabled and placeholder text (3:1 on `panel`).
+    pub text_3: Color32,
     pub accent: Color32,
     /// Selection fills.
     pub accent_soft: Color32,
@@ -35,12 +86,27 @@ pub struct Tokens {
     /// Selection outlines on canvas and timeline (cool, so it never fights
     /// the accent).
     pub select: Color32,
+    pub ok: Color32,
+    pub info: Color32,
     pub warn: Color32,
     pub danger: Color32,
+    /// The timeline and viewer playhead. Warm, so it never reads as the
+    /// accent.
+    pub playhead: Color32,
+    /// Node-graph connections, and the node bodies and their selected state.
+    pub graph_wire: Color32,
+    pub graph_node: Color32,
+    pub graph_node_selected: Color32,
+    /// Hyperlinks and "open" affordances.
+    pub link: Color32,
+    /// Content made or suggested by the AI (badges, marks).
+    pub ai: Color32,
     pub video: Color32,
     pub audio: Color32,
     pub title: Color32,
     pub fx: Color32,
+    pub model3d: Color32,
+    pub marker: Color32,
     /// Text drawn on top of clip fills (same in both themes because the
     /// clip fills are shared).
     pub on_clip: Color32,
@@ -67,19 +133,32 @@ pub const DARK: Tokens = Tokens {
     edge: rgba(255, 255, 255, 0.0),
     alt: hex(0x27272A),
     line: hex(0x343438),
+    line_strong: hex(0x4A4A50),
+    focus: hex(0x45CEDD),
     text: hex(0xE4E4E6),
     text_2: hex(0x9A9AA0),
+    text_3: hex(0x7E7E86),
     accent: hex(0x45CEDD),
     accent_soft: rgba(69, 206, 221, 0.16),
     accent_fill: hex(0x45CEDD),
     accent_ink: hex(0x0B1A1C),
     select: hex(0x45CEDD),
+    ok: hex(0x5CC28A),
+    info: hex(0x6FA8F0),
     warn: hex(0xF2C14E),
     danger: hex(0xE56B6B),
+    playhead: hex(0xFF7A59),
+    graph_wire: hex(0x8C96A8),
+    graph_node: hex(0x2C2C30),
+    graph_node_selected: hex(0x3A4A66),
+    link: hex(0x7FB4F5),
+    ai: hex(0xB79CF5),
     video: hex(0x1C5D63),
     audio: hex(0x2F7A5A),
     title: hex(0x8A5A2F),
     fx: hex(0x5A4A8A),
+    model3d: hex(0x40567A),
+    marker: hex(0xD9B93A),
     on_clip: hex(0xFFFFFF),
     dark: true,
 };
@@ -95,19 +174,32 @@ pub const LIGHT: Tokens = Tokens {
     edge: rgba(0, 0, 0, 0.06),
     alt: hex(0xE6E9ED),
     line: hex(0xD5D9DF),
+    line_strong: hex(0xB4BAC3),
+    focus: hex(0x0A8D9A),
     text: hex(0x14171B),
     text_2: hex(0x565F69),
+    text_3: hex(0x79818B),
     accent: hex(0x0A8D9A),
     accent_soft: rgba(10, 141, 154, 0.13),
     accent_fill: hex(0x087A86),
     accent_ink: hex(0xFFFFFF),
     select: hex(0x0A8D9A),
+    ok: hex(0x1F7A4D),
+    info: hex(0x2563B0),
     warn: hex(0xA8780B),
     danger: hex(0xC62828),
+    playhead: hex(0xD9451F),
+    graph_wire: hex(0x6B7584),
+    graph_node: hex(0xEEF0F3),
+    graph_node_selected: hex(0xD3E0F5),
+    link: hex(0x1F5FBF),
+    ai: hex(0x6E4FC4),
     video: hex(0x1C6871),
     audio: hex(0x2B7553),
     title: hex(0x8F5E26),
     fx: hex(0x5E4D9A),
+    model3d: hex(0x3F5A86),
+    marker: hex(0x8F7A12),
     on_clip: hex(0xFFFFFF),
     dark: false,
 };
@@ -181,20 +273,40 @@ pub fn alpha(c: Color32, a: f32) -> Color32 {
 // --- spacing, radii (spec §1) ---------------------------------------------
 
 pub mod space {
+    // The scale. Every gap and margin is one of these.
+    pub const NONE: f32 = 0.0;
+    pub const XXS: f32 = 2.0;
+    pub const XS: f32 = 4.0;
+    pub const SM: f32 = 8.0;
+    pub const MD: f32 = 12.0;
+    pub const LG: f32 = 16.0;
+    pub const XL: f32 = 24.0;
+    pub const XXL: f32 = 32.0;
+
+    // Older names, kept so existing callers still build.
     pub const PANEL_PAD: f32 = 10.0;
-    pub const SECTION_GAP: f32 = 12.0;
+    pub const SECTION_GAP: f32 = MD;
+    pub const GAP: f32 = XS;
+
+    // Control and row heights.
     pub const CONTROL_H: f32 = 24.0;
     pub const CONTROL_H_COMPACT: f32 = 22.0;
+    pub const CONTROL_H_DENSE: f32 = 20.0;
+    pub const CONTROL_H_LARGE: f32 = 28.0;
     pub const ROW_H: f32 = 26.0;
-    pub const GAP: f32 = 4.0;
+    pub const ROW_H_LIST: f32 = 22.0;
+    pub const ROW_H_BIN: f32 = 32.0;
 }
 
 pub mod radius {
+    pub const SMALL: u8 = 2;
     pub const PANEL: u8 = 6;
     pub const CARD: u8 = 6;
     pub const CONTROL: u8 = 4;
     pub const CHIP: u8 = 4;
     pub const CLIP: u8 = 4;
+    pub const DIALOG: u8 = 8;
+    pub const PILL: u8 = 255;
 }
 
 // --- type scale ----------------------------------------------------------
@@ -230,6 +342,10 @@ pub fn section_title() -> FontId {
 }
 pub fn dialog_title() -> FontId {
     FontId::new(20.0, FontFamily::Name(BOLD.into()))
+}
+/// Group labels in menus and lists, drawn in capitals by the caller.
+pub fn micro() -> FontId {
+    FontId::new(10.0, FontFamily::Name(SEMIBOLD.into()))
 }
 pub fn timecode() -> FontId {
     FontId::new(13.0, FontFamily::Monospace)
@@ -402,7 +518,11 @@ mod tests {
             assert!(contrast(t.accent_ink, t.accent_fill) >= 4.5, "accent ink on {:?}: {}", t.accent_fill, contrast(t.accent_ink, t.accent_fill));
             // Accent text (links, active labels) on panels.
             assert!(contrast(t.accent, t.panel) >= 3.0, "accent marks");
-            for clip in [t.video, t.audio, t.title, t.fx] {
+            assert!(contrast(t.text_3, t.panel) >= 3.0, "text-3 on panel: {}", contrast(t.text_3, t.panel));
+            for status in [t.ok, t.info, t.warn, t.danger, t.playhead, t.link, t.ai] {
+                assert!(contrast(status, t.panel) >= 3.0, "status {status:?} on panel");
+            }
+            for clip in [t.video, t.audio, t.title, t.fx, t.model3d] {
                 assert!(contrast(t.on_clip, clip) >= 4.5, "clip text on {clip:?}");
             }
         }

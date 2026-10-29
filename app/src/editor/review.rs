@@ -6,8 +6,8 @@
 //! ruler and as boxes on the picture.
 //!
 //! Everything is read from and written to the project folder through
-//! [`crate::collab`], so what the AI editor (or a sync) writes shows up
-//! here within a second, and what is written here the AI reads.
+//! [`crate::collab`], so what the Assistant (or a sync) writes shows up
+//! here within a second, and what is written here the Assistant reads.
 
 use crate::app::StudioApp;
 use crate::collab::{self, comments, delta, package, sync, team, versions};
@@ -57,6 +57,11 @@ struct ReviewUi {
     folder: String,
     path: String,
     status: Option<String>,
+    /// The note just deleted, which the status line can bring back.
+    undo_delete: Option<String>,
+    /// What the status line offers next: the render, after an approval.
+    offer_export: bool,
+    approvals: Approvals,
 }
 
 thread_local! {
@@ -72,7 +77,7 @@ fn stamp(p: &Path) -> Option<std::time::SystemTime> {
 }
 
 fn files(root: &Path) -> [PathBuf; 3] {
-    [comments::file(root), root.join("versions").join("index.json"), team::file(root)]
+    [comments::file(root), m::file::ProjectFolder::new(root).review_versions_dir().join("index.json"), team::file(root)]
 }
 
 /// Every frame: follows the project folder (reloading what changed on
@@ -92,6 +97,7 @@ pub fn tick(app: &mut StudioApp, ctx: &egui::Context) {
             u.store = Default::default();
             u.index = Default::default();
             u.team = Default::default();
+            u.approvals = Default::default();
             u.selected = None;
         }
         let Some(root) = &root else {
@@ -105,6 +111,7 @@ pub fn tick(app: &mut StudioApp, ctx: &egui::Context) {
         }
         if s[1] != u.stamps[1] || moved {
             u.index = versions::Index::load(root).unwrap_or_default();
+            u.approvals = Approvals::load(root);
         }
         if s[2] != u.stamps[2] || moved {
             u.team = team::Team::load(root).unwrap_or_default();
@@ -181,7 +188,7 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
         let close = Rect::from_center_size(egui::pos2(r.right() - 22.0, r.top() + 22.0), Vec2::splat(24.0));
         let inner = r.shrink2(Vec2::new(16.0, 12.0));
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
-        child.set_clip_rect(r);
+        child.set_clip_rect(inner.expand2(Vec2::new(0.0, 12.0)).intersect(r));
         body(app, &mut child);
         // Drag onto the editor to dock it.
         let grip = Rect::from_center_size(close.center() - Vec2::new(28.0, 0.0), Vec2::splat(22.0));
@@ -199,25 +206,36 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     ui.add_space(6.0);
     let has_root = with(|u| u.root.is_some());
     if !has_root {
-        ui.label(egui::RichText::new("Save the project to start reviewing: notes, versions and the team are kept in its folder.").color(t.text_2));
+        ui.label(egui::RichText::new("Save the project to start reviewing: notes, versions and the team are kept in its folder").color(t.text_2));
         return;
     }
-    kit::scroll_strip(ui, "review-tabs", |ui| {
-        for (tab, name) in [(Tab::Notes, "Notes"), (Tab::Versions, "Versions"), (Tab::Team, "Team"), (Tab::Share, "Share")] {
-            let on = with(|u| u.tab == tab);
-            if ui.selectable_label(on, name).clicked() {
-                with(|u| u.tab = tab);
-            }
-        }
-    });
-    ui.add_space(4.0);
-    kit::hline(ui, ui.max_rect().left()..=ui.max_rect().right(), ui.cursor().top());
-    ui.add_space(8.0);
+    let tabs = [Tab::Notes, Tab::Versions, Tab::Team, Tab::Share];
+    let mut at = tabs.iter().position(|x| with(|u| u.tab == *x)).unwrap_or(0);
+    if kit::tab_bar(ui, "review-tabs", &mut at, &["Notes", "Versions", "Team", "Share"]) {
+        with(|u| u.tab = tabs[at]);
+    }
+    ui.add_space(theme::space::SM);
     if let Some(s) = with(|u| u.status.clone()) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(&s).color(t.text_2).font(theme::caption()));
+            if s == "Deleted the note" && with(|u| u.undo_delete.is_some()) && ui.small_button("Undo").clicked() {
+                with(|u| {
+                    if let Some(id) = u.undo_delete.take() {
+                        u.status = Some(if undelete(&mut u.store, &id) { "Brought the note back".to_owned() } else { "That note is gone for good".to_owned() });
+                        save_store(u);
+                    }
+                });
+            }
+            if with(|u| u.offer_export) && Button::primary("Export…").compact().show(ui).clicked() {
+                with(|u| u.offer_export = false);
+                super::run(app, ui.ctx(), super::Action::Export);
+            }
             if ui.small_button("×").clicked() {
-                with(|u| u.status = None);
+                with(|u| {
+                    u.status = None;
+                    u.undo_delete = None;
+                    u.offer_export = false;
+                });
             }
         });
     }
@@ -294,7 +312,7 @@ fn notes_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         u.store.list(&app.doc.model, f).into_iter().cloned().collect()
     });
     if notes.is_empty() {
-        ui.label(egui::RichText::new("No notes yet. Notes made here, by the AI or by a reviewer's package show up in this list and on the timeline.").color(t.text_2));
+        ui.label(egui::RichText::new("No notes yet. Notes made here, by the Assistant or by a reviewer's package show up in this list and on the timeline").color(t.text_2));
     }
     for c in notes {
         let (at, gone) = c.time_in(&app.doc.model);
@@ -331,6 +349,14 @@ fn notes_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         ui.add_space(4.0);
     }
     ui.add_space(8.0);
+    if finish_ready(with(|u| u.store.open_count()), with(|u| u.store.list(&app.doc.model, comments::Filter::All).len())) {
+        // Notes all answered: the next step is the render.
+        ui.label(egui::RichText::new("Every note is resolved").color(t.text));
+        if Button::primary("Export…").compact().show(ui).clicked() {
+            super::run(app, ui.ctx(), super::Action::Export);
+        }
+        ui.add_space(8.0);
+    }
     ui.horizontal_wrapped(|ui| {
         for (label, fmt, ext) in [("Export CSV", "csv", "csv"), ("Markdown", "markdown", "md"), ("EDL markers", "edl", "edl")] {
             if ui.small_button(label).clicked() {
@@ -365,7 +391,7 @@ fn note_actions(app: &mut StudioApp, ui: &mut egui::Ui, c: &comments::Comment, m
                 save_store(u);
             });
         }
-        if ui.small_button("Ask the AI").on_hover_text("Puts this note in the AI editor's message box").clicked() {
+        if ui.small_button("Ask the Assistant").on_hover_text("Puts this note in the Assistant's message box").clicked() {
             let (at, _) = c.time_in(&app.doc.model);
             let ask = format!("Please address review note {} at {:.2}s: \"{}\". When done, resolve it with comments (say what changed).", c.id, at as f64 / SEC as f64, c.text);
             let a = app.agent.get_or_insert_with(|| super::agent_panel::AgentUi::new(ui.ctx()));
@@ -374,12 +400,119 @@ fn note_actions(app: &mut StudioApp, ui: &mut egui::Ui, c: &comments::Comment, m
         }
         if ui.small_button("Delete").clicked() {
             with(|u| {
-                let _ = u.store.delete(&c.id);
+                match u.store.delete(&c.id) {
+                    Ok(()) => {
+                        u.status = Some("Deleted the note".to_owned());
+                        u.undo_delete = Some(c.id.clone());
+                    }
+                    Err(e) => u.status = Some(format!("Could not delete the note: {e}")),
+                }
                 u.selected = None;
                 save_store(u);
             });
         }
     });
+}
+
+/// Where a version stands with the reviewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum Verdict {
+    Approved,
+    ChangesRequested,
+}
+
+/// Who said what about which version, kept beside the review files.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Approvals {
+    verdicts: Vec<(String, Verdict, String)>,
+}
+
+impl Approvals {
+    fn file(root: &Path) -> PathBuf {
+        team::file(root).with_file_name("approvals.json")
+    }
+
+    fn load(root: &Path) -> Self {
+        std::fs::read(Self::file(root)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    fn save(&self, root: &Path) -> Result<(), String> {
+        let path = Self::file(root);
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d).map_err(|e| format!("could not write the approval: {e}"))?;
+        }
+        std::fs::write(&path, serde_json::to_vec_pretty(self).unwrap_or_default()).map_err(|e| format!("could not write the approval: {e}"))
+    }
+
+    /// The latest word on `version`, and who gave it.
+    fn of(&self, version: &str) -> Option<(Verdict, &str)> {
+        self.verdicts.iter().rev().find(|(v, _, _)| v == version).map(|(_, d, who)| (*d, who.as_str()))
+    }
+
+    fn set(&mut self, version: &str, verdict: Verdict, who: &str) {
+        self.verdicts.retain(|(v, _, _)| v != version);
+        self.verdicts.push((version.to_owned(), verdict, who.to_owned()));
+    }
+}
+
+/// Brings a deleted note back. False when there is no such note.
+fn undelete(store: &mut comments::Store, id: &str) -> bool {
+    match store.comments.iter_mut().find(|c| c.id == id && c.deleted) {
+        Some(c) => {
+            c.deleted = false;
+            c.updated = collab::now_ms();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Review is finished when there are notes and none is open.
+fn finish_ready(open: usize, total: usize) -> bool {
+    total > 0 && open == 0
+}
+
+#[cfg(test)]
+mod finish_tests {
+    use super::{Approvals, Verdict, finish_ready, undelete};
+    use crate::collab::comments;
+
+    #[test]
+    fn the_latest_verdict_on_a_version_wins_and_survives_a_reload() {
+        let dir = std::env::temp_dir().join(format!("studio-approvals-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = Approvals::default();
+        a.set("v1", Verdict::ChangesRequested, "Sam");
+        a.set("v1", Verdict::Approved, "Kim");
+        a.set("v2", Verdict::ChangesRequested, "Sam");
+        a.save(&dir).unwrap();
+        let back = Approvals::load(&dir);
+        assert_eq!(back.of("v1"), Some((Verdict::Approved, "Kim")));
+        assert_eq!(back.of("v2"), Some((Verdict::ChangesRequested, "Sam")));
+        assert_eq!(back.of("v3"), None);
+        assert_eq!(back.verdicts.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_deleted_note_comes_back_and_a_missing_one_does_not() {
+        let p = crate::collab::testing::project();
+        let mut store = comments::Store::default();
+        let id = store.add(&p, "Sam", "Cut earlier", comments::Pin { at: 0, until: None, clip: None, region: None }, None).unwrap();
+        store.delete(&id).unwrap();
+        assert_eq!(store.open_count(), 0);
+        assert!(undelete(&mut store, &id));
+        assert_eq!(store.open_count(), 1);
+        assert!(!undelete(&mut store, &id), "it is not deleted any more");
+        assert!(!undelete(&mut store, "nope"));
+    }
+
+    #[test]
+    fn the_export_step_shows_once_every_note_is_resolved() {
+        assert!(!finish_ready(0, 0), "no notes: nothing was reviewed");
+        assert!(!finish_ready(2, 5));
+        assert!(finish_ready(0, 5));
+    }
 }
 
 fn export_notes(app: &mut StudioApp, format: &str, ext: &str) {
@@ -389,7 +522,7 @@ fn export_notes(app: &mut StudioApp, format: &str, ext: &str) {
             Ok(t) => t,
             Err(e) => return u.status = Some(e),
         };
-        let dir = root.join("Review");
+        let dir = m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Review);
         let path = dir.join(format!("{} notes.{ext}", app.doc.project.name));
         let r = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text));
         u.status = Some(match r {
@@ -427,18 +560,42 @@ fn versions_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
     let now = collab::fingerprint(&app.doc.model);
     ui.label(egui::RichText::new(format!("Branch: {line} · {} cuts in this project", app.doc.model.sequences.len())).font(theme::caption()).color(t.text_2));
     if list.is_empty() {
-        ui.label(egui::RichText::new("No versions yet. A version is the whole edit as it is now, to compare with, go back to, or branch an alternate cut from.").color(t.text_2));
+        ui.label(egui::RichText::new("No versions yet. A version is the whole edit as it is now, to compare with, go back to, or branch an alternate cut from").color(t.text_2));
     }
     for v in list.iter().rev() {
         egui::Frame::new().fill(t.raised).corner_radius(CornerRadius::same(6)).inner_margin(8.0).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let mark = if v.fingerprint == now { " · matches now" } else if current.as_deref() == Some(v.id.as_str()) { " · current" } else { "" };
             ui.label(egui::RichText::new(format!("{} {}{mark}", v.id, v.name)).color(t.text));
-            ui.label(egui::RichText::new(format!("{} · {} clips · {:.1} s · {}", v.author, v.clips, v.duration as f64 / SEC as f64, v.branch)).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(format!("{} · {} · {:.1} s · {}", v.author, if v.clips == 1 { "1 clip".to_owned() } else { format!("{} clips", v.clips) }, v.duration as f64 / SEC as f64, v.branch)).font(theme::caption()).color(t.text_2));
             if !v.note.is_empty() {
                 ui.label(egui::RichText::new(&v.note).font(theme::caption()).color(t.text_2));
             }
+            if let Some((verdict, who)) = with(|u| u.approvals.of(&v.id).map(|(d, w)| (d, w.to_owned()))) {
+                let (word, colour) = match verdict {
+                    Verdict::Approved => ("Approved", t.ok),
+                    Verdict::ChangesRequested => ("Changes requested", t.warn),
+                };
+                ui.label(egui::RichText::new(format!("{word} by {who}")).font(theme::caption()).color(colour));
+            }
             ui.horizontal_wrapped(|ui| {
+                for (label, verdict) in [("Approve", Verdict::Approved), ("Request changes", Verdict::ChangesRequested)] {
+                    if ui.small_button(label).clicked() {
+                        with(|u| {
+                            u.approvals.set(&v.id, verdict, &me);
+                            match u.approvals.save(&root) {
+                                Ok(()) => {
+                                    u.status = Some(match verdict {
+                                        Verdict::Approved => format!("Approved {} \"{}\"", v.id, v.name),
+                                        Verdict::ChangesRequested => format!("Requested changes on {} \"{}\"", v.id, v.name),
+                                    });
+                                    u.offer_export = verdict == Verdict::Approved;
+                                }
+                                Err(e) => u.status = Some(e),
+                            }
+                        });
+                    }
+                }
                 if ui.small_button("Compare with now").clicked() {
                     let text = versions::load(&root, &v.id).map(|(_, p)| delta::report(&p, &app.doc.model).text()).unwrap_or_else(|e| e);
                     with(|u| u.compare = Some((v.id.clone(), text)));
@@ -446,8 +603,11 @@ fn versions_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                 if ui.small_button("Restore").on_hover_text("Back to this version, as one undo step").clicked() {
                     match versions::load(&root, &v.id).and_then(|(_, p)| app.doc.take_in(&format!("Restore {}", v.name), &p)) {
                         Ok(_) => {
-                            let _ = versions::set_current(&root, &v.id);
-                            with(|u| u.status = Some(format!("Restored {} (undo takes it back)", v.name)));
+                            let note = match versions::set_current(&root, &v.id) {
+                                Ok(_) => format!("Restored {} (undo takes it back)", v.name),
+                                Err(e) => format!("Restored {} (undo takes it back), but could not mark it current: {e}", v.name),
+                            };
+                            with(|u| u.status = Some(note));
                         }
                         Err(e) => with(|u| u.status = Some(e)),
                     }
@@ -484,12 +644,13 @@ fn branch(app: &mut StudioApp, root: &Path, version: &str, name: &str) {
         app.doc.model.next_id = counter.next_id;
         if app.doc.apply(&format!("Branch {name}"), m::Edit::Batch { edits }) { Ok(()) } else { Err(app.doc.error.take().unwrap_or_default()) }
     });
-    let _ = versions::set_branch(root, name);
+    let marked = versions::set_branch(root, name);
     with(|u| {
         u.index = versions::Index::load(root).unwrap_or_default();
-        u.status = Some(match r {
-            Ok(()) => format!("\"{name}\" is now a cut of its own"),
-            Err(e) => e,
+        u.status = Some(match (r, marked) {
+            (Ok(()), Ok(_)) => format!("\"{name}\" is now a cut of its own"),
+            (Ok(()), Err(e)) => format!("\"{name}\" is now a cut of its own, but could not be marked current: {e}"),
+            (Err(e), _) => e,
         });
     });
 }
@@ -502,12 +663,12 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
     let role = with(|u| u.team.role_of(&me));
     ui.label(egui::RichText::new(format!("You are {me}: {}", role.name())).color(t.text));
     if !role.can_edit() {
-        ui.label(egui::RichText::new("Reviewers add notes; edits are made by editors.").font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new("Reviewers add notes; edits are made by editors").font(theme::caption()).color(t.text_2));
     }
     ui.add_space(8.0);
     let members = with(|u| u.team.members.clone());
     if members.is_empty() {
-        ui.label(egui::RichText::new("Just you so far. Add people to give them roles; anyone not on the team then reviews.").color(t.text_2));
+        ui.label(egui::RichText::new("Just you so far. Add people to give them roles; anyone not on the team then reviews").color(t.text_2));
     }
     for mem in &members {
         ui.horizontal_wrapped(|ui| {
@@ -556,12 +717,12 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
     let seq = app.doc.model.active_sequence.0;
     let locks = with(|u| u.team.locks.clone());
     if locks.is_empty() {
-        ui.label(egui::RichText::new("Nothing is held. Lock what you are working on so nobody else's edit changes it.").font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new("Nothing is held. Lock what you are working on so nobody else's edit changes it").font(theme::caption()).color(t.text_2));
     }
     for l in &locks {
         ui.horizontal_wrapped(|ui| {
             let what = match (l.lane, l.clip) {
-                (Some(id), _) => format!("lane {}", app.doc.project.lane(id as u32).map(|x| x.name.clone()).unwrap_or_else(|| id.to_string())),
+                (Some(id), _) => format!("track {}", app.doc.project.lane(id as u32).map(|x| x.name.clone()).unwrap_or_else(|| id.to_string())),
                 (_, Some(id)) => format!("clip #{id} {}", app.doc.project.clip(id as u32).map(|c| c.name.clone()).unwrap_or_default()),
                 _ => "?".into(),
             };
@@ -590,7 +751,7 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                 });
             }
             let lanes: Vec<(u32, String)> = app.doc.project.lanes.iter().map(|l| (l.id, l.name.clone())).collect();
-            ui.menu_button("Lock a lane", |ui| {
+            ui.menu_button("Lock a track", |ui| {
                 kit::popup_body(ui, |ui| {
                     for (id, name) in lanes {
                         if ui.button(&name).clicked() {
@@ -624,7 +785,7 @@ fn share_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         let index = with(|u| u.index.clone());
         let now = collab::fingerprint(&app.doc.model);
         let version = index.versions.iter().rev().find(|v| v.fingerprint == now).map(|v| (v.id.clone(), v.name.clone()));
-        let dir = package::folder_in(&root.join("Review"), &app.doc.model.active().name);
+        let dir = package::folder_in(&m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Review), &app.doc.model.active().name);
         let r = package::write(&dir, &app.doc.model, &store, version.as_ref().map(|(a, b)| (a.as_str(), b.as_str())), &me, None);
         with(|u| u.status = Some(r.map(|_| format!("Wrote {}", studio_paths::tilde(&dir))).unwrap_or_else(|e| e)));
     }
@@ -739,7 +900,9 @@ fn sync_now(app: &mut StudioApp, root: &Path, remote: &str) {
         if let Ok(o) = &r
             && o.team_updated
         {
-            let _ = collab::write_json(&team::file(root), &u.team);
+            if let Err(e) = collab::write_json(&team::file(root), &u.team) {
+                u.status = Some(format!("Could not save the team: {e}"));
+            }
             app.doc.guard = u.team.guard_for(&collab::identity());
         }
         u.status = Some(match r {

@@ -5,7 +5,7 @@ use crate::spec_tables::*;
 use crate::transform::round2;
 
 /// Inputs of the intra prediction process that come from the block.
-pub(crate) struct IntraParams {
+pub struct IntraParams {
     pub plane: usize,
     pub x: usize,
     pub y: usize,
@@ -40,7 +40,7 @@ pub(crate) fn is_directional_mode(mode: usize) -> bool {
 }
 
 /// Predict the w x h block at (x, y) of `pl` (writes into the plane).
-pub(crate) fn predict_intra(pl: &mut Plane, p: &IntraParams) {
+pub fn predict_intra(pl: &mut Plane, p: &IntraParams) {
     let w = 1usize << p.log2w;
     let h = 1usize << p.log2h;
     let bd = p.bit_depth;

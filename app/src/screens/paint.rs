@@ -16,7 +16,8 @@
 
 use crate::app::StudioApp;
 use crate::cli::Screen;
-use crate::theme;
+use crate::icons::Icon;
+use crate::theme::{self, space};
 use eframe::egui::{self, Color32, ColorImage, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 use serde_json::{Value, json};
 use std::cell::RefCell;
@@ -273,6 +274,7 @@ pub struct PaintState {
     palette_pick: Option<String>,
     adjust_params: String,
     new_size: [u32; 2],
+    new_bg: usize,
     last_picture: Option<String>,
     pen: Option<studio_pixel_tablet::Sample>,
 }
@@ -304,10 +306,11 @@ impl Default for PaintState {
             status: String::new(),
             palette_open: false,
             palette_query: String::new(),
-            palette_params: "{}".into(),
+            palette_params: String::new(),
             palette_pick: None,
-            adjust_params: "{}".into(),
+            adjust_params: String::new(),
             new_size: [1920, 1080],
+            new_bg: 0,
             last_picture: None,
             pen: None,
         }
@@ -447,9 +450,9 @@ fn icon(st: &mut PaintState, ctx: &egui::Context, name: &'static str, px: f32) -
 
 fn icon_button(st: &mut PaintState, ui: &mut egui::Ui, name: &'static str, tip: &str, on: bool) -> egui::Response {
     let t = theme::tokens(ui.ctx());
-    let (r, resp) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(space::CONTROL_H_LARGE + space::XS), Sense::click());
     let fill = if on { t.accent_soft } else if resp.hovered() { t.raised } else { Color32::TRANSPARENT };
-    ui.painter().rect_filled(r, CornerRadius::same(6), fill);
+    ui.painter().rect_filled(r, CornerRadius::same(theme::radius::CONTROL), fill);
     if let Some(id) = icon(st, ui.ctx(), name, 18.0) {
         let ir = Rect::from_center_size(r.center(), Vec2::splat(18.0));
         ui.painter().image(id, ir, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), if on { t.accent } else { t.text });
@@ -520,8 +523,8 @@ fn top_bar(app: &mut StudioApp, st: &mut PaintState, ui: &mut egui::Ui, r: Rect)
 }
 
 fn top_bar_row(app: &mut StudioApp, st: &mut PaintState, bar: &mut egui::Ui) {
-    bar.spacing_mut().item_spacing.x = 6.0;
-    if bar.button("◀ Edit").on_hover_text("Back to the timeline (⇧⌘P)").clicked() {
+    bar.spacing_mut().item_spacing.x = space::SM;
+    if kit::Button::ghost("Edit").icon(Icon::CaretLeft).shortcut("⇧⌘P").show(bar).on_hover_text("Back to the timeline").clicked() {
         app.screen = Screen::Editor;
     }
     bar.separator();
@@ -534,50 +537,32 @@ fn top_bar_row(app: &mut StudioApp, st: &mut PaintState, bar: &mut egui::Ui) {
     }
     for n in &names {
         let on = Some(n) == active.as_ref();
-        if bar.selectable_label(on, studio_canvas::stem(n)).clicked() && !on {
+        if kit::chip(bar, studio_canvas::stem(n), on, None).clicked() && !on {
             run(st, "Switch", vec![json!({"op": "picture", "name": n})]);
             st.fit_pending = true;
         }
     }
-    let new = bar.button("+ New");
-    let pop = egui::Id::new("paint-new");
+    let new_id = new_sheet_id();
+    let new = kit::Button::secondary("New").icon(Icon::Plus).show(bar);
     if new.clicked() {
-        egui::Popup::toggle_id(bar.ctx(), pop);
+        kit::toggle_open(bar.ctx(), new_id);
     }
-    egui::Popup::from_toggle_button_response(&new).id(pop).show(|ui| kit::popup_body(ui, |ui| {
-        ui.horizontal(|ui| {
-            paint_dim(ui, "Width", &mut st.new_size[0]);
-            ui.label("×");
-            paint_dim(ui, "Height", &mut st.new_size[1]);
-        });
-        for (label, bg) in [("White", "white"), ("Transparent", "transparent"), ("Black", "black")] {
-            if ui.button(format!("New picture · {label}")).clicked() {
-                let [w, h] = st.new_size;
-                run(st, "New picture", vec![json!({"op": "new", "name": "Painting", "width": w, "height": h, "background": bg})]);
-                st.fit_pending = true;
-            }
-        }
-        if ui.button("New animation (12 drawings, 12 fps on twos)").clicked() {
-            let [w, h] = st.new_size;
-            run(st, "New animation", vec![json!({"op": "new", "name": "Animation", "width": w, "height": h, "background": "white"}), json!({"op": "animate", "drawings": 12, "fps": 12, "hold": 2})]);
-            st.fit_pending = true;
-        }
-    }));
-    if bar.button("Open…").on_hover_text("PSD, TIFF, PNG, JPEG, WebP, HEIC, EXR, camera raw… (the file is only read)").clicked() {
+    kit::popover(bar.ctx(), new_id, new.rect, kit::Side::Below, 280.0, |ui| new_sheet(st, ui));
+    if kit::Button::secondary("Open").icon(Icon::FolderOpen).show(bar).on_hover_text("PSD, TIFF, PNG, JPEG, WebP, HEIC, EXR and camera raw files (the file is only read)").clicked() {
         if let Some(p) = rfd::FileDialog::new().add_filter("Pictures", studio_canvas::files::READS).pick_file() {
             run(st, "Open", vec![json!({"op": "open", "path": p.display().to_string()})]);
             st.fit_pending = true;
         }
     }
-    if bar.button("Save").on_hover_text("Into the project's Pictures folder (⌘S)").clicked() {
+    if kit::Button::secondary("Save").shortcut("⌘S").show(bar).on_hover_text("Into the project's Pictures folder").clicked() {
         run(st, "Save", vec![json!({"op": "save"})]);
     }
-    if bar.button("Export…").clicked() {
+    if kit::Button::secondary("Export").icon(Icon::Export).show(bar).clicked() {
         if let Some(p) = rfd::FileDialog::new().add_filter("Pictures", studio_canvas::files::WRITES).set_file_name(format!("{}.psd", st.last_picture.as_deref().map(studio_canvas::stem).unwrap_or("Painting"))).save_file() {
             run(st, "Export", vec![json!({"op": "export", "path": p.display().to_string()})]);
         }
     }
-    if bar.button("Place on timeline").on_hover_text("Saves the picture and puts it (or the animation) on the timeline at the playhead; again after painting more updates it").clicked() {
+    if kit::Button::primary("Place on timeline").show(bar).on_hover_text("Saves the picture and puts it (or the animation) on the timeline at the playhead; again after painting more updates it").clicked() {
         place_on_timeline(app, st);
     }
     bar.separator();
@@ -587,8 +572,46 @@ fn top_bar_row(app: &mut StudioApp, st: &mut PaintState, bar: &mut egui::Ui) {
     if icon_button(st, bar, "redo-2", "Redo (⇧⌘Z)", false).clicked() {
         run(st, "Redo", vec![json!({"op": "redo"})]);
     }
-    if bar.button("Commands…").on_hover_text("Every command: filters, liquify, puppet warp, HDR merge, panorama, focus stacking, camera raw… (⌘K)").clicked() {
+    if kit::Button::ghost("More tools").icon(Icon::MagnifyingGlass).shortcut("⌘K").show(bar).on_hover_text("Search every tool: filters, liquify, puppet warp, HDR merge, panorama, focus stacking, camera raw").clicked() {
         st.palette_open = true;
+    }
+}
+
+fn new_sheet_id() -> egui::Id {
+    egui::Id::new("paint-new")
+}
+
+/// The "New" sheet: size (with presets), background, then a picture or an
+/// animation.
+fn new_sheet(st: &mut PaintState, ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = Vec2::splat(space::SM);
+    kit::menu_heading(ui, "Size");
+    ui.horizontal(|ui| {
+        paint_dim(ui, "Width", &mut st.new_size[0]);
+        ui.label("×");
+        paint_dim(ui, "Height", &mut st.new_size[1]);
+    });
+    ui.horizontal_wrapped(|ui| {
+        for (label, size) in [("HD", [1920, 1080]), ("4K", [3840, 2160]), ("Square", [2048, 2048]), ("Poster", [2400, 3600])] {
+            if kit::chip(ui, label, st.new_size == size, None).clicked() {
+                st.new_size = size;
+            }
+        }
+    });
+    kit::menu_heading(ui, "Background");
+    kit::segmented(ui, "paint-new-bg", &mut st.new_bg, &[kit::Segment::text("White"), kit::Segment::text("Transparent"), kit::Segment::text("Black")], Some(256.0), None);
+    ui.add_space(space::XS);
+    let bg = ["white", "transparent", "black"][st.new_bg.min(2)];
+    let [w, h] = st.new_size;
+    if kit::Button::primary("Create picture").min_width(256.0).show(ui).clicked() {
+        run(st, "New picture", vec![json!({"op": "new", "name": "Painting", "width": w, "height": h, "background": bg})]);
+        st.fit_pending = true;
+        kit::set_open(ui.ctx(), new_sheet_id(), false);
+    }
+    if kit::Button::secondary("Create animation").min_width(256.0).show(ui).on_hover_text("12 drawings at 12 fps, each held for two frames").clicked() {
+        run(st, "New animation", vec![json!({"op": "new", "name": "Animation", "width": w, "height": h, "background": bg}), json!({"op": "animate", "drawings": 12, "fps": 12, "hold": 2})]);
+        st.fit_pending = true;
+        kit::set_open(ui.ctx(), new_sheet_id(), false);
     }
 }
 
@@ -722,12 +745,17 @@ fn canvas_view(st: &mut PaintState, ui: &mut egui::Ui, r: Rect) {
     ui.painter().rect_filled(r, 0, if t.dark { Color32::from_gray(38) } else { Color32::from_gray(200) });
     let resp = ui.allocate_rect(r, Sense::click_and_drag());
     let Some(c) = crate::paint::try_canvas() else {
-        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "Working…", egui::FontId::proportional(15.0), t.text_2);
+        // The picture is busy with the last change: a spinner, and the
+        // canvas comes back on its own.
+        kit::spinner(ui.painter(), r.center(), 10.0, t.text_2);
         ctx.request_repaint_after(std::time::Duration::from_millis(40));
         return;
     };
     let Some(doc) = c.doc() else {
-        ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "No picture open: + New, Open…, or ask the AI to paint one", egui::FontId::proportional(15.0), t.text_2);
+        let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(r));
+        if kit::empty_state(&mut empty, Icon::Image, "No picture open. Start a new one, open a file, or ask the assistant to paint something.", Some(("New picture", Icon::Plus))) {
+            kit::set_open(&ctx, new_sheet_id(), true);
+        }
         return;
     };
     let (dw, dh) = (doc.size.width as f32, doc.size.height as f32);
@@ -1005,82 +1033,84 @@ fn input(st: &mut PaintState, ui: &mut egui::Ui, resp: &egui::Response, view: &V
 fn side_panel(st: &mut PaintState, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
     ui.painter().rect_filled(r, 0, t.panel);
-    let mut col = ui.new_child(egui::UiBuilder::new().max_rect(r.shrink(10.0)).layout(egui::Layout::top_down(egui::Align::Min)));
+    let mut col = ui.new_child(egui::UiBuilder::new().max_rect(r.shrink(space::SM)).layout(egui::Layout::top_down(egui::Align::Min)));
     egui::ScrollArea::vertical().id_salt("paint-side").auto_shrink([false, false]).show_v(&mut col, |ui| {
         ui.set_width(ui.available_width());
         let snapshot = crate::paint::try_canvas().and_then(|c| c.summary().ok());
         let Some(sum) = snapshot else {
-            ui.label("Working…");
+            // Busy or no picture yet: the canvas says which; here the panel
+            // just waits.
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(80));
             return;
         };
-        egui::CollapsingHeader::new("AI selection").default_open(true).show(ui, |ui| {
+        kit::Section::new("paint-ai", "AI selection").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (label, what) in [("Subject", "subject"), ("People", "people"), ("Sky", "sky"), ("Background", "background")] {
-                    if ui.button(label).clicked() {
+                    if kit::Button::secondary(label).compact().show(ui).clicked() {
                         run(st, &format!("Select {label}"), vec![json!({"op": "select", "what": what})]);
                     }
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                if ui.button("Remove it").on_hover_text("Fill the selection from its surroundings").clicked() {
+                if kit::Button::secondary("Remove it").compact().show(ui).on_hover_text("Fill the selection from its surroundings").clicked() {
                     run(st, "Remove", vec![json!({"op": "remove"})]);
                 }
-                if ui.button("Mask it").on_hover_text("The selection as the layer's mask").clicked() {
+                if kit::Button::secondary("Mask it").compact().show(ui).on_hover_text("The selection as the layer's mask").clicked() {
                     run(st, "Mask", vec![json!({"op": "layer", "action": "mask"})]);
                 }
-                if ui.button("Invert").clicked() {
+                if kit::Button::ghost("Invert").compact().show(ui).clicked() {
                     run(st, "Invert", vec![json!({"op": "select", "what": "invert"})]);
                 }
-                if ui.button("Deselect").clicked() {
+                if kit::Button::ghost("Deselect").compact().show(ui).clicked() {
                     run(st, "Deselect", vec![json!({"op": "select", "what": "none"})]);
                 }
             });
         });
-        egui::CollapsingHeader::new("Layers").default_open(true).show(ui, |ui| layers(st, ui, &sum));
-        egui::CollapsingHeader::new("Adjustments").default_open(false).show(ui, |ui| {
+        kit::Section::new("paint-layers", "Layers").show(ui, |ui| layers(st, ui, &sum));
+        kit::Section::new("paint-adjust", "Adjustments").start_closed().show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (label, kind) in ADJUSTMENTS {
-                    if ui.small_button(*label).clicked() {
+                    if kit::Button::secondary(label).compact().show(ui).clicked() {
                         run(st, label, vec![json!({"op": "adjust", "kind": kind})]);
                     }
                 }
             });
-            ui.label(egui::RichText::new("Settings of the active adjustment layer (JSON, as `commands` lists for layer.setAdjustment):").small());
-            ui.add(egui::TextEdit::multiline(&mut st.adjust_params).desired_rows(2).code_editor());
-            if ui.button("Apply settings").clicked() {
-                match serde_json::from_str::<Value>(&st.adjust_params) {
+            ui.label(egui::RichText::new("Options for the selected adjustment layer, like: amount 20, tint 0.3").font(theme::caption()).color(t.text_2));
+            ui.add(egui::TextEdit::singleline(&mut st.adjust_params).hint_text("amount 20, tint 0.3").desired_width(f32::INFINITY));
+            if kit::Button::secondary("Apply to adjustment").compact().show(ui).clicked() {
+                match crate::paint::options_to_params(&st.adjust_params) {
                     Ok(mut p) => {
                         p["op"] = json!("layer.setAdjustment");
                         run(st, "Adjust", vec![p]);
                     }
-                    Err(e) => st.status = format!("Settings: {e}"),
+                    Err(e) => st.status = e,
                 }
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.small_button("Camera raw…").clicked() {
+                if kit::Button::ghost("Camera raw").compact().show(ui).clicked() {
                     st.palette_open = true;
                     st.palette_query = "camera raw".into();
                 }
-                if ui.small_button("Frequency separation").clicked() {
+                if kit::Button::ghost("Frequency separation").compact().show(ui).clicked() {
                     run(st, "Frequency separation", vec![json!({"op": "frequency_separation", "radius": 6})]);
                 }
-                if ui.small_button("Liquify…").clicked() {
+                if kit::Button::ghost("Liquify").compact().show(ui).clicked() {
                     st.palette_open = true;
                     st.palette_query = "liquify".into();
                 }
             });
         });
         if let Some(fb) = sum.get("flipbook") {
-            egui::CollapsingHeader::new("Animation").default_open(true).show(ui, |ui| animation(st, ui, fb));
+            kit::Section::new("paint-animation", "Animation").show(ui, |ui| animation(st, ui, fb));
         } else {
-            egui::CollapsingHeader::new("Animation").default_open(false).show(ui, |ui| {
-                ui.label("Frame-by-frame drawing with onion skin; or trace footage (ask the AI: “trace the dancer at 12 fps”).");
-                if ui.button("Make this picture an animation").clicked() {
+            kit::Section::new("paint-animation", "Animation").start_closed().show(ui, |ui| {
+                ui.label(egui::RichText::new("Draw frame by frame with onion skin, or ask the assistant to trace footage.").font(theme::caption()).color(t.text_2));
+                if kit::Button::secondary("Make this picture an animation").compact().show(ui).clicked() {
                     run(st, "Animate", vec![json!({"op": "animate", "drawings": 12, "fps": 12, "hold": 2})]);
                 }
             });
         }
-        egui::CollapsingHeader::new("History").default_open(false).show(ui, |ui| history(st, ui));
+        kit::Section::new("paint-history", "History").start_closed().show(ui, |ui| history(st, ui));
     });
 }
 
@@ -1167,37 +1197,37 @@ fn animation(st: &mut PaintState, ui: &mut egui::Ui, fb: &Value) {
     ui.horizontal_wrapped(|ui| {
         for i in 1..=n {
             let hold = fb["holds"][i - 1].as_u64().unwrap_or(1);
-            if ui.selectable_label(i == cur, format!("{i}{}", if hold > 1 { format!("×{hold}") } else { String::new() })).clicked() {
+            if kit::chip(ui, &format!("{i}{}", if hold > 1 { format!("×{hold}") } else { String::new() }), i == cur, None).clicked() {
                 run(st, "Drawing", vec![json!({"op": "frame", "go": i})]);
             }
         }
     });
     ui.horizontal_wrapped(|ui| {
-        if ui.button("◀").clicked() {
+        if kit::Button::secondary("◀").compact().show(ui).clicked() {
             run(st, "Previous", vec![json!({"op": "frame", "action": "prev"})]);
         }
-        if ui.button("▶").clicked() {
+        if kit::Button::secondary("▶").compact().show(ui).clicked() {
             run(st, "Next", vec![json!({"op": "frame", "action": "next"})]);
         }
-        if ui.button("+ Blank").clicked() {
+        if kit::Button::secondary("+ Blank").compact().show(ui).clicked() {
             run(st, "New drawing", vec![json!({"op": "frame", "action": "add"})]);
         }
-        if ui.button("+ Copy").clicked() {
+        if kit::Button::secondary("+ Copy").compact().show(ui).clicked() {
             run(st, "Copy drawing", vec![json!({"op": "frame", "action": "copy"})]);
         }
-        if ui.button("Delete").clicked() {
+        if kit::Button::secondary("Delete").compact().show(ui).clicked() {
             run(st, "Delete drawing", vec![json!({"op": "frame", "action": "delete"})]);
         }
     });
     ui.horizontal_wrapped(|ui| {
-        ui.label("Hold");
+        ui.label(egui::RichText::new("Hold").font(theme::caption()));
         for h in [1u32, 2, 3, 4] {
-            if ui.small_button(format!("{h}")).on_hover_text(format!("This drawing on {h}s")).clicked() {
+            if kit::Button::ghost(&h.to_string()).compact().show(ui).on_hover_text(format!("Hold this drawing for {h} frames")).clicked() {
                 run(st, "Hold", vec![json!({"op": "frame", "action": "hold", "hold": h})]);
             }
         }
         let on = fb["onion"]["on"].as_bool().unwrap_or(true);
-        if ui.selectable_label(on, "Onion skin").clicked() {
+        if kit::chip(ui, "Onion skin", on, None).clicked() {
             run(st, "Onion skin", vec![json!({"op": "flipbook", "onion": !on})]);
         }
     });
@@ -1208,7 +1238,7 @@ fn history(st: &mut PaintState, ui: &mut egui::Ui) {
         Some(c) => c.engine.active().map(|d| d.history.entries()).unwrap_or_default(),
         None => return,
     };
-    if ui.button("Snapshot").on_hover_text("Keep this state to come back to").clicked() {
+    if kit::Button::secondary("Snapshot").compact().show(ui).on_hover_text("Keep this state to come back to").clicked() {
         run(st, "Snapshot", vec![json!({"op": "snapshot", "name": "Snapshot"})]);
     }
     for (i, label) in rows.iter().enumerate().rev().take(40) {
@@ -1225,43 +1255,58 @@ fn status_bar(st: &mut PaintState, ui: &mut egui::Ui, r: Rect) {
     let info = crate::paint::try_canvas().and_then(|c| c.doc().map(|d| format!("{} · {}×{} · {:?} · {:?}", studio_canvas::stem(&d.name), d.size.width, d.size.height, d.mode, d.depth))).unwrap_or_default();
     let text = format!("{info}   {:.0}%   {}", st.zoom * 100.0, st.status);
     // One line: a long status ends in an ellipsis and shows whole on hover.
-    let cut = kit::paint_text_clipped(ui.painter(), Pos2::new(r.left() + 10.0, r.center().y), egui::Align2::LEFT_CENTER, &text, egui::FontId::proportional(12.0), t.text_2, r.width() - 20.0);
+    let cut = kit::paint_text_clipped(ui.painter(), Pos2::new(r.left() + 10.0, r.center().y), egui::Align2::LEFT_CENTER, &text, theme::caption(), t.text_2, r.width() - 20.0);
     if cut {
         ui.interact(r, egui::Id::unique("paint-status"), Sense::hover()).on_hover_text(text);
     }
 }
 
-/// Every engine command, searchable, with its parameters.
+/// Every engine command, searchable by name.
 fn palette(st: &mut PaintState, ctx: &egui::Context) {
+    let t = theme::tokens(ctx);
     let mut open = st.palette_open;
-    egui::Window::new("Commands").open(&mut open).default_width(520.0).default_height(460.0).collapsible(false).show(ctx, |ui| kit::scroll_panel(ui, "paint-commands", |ui| {
-        ui.add(egui::TextEdit::singleline(&mut st.palette_query).hint_text("liquify, puppet, HDR, panorama, blur, camera raw…").desired_width(f32::INFINITY));
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        open = false;
+    }
+    egui::Window::new("More tools").open(&mut open).default_width(520.0).default_height(460.0).collapsible(false).show(ctx, |ui| kit::scroll_panel(ui, "paint-commands", |ui| {
+        ui.add(egui::TextEdit::singleline(&mut st.palette_query).hint_text("liquify, puppet, HDR, panorama, blur, camera raw").desired_width(f32::INFINITY));
         let found = studio_canvas::Canvas::commands(&st.palette_query);
+        if found.is_empty() {
+            let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap().shrink(space::SM)));
+            kit::empty_state(&mut empty, Icon::MagnifyingGlass, "No tool matches that search.", None);
+        }
         egui::ScrollArea::vertical().max_height(220.0).show_v(ui, |ui| {
             for c in found.iter().take(120) {
                 let id = c["id"].as_str().unwrap_or("").to_owned();
+                let label = c["label"].as_str().unwrap_or("").to_owned();
                 let on = st.palette_pick.as_deref() == Some(id.as_str());
-                if ui.selectable_label(on, format!("{}   {}", c["label"].as_str().unwrap_or(""), id)).clicked() {
+                if kit::ListRow::new(&label).selected(on).show(ui).response.clicked() {
                     st.palette_pick = Some(id.clone());
-                    st.palette_params = "{}".into();
+                    st.palette_params.clear();
                 }
             }
         });
         if let Some(id) = st.palette_pick.clone() {
             ui.separator();
-            let doc = found.iter().find(|c| c["id"] == json!(id)).and_then(|c| c["params"].as_str()).unwrap_or("").to_owned();
-            ui.label(egui::RichText::new(&doc).small().monospace());
-            ui.add(egui::TextEdit::multiline(&mut st.palette_params).desired_rows(3).code_editor().desired_width(f32::INFINITY));
-            if ui.button(format!("Run {id}")).clicked() {
-                match serde_json::from_str::<Value>(&st.palette_params) {
+            let spec = found.iter().find(|c| c["id"] == json!(id));
+            let label = spec.and_then(|c| c["label"].as_str()).unwrap_or("this tool").to_owned();
+            let doc = spec.and_then(|c| c["params"].as_str()).unwrap_or("").trim().to_owned();
+            let has_options = !(doc.is_empty() || doc == "{}" || doc.eq_ignore_ascii_case("none"));
+            if has_options {
+                let hint = doc.trim_matches(|c| c == '{' || c == '}').to_owned();
+                ui.label(egui::RichText::new(format!("Options: {hint}")).font(theme::caption()).color(t.text_2));
+                ui.add(egui::TextEdit::singleline(&mut st.palette_params).hint_text("radius 4, mode soft").desired_width(f32::INFINITY));
+            }
+            if kit::Button::primary(&format!("Apply {label}")).show(ui).clicked() {
+                match crate::paint::options_to_params(&st.palette_params) {
                     Ok(mut p) => {
                         if !p.is_object() {
                             p = json!({});
                         }
                         p["op"] = json!(id);
-                        run(st, &id, vec![p]);
+                        run(st, &label, vec![p]);
                     }
-                    Err(e) => st.status = format!("Parameters: {e}"),
+                    Err(e) => st.status = e,
                 }
             }
         }
@@ -1412,6 +1457,45 @@ mod tests {
             settle(&mut app, &mut frame);
         }
         let _ = crate::paint::apply(&[json!({"op": "close"})]);
+    }
+
+    /// The New sheet opens and offers a picture; the tool search lists names,
+    /// never command IDs or parameter text.
+    #[test]
+    fn new_sheet_and_tool_search_show_no_developer_text() {
+        let _turn = crate::paint::test_lock();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(Screen::Paint), fresh: true, ..Default::default() });
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
+        let mut labels = |app: &mut StudioApp| {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| show(app, ui));
+            let l: Vec<String> = out.platform_output.accesskit_update.iter().flat_map(|u| u.nodes.iter()).filter_map(|(_, n)| n.label().map(str::to_owned)).collect();
+            let _ = ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
+            out.textures_delta.clear();
+            l
+        };
+        labels(&mut app);
+        kit::set_open(&ctx, new_sheet_id(), true);
+        for _ in 0..8 {
+            labels(&mut app);
+        }
+        let l = labels(&mut app);
+        assert!(l.iter().any(|s| s == "Create picture"), "the New sheet offers a picture: {l:?}");
+        STATE.with(|s| {
+            let mut st = s.borrow_mut();
+            st.palette_open = true;
+            st.palette_pick = Some("file.new".into());
+        });
+        let l = labels(&mut app);
+        let l = [l, labels(&mut app)].concat();
+        for s in &l {
+            assert!(!s.contains("file.") && !s.contains("layer.") && !s.contains("JSON") && !s.contains("{"), "developer text on screen: {s}");
+        }
+        STATE.with(|s| s.borrow_mut().palette_open = false);
     }
 
     #[test]

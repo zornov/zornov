@@ -220,16 +220,16 @@ pub fn show(app: &mut StudioApp, ctx: &Context) {
     let hits = search(&st.query, lang);
     let mut close = false;
     let out = kit::modal(ctx, Id::new("help-modal"), Vec2::new(860.0, 580.0), "Help", |ui| {
-        ui.add_space(8.0);
+        ui.add_space(theme::space::SM);
         ui.horizontal(|ui| {
-            ui.add_space(16.0);
+            ui.add_space(theme::space::LG);
             let w = ui.available_width() - 16.0;
             let r = kit::text_field(ui, &mut st.query, "Search help", Some(Icon::MagnifyingGlass), w, None);
             if !r.has_focus() && st.open.is_none() && st.query.is_empty() && ui.memory(|m| m.focused().is_none()) {
                 r.request_focus();
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(theme::space::SM);
         let avail = ui.available_rect_before_wrap();
         let list_w = 260.0;
         let rtl = crate::i18n::is_rtl();
@@ -243,7 +243,7 @@ pub fn show(app: &mut StudioApp, ctx: &Context) {
         let mut list = ui.new_child(egui::UiBuilder::new().max_rect(list_r));
         egui::ScrollArea::vertical().id_salt("help-list").auto_shrink([false, false]).show_v(&mut list, |ui| {
             if hits.is_empty() {
-                ui.add_space(12.0);
+                ui.add_space(theme::space::MD);
                 ui.label(egui::RichText::new(crate::i18n::shown("No help article matches. Try other words.")).font(theme::body()).color(t.text_2));
             }
             for h in &hits {
@@ -258,19 +258,19 @@ pub fn show(app: &mut StudioApp, ctx: &Context) {
         let shown_id = st.open.or(hits.first().map(|h| h.id));
         egui::ScrollArea::vertical().id_salt("help-article").auto_shrink([false, false]).show_v(&mut art, |ui| {
             let Some(id) = shown_id else { return };
-            ui.add_space(4.0);
+            ui.add_space(theme::space::XS);
             let heading = title(id, lang);
             kit::label_a11y(ui, egui::Label::new(egui::RichText::new(crate::i18n::visual(&heading)).font(theme::section_title()).color(t.text)), &heading);
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             let text = body(id, lang);
             for para in text.split('\n') {
                 let font = theme::control();
                 let wrapped = kit::wrapped(ui.painter(), para, font.clone(), art_r.width() - 24.0);
                 let lab = egui::Label::new(egui::RichText::new(wrapped).font(font).color(t.text));
                 kit::label_a11y(ui, if studio_i18n::rtl::has_rtl(para) { lab.extend() } else { lab.wrap() }, para);
-                ui.add_space(8.0);
+                ui.add_space(theme::space::SM);
             }
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             ui.horizontal_wrapped(|ui| {
                 if Button::secondary("Replay the welcome tour").compact().show(ui).clicked() {
                     close = true;

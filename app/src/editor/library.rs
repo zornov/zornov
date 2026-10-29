@@ -48,6 +48,16 @@ impl RailItem {
             RailItem::Story => "Story",
         }
     }
+    /// The name shown on the tab (the glossary's); `name` stays the key
+    /// that saved workspaces use.
+    pub fn label(self) -> &'static str {
+        match self {
+            RailItem::Motions => "Animations",
+            RailItem::Cuts => "Transitions",
+            RailItem::Ai => "Tools",
+            other => other.name(),
+        }
+    }
     pub fn icon(self) -> Icon {
         match self {
             RailItem::Media => Icon::FilmStrip,
@@ -80,7 +90,7 @@ impl RailItem {
             RailItem::Looks => catalogue::LOOK_GROUPS,
             RailItem::Audio if crate::content::find_dir().is_some() => super::library_content::AUDIO_GROUPS,
             RailItem::Audio => view::SOUND_GROUPS,
-            RailItem::Ai => &["AI editor", "All tools", "Installed", "Available"],
+            RailItem::Ai => &["All tools", "Installed", "Available"],
             RailItem::Story => super::story::GROUPS,
         }
     }
@@ -101,34 +111,59 @@ pub const TABS_H: f32 = 50.0;
 /// Width of the category column.
 pub const CATEGORY_W: f32 = 84.0;
 
+/// Width of the overflow cell.
+const MORE_W: f32 = 36.0;
+
+/// How many of the tabs fit across `avail` (all of them when they do, else
+/// as many as leave room for the overflow cell).
+fn tabs_that_fit(widths: &[f32], avail: f32) -> usize {
+    let all: f32 = 6.0 + widths.iter().map(|w| w + 2.0).sum::<f32>();
+    if all <= avail {
+        return widths.len();
+    }
+    let mut x = 6.0 + MORE_W + 2.0;
+    let mut n = 0;
+    for w in widths {
+        x += w + 2.0;
+        if x > avail {
+            break;
+        }
+        n += 1;
+    }
+    n.max(1)
+}
+
 /// The section tabs: a row of icon-over-label tabs, the active one in the
-/// accent. Number keys 1-9 switch sections; clicking the active one
-/// collapses the library.
+/// accent. Number keys 1-9 and 0 switch sections; clicking the active one
+/// collapses the library. The tabs that do not fit are in a "…" menu, so
+/// none is ever out of reach.
 pub fn rail(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
-    let widths: Vec<f32> = RailItem::ALL.iter().map(|item| (ui.fonts_mut(|f| f.layout_no_wrap(item.name().to_string(), theme::caption(), t.text).size().x) + 14.0).max(40.0)).collect();
-    let natural = 6.0 + widths.iter().map(|w| w + 2.0).sum::<f32>() + 4.0;
-    // A library narrower than its tabs scrolls them sideways.
-    let mut strip = ui.new_child(egui::UiBuilder::new().max_rect(r).id_salt("lib-rail"));
-    strip.set_clip_rect(r.intersect(ui.clip_rect()));
-    kit::scroll_strip(&mut strip, "lib-rail-scroll", |ui| {
-        let (area, _) = ui.allocate_exact_size(Vec2::new(natural.max(r.width()), r.height()), Sense::hover());
-        rail_cells(app, ui, area, &widths);
-    });
+    let widths: Vec<f32> = RailItem::ALL.iter().map(|item| (ui.fonts_mut(|f| f.layout_no_wrap(item.label().to_string(), theme::caption(), t.text).size().x) + 14.0).max(40.0)).collect();
+    let fit = tabs_that_fit(&widths, r.width());
+    rail_cells(app, ui, r, &widths, fit);
     ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, t.line));
 }
 
-fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32]) {
+fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32], fit: usize) {
     let t = theme::tokens(ui.ctx());
-    let ed = &mut app.editor;
-    let mut open_ai = false;
+    let mut open_tool: Option<RailItem> = None;
     let mut x = r.left() + 6.0;
     for (item, w) in RailItem::ALL.into_iter().zip(widths.iter().copied()) {
-        let name = item.name();
+        // Keys reach every section, shown as a tab or not.
+        let key_hit = !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8, egui::Key::Num9, egui::Key::Num0][item.index()])));
+        if key_hit {
+            open_tool = Some(item);
+        }
+        if item.index() >= fit {
+            continue;
+        }
+        let name = item.label();
         let cell = Rect::from_min_size(egui::pos2(x, r.top() + 4.0), Vec2::new(w, r.height() - 8.0));
         let resp = ui.interact(cell, egui::Id::unique(("rail", item.index())), Sense::click());
         let st = kit::State::from_response(ui, &resp, None);
-        let active = ed.rail == item && ed.dock.is_open(crate::dock::Panel::Library);
+        let active = app.editor.rail == item && app.editor.dock.is_open(crate::dock::Panel::Library);
         let p = ui.painter();
         let fg = if active { t.accent } else { theme::mix(t.text, t.text, st.hover) };
         let ir = Rect::from_center_size(egui::pos2(cell.center().x, cell.top() + 13.0), Vec2::splat(16.0));
@@ -139,22 +174,39 @@ fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32]) {
         }
         resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, active, name));
         let resp = kit::tip(resp, name, Some(item.shortcut()));
-        let key_hit = !ui.ctx().egui_wants_keyboard_input()
-            && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8, egui::Key::Num9, egui::Key::Num0][item.index()])));
-        if resp.clicked() || key_hit {
-            ed.rail = item;
-            if item == RailItem::Ai {
-                // The AI editor is a panel of its own: this opens (or shows) it,
-                // and the Library keeps the AI tools.
-                open_ai = true;
-            } else {
-                ed.open_panel(crate::dock::Panel::Library);
-            }
+        if resp.clicked() {
+            open_tool = Some(item);
         }
         x += w + 2.0;
     }
-    if open_ai {
-        super::agent_panel::open(app);
+    if fit < RailItem::ALL.len() {
+        let cell = Rect::from_min_size(egui::pos2(x, r.top() + 4.0), Vec2::new(MORE_W, r.height() - 8.0));
+        let resp = ui.interact(cell, egui::Id::new("rail-more"), Sense::click());
+        let st = kit::State::from_response(ui, &resp, None);
+        let hidden_active = app.editor.rail.index() >= fit && app.editor.dock.is_open(crate::dock::Panel::Library);
+        let fg = if hidden_active { t.accent } else { theme::mix(t.text, t.text, st.hover) };
+        icons::paint(ui.painter(), Rect::from_center_size(cell.center(), Vec2::splat(16.0)), Icon::DotsThree, 16.0, fg);
+        if st.focused {
+            kit::focus_ring(ui.painter(), cell, CornerRadius::same(theme::radius::CONTROL), &t);
+        }
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "More sections"));
+        let resp = kit::tip(resp, "More sections", None);
+        let id = egui::Id::new("rail-more-menu");
+        if resp.clicked() {
+            kit::toggle_open(ui.ctx(), id);
+        }
+        kit::popover(ui.ctx(), id, cell, kit::Side::BelowRight, 180.0, |ui| {
+            for item in RailItem::ALL.into_iter().filter(|i| i.index() >= fit) {
+                if kit::MenuItem::new(item.label()).icon(item.icon()).shortcut(item.shortcut()).checked(app.editor.rail == item).show(ui).clicked() {
+                    open_tool = Some(item);
+                    kit::set_open(ui.ctx(), id, false);
+                }
+            }
+        });
+    }
+    if let Some(item) = open_tool {
+        app.editor.rail = item;
+        app.editor.open_panel(crate::dock::Panel::Library);
     }
 }
 
@@ -202,19 +254,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let rail = app.editor.rail;
     // Category column on the left, content on the right.
     let col = Rect::from_min_max(egui::pos2(r.left(), tabs.bottom()), egui::pos2(r.left() + CATEGORY_W, r.bottom()));
-    let mut chip = app.editor.library_chip[rail.index()].min(rail.groups().len().saturating_sub(1));
+    // The tools keep their old chip numbers (1 All tools, 2 Installed, 3
+    // Available; 0 was "AI editor", now only the assistant panel), so the
+    // saved chip and the assistant's own jump to "All tools" still agree.
+    let off = usize::from(rail == RailItem::Ai);
+    let mut chip = app.editor.library_chip[rail.index()].saturating_sub(off).min(rail.groups().len().saturating_sub(1));
     categories(ui, col, rail.groups(), &mut chip);
     ui.painter().vline(col.right() - 0.5, col.y_range(), Stroke::new(1.0, t.line));
-    if rail == RailItem::Ai && chip == 0 {
-        // "AI editor" opens the AI editor's own panel; the Library goes on
-        // with the AI tools.
-        super::agent_panel::open(app);
-        chip = 1;
-        app.editor.library_chip[rail.index()] = chip;
-    }
     if rail == RailItem::Story {
         // The production plan: storyboard, script, places, cast, check.
-        app.editor.library_chip[rail.index()] = chip;
+        app.editor.library_chip[rail.index()] = chip + off;
         let area = Rect::from_min_max(egui::pos2(col.right(), tabs.bottom() + 6.0), r.max - Vec2::new(0.0, 4.0));
         super::story::panel(app, ui, chip, area);
         return;
@@ -242,11 +291,11 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
     let search = Rect::from_min_size(inner.min, Vec2::new(search_w, 26.0));
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(search));
-    let hint = crate::i18n::tf(format!("Search {}", rail.name().to_lowercase()));
-    kit::text_field(&mut sui, &mut app.editor.library_query, if rail == RailItem::Ai { "Search AI tools" } else { &hint }, Some(Icon::MagnifyingGlass), search_w, None);
+    let hint = crate::i18n::tf(format!("Search {}", rail.label().to_lowercase()));
+    kit::text_field(&mut sui, &mut app.editor.library_query, if rail == RailItem::Ai { "Search tools" } else { &hint }, Some(Icon::MagnifyingGlass), search_w, None);
     let chips_r = Rect::from_min_max(egui::pos2(inner.left(), search.bottom()), egui::pos2(inner.right(), search.bottom()));
     let r = Rect::from_min_max(egui::pos2(inner.left() - pad, r.top()), r.max);
-    app.editor.library_chip[rail.index()] = chip;
+    app.editor.library_chip[rail.index()] = chip + off;
 
     let body = Rect::from_min_max(egui::pos2(r.left(), chips_r.bottom() + 12.0), r.max - Vec2::new(0.0, 4.0));
     let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(body));
@@ -256,7 +305,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     if matches!(rail, RailItem::Assets | RailItem::Audio) && super::library_content::panel(app, ui, rail, chip, &query, body) {
         return;
     }
-    let items = items_for(app, rail, chip, &query);
+    let sort = ui.ctx().data(|d| d.get_temp::<crate::services::library::Sort>(egui::Id::new("media-sort"))).unwrap_or_default();
+    let items = items_for(app, rail, chip, &query, sort);
     if items.is_empty() {
         let mut eui = bui.new_child(egui::UiBuilder::new().max_rect(body.shrink(pad)));
         let clicked = if rail == RailItem::Media && app.doc.project.media.is_empty() && query.is_empty() {
@@ -287,17 +337,139 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
                     ui.label(egui::RichText::new(name).font(theme::body()).color(theme::tokens(ui.ctx()).text));
                     ui.add_space(2.0);
                 }
+                if rail == RailItem::Media {
+                    offline_banner(app, ui);
+                    sort_row(app, ui, sort);
+                }
                 grid(app, ui, rail, &items);
             }
         });
     });
 }
 
+/// "Sort: Date added" with the other orders in a menu.
+fn sort_row(app: &StudioApp, ui: &mut egui::Ui, sort: crate::services::library::Sort) {
+    if app.doc.project.media.len() < 2 {
+        return;
+    }
+    let mut pick = None;
+    kit::menu_group_button(ui, "media-sort", &crate::i18n::tf(format!("Sort: {}", sort.label())), Some(Icon::List), |ui| {
+        for s in crate::services::library::Sort::ALL {
+            if kit::MenuItem::new(s.label()).checked(s == sort).show(ui).clicked() {
+                pick = Some(s);
+            }
+        }
+    });
+    if let Some(s) = pick {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("media-sort"), s));
+    }
+    ui.add_space(6.0);
+}
+
+/// "N files are offline", with the way to find them again, above the bin.
+fn offline_banner(app: &mut StudioApp, ui: &mut egui::Ui) {
+    let n = crate::services::library::offline_ids(&app.doc.project.media).len();
+    if n == 0 {
+        return;
+    }
+    ui.horizontal(|ui| {
+        let t = theme::tokens(ui.ctx());
+        icons::paint(ui.painter(), Rect::from_min_size(ui.cursor().min + Vec2::new(0.0, 2.0), Vec2::splat(16.0)), Icon::Warning, 14.0, t.danger);
+        ui.add_space(20.0);
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("{n} file{} offline", if n == 1 { " is" } else { "s are" }))).font(theme::body()).color(t.text));
+        if Button::secondary("Find in folder").icon(Icon::FolderOpen).compact().show(ui).clicked() {
+            relink_from_folder(app, ui.ctx());
+        }
+    });
+    ui.add_space(6.0);
+}
+
+/// Pick a folder and point every offline file found there (by name) back at it.
+fn relink_from_folder(app: &mut StudioApp, ctx: &egui::Context) {
+    let Some(dir) = rfd::FileDialog::new().set_title("Find offline files in").pick_folder() else { return };
+    let res = crate::services::library::relink_in(&mut app.doc, &[dir]);
+    kit::push(ctx, res.message(), None, Some(if res.done.is_empty() { Icon::Info } else { Icon::Check }));
+}
+
+/// Right-click on a bin item: add it, or (when its file is gone) relink it.
+fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collections::HashSet<u32>) {
+    let id = egui::Id::new("media-menu");
+    if !kit::is_open(ctx, id) {
+        return;
+    }
+    let Some(media) = ctx.data(|d| d.get_temp::<u32>(egui::Id::new("media-menu-for"))) else { return };
+    let Some(index) = app.doc.project.media.iter().position(|x| x.id == media) else {
+        kit::set_open(ctx, id, false);
+        return;
+    };
+    let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or_default();
+    let (mut add_it, mut relink_it, mut proxy_it, mut cancel_it) = (false, false, false, false);
+    let is_video = app.doc.project.media[index].kind == MediaKind::Video;
+    let making = crate::services::proxies::progress_of(media).is_some();
+    let (mut name, mut folder) = ctx.data(|d| d.get_temp::<(String, String)>(egui::Id::new("media-menu-fields"))).unwrap_or_else(|| (app.doc.project.media[index].name.clone(), crate::services::library::folder_of(&app.doc, media).unwrap_or_default()));
+    let (mut renamed, mut filed) = (false, false);
+    kit::popover(ctx, id, Rect::from_min_size(at, Vec2::ZERO), kit::Side::Below, 220.0, |ui| {
+        add_it = kit::MenuItem::new("Add to timeline").show(ui).clicked();
+        if offline.contains(&media) {
+            relink_it = kit::MenuItem::new("Relink file").show(ui).clicked();
+        } else if is_video && making {
+            cancel_it = kit::MenuItem::new("Cancel proxy").show(ui).clicked();
+        } else if is_video {
+            proxy_it = kit::MenuItem::new("Make proxy").show(ui).clicked();
+        }
+        kit::menu_separator(ui);
+        renamed = kit::text_field(ui, &mut name, "Name", Some(Icon::FilmStrip), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        filed = kit::text_field(ui, &mut folder, "Folder", Some(Icon::Folder), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    });
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("media-menu-fields"), (name.clone(), folder.clone())));
+    if renamed || filed {
+        kit::set_open(ctx, id, false);
+        ctx.data_mut(|d| d.remove::<(String, String)>(egui::Id::new("media-menu-fields")));
+        let res = if renamed { crate::services::library::rename(&mut app.doc, media, &name) } else { crate::services::library::set_folder(&mut app.doc, media, &folder) };
+        match res {
+            Ok(msg) => {
+                kit::push(ctx, msg, None, Some(Icon::Check));
+            }
+            Err(e) => {
+                kit::push(ctx, e.0, None, Some(Icon::Warning));
+            }
+        }
+    }
+    if proxy_it {
+        kit::set_open(ctx, id, false);
+        crate::services::proxies::start(&app.doc, vec![m::MediaId(media as u64)], 2);
+        kit::push(ctx, crate::i18n::tf(format!("Making a proxy of {}", app.doc.project.media[index].name)), None, Some(Icon::Info));
+    }
+    if cancel_it {
+        kit::set_open(ctx, id, false);
+        crate::services::proxies::cancel(media);
+    }
+    if add_it {
+        kit::set_open(ctx, id, false);
+        add(app, ctx, RailItem::Media, index, None, None);
+    }
+    if relink_it {
+        kit::set_open(ctx, id, false);
+        let name = app.doc.project.media[index].name.clone();
+        if let Some(to) = rfd::FileDialog::new().set_title(format!("Locate {name}")).pick_file() {
+            match crate::services::library::relink(&mut app.doc, media, &to) {
+                Ok(msg) => {
+                    kit::push(ctx, msg, None, Some(Icon::Check));
+                }
+                Err(e) => {
+                    kit::push(ctx, e.0, None, Some(Icon::Warning));
+                }
+            }
+        }
+    }
+}
+
 /// Indices into the catalogue for this rail item, after chip and search
 /// filters.
-fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize> {
+fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str, sort: crate::services::library::Sort) -> Vec<usize> {
     let names: Vec<String> = match rail {
-        RailItem::Media => app.doc.project.media.iter().map(|m| m.name.clone()).collect(),
+        // A folder's name finds what is in it.
+        RailItem::Media => app.doc.project.media.iter().map(|m| match crate::services::library::folder_of(&app.doc, m.id) { Some(f) => format!("{} {f}", m.name), None => m.name.clone() }).collect(),
         RailItem::Assets => view::ASSETS.iter().map(|s| s.to_string()).collect(),
         RailItem::Text => studio_text::styles::catalogue().iter().map(|s| s.name.clone()).collect(),
         RailItem::Motions => catalogue::motions().iter().map(|s| s.name.to_string()).collect(),
@@ -309,10 +481,14 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
         RailItem::Story => Vec::new(),
     };
     let n = rail.groups().len().max(1);
-    names
+    let mut found: Vec<usize> = names
         .iter()
         .enumerate()
         .filter(|(i, name)| {
+            // Tools that cannot run yet are not listed.
+            if rail == RailItem::Ai && !ai_runnable(name) {
+                return false;
+            }
             let in_group = chip == 0
                 || match rail {
                     RailItem::Media => {
@@ -325,7 +501,7 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
                     }
                     // Installed: it runs now (its model is in the models
                     // folder, or it needs none). It was a fixed list.
-                    RailItem::Ai => chip == 1 || (chip == 2) == ai_feature(view::AI_TOOLS[*i].name).map(crate::services::models::feature).is_some_and(|r| r.ready),
+                    RailItem::Ai => (chip == 1) == ai_feature(view::AI_TOOLS[*i].name).map(crate::services::models::feature).is_some_and(|r| r.ready),
                     RailItem::Text => studio_text::styles::StyleCategory::ALL.get(chip - 1) == Some(&studio_text::styles::catalogue()[*i].category),
                     RailItem::Motions => catalogue::motions()[*i].group == chip,
                     RailItem::Effects => catalogue::effects()[*i].group == chip,
@@ -337,13 +513,41 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str) -> Vec<usize
             in_group && (q.is_empty() || name.to_lowercase().contains(q))
         })
         .map(|(i, _)| i)
-        .collect()
+        .collect();
+    if rail == RailItem::Media {
+        crate::services::library::sort_media(&app.doc, &mut found, sort);
+    }
+    found
 }
 
 fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize]) {
     let t = theme::tokens(ui.ctx());
+    if rail == RailItem::Media {
+        // Proxies made in the background land here, with their result.
+        for (msg, bad) in crate::services::proxies::collect(&mut app.doc) {
+            kit::push(ui.ctx(), msg, None, Some(if bad { Icon::Warning } else { Icon::Check }));
+        }
+        if crate::services::proxies::busy() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        }
+    }
     let names: Vec<String> = items.iter().map(|&i| item_name(app, rail, i)).collect();
-    let badges: Vec<Option<String>> = items.iter().map(|&i| badge(app, rail, i)).collect();
+    let offline = if rail == RailItem::Media { crate::services::library::offline_ids(&app.doc.project.media) } else { Default::default() };
+    // A file that cannot be read says so (with the reason on hover) instead of a grey tile.
+    let unreadable: Vec<Option<String>> = items.iter().map(|&i| if rail == RailItem::Media && app.doc.project.media[i].kind != MediaKind::Audio { app.doc.project.media[i].path.as_deref().and_then(thumbs::read_failure) } else { None }).collect();
+    let badges: Vec<Option<String>> = items
+        .iter()
+        .enumerate()
+        .map(|(k, &i)| {
+            if rail == RailItem::Media && offline.contains(&app.doc.project.media[i].id) {
+                Some("Offline".to_string())
+            } else if unreadable[k].is_some() {
+                Some("Can't read".to_string())
+            } else {
+                badge(app, rail, i)
+            }
+        })
+        .collect();
     let selected = app.editor.library_selected;
     let now = ui.input(|i| i.time);
     let progress: Vec<Option<f32>> = items
@@ -353,15 +557,19 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
                 return None;
             }
             let id = app.doc.project.media[i].id;
-            app.editor_import_progress(id, now)
+            app.editor_import_progress(id, now).or_else(|| crate::services::proxies::progress_of(id))
         })
         .collect();
-    let tips: Vec<Option<&'static str>> = items
+    let folders: Vec<Option<String>> = items.iter().map(|&i| if rail == RailItem::Media { crate::services::library::folder_of(&app.doc, app.doc.project.media[i].id) } else { None }).collect();
+    let tips: Vec<Option<String>> = items
         .iter()
-        .map(|&i| match rail {
-            RailItem::Effects => Some(catalogue::effects()[i].description),
-            RailItem::Cuts => Some(catalogue::cuts()[i].description),
-            RailItem::Motions => Some(catalogue::motions()[i].description),
+        .enumerate()
+        .map(|(k, &i)| match rail {
+            RailItem::Effects => Some(catalogue::effects()[i].description.to_string()),
+            RailItem::Cuts => Some(catalogue::cuts()[i].description.to_string()),
+            RailItem::Motions => Some(catalogue::motions()[i].description.to_string()),
+            RailItem::Media if offline.contains(&app.doc.project.media[i].id) => Some(crate::i18n::tf(format!("{} is not at {}. Right-click to relink it.", app.doc.project.media[i].name, app.doc.project.media[i].path.as_ref().map_or_else(String::new, |p| p.display().to_string())))),
+            RailItem::Media => unreadable[k].as_ref().map(|e| crate::i18n::tf(format!("Could not read this file: {e}"))),
             _ => None,
         })
         .collect();
@@ -371,16 +579,23 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
     let info = |k: usize| TileInfo {
         label: names[k].as_str(),
         badge: badges[k].as_deref(),
-        sub: None,
+        sub: folders[k].as_deref(),
         selected: selected == Some((rail, items[k])),
         addable: rail != RailItem::Ai,
         progress: progress[k],
-        tip: tips[k],
+        tip: tips[k].as_deref(),
         added: added[k],
     };
     let media = app.doc.project.media.clone();
     let thumbs = &mut app.thumbs;
-    let mut paint = |p: &Painter, r: Rect, k: usize, hover: f32, live: bool| paint_thumb(thumbs, &media, rail, items[k], p, r, hover, live, &t);
+    let mut paint = |p: &Painter, r: Rect, k: usize, hover: f32, live: bool| {
+        paint_thumb(thumbs, &media, rail, items[k], p, r, hover, live, &t);
+        if rail == RailItem::Media && offline.contains(&media[items[k]].id) {
+            // Gone from disk: the picture dims and says so.
+            p.rect_filled(r, 0, t.sunken.gamma_multiply(0.75));
+            icons::paint(p, Rect::from_center_size(r.center(), Vec2::splat(20.0)), Icon::Warning, 18.0, t.danger);
+        }
+    };
     let out = if app.prefs.library_list {
         kit::tile_list(ui, rail.name(), items.len(), info, |k| LibDrag { rail, index: items[k] }, &mut paint)
     } else {
@@ -395,6 +610,16 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
         TileGrid::new(rail.name()).aspect(aspect).min_width(min).centred().show(ui, items.len(), info, |k| LibDrag { rail, index: items[k] }, &mut paint)
     };
     let ctx = ui.ctx().clone();
+    if rail == RailItem::Media {
+        if let Some(k) = out.secondary {
+            ctx.data_mut(|d| {
+                d.insert_temp(egui::Id::new("media-menu-for"), app.doc.project.media[items[k]].id);
+                d.remove::<(String, String)>(egui::Id::new("media-menu-fields"));
+            });
+            kit::set_open(&ctx, egui::Id::new("media-menu"), true);
+        }
+        media_menu(app, &ctx, &offline);
+    }
     if let Some(k) = out.clicked {
         app.editor.library_selected = Some((rail, items[k]));
         if rail != RailItem::Media {
@@ -462,7 +687,8 @@ fn paint_thumb(thumbs: &mut thumbs::Thumbs, media: &[view::MediaItem], rail: Rai
         RailItem::Media => {
             let m = &media[i];
             if m.kind == MediaKind::Audio {
-                waveform_tile(p, r, m.seed, live.then_some(clock), t);
+                let peaks = m.path.as_deref().and_then(crate::services::library::peaks);
+                peaks_tile(p, r, peaks.as_deref().map(|v| v.as_slice()), live.then_some(clock), t);
                 return;
             }
             // Hover plays through the footage.
@@ -553,7 +779,11 @@ fn paint_thumb(thumbs: &mut thumbs::Thumbs, media: &[view::MediaItem], rail: Rai
             let bob = if live { (clock * 3.0).sin() as f32 * 0.06 } else { 0.0 };
             asset_shape(p, Rect::from_center_size(r.center(), r.size() * (0.55 + bob)), i, if live { clock as f32 } else { 0.0 }, t);
         }
-        RailItem::Audio => waveform_tile(p, r, 200 + i as u32, live.then_some(clock), t),
+        RailItem::Audio => {
+            // Built-in sounds are names only: no waveform to show.
+            p.rect_filled(r, 0, theme::mix(t.sunken, t.audio, if t.dark { 0.35 } else { 0.55 }));
+            icons::paint(p, Rect::from_center_size(r.center(), Vec2::splat(22.0)), Icon::SpeakerHigh, 20.0, Color32::from_white_alpha(200));
+        }
         RailItem::Ai | RailItem::Story => {}
     }
     let _ = hover;
@@ -607,21 +837,26 @@ pub fn image_rotated_uv(p: &Painter, tex: egui::TextureId, r: Rect, uv: Rect, an
     p.add(egui::Shape::mesh(mesh));
 }
 
-fn waveform_tile(p: &Painter, r: Rect, seed: u32, clock: Option<f64>, t: &theme::Tokens) {
+/// A sound's real peaks as bars; `None` (still being read, or unreadable)
+/// is a quiet centre line, not an invented wave.
+fn peaks_tile(p: &Painter, r: Rect, peaks: Option<&[f32]>, clock: Option<f64>, t: &theme::Tokens) {
     p.rect_filled(r, 0, theme::mix(t.sunken, t.audio, if t.dark { 0.35 } else { 0.55 }));
-    let bars = (r.width() / 3.0) as usize;
     let mid = r.center().y;
+    let Some(peaks) = peaks else {
+        p.hline(r.x_range().shrink(6.0), mid, egui::Stroke::new(1.5, Color32::from_white_alpha(110)));
+        return;
+    };
+    let bars = ((r.width() - 4.0) / 3.0).max(1.0) as usize;
     let play = clock.map(|c| ((c * 0.3) % 1.0) as f32);
     for k in 0..bars {
         let x = r.left() + 2.0 + k as f32 * 3.0;
-        let h = waveform_sample(seed, k as f32 / bars as f32) * r.height() * 0.36;
-        let played = play.is_some_and(|pl| (k as f32 / bars as f32) < pl);
-        let c = if played { Color32::WHITE } else { Color32::from_white_alpha(170) };
+        let u = k as f32 / bars as f32;
+        let h = (peaks[(u * peaks.len() as f32) as usize % peaks.len()] * r.height() * 0.36).max(0.8);
+        let c = if play.is_some_and(|pl| u < pl) { Color32::WHITE } else { Color32::from_white_alpha(170) };
         p.line_segment([egui::pos2(x, mid - h), egui::pos2(x, mid + h)], egui::Stroke::new(1.6, c));
     }
     if let Some(pl) = play {
-        let x = egui::lerp(r.left()..=r.right(), pl);
-        p.vline(x, r.y_range(), egui::Stroke::new(1.0, Color32::WHITE));
+        p.vline(egui::lerp(r.left()..=r.right(), pl), r.y_range(), egui::Stroke::new(1.0, Color32::WHITE));
     }
 }
 
@@ -707,6 +942,12 @@ pub fn ai_runner() -> &'static std::sync::Mutex<crate::services::ai_run::AiRunne
 }
 
 /// The `studio-ai` feature behind an AI panel tile.
+/// Whether the tool does something today: it has an action here, or it is
+/// one of the two Inspector tools run from this list.
+fn ai_runnable(name: &str) -> bool {
+    crate::services::ai_run::Action::for_tool(name).is_some() || (cfg!(feature = "render") && matches!(name, "Remove background" | "Smooth slow motion"))
+}
+
 fn ai_feature(name: &str) -> Option<studio_ai::features::Feature> {
     use studio_ai::features::Feature as F;
     Some(match name {
@@ -753,7 +994,7 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
         let note = match (&row, action) {
             (Some(r), None) if cut && !r.ready => format!("{} {}", tool.blurb, r.note),
             (_, None) if cut => format!("{} {}", tool.blurb, if tool.name == "Remove background" { "People stay, the rest goes; Inspector ▸ Cut out picks objects." } else { "On the selected slowed clip (speed under 1, or a ramp)." }),
-            (_, None) => format!("{} Coming to this panel soon.", tool.blurb),
+            (_, None) => tool.blurb.to_owned(),
             (Some(r), Some(_)) if !r.ready => format!("{} {}", tool.blurb, r.note),
             _ => tool.blurb.to_owned(),
         };
@@ -764,7 +1005,7 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
         kit::on_card(&mut bui);
         let enabled = (action.is_some() || cut) && ready && !running;
         bui.add_enabled_ui(enabled, |bui| {
-            let label = if running { "Running" } else if action.is_none() && !cut { "Soon" } else if ready { "Run" } else { "Needs model" };
+            let label = if running { "Running" } else if ready { "Run" } else { "Needs model" };
             let b = Button::secondary(label).icon(Icon::PlayFill).busy(running).min_width(btn_w).show(bui);
             let tip = if !ready && (action.is_some() || cut) { "Install the model in Settings ▸ Models".to_owned() } else if cut { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first video clip" })) } else { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first clip with sound" })) };
             let b = kit::tip(b, &tip, None);
@@ -871,7 +1112,7 @@ fn apply(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, tar
     };
     let panel = crate::services::library::Panel::ALL[rail.index()];
     match crate::services::library::apply(&mut app.doc, panel, i, &targets) {
-        Ok(out) => app.editor.undo_toast = Some(kit::push(ctx, out.message, Some("Undo"), Some(Icon::Check))),
+        Ok(out) => super::toast_undo(&mut app.editor, ctx, out.message, Icon::Check),
         Err(r) => {
             kit::push(ctx, r.0, None, Some(Icon::Info));
         }
@@ -892,81 +1133,24 @@ pub fn add(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, a
         return;
     }
     let t = at.unwrap_or(app.editor.playhead);
-    let p = &app.doc.project;
-    let lane_of = |kind: LaneKind, prefer_last: bool| {
-        let mut ls = p.lanes.iter().filter(|l| l.kind == kind);
-        if prefer_last { ls.last().map(|l| l.id) } else { ls.next().map(|l| l.id) }
-    };
-    let mut clip = match rail {
-        RailItem::Media => {
-            let mi = p.media[i].clone();
-            let kind = if mi.kind == MediaKind::Audio { ClipKind::Audio } else { ClipKind::Video };
-            let lane = lane.or_else(|| if kind == ClipKind::Audio { lane_of(LaneKind::Audio, false) } else { p.spine() });
-            new_clip(lane, t, media_clip_len(mi.kind, mi.dur), kind, mi.name.rsplit_once('.').map_or(mi.name.as_str(), |(a, _)| a), Some(mi.id))
-        }
-        RailItem::Text => {
-            let preset = &studio_text::styles::catalogue()[i];
-            let mut c = new_clip(lane.or_else(|| lane_of(LaneKind::Visual, false)), t, 4 * SEC, ClipKind::Title, &preset.name, None);
-            c.text = if preset.sample.chars().count() <= 24 { preset.sample.clone() } else { "Your title".into() };
-            c.text_style = Some(preset.id.clone());
-            c.extra.text_size = preset.style.size.clamp(5.0, 300.0);
-            c
-        }
-        RailItem::Assets => {
-            let mut c = new_clip(lane.or_else(|| lane_of(LaneKind::Visual, true)), t, 3 * SEC, ClipKind::Title, view::ASSETS[i], None);
-            c.transform.scale = 30.0;
-            c
-        }
-        RailItem::Audio => {
-            let d = (view::SOUNDS[i].1 as f64 * SEC as f64) as Time;
-            // Sounds are generated; until the content library ships audio,
-            // they use the sample music item if the project has one.
-            let media = p.media.iter().find(|m| m.kind == MediaKind::Audio).map(|m| m.id);
-            let Some(media) = media else {
-                kit::push(ctx, "Import an audio file first", None, Some(Icon::Info));
-                return;
-            };
-            new_clip(lane.or_else(|| lane_of(LaneKind::Audio, true)), t, d.min(30 * SEC), ClipKind::Audio, view::SOUNDS[i].0, Some(media))
-        }
-        RailItem::Effects | RailItem::Looks => {
-            let item = if rail == RailItem::Effects { catalogue::effects()[i] } else { catalogue::looks()[i] };
-            let mut c = new_clip(lane.or_else(|| lane_of(LaneKind::Visual, true)), t, 4 * SEC, ClipKind::Fx, item.name, None);
-            if rail == RailItem::Effects {
-                c.effects = vec![view::Effect::new(item.id)];
-            } else {
-                c.look = Some(item.id.into());
-            }
-            c
-        }
+    match rail {
         RailItem::Story => return,
         RailItem::Motions | RailItem::Cuts | RailItem::Ai => {
             apply(app, ctx, rail, i, None);
             return;
         }
-    };
-    let Some(lane) = clip.lane_opt() else { return };
-    clip.lane = lane;
-    let name = clip.name.clone();
-    let spine = p.spine() == Some(lane);
-    // On the spine, insert at the nearest cut; later clips move along.
-    let cut = p.clips.iter().filter(|c| c.lane == lane).flat_map(|c| [c.start, c.end()]).min_by_key(|x| (x - t).abs()).unwrap_or(0);
-    let new_id = app.doc.alloc_id() as u32;
-    clip.id = new_id;
-    let ok = if spine {
-        clip.start = cut;
-        let mc = crate::bridge::new_clip(&app.doc.model, &clip);
-        let seq = app.doc.seq();
-        app.doc.apply("Add clip", m::Edit::Insert { seq, lane: Some(m::LaneId(lane as u64)), at: cut, clip: Box::new(mc) })
-    } else {
-        app.doc.edit("Add clip", |p| {
-            p.clips.push(clip);
-            // Free lanes do not overlap: find room, adding a lane if needed.
-            p.resolve_overlap(new_id);
-        })
-    };
-    if ok {
-        app.editor.selection = vec![new_id];
-        app.editor.undo_toast = Some(kit::push(ctx, crate::i18n::tf(format!("Added {name}")), Some("Undo"), Some(Icon::Plus)));
+        _ => {}
+    }
+    // One implementation of "add this item to the timeline", shared with the agent.
+    let panel = crate::services::library::Panel::ALL[rail.index()];
+    match crate::services::library::add(&mut app.doc, panel, i, t, lane) {
+        Ok(out) => {
+            app.editor.selection = out.select;
+            super::toast_undo(&mut app.editor, ctx, out.message, Icon::Plus);
+        }
+        Err(r) => {
+            kit::push(ctx, r.0, None, Some(Icon::Info));
+        }
     }
 }
 
@@ -1062,7 +1246,7 @@ pub fn add_adjustment(app: &mut StudioApp, ctx: &egui::Context, d: LibDrag, star
         p.resolve_overlap(id);
     }) {
         app.editor.selection = vec![id];
-        app.editor.undo_toast = Some(kit::push(ctx, format!("{} added as an adjustment clip", item.name), Some("Undo"), Some(Icon::MagicWand)));
+        super::toast_undo(&mut app.editor, ctx, format!("{} added as an adjustment clip", item.name), Icon::MagicWand);
     }
 }
 
@@ -1080,5 +1264,56 @@ mod tests {
         assert_eq!(media_clip_len(MediaKind::Video, 90 * SEC), 90 * SEC);
         assert_eq!(media_clip_len(MediaKind::Audio, 180 * SEC), 180 * SEC);
         assert_eq!(media_clip_len(MediaKind::Image, 0), 4 * SEC);
+    }
+
+    #[test]
+    fn rail_tabs_that_do_not_fit_go_to_the_overflow_menu() {
+        let widths = vec![50.0; RailItem::ALL.len()];
+        // Wide enough: every tab shows and there is no "…".
+        assert_eq!(tabs_that_fit(&widths, 700.0), RailItem::ALL.len());
+        // The default library width: some tabs, never none, never all, and
+        // the tabs plus the "…" cell fit across.
+        let n = tabs_that_fit(&widths, 340.0);
+        assert!((1..RailItem::ALL.len()).contains(&n), "{n}");
+        assert!(6.0 + MORE_W + 2.0 + n as f32 * 52.0 <= 340.0);
+        // Hopelessly narrow: still one tab and the menu.
+        assert_eq!(tabs_that_fit(&widths, 20.0), 1);
+    }
+
+    #[test]
+    fn tool_labels_follow_the_glossary_and_keys_stay() {
+        assert_eq!(RailItem::Cuts.label(), "Transitions");
+        assert_eq!(RailItem::Motions.label(), "Animations");
+        assert_eq!(RailItem::Ai.label(), "Tools");
+        // Saved workspaces keep finding their section by the old key.
+        assert_eq!(RailItem::Ai.name(), "AI");
+        assert!(!RailItem::Ai.groups().iter().any(|g| g.contains("AI editor")));
+    }
+
+    #[test]
+    fn tools_list_has_no_unfinished_entries() {
+        for t in view::AI_TOOLS.iter().filter(|t| !ai_runnable(t.name)) {
+            assert!(matches!(t.name, "Trim silences" | "Smart reframe" | "Scene cuts" | "Remove background" | "Smooth slow motion"), "{}", t.name);
+        }
+        assert!(ai_runnable("Auto captions") && !ai_runnable("Scene cuts"));
+    }
+
+    /// Library ▸ Tools ▸ Available crashed the signed app: listing the
+    /// bundled plugins compiled WebAssembly, which hardened runtime kills
+    /// without the JIT entitlement. Draw every Tools chip headless, in a
+    /// narrow library, and keep the sections reachable.
+    #[test]
+    fn every_tools_chip_draws_headless() {
+        use crate::ui_tests::Harness;
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.frames(3);
+        for chip in 1..=3 {
+            h.app.editor.rail = RailItem::Ai;
+            h.app.editor.library_chip[RailItem::Ai.index()] = chip;
+            h.app.editor.open_panel(crate::dock::Panel::Library);
+            h.frames(3);
+            assert_eq!(h.app.editor.rail, RailItem::Ai);
+            assert_eq!(h.app.editor.library_chip[RailItem::Ai.index()], chip, "chip {chip} kept");
+        }
     }
 }

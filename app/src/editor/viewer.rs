@@ -460,15 +460,31 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let bar = Rect::from_min_size(r.min + Vec2::new(12.0, 4.0), Vec2::new(r.width() - 20.0, TOOLBAR_H - 8.0));
     let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(bar).layout(egui::Layout::left_to_right(egui::Align::Center)));
     bui.spacing_mut().item_spacing.x = 4.0;
-    bui.label(egui::RichText::new(crate::i18n::shown("Player")).font(theme::section_title()).color(t.text));
-    bui.add_space(10.0);
+    // Source monitor or the program (⇧2 / ⇧4 do the same).
+    {
+        let ctx = bui.ctx().clone();
+        let mut which = usize::from(app.editor.cutting.show_source);
+        let was = which;
+        kit::segmented(&mut bui, "viewer-source-program", &mut which, &[kit::Segment::text("Program"), kit::Segment::text("Source")], None, None);
+        if which != was {
+            super::cutting::toggle_source(app);
+            if which == 1 && !app.editor.cutting.show_source {
+                kit::push(&ctx, "Pick a clip in the Library to load the Source monitor", None, Some(Icon::Info));
+            }
+        }
+    }
+    bui.add_space(8.0);
     // The buttons scroll sideways when the viewer is narrower than they
     // are, leaving the picture's size and rate their room at the end.
     let (overlays_keys, before_after_keys) = (crate::keymap::hint(&app.prefs, "overlays"), crate::keymap::hint(&app.prefs, "before-after"));
     let proj = &app.doc.project;
     let info = format!("{} × {} · {} fps", proj.width, proj.height, proj.fps);
-    let info_w = kit::text_width(&bui, &info, theme::caption()) + 8.0;
-    let strip_w = (bui.available_width() - info_w - 8.0).max(120.0);
+    // In a narrow viewer the picture's size and rate go (the project settings
+    // hold them) and the tools scroll sideways beside the always-visible Add.
+    let show_info = bui.available_width() >= 600.0;
+    let info_w = if show_info { kit::text_width(&bui, &info, theme::caption()) + 8.0 } else { 0.0 };
+    let add_w = 76.0;
+    let strip_w = (bui.available_width() - info_w - add_w - 16.0).max(48.0);
     egui::ScrollArea::horizontal().id_salt("viewer-tools").max_width(strip_w).auto_shrink([true, true]).show_h(&mut bui, |ui| {
         ui.horizontal(|bui| {
             let ed = &mut app.editor;
@@ -512,19 +528,15 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
             if IconButton::new(Icon::SquareSplitHorizontal, "Before / after").shortcut(&before_after_keys).active(ed.before_after).show(bui).clicked() {
                 ed.before_after = !ed.before_after;
             }
-            // Camera tools, cameras and lights.
-            super::three_d::toolbar_buttons(app, bui);
-            // Vector illustration: logos, icons, illustrations, infographics.
-            super::vector::toolbar_button(app, bui);
-            // Motion graphics templates, shape layers, charts, 3D text.
-            super::mograph::toolbar_buttons(app, bui);
-            // The 3D workspace: move through the scene.
+            // What dragging in the picture does (orbit, pan, dolly).
+            super::three_d::camera_tool_button(bui);
+            // The 3D viewport: move through the scene.
             #[cfg(feature = "render")]
             super::viewport::ui::toolbar_button(app, bui);
-            // Point the AI editor at part of the picture.
-            super::ai_marks::toolbar_buttons(app, bui);
-            super::scopes::toolbar_button(bui);
-            super::capture::toolbar_button(bui);
+            if let Some(i) = kit::menu_button(bui, "viewer-quality", app.editor.quality, &QUALITY, 72.0, None) {
+                app.editor.quality = i;
+            }
+            super::ai_marks::mode_chip(app, bui);
             let key_hit = !bui.ctx().egui_wants_keyboard_input() && crate::keymap::hit(bui.ctx(), &app.prefs, "before-after");
             let ed = &mut app.editor;
             if key_hit {
@@ -562,7 +574,79 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     });
     bui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.add_space(4.0);
-        kit::label_trunc(ui, egui::RichText::new(info).font(theme::caption()).color(t.text_2));
+        if show_info {
+            kit::label_trunc(ui, egui::RichText::new(info).font(theme::caption()).color(t.text_2));
+        }
+        add_menu(app, ui);
+    });
+    super::three_d::poll_asked(ui.ctx());
+}
+
+/// A drop-down's width: the longest of `options` and its caret, so no label
+/// ends in an ellipsis.
+pub(crate) fn menu_w(ui: &egui::Ui, options: &[&str]) -> f32 {
+    let longest = options.iter().map(|o| kit::text_width(ui, &crate::i18n::shown(o), theme::control())).fold(0.0, f32::max);
+    (longest + 44.0).ceil()
+}
+
+/// Draws a long menu's items in a scroll area that stops above the window's
+/// bottom edge.
+pub(crate) fn tall_menu<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 16.0).clamp(120.0, 640.0);
+    egui::ScrollArea::vertical().max_height(room).auto_shrink([true, true]).show_v(ui, add).inner
+}
+
+pub(crate) fn add_id() -> egui::Id {
+    egui::Id::unique("viewer-add")
+}
+
+fn add_search_id() -> egui::Id {
+    egui::Id::unique("viewer-add-search")
+}
+
+/// Whether the Add menu's `q` search keeps `label` in the section `heading`
+/// (a search that names the section keeps all of it).
+pub(crate) fn add_matches(q: &str, heading: &str, label: &str) -> bool {
+    let q = q.trim().to_lowercase();
+    q.is_empty() || label.to_lowercase().contains(&q) || heading.to_lowercase().contains(&q)
+}
+
+/// Whether any of `labels` is left in the section `heading` by the search.
+pub(crate) fn add_shows<'a>(q: &str, heading: &str, labels: impl IntoIterator<Item = &'a str>) -> bool {
+    labels.into_iter().any(|l| add_matches(q, heading, l))
+}
+
+/// One entry of the Add menu; false (and nothing drawn) when the search leaves it out.
+pub(crate) fn add_item(ui: &mut egui::Ui, q: &str, heading: &str, label: &str) -> bool {
+    add_matches(q, heading, label) && MenuItem::new(label).show(ui).clicked()
+}
+
+/// The one "+ Add" in the viewer's header: everything that puts something new
+/// in the picture, in sections, with a search at the top.
+fn add_menu(app: &mut StudioApp, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    let id = add_id();
+    let open = kit::is_open(&ctx, id);
+    let resp = kit::Button::secondary("Add").icon(Icon::Plus).compact().show(ui).on_hover_text("Add a title, shape, chart, 3D object, light, drawing or AI mark");
+    if resp.clicked() {
+        kit::toggle_open(&ctx, id);
+    }
+    if !open {
+        ctx.data_mut(|d| d.remove_temp::<String>(add_search_id()));
+    }
+    kit::popover(&ctx, id, resp.rect, kit::Side::Below, 280.0, |ui| {
+        let mut q: String = ui.data(|d| d.get_temp(add_search_id())).unwrap_or_default();
+        if kit::text_field(ui, &mut q, "Search", Some(Icon::MagnifyingGlass), 264.0, None).changed() {
+            ui.data_mut(|d| d.insert_temp(add_search_id(), q.clone()));
+        }
+        // Long menus scroll instead of running off the window.
+        let max = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 90.0).clamp(160.0, 520.0);
+        egui::ScrollArea::vertical().max_height(max).show_v(ui, |ui| {
+            super::mograph::add_items(app, ui, &q, id);
+            super::three_d::add_items(app, ui, &q, id);
+            super::vector::add_items(app, ui, &q, id);
+            super::ai_marks::add_items(app, ui, &q, id);
+        });
     });
 }
 
@@ -579,7 +663,6 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let bar = Rect::from_min_max(egui::pos2(r.left() + 12.0, r.bottom() - PILL_H), egui::pos2(r.right() - 10.0, r.bottom()));
 
     // Centre: previous frame, play, next frame (plain icons).
-    let frame = ed.frame_dur(fps);
     let mid = Rect::from_center_size(bar.center(), Vec2::new(96.0, 28.0));
 
     // Left: the playhead time in the accent, the length muted. In a narrow
@@ -601,7 +684,7 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let mut mui = ui.new_child(egui::UiBuilder::new().max_rect(mid).layout(egui::Layout::left_to_right(egui::Align::Center)));
     mui.spacing_mut().item_spacing.x = 4.0;
     if IconButton::new(Icon::CaretLeft, "Previous frame").shortcut(&back_keys).show(&mut mui).clicked() {
-        ed.playhead = (ed.playhead - frame).max(0);
+        ed.playhead = crate::services::transport::step(&app.doc, ed.playhead, -1);
         ed.playing = false;
     }
     let (pr, presp) = mui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
@@ -616,7 +699,7 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         toggle_play(ed);
     }
     if IconButton::new(Icon::CaretRight, "Next frame").shortcut(&fwd_keys).show(&mut mui).clicked() {
-        ed.playhead += frame;
+        ed.playhead = crate::services::transport::step(&app.doc, ed.playhead, 1);
         ed.playing = false;
     }
 
@@ -627,15 +710,24 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     if IconButton::new(if ed.fullscreen { Icon::CornersIn } else { Icon::CornersOut }, if ed.fullscreen { "Exit full screen" } else { "Full screen" }).shortcut(&full_keys).show(&mut rui).clicked() {
         ed.fullscreen = !ed.fullscreen;
     }
-    if r.width() >= 520.0 {
-        if let Some(i) = kit::menu_button(&mut rui, "viewer-quality", ed.quality, &QUALITY, 64.0, None) {
-            ed.quality = i;
-        }
-    }
     if IconButton::new(Icon::Repeat, if proj.range.is_some() { "Loop in–out range" } else { "Loop sequence" }).shortcut("⌘L").active(ed.loop_on).show(&mut rui).clicked() {
         ed.loop_on = !ed.loop_on;
     }
     if rui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::L))) {
         ed.loop_on = !ed.loop_on;
+    }
+}
+
+#[cfg(test)]
+mod add_menu_tests {
+    use super::add_matches;
+
+    #[test]
+    fn the_add_search_keeps_matching_items_and_whole_sections() {
+        assert!(add_matches("", "3D model", "Cube"));
+        assert!(add_matches("cu", "3D model", "Cube"));
+        assert!(!add_matches("cu", "3D model", "Torus"));
+        assert!(add_matches("particles", "Particles", "Snow"), "naming a section keeps all of it");
+        assert!(!add_matches("snow", "Chart from data", "Bar chart"));
     }
 }

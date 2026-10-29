@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use studio_model as m;
 
 /// What import learns about a file.
+#[derive(Clone)]
 pub struct Probe {
     pub kind: m::MediaKind,
     pub duration: Option<m::Micros>,
@@ -60,7 +61,33 @@ pub const IMAGE_EXT: &[&str] = &["png", "jpg", "jpeg"];
 /// Sound files Zornov's own decoders read (`sound_bridge`).
 pub const SOUND_DECODED: &[&str] = &["wav", "wave", "mp3", "ogg", "oga", "flac", "aif", "aiff", "aifc"];
 
+/// Probe a file. Import used to probe each file twice (to choose between
+/// converting and importing, then to read it); the answer is remembered by
+/// path, size and modification time so the second look costs nothing and a
+/// changed file is read again.
 pub fn probe(path: &Path) -> Result<Probe, String> {
+    type Cache = std::collections::HashMap<std::path::PathBuf, ((u64, Option<std::time::SystemTime>), Probe)>;
+    static CACHE: std::sync::Mutex<Option<Cache>> = std::sync::Mutex::new(None);
+    let stamp = std::fs::metadata(path).ok().filter(|md| md.is_file()).map(|md| (md.len(), md.modified().ok()));
+    if let Some(stamp) = stamp {
+        let hit = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|c| c.get(path)).filter(|(s, _)| *s == stamp).map(|(_, p)| p.clone());
+        if let Some(p) = hit {
+            return Ok(p);
+        }
+    }
+    let pr = probe_uncached(path)?;
+    if let Some(stamp) = stamp {
+        let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let c = c.get_or_insert_with(Default::default);
+        if c.len() >= 512 {
+            c.clear();
+        }
+        c.insert(path.to_path_buf(), (stamp, pr.clone()));
+    }
+    Ok(pr)
+}
+
+fn probe_uncached(path: &Path) -> Result<Probe, String> {
     // ProRes, EXR / DPX / TIFF / 16-bit PNG and frame sequences.
     if let Some(pr) = crate::services::media_meta::probe(path) {
         return pr;
@@ -436,5 +463,21 @@ mod tests {
     #[test]
     fn unknown_files_are_reported() {
         assert!(probe(Path::new("/nonexistent/clip.mp4")).is_err());
+    }
+
+    /// A second probe of the same file is answered from memory; a file that
+    /// changed is read again.
+    #[test]
+    fn probes_are_remembered_until_the_file_changes() {
+        let dir = std::env::temp_dir().join(format!("studio-probe-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("p.png");
+        let png = |n: u32| std::fs::write(&f, studio_media::png::encode(&studio_media::RgbaImage { width: n, height: n, pixels: vec![9, 9, 9, 255].repeat((n * n) as usize) })).unwrap();
+        png(2);
+        let (a, b) = (probe(&f).unwrap(), probe(&f).unwrap());
+        assert_eq!((a.video.as_ref().unwrap().width, b.video.as_ref().unwrap().width), (2, 2));
+        png(4);
+        assert_eq!(probe(&f).unwrap().video.unwrap().width, 4, "a changed file is probed again");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

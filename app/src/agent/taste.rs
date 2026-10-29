@@ -18,6 +18,7 @@
 
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use studio_model as m;
 
 /// What a note is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,11 +59,11 @@ impl Kind {
 const KEEP: usize = 200;
 
 fn project_file(project: &Path) -> PathBuf {
-    project.join("AI").join("taste.json")
+    m::file::ProjectFolder::new(project).state(m::file::State::Taste)
 }
 
 pub fn style_guide_path(project: &Path) -> PathBuf {
-    project.join("AI").join("Style guide.md")
+    m::file::ProjectFolder::new(project).state(m::file::State::StyleGuide)
 }
 
 thread_local! {

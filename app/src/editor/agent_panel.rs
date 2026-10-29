@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The AI editor in the AI panel: ask for anything, watch it happen on the
+//! The Assistant in the AI panel: ask for anything, watch it happen on the
 //! timeline. A line starting with `/` runs a Studio command directly (the
 //! `studio` prompt's commands), without the model.
 
@@ -246,7 +246,7 @@ impl AgentUi {
         }
     }
 
-    /// Visual checks: a question as the AI editor would ask it.
+    /// Visual checks: a question as the Assistant would ask it.
     pub fn demo_ask(&mut self, with_question: bool) {
         let (tx, _rx) = mpsc::channel();
         std::mem::forget(_rx);
@@ -514,7 +514,10 @@ impl AgentUi {
                         let (url, _) = a.downloads.remove(i);
                         let short = one_line(url.rsplit('/').next().unwrap_or(&url), 40);
                         match r {
-                            Ok(_) if url.starts_with("converted ") => kit::push(ctx, crate::i18n::tf(format!("Done: {url}")), None, Some(Icon::CheckCircle)),
+                            Ok(content) if url.starts_with("converted ") => match failed_in(&content) {
+                                None => kit::push(ctx, crate::i18n::tf(format!("Done: {url}")), None, Some(Icon::CheckCircle)),
+                                Some(why) => kit::push(ctx, crate::i18n::tf(format!("Could not {}. {}", url.replacen("converted ", "convert ", 1), one_line(&why, 140))), None, Some(Icon::Warning)),
+                            },
                             Ok(_) => kit::push(ctx, crate::i18n::tf(format!("Downloaded {short} into the media bin")), None, Some(Icon::CheckCircle)),
                             Err(e) => kit::push(ctx, crate::i18n::tf(format!("Could not download {short}: {}", one_line(&e, 140))), None, Some(Icon::Warning)),
                         };
@@ -556,14 +559,14 @@ impl AgentUi {
             let _ = std::fs::create_dir_all(&d);
             d
         };
-        let socket = self.socket.clone().ok_or("The AI editor could not open its connection for the command-line agents.");
+        let socket = self.socket.clone().ok_or("The Assistant could not open its connection for the command-line agents.");
         let cast = casting(want.0, want.1.clone(), socket.ok(), dir());
         // A missing key or program is said now, not halfway into a crew.
         cast(None)?;
         let brain: Box<dyn Brain> = if want.2 { Box::new(CrewBrain::new(cast)) } else { cast(None)? };
         // Swapped in by the thread that runs the next request (after the
         // previous one has let go).
-        *self.tabs[tab].pending_brain.lock().map_err(|_| "the AI editor crashed; reopen Zornov")? = Some(brain);
+        *self.tabs[tab].pending_brain.lock().map_err(|_| "the Assistant crashed; reopen Zornov")? = Some(brain);
         self.tabs[tab].brain_for = Some(want);
         Ok(())
     }
@@ -714,12 +717,12 @@ impl AgentUi {
                             _ if gate.stopped() => Ok(()),
                             // A crew checks itself; one agent is held to
                             // looking up a tool before saying "impossible".
-                            Some(b) if crew_on => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| b.turn(&request, &gate))).unwrap_or_else(|_| Err("The AI editor crashed during this request.".into())),
-                            Some(b) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crew::honest_turn(b.as_mut(), &request, &gate, crew::LEAD))).unwrap_or_else(|_| Err("The AI editor crashed during this request.".into())),
-                            None => Err("no AI editor".into()),
+                            Some(b) if crew_on => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| b.turn(&request, &gate))).unwrap_or_else(|_| Err("The Assistant crashed during this request.".into())),
+                            Some(b) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crew::honest_turn(b.as_mut(), &request, &gate, crew::LEAD))).unwrap_or_else(|_| Err("The Assistant crashed during this request.".into())),
+                            None => Err("no Assistant".into()),
                         }
                     }
-                    Err(_) => Err("The AI editor crashed earlier; reopen Zornov.".into()),
+                    Err(_) => Err("The Assistant crashed earlier; reopen Zornov.".into()),
                 };
                 if let Err(e) = r {
                     if !gate.stopped() {
@@ -863,7 +866,7 @@ pub fn casting(provider: u8, model: String, socket: Option<PathBuf>, dir: PathBu
         let brief = role.map(Role::brief).unwrap_or_default();
         // Empty for the command-line agents: their own default model.
         let cli_model = Some(model.clone()).filter(|m| !m.is_empty());
-        let socket = || socket.clone().ok_or_else(|| "The AI editor could not open its connection for the command-line agents.".to_owned());
+        let socket = || socket.clone().ok_or_else(|| "The Assistant could not open its connection for the command-line agents.".to_owned());
         Ok(match provider {
             1 => {
                 let mut b = ClaudeCodeBrain::new(socket()?, dir.clone(), cli_model);
@@ -871,7 +874,7 @@ pub fn casting(provider: u8, model: String, socket: Option<PathBuf>, dir: PathBu
                 Box::new(b)
             }
             2 => {
-                let key = keychain::api_key(keychain::OPENAI).ok_or("Add your OpenAI API key in Settings ▸ AI, or pick another AI editor there.")?;
+                let key = keychain::api_key(keychain::OPENAI).ok_or("Add your OpenAI API key in Settings ▸ AI, or pick another Assistant there.")?;
                 let mut b = OpenAiBrain::new(key, model.clone());
                 (b.role, b.brief) = (role, brief);
                 Box::new(b)
@@ -882,7 +885,7 @@ pub fn casting(provider: u8, model: String, socket: Option<PathBuf>, dir: PathBu
                 Box::new(b)
             }
             _ => {
-                let key = keychain::api_key(keychain::ANTHROPIC).ok_or("Add your Claude API key in Settings ▸ AI, or pick another AI editor there.")?;
+                let key = keychain::api_key(keychain::ANTHROPIC).ok_or("Add your Claude API key in Settings ▸ AI, or pick another Assistant there.")?;
                 let mut b = ApiBrain::new(key, model.clone());
                 (b.role, b.brief) = (role, brief);
                 Box::new(b)
@@ -962,7 +965,7 @@ fn link_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
-/// Opens the AI editor's panel (where it is docked, in its own window, or
+/// Opens the Assistant's panel (where it is docked, in its own window, or
 /// where it goes by default) on the conversation with the input focused (⌘K).
 pub fn open(app: &mut StudioApp) {
     let p = crate::dock::Panel::Ai;
@@ -1009,7 +1012,7 @@ fn well_fill(t: &Tokens) -> Color32 {
     theme::mix(t.panel, t.ground, 0.55)
 }
 
-/// The sparkle mark: the AI editor's face.
+/// The sparkle mark: the Assistant's face.
 fn mark(p: &egui::Painter, rect: Rect, t: &Tokens) {
     p.rect_filled(rect, CornerRadius::same((rect.width() * 0.3) as u8), t.accent_soft);
     icons::paint(p, rect.shrink(rect.width() * 0.22), Icon::Sparkle, rect.width() * 0.56, t.accent);
@@ -1031,6 +1034,22 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
     let header = Rect::from_min_size(r.min, Vec2::new(r.width(), 44.0));
     header_bar(app, ui, header);
+    // Chat and the tools it can run: two tabs of the one Assistant panel.
+    let view_id = egui::Id::new("assistant-view");
+    let mut view: usize = ui.ctx().data(|d| d.get_temp(view_id)).unwrap_or(0);
+    let tabs_r = Rect::from_min_size(egui::pos2(r.left() + PAD, header.bottom()), Vec2::new(r.width() - 2.0 * PAD, 32.0));
+    let mut tui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_r).id_salt("assistant-tabs"));
+    if kit::tab_bar(&mut tui, "assistant-view-tabs", &mut view, &["Chat", "Tools"]) {
+        ui.ctx().data_mut(|d| d.insert_temp(view_id, view));
+    }
+    if view == 1 {
+        let body = Rect::from_min_max(egui::pos2(r.left() + PAD, tabs_r.bottom() + 4.0), egui::pos2(r.right() - PAD, r.bottom() - PAD));
+        let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt("assistant-tools"));
+        bui.set_clip_rect(body.intersect(ui.clip_rect()));
+        tools_tab(app, &mut bui);
+        return;
+    }
+    let header = Rect::from_min_size(r.min, Vec2::new(r.width(), 44.0 + 32.0));
     let strip = Rect::from_min_size(egui::pos2(r.left(), header.bottom()), Vec2::new(r.width(), 36.0));
     tab_strip(app, ui, strip);
     let header = header.union(strip);
@@ -1061,6 +1080,104 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     composer_card(app, &mut iui, composer);
 }
 
+
+/// The AI tools the Assistant can run for you, one row each. Tools that need
+/// a model say so; tools that do nothing yet are not listed.
+fn tools_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
+    use crate::services::ai_run::Action;
+    let t = theme::tokens(ui.ctx());
+    let sel_clip = app.editor.selection.first().copied();
+    egui::ScrollArea::vertical().auto_shrink([false, false]).id_salt("assistant-tools-scroll").show_v(ui, |ui| {
+        ui.label(egui::RichText::new(crate::i18n::shown("Run a tool on the selected clip, or ask the Assistant in Chat.")).font(theme::caption()).color(t.text_2));
+        ui.add_space(theme::space::SM);
+        for tool in crate::view::AI_TOOLS {
+            let action = Action::for_tool(tool.name);
+            let cut = cfg!(feature = "render") && matches!(tool.name, "Remove background" | "Smooth slow motion");
+            if action.is_none() && !cut {
+                continue;
+            }
+            let ready = tool_feature(tool.name).map(crate::services::models::feature).is_some_and(|r| r.ready);
+            let running = action.is_some_and(|a| super::library::ai_runner().lock().unwrap_or_else(|e| e.into_inner()).is_running(a));
+            #[cfg(feature = "render")]
+            let running = running || (cut && (super::cutout::busy() || super::slowmo::busy()));
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_max_width((ui.available_width() - 110.0).max(80.0));
+                    ui.label(egui::RichText::new(crate::i18n::shown(tool.name)).font(theme::control_medium()).color(t.text));
+                    ui.label(egui::RichText::new(crate::i18n::shown(tool.blurb.trim_end_matches('.'))).font(theme::caption()).color(t.text_2));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_enabled_ui(ready && !running, |ui| {
+                        let label = if running { "Running" } else if ready { "Run" } else { "Needs model" };
+                        let b = Button::secondary(label).icon(Icon::PlayFill).busy(running).compact().show(ui);
+                        let tip = if !ready { "Install the model in Settings ▸ Models".to_owned() } else { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first clip" })) };
+                        let b = kit::tip(b, &tip, None);
+                        if b.clicked() {
+                            let ctx = ui.ctx().clone();
+                            let res = if let Some(a) = action {
+                                let sel = app.editor.selection.clone();
+                                super::library::ai_runner().lock().unwrap_or_else(|e| e.into_inner()).start(&app.doc, a, &sel).map_err(|e| e.0)
+                            } else {
+                                run_cut_tool(app, &ctx, tool.name, sel_clip)
+                            };
+                            match res {
+                                Ok(m) => kit::push(&ctx, m, None, Some(Icon::Sparkle)),
+                                Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+                            };
+                        }
+                    });
+                });
+            });
+            ui.add_space(theme::space::SM);
+        }
+    });
+}
+
+fn tool_feature(name: &str) -> Option<studio_ai::features::Feature> {
+    use studio_ai::features::Feature as F;
+    Some(match name {
+        "Auto captions" => F::Captions,
+        "Remove background" => F::RemoveBackground,
+        "Voice cleanup" => F::VoiceCleanup,
+        "Beat markers" => F::BeatSync,
+        "Smooth slow motion" => F::SmoothSlowMotion,
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "render")]
+fn run_cut_tool(app: &mut StudioApp, ctx: &egui::Context, name: &str, sel: Option<u32>) -> Result<String, String> {
+    let video = |id: &u32| app.doc.project.clip(*id).is_some_and(|c| matches!(c.kind, crate::view::ClipKind::Video));
+    let target = sel.filter(video).or_else(|| app.doc.project.clips.iter().filter(|c| matches!(c.kind, crate::view::ClipKind::Video)).min_by_key(|c| (c.start, c.lane)).map(|c| c.id));
+    let id = target.ok_or_else(|| "There is no video clip to work on".to_owned())?;
+    if name == "Remove background" { super::cutout::start_people(app, ctx, id) } else { super::slowmo::start(app, ctx, id, crate::services::slowmo::Method::Flow) }
+}
+
+#[cfg(not(feature = "render"))]
+fn run_cut_tool(_: &mut StudioApp, _: &egui::Context, _: &str, _: Option<u32>) -> Result<String, String> {
+    Err("This tool is not available in this build".into())
+}
+
+/// The commands behind "/": every tool the Assistant uses, with the gist of
+/// what it does.
+fn slash_commands() -> &'static [(String, String)] {
+    static LIST: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    LIST.get_or_init(|| {
+        crate::agent::mcp::tools()
+            .iter()
+            .filter_map(|t| {
+                let name = t["name"].as_str()?.to_owned();
+                if matches!(name.as_str(), "edit_schema" | "open" | "new_project" | "export_status" | "ai") {
+                    return None;
+                }
+                let d = t["description"].as_str().unwrap_or("");
+                let gist = d.split([':', ';', '(']).next().unwrap_or(d).split(". ").next().unwrap_or(d).trim().trim_end_matches(['.', ',']).to_owned();
+                Some((name, gist))
+            })
+            .collect()
+    })
+}
+
 const USAGE_H: f32 = 18.0;
 
 /// The token count of this reply as it climbs, and the conversation's
@@ -1081,7 +1198,7 @@ fn header_bar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let cy = r.center().y;
     mark(&p, Rect::from_center_size(egui::pos2(r.left() + PAD + 12.0, cy), Vec2::splat(24.0)), &t);
     let title_x = r.left() + PAD + 32.0;
-    let tg = p.layout_no_wrap("AI editor".into(), title_font(), t.text);
+    let tg = p.layout_no_wrap("Assistant".into(), title_font(), t.text);
     let tw = tg.size().x;
     p.galley(egui::pos2(title_x, cy - tg.size().y / 2.0), tg, t.text);
 
@@ -1228,11 +1345,11 @@ fn welcome(app: &mut StudioApp, ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(w, 40.0), Sense::hover());
     mark(ui.painter(), Rect::from_min_size(r.min, Vec2::splat(40.0)), &t);
     ui.add_space(10.0);
-    ui.label(egui::RichText::new(crate::i18n::shown("Meet the AI editor")).font(FontId::new(19.0, FontFamily::Name(theme::BOLD.into()))).color(t.text));
+    ui.label(egui::RichText::new(crate::i18n::shown("Meet the Assistant")).font(FontId::new(19.0, FontFamily::Name(theme::BOLD.into()))).color(t.text));
     ui.add_space(4.0);
     ui.label(egui::RichText::new(crate::i18n::shown("Say what you want in plain words. It cuts, captions, scores and checks your video while you watch.")).font(chat_font()).color(t.text_2));
     ui.add_space(12.0);
-    if Button::primary("Turn on the AI editor").icon(Icon::Sparkle).show(ui).clicked() {
+    if Button::primary("Turn on the Assistant").icon(Icon::Sparkle).show(ui).clicked() {
         app.prefs.ai_cloud_ok = true;
         if let Some(a) = app.agent.as_mut() {
             a.focus_input = true;
@@ -2332,6 +2449,33 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     if std::mem::take(&mut a.focus_input) {
         resp.request_focus();
     }
+    // "/" opens the list of commands (the tools the Assistant itself uses);
+    // a click puts the name in the box, ready for its arguments.
+    if a.input.starts_with('/') && !a.input.contains(char::is_whitespace) {
+        let q = a.input[1..].to_lowercase();
+        let hits: Vec<&(String, String)> = slash_commands().iter().filter(|(n, _)| n.contains(&q)).take(8).collect();
+        if !hits.is_empty() {
+            let mut picked = None;
+            egui::Area::new(egui::Id::new("assistant-slash")).order(egui::Order::Foreground).fixed_pos(r.left_top() - Vec2::new(0.0, 4.0)).pivot(Align2::LEFT_BOTTOM).show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width((r.width() - 16.0).max(160.0));
+                    for (name, gist) in hits {
+                        let row = ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(format!("/{name}")).font(theme::control_medium()).color(t.text));
+                            ui.label(egui::RichText::new(gist).font(theme::caption()).color(t.text_2));
+                        });
+                        if ui.interact(row.response.rect, ui.id().with(name), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            picked = Some(name.clone());
+                        }
+                    }
+                });
+            });
+            if let Some(n) = picked {
+                a.input = format!("/{n} ");
+                resp.request_focus();
+            }
+        }
+    }
     let mut send = false;
     let mut correct = false;
     let mut stop = false;
@@ -2434,8 +2578,41 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     }
 }
 
+/// Why a tool that reports `failed` entries (import, make_playable) did not
+/// do everything it was asked: None when nothing failed.
+fn failed_in(content: &[Content]) -> Option<String> {
+    let text = content.iter().find_map(|c| match c {
+        Content::Text(t) => Some(t.as_str()),
+        _ => None,
+    })?;
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let failed = v.get("failed")?.as_array()?;
+    if failed.is_empty() {
+        return None;
+    }
+    let why: Vec<String> = failed
+        .iter()
+        .map(|f| match f {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.get("error").and_then(|e| e.as_str()).map_or_else(|| other.to_string(), str::to_owned),
+        })
+        .collect();
+    Some(why.join("; "))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_converted_import_with_failures_is_not_done() {
+        let ok = vec![Content::Text(r#"{"media":[3],"failed":[]}"#.into())];
+        assert_eq!(failed_in(&ok), None);
+        let bad = vec![Content::Text(r#"{"media":[],"failed":["clip.mxf: no video stream"]}"#.into())];
+        assert_eq!(failed_in(&bad).as_deref(), Some("clip.mxf: no video stream"));
+        let playable = vec![Content::Text(r#"{"made_playable":[],"failed":[{"media":4,"error":"disk full"}]}"#.into())];
+        assert_eq!(failed_in(&playable).as_deref(), Some("disk full"));
+        assert_eq!(failed_in(&[Content::Jpeg(vec![1])]), None);
+    }
+
     use super::*;
 
     /// A panel with a crew plan on the card and a request running.

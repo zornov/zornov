@@ -21,6 +21,7 @@
 //! the project is not saved yet), named after the page or file.
 
 use std::path::{Path, PathBuf};
+use studio_model as m;
 
 /// Longest a download may take, seconds.
 const MAX_SECS: &str = "1800";
@@ -35,10 +36,23 @@ const FILE_EXT: &[&str] = &[
 
 /// Where downloads go for a project in `home` (or none yet).
 pub fn folder_for(home: Option<&Path>) -> PathBuf {
+    folder_for_kind(home, m::file::MediaKind::Other)
+}
+
+/// Where a download of `kind` goes for a project in `home` (or none yet): a
+/// package sorts it with the rest of its media.
+pub fn folder_for_kind(home: Option<&Path>, kind: m::file::MediaKind) -> PathBuf {
     match home {
-        Some(h) => h.join("Downloads"),
+        Some(h) => m::file::ProjectFolder::new(h).download_dir(kind),
         None => studio_paths::studio().join("Downloads"),
     }
+}
+
+/// Where a download from `url` goes for a project in `home`: a package sorts
+/// it by the file type the link names, earlier folders use `Downloads`.
+pub fn folder_for_url(home: Option<&Path>, url: &str) -> PathBuf {
+    let kind = url_ext(url).map_or(m::file::MediaKind::Other, |e| m::file::MediaKind::for_extension(&e));
+    folder_for_kind(home, kind)
 }
 
 /// The path part of a link (after the host, before `?` and `#`).
@@ -122,7 +136,7 @@ pub fn resolve_local(home: Option<&Path>, s: &str) -> Result<PathBuf, String> {
         let downloads = folder_for(home);
         let mut roots: Vec<PathBuf> = Vec::new();
         if let Some(h) = home {
-            roots.extend(["", "Downloads", "Models", "media", "Media"].iter().map(|d| h.join(d)));
+            roots.extend(m::file::ProjectFolder::new(h).lookup_roots());
         }
         roots.push(downloads.clone());
         for r in roots {
@@ -135,7 +149,9 @@ pub fn resolve_local(home: Option<&Path>, s: &str) -> Result<PathBuf, String> {
         // By name, anywhere in Downloads (two levels down).
         if let Some(name) = expanded.file_name().map(|n| n.to_string_lossy().to_lowercase()) {
             let mut hit = None;
-            let mut stack = vec![(downloads.clone(), 0)];
+            // A package sorts downloads by type under Media; earlier folders kept them in Downloads.
+            let search = home.map(m::file::ProjectFolder::new).filter(|pf| pf.layout() == m::file::Layout::Package).map_or_else(|| downloads.clone(), |pf| pf.media_root());
+            let mut stack = vec![(search, 0)];
             while let Some((d, depth)) = stack.pop() {
                 for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
                     let p = e.path();
@@ -151,8 +167,13 @@ pub fn resolve_local(home: Option<&Path>, s: &str) -> Result<PathBuf, String> {
             }
         }
     }
-    let dl = home.map(|h| h.join("Downloads")).unwrap_or_else(|| folder_for(None));
-    let mut held: Vec<String> = std::fs::read_dir(&dl).into_iter().flatten().flatten().filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    let dl = folder_for(home);
+    let mut dirs = vec![dl.clone()];
+    let models = folder_for_kind(home, m::file::MediaKind::Models3d);
+    if models != dl {
+        dirs.push(models);
+    }
+    let mut held: Vec<String> = dirs.iter().flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten()).filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     held.sort();
     held.truncate(20);
     let first = looked.first().map(|p| p.display().to_string()).unwrap_or_default();
@@ -978,18 +999,18 @@ mod tests {
         let link = format!("http://127.0.0.1:{port}/raw/rooster.glb");
         let r = text(s.run("download", &serde_json::json!({"url": link, "name": "rooster.glb"})).unwrap());
         assert!(r.contains("\"model\":true") && r.contains("rooster"), "{r}");
-        assert!(dir.join("Downloads/rooster.glb").is_file());
+        assert!(m::file::ProjectFolder::new(&dir).download_dir(m::file::MediaKind::Models3d).join("rooster.glb").is_file());
         let models = |s: &crate::agent::Session| s.doc.project.clips.iter().filter(|c| c.name == "rooster" || c.name == "chicken" || c.name == "hen").count();
         assert_eq!(models(&s), 1);
         // The same file by its name, by a link, and through import.
         s.run("edit", &serde_json::json!({"ops": [{"op": "model", "file": "rooster.glb", "name": "hen"}]})).unwrap();
         s.run("edit", &serde_json::json!({"ops": [{"op": "model", "file": link, "name": "chicken"}]})).unwrap();
-        let r = text(s.run("import", &serde_json::json!({"paths": ["Downloads/rooster.glb"]})).unwrap());
+        let r = text(s.run("import", &serde_json::json!({"paths": [m::file::ProjectFolder::new(&dir).download_dir(m::file::MediaKind::Models3d).join("rooster.glb")]})).unwrap());
         assert!(r.contains("3D model clip"), "{r}");
         assert_eq!(models(&s), 4);
         // A file that is not media is kept, not deleted.
         let r = text(s.run("download", &serde_json::json!({"url": format!("http://127.0.0.1:{port}/pack.zip")})).unwrap());
-        assert!(r.contains("kept_as_file") && dir.join("Downloads/pack.zip").is_file(), "{r}");
+        assert!(r.contains("kept_as_file") && m::file::ProjectFolder::new(&dir).download_dir(m::file::MediaKind::Other).join("pack.zip").is_file(), "{r}");
         // Misses say where they looked.
         let e = s.run("edit", &serde_json::json!({"ops": [{"op": "model", "file": "Downloads/nothing.glb"}]})).err().expect("it fails");
         assert!(e.contains("no file at") && e.contains("rooster.glb"), "{e}");

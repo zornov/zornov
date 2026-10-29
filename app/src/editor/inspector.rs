@@ -57,13 +57,19 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     // Header.
     let header = Rect::from_min_size(r.min + Vec2::splat(pad), Vec2::new(r.width() - pad * 2.0, 28.0));
     let cut = app.editor.selected_cut.and_then(|id| app.doc.project.transitions.iter().find(|t| t.id == id)).cloned();
+    // A cut that no longer exists (undone, deleted) is not a selection: the
+    // header and the body both fall back to the Project.
+    if cut.is_none() {
+        app.editor.selected_cut = None;
+    }
+    let live_cut = cut.as_ref().map(|c| c.id);
     let (title, sub) = match (&first, sel.len()) {
         (None, _) if cut.is_some() => {
             let c = cut.as_ref().unwrap();
             (catalogue::cut_name(&c.kind).to_owned(), crate::i18n::tf(format!("Cut · {}", view::format_short(c.dur))))
         }
-        (None, _) => ("Details".to_owned(), String::new()),
-        (Some(c), 1) => (c.name.clone(), format!("{} · {}", kind_name(c.kind), view::format_short(c.dur))),
+        (None, _) => ("Project".to_owned(), String::new()),
+        (Some(c), 1) => (c.name.clone(), format!("{} · {}", kind_label(app, c), view::format_short(c.dur))),
         (Some(_), n) => (format!("{n} clips"), "Changes apply to all of them".to_owned()),
     };
     let mut close = false;
@@ -98,7 +104,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     egui::ScrollArea::vertical().id_salt("insp-scroll").auto_shrink([false, false]).show_v(&mut bui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: pad as i8, right: pad as i8, top: 0, bottom: 12 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = theme::space::SECTION_GAP;
-            match (first, app.editor.selected_cut) {
+            match (first, live_cut) {
                 (None, Some(cut)) => cut_section(app, ui, cut),
                 (None, None) => sequence(app, ui),
                 (Some(c), _) => clip_sections(app, ui, &sel, &c),
@@ -108,27 +114,41 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     close
 }
 
-fn kind_name(k: ClipKind) -> &'static str {
-    match k {
-        ClipKind::Video => "Video",
-        ClipKind::Audio => "Audio",
-        ClipKind::Title => "Text",
-        ClipKind::Fx => "Adjustment",
+/// What the clip is, in the person's words: a 3D model is not "Text" and a
+/// light is not an adjustment layer.
+fn kind_label(app: &StudioApp, c: &Clip) -> &'static str {
+    use m::GeneratorKind as G;
+    let generated = app.doc.model.active().clip(m::ClipId(c.id as u64)).and_then(|mc| match &mc.source {
+        m::ClipSource::Generator(g) => Some(g.kind),
+        _ => None,
+    });
+    match (generated, c.kind) {
+        (Some(G::Text), _) => "Text",
+        (Some(G::Model), _) => "3D model",
+        (Some(G::Shape), _) => "Shape",
+        (Some(G::Solid), _) => "Solid",
+        (Some(G::Gradient), _) => "Gradient",
+        (Some(G::Adjustment), _) => "Adjustment layer",
+        (Some(G::Camera), _) => "Camera",
+        (Some(G::Light), _) => "Light",
+        (None, ClipKind::Video) if is_still(app, c) => "Image",
+        (None, ClipKind::Video) => "Video",
+        (None, ClipKind::Audio) => "Audio",
+        (None, ClipKind::Title) => "Text",
+        (None, ClipKind::Fx) => "Adjustment layer",
     }
+}
+
+/// Whether the clip is a picture that does not move: it has no sound and no
+/// speed to set.
+fn is_still(app: &StudioApp, c: &Clip) -> bool {
+    c.kind == ClipKind::Video && c.media.and_then(|id| app.doc.project.media.iter().find(|m| m.id == id)).is_some_and(|m| m.kind == view::MediaKind::Image)
 }
 
 fn sequence(app: &mut StudioApp, ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
     let p = app.doc.project.clone();
     ui.spacing_mut().item_spacing.y = 10.0;
-    let row = |ui: &mut egui::Ui, k: &str, v: &str| {
-        ui.horizontal_top(|ui| {
-            let (lr, lresp) = ui.allocate_exact_size(Vec2::new(96.0, 16.0), Sense::hover());
-            let cut = kit::paint_text_clipped(ui.painter(), lr.left_center(), Align2::LEFT_CENTER, k, theme::caption(), t.text_2, 92.0);
-            kit::tip_if_cut(lresp, cut, k);
-            ui.add(egui::Label::new(egui::RichText::new(v).font(theme::caption()).color(t.text)).wrap());
-        });
-    };
     let gcd = |mut a: u32, mut b: u32| {
         while b != 0 {
             (a, b) = (b, a % b);
@@ -136,26 +156,32 @@ fn sequence(app: &mut StudioApp, ui: &mut egui::Ui) {
         a.max(1)
     };
     let g = gcd(p.width, p.height);
-    let place = app.doc.folder.as_ref().map(|f| f.root().display().to_string()).unwrap_or_else(|| "Not saved yet".into());
-    row(ui, "Name:", &p.name);
-    row(ui, "Location:", &place);
-    row(ui, "Imported media:", &format!("{} items", p.media.len()));
+    // A short summary of the project; the title bar already says where it is
+    // saved, so the path is one line, whole on hover.
+    ui.label(egui::RichText::new(&p.name).font(theme::control_medium()).color(t.text));
+    let facts = format!("{}×{} · {}:{} · {:.2} fps · {}", p.width, p.height, p.width / g, p.height / g, p.fps, view::format_duration(p.duration()));
+    ui.add(egui::Label::new(egui::RichText::new(facts).font(theme::caption()).color(t.text_2)).truncate());
+    let tracks = p.lanes.len();
+    let counts = crate::i18n::tf(format!("{} clips on {} tracks · {} media items", p.clips.len(), tracks, p.media.len()));
+    ui.add(egui::Label::new(egui::RichText::new(counts).font(theme::caption()).color(t.text_2)).truncate());
+    if let Some(f) = app.doc.folder.as_ref() {
+        let place = f.root().display().to_string();
+        kit::label_trunc(ui, egui::RichText::new(&place).font(theme::caption()).color(t.text_2)).on_hover_text(place);
+    } else {
+        ui.label(egui::RichText::new("Not saved yet").font(theme::caption()).color(t.text_2));
+    }
     let (x0, x1) = (ui.max_rect().left(), ui.max_rect().right());
     kit::hline(ui, x0..=x1, ui.cursor().top());
-    row(ui, "Aspect ratio:", &format!("{}:{}", p.width / g, p.height / g));
-    row(ui, "Resolution:", &format!("{}×{}", p.width, p.height));
-    row(ui, "Frame rate:", &format!("{:.2}fps", p.fps));
-    row(ui, "Length:", &view::format_duration(p.duration()));
+    hint(ui, Icon::Info, "Select a clip or a transition on the timeline to edit it here.");
 
-    // Canvas settings open from "Modify".
+    // Canvas, frame rate and background open from "Project settings…" (also
+    // File ▸ Project settings…).
     let open_id = egui::Id::unique("details-modify");
     let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
     ui.add_space(4.0);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-        if Button::secondary(if open { "Done" } else { "Modify" }).compact().show(ui).clicked() {
-            open = !open;
-        }
-    });
+    if Button::secondary(if open { "Done" } else { "Project settings…" }).icon(Icon::Faders).compact().show(ui).clicked() {
+        open = !open;
+    }
     ui.data_mut(|d| d.insert_temp(open_id, open));
     if open {
         let mut w = p.width as f32;
@@ -267,7 +293,11 @@ fn prop(
     let mut keyed = key_here.is_some();
     // Only properties the model can animate get a keyframe diamond.
     let keyable = path.starts_with("transform.") || path.starts_with("grade.") || matches!(path, "audio.volume_db" | "audio.pan");
-    let mut row = FieldRow::new(label, &mut v, range.clone())
+    // Several clips with different values: the row shows the first one's and
+    // says so; a change sets them all.
+    let mixed = is_mixed(ids.iter().filter_map(|id| app.doc.project.clip(*id)).map(get));
+    let shown = if mixed { format!("{label} (mixed)") } else { label.to_owned() };
+    let mut row = FieldRow::new(&shown, &mut v, range.clone())
         .default(default)
         .unit(unit)
         .decimals(decimals)
@@ -400,6 +430,29 @@ fn effect_bool(e: &m::Effect, pd: &studio_fx::ParamDef) -> bool {
     }
 }
 
+/// The tabs every list has, each with the sections all of them show there.
+fn shared_tabs(lists: &[Vec<(&'static str, Vec<&'static str>)>]) -> Vec<(&'static str, Vec<&'static str>)> {
+    let Some((first, rest)) = lists.split_first() else { return Vec::new() };
+    first
+        .iter()
+        .filter_map(|(name, sections)| {
+            let mut keep = sections.clone();
+            for other in rest {
+                let theirs = other.iter().find(|t| t.0 == *name)?;
+                keep.retain(|s| theirs.1.contains(s));
+            }
+            (!keep.is_empty()).then_some((*name, keep))
+        })
+        .collect()
+}
+
+/// Whether the values differ (so a multi-selection row can say "mixed").
+fn is_mixed(values: impl Iterator<Item = f32>) -> bool {
+    let mut it = values;
+    let Some(first) = it.next() else { return false };
+    it.any(|v| (v - first).abs() > 1e-4)
+}
+
 fn edit_all(app: &mut StudioApp, ids: &[u32], label: &str, f: impl Fn(&mut Clip)) {
     let ids = ids.to_vec();
     app.doc.edit(label, |p| {
@@ -412,18 +465,16 @@ fn edit_all(app: &mut StudioApp, ids: &[u32], label: &str, f: impl Fn(&mut Clip)
 }
 
 /// The inspector's tabs for a clip and the section kinds each one shows.
-/// `gen` is the generator kind of a generated layer (text, shape, model…),
-/// which decides what its first tab is called and holds.
-pub(crate) fn clip_tabs(kind: ClipKind, generated: Option<m::GeneratorKind>) -> Vec<(&'static str, Vec<&'static str>)> {
+/// `generated` is the generator kind of a generated layer (text, shape,
+/// model…), which decides what its first tab is called and holds. `still`
+/// is a picture clip from an image: no Audio or Speed. A tab with nothing
+/// for the clip is left out, and the settings no tab has room for (the
+/// generator's own and the tools' data) sit, collapsed, at the bottom of the
+/// last tab instead of a tab of one row.
+pub(crate) fn clip_tabs(kind: ClipKind, generated: Option<m::GeneratorKind>, still: bool) -> Vec<(&'static str, Vec<&'static str>)> {
     use m::GeneratorKind as G;
-    // Settings no tab above has room for sit in "Advanced", collapsed.
-    let advanced = |extra: &[&'static str]| -> (&'static str, Vec<&'static str>) {
-        let mut v = vec!["generator", "data"];
-        v.extend_from_slice(extra);
-        ("Advanced", v)
-    };
-    match kind {
-        ClipKind::Audio => vec![("Audio", vec!["clip", "audio", "audio-fx"]), ("Speed", vec!["speed"]), advanced(&[])],
+    let mut tabs = match kind {
+        ClipKind::Audio => vec![("Audio", vec!["clip", "audio", "audio-fx"]), ("Speed", vec!["speed"])],
         ClipKind::Title => {
             let first = match generated {
                 Some(G::Text) | None => "Text",
@@ -432,24 +483,30 @@ pub(crate) fn clip_tabs(kind: ClipKind, generated: Option<m::GeneratorKind>) -> 
             };
             // A model's own panel (parts, modifiers, materials, UVs,
             // shading) sits under the Model section; its rigid-body physics
-            // with the other physics, under Animation.
+            // with the other physics, under Animation. What belongs to the
+            // kind of clip comes first.
             vec![
                 (first, vec!["clip", "text", "shape", "mograph-template", "mograph-shape", "mograph-text", "model", "model-parts", "model-modifiers", "model-materials", "model-uv", "model-object", "world-spec", "sim-settings", "transform", "crop", "space", "mask", "pins"]),
                 ("Animation", vec!["motion", "modifiers", "physics", "physics3d", "drivers", "skeleton", "character3d", "sim3d"]),
-                ("Adjust", vec!["colour", "effects"]),
-                advanced(&["world3d"]),
+                ("Adjust", vec!["colour", "effects", "world3d"]),
             ]
         }
-        ClipKind::Fx => vec![("Adjust", vec!["clip", "colour", "effects"]), advanced(&[])],
-        ClipKind::Video => vec![
-            ("Video", vec!["clip", "mograph-template", "transform", "crop", "space", "mask", "pins", "cutout", "tracking"]),
-            ("Audio", vec!["audio", "audio-fx"]),
-            ("Speed", vec!["speed", "slow-motion"]),
-            ("Animation", vec!["motion", "modifiers", "physics", "drivers", "skeleton"]),
-            ("Adjust", vec!["colour", "effects", "match-colour", "in-scene"]),
-            advanced(&[]),
-        ],
+        ClipKind::Fx => vec![("Adjust", vec!["clip", "colour", "effects"])],
+        ClipKind::Video => {
+            let mut v = vec![("Video", vec!["clip", "mograph-template", "transform", "crop", "space", "mask", "pins", "cutout", "tracking"])];
+            if !still {
+                v.push(("Audio", vec!["audio", "audio-fx"]));
+                v.push(("Speed", vec!["speed", "slow-motion"]));
+            }
+            v.push(("Animation", vec!["motion", "modifiers", "physics", "drivers", "skeleton"]));
+            v.push(("Adjust", vec!["colour", "effects", "match-colour", "in-scene"]));
+            v
+        }
+    };
+    if let Some(last) = tabs.last_mut() {
+        last.1.extend(["generator", "data"]);
     }
+    tabs
 }
 
 /// Every section kind some tab shows (what the tests check each section against).
@@ -457,7 +514,9 @@ pub(crate) fn all_tab_kinds() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = Vec::new();
     for kind in [ClipKind::Video, ClipKind::Audio, ClipKind::Title, ClipKind::Fx] {
         for g in std::iter::once(None).chain(super::params::ALL_KINDS.iter().copied().map(Some)) {
-            out.extend(clip_tabs(kind, g).into_iter().flat_map(|t| t.1));
+            for still in [false, true] {
+                out.extend(clip_tabs(kind, g, still).into_iter().flat_map(|t| t.1));
+            }
         }
     }
     for g in [m::GeneratorKind::Camera, m::GeneratorKind::Light] {
@@ -500,12 +559,30 @@ fn tab_cells(ui: &mut egui::Ui, names: &[&str], cur: &mut usize, full: f32) {
 
 fn clip_sections(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &Clip) {
     let rig = super::three_d::tabs_for(app, c);
-    let key = egui::Id::unique(("insp-tab-of", if rig.is_some() { "rig" } else { kind_name(c.kind) }));
+    let key = egui::Id::unique(("insp-tab-of", if rig.is_some() { "rig" } else { kind_label(app, c) }));
     let gk = app.doc.model.active().clip(m::ClipId(c.id as u64)).and_then(|mc| match &mc.source {
         m::ClipSource::Generator(g) => Some(g.kind),
         _ => None,
     });
-    let tabs = rig.unwrap_or_else(|| clip_tabs(c.kind, gk));
+    let tabs = rig.unwrap_or_else(|| {
+        if ids.len() < 2 {
+            return clip_tabs(c.kind, gk, is_still(app, c));
+        }
+        // Several clips: what every one of them has.
+        let lists: Vec<Vec<(&'static str, Vec<&'static str>)>> = ids
+            .iter()
+            .filter_map(|id| app.doc.project.clip(*id))
+            .map(|o| {
+                let gk = app.doc.model.active().clip(m::ClipId(o.id as u64)).and_then(|mc| match &mc.source {
+                    m::ClipSource::Generator(g) => Some(g.kind),
+                    _ => None,
+                });
+                clip_tabs(o.kind, gk, is_still(app, o))
+            })
+            .collect();
+        let shared = shared_tabs(&lists);
+        if shared.is_empty() { clip_tabs(c.kind, gk, is_still(app, c)) } else { shared }
+    });
     let mut cur = ui.data(|d| d.get_temp::<usize>(key)).unwrap_or(0).min(tabs.len() - 1);
     // A workspace can ask for a tab (Colour opens on Adjust, Audio on Audio).
     if let Some(want) = crate::workspaces::take_tab(ui.ctx()) {
@@ -532,6 +609,19 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
 
     // Name, on/off and label; the fill of a solid, gradient or shape layer.
     super::params::top(app, ui, ids);
+
+    // What belongs to the kind of clip comes first: a template's fields on a
+    // template clip, a model's own panel on a 3D model.
+    let lead = ids.len() == 1;
+    let lead_template = lead && app.doc.model.active().clip(m::ClipId(ids[0] as u64)).is_some_and(|mc| mc.meta.contains_key("template"));
+    let lead_model = lead && app.doc.model.active().clip(m::ClipId(ids[0] as u64)).is_some_and(|mc| crate::mesh_store::file_of(mc).is_some());
+    if lead_template {
+        super::mograph::inspector(app, ui, ids[0]);
+    }
+    if lead_model {
+        super::three_d::sections(app, ui, ids, c);
+        super::anim3d::inspector(app, ui, ids, c);
+    }
 
     let is_text = ids.first().and_then(|id| app.doc.model.active().clip(m::ClipId(*id as u64))).is_none_or(|mc| matches!(&mc.source, m::ClipSource::Generator(g) if g.kind == m::GeneratorKind::Text));
     if kind == ClipKind::Title && is_text {
@@ -636,11 +726,13 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
         super::params::crop(app, ui, ids);
     }
     // 3D (on picture clips), or a camera's or a light's settings.
-    super::three_d::sections(app, ui, ids, c);
-    // Rigs, motion, simulation, render settings and skies.
-    super::anim3d::inspector(app, ui, ids, c);
+    if !lead_model {
+        super::three_d::sections(app, ui, ids, c);
+        // Rigs, motion, simulation, render settings and skies.
+        super::anim3d::inspector(app, ui, ids, c);
+    }
 
-    if kind == ClipKind::Video || kind == ClipKind::Fx {
+    if matches!(kind, ClipKind::Video | ClipKind::Fx | ClipKind::Title) {
         let mut on = c.grade.enabled;
         let out = Section::new("colour", "Colour").icon(Icon::DropHalf).enable(&mut on).resettable(c.grade != view::Grade::default() || c.look.is_some()).show(ui, |ui| {
             prop(app, ui, ids, "grade.exposure", "Exposure", |c| c.grade.exposure, |c, v| c.grade.exposure = v, -100.0..=100.0, 0.0, "", 0);
@@ -919,7 +1011,9 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
         super::physics::inspector(app, ui, ids);
         super::drivers::inspector(app, ui, ids[0]);
         // Template controls, shape layer items, text animators.
-        super::mograph::inspector(app, ui, ids[0]);
+        if !lead_template {
+            super::mograph::inspector(app, ui, ids[0]);
+        }
         // Motion tracks, followers and stabilizing.
         #[cfg(feature = "render")]
         super::track::inspector(app, ui, ids[0]);
@@ -970,6 +1064,48 @@ pub fn percent_to_db(p: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn several_clips_show_only_the_tabs_and_sections_they_share() {
+        let video = clip_tabs(ClipKind::Video, None, false);
+        let audio = clip_tabs(ClipKind::Audio, None, false);
+        let both = shared_tabs(&[video.clone(), audio.clone()]);
+        let names: Vec<&str> = both.iter().map(|t| t.0).collect();
+        assert!(names.contains(&"Audio") && !names.contains(&"Video"), "{names:?}");
+        assert_eq!(shared_tabs(&[video.clone(), video.clone()]), video);
+        assert!(shared_tabs(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_row_is_mixed_only_when_the_selected_clips_differ() {
+        assert!(!is_mixed([].into_iter()));
+        assert!(!is_mixed([1.0, 1.0].into_iter()));
+        assert!(is_mixed([1.0, 0.5, 1.0].into_iter()));
+    }
+
+    fn names(t: &[(&'static str, Vec<&'static str>)]) -> Vec<&'static str> {
+        t.iter().map(|t| t.0).collect()
+    }
+
+    #[test]
+    fn tabs_match_the_kind_of_clip() {
+        // A still image has no Audio or Speed; a video does.
+        assert_eq!(names(&clip_tabs(ClipKind::Video, None, true)), ["Video", "Animation", "Adjust"]);
+        assert_eq!(names(&clip_tabs(ClipKind::Video, None, false)), ["Video", "Audio", "Speed", "Animation", "Adjust"]);
+        // No kind has an "Advanced" tab; its rows sit in the last tab, and every tab has content.
+        for kind in [ClipKind::Video, ClipKind::Audio, ClipKind::Title, ClipKind::Fx] {
+            for still in [false, true] {
+                let t = clip_tabs(kind, None, still);
+                assert!(!names(&t).contains(&"Advanced"));
+                assert!(t.iter().all(|t| !t.1.is_empty()));
+                assert!(t.last().unwrap().1.contains(&"generator"));
+            }
+        }
+        // A model's Adjust tab has Colour.
+        let model = clip_tabs(ClipKind::Title, Some(m::GeneratorKind::Model), false);
+        assert!(model.iter().find(|t| t.0 == "Adjust").unwrap().1.contains(&"colour"));
+        assert_eq!(model[0].0, "Model");
+    }
 
     #[test]
     fn volume_mapping_round_trips() {
@@ -1037,7 +1173,7 @@ mod tests {
     /// the tab filter never hides it for good.
     #[test]
     fn every_model_clip_section_is_in_a_tab() {
-        let tabs = clip_tabs(ClipKind::Title, Some(m::GeneratorKind::Model));
+        let tabs = clip_tabs(ClipKind::Title, Some(m::GeneratorKind::Model), false);
         let shown: Vec<&str> = tabs.iter().flat_map(|t| t.1.iter().copied()).collect();
         let mut kinds: Vec<String> = Vec::new();
         kinds.extend(section_kinds(include_str!("model_edit/panel.rs")));

@@ -8,7 +8,7 @@ fn round2_64(x: i64, n: u32) -> i32 {
 }
 
 #[inline(always)]
-pub(crate) fn round2(x: i32, n: u32) -> i32 {
+pub fn round2(x: i32, n: u32) -> i32 {
     if n == 0 { x } else { (x + (1 << (n - 1))) >> n }
 }
 
@@ -517,7 +517,7 @@ fn col_kind(tx_type: usize) -> Kind1d {
 
 /// 2D inverse transform (7.13.3). `dequant` is 64x64 (row stride 64, only the top-left 32x32
 /// may be non-zero); the residual is written to `residual` with row stride `w`.
-pub(crate) fn inverse_transform_2d(dequant: &[i32], residual: &mut [i32], tx_sz: usize, tx_type: usize, lossless: bool, bit_depth: u32) {
+pub fn inverse_transform_2d(dequant: &[i32], residual: &mut [i32], tx_sz: usize, tx_type: usize, lossless: bool, bit_depth: u32) {
     let log2w = TX_WIDTH_LOG2[tx_sz] as u32;
     let log2h = TX_HEIGHT_LOG2[tx_sz] as u32;
     let w = 1usize << log2w;

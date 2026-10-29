@@ -472,6 +472,9 @@ pub struct Session {
     next_batch: u32,
     /// How deep in tool calls this is (news of batches goes on the outer one).
     call_depth: u32,
+    /// Headless MCP: whether a result in this session carried outside
+    /// text, which makes the calls `outside::asks_after_outside` names ask.
+    read_outside: bool,
 }
 
 impl Default for Session {
@@ -754,6 +757,7 @@ impl Session {
             model_jobs: Vec::new(),
             next_batch: 1,
             call_depth: 0,
+            read_outside: false,
         }
     }
 
@@ -825,7 +829,7 @@ impl Session {
             "images": images,
             "error": r.as_ref().err().map(|e| e.chars().take(160).collect::<String>()),
         });
-        let path = self.home.clone().map(|h| h.join("agent-usage.jsonl")).unwrap_or_else(|| studio_paths::cache().join("agent-usage.jsonl"));
+        let path = self.home.clone().map(|h| studio_model::file::ProjectFolder::new(h).state(studio_model::file::State::AgentUsage)).unwrap_or_else(|| studio_paths::cache().join("agent-usage.jsonl"));
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             use std::io::Write;
             let _ = writeln!(f, "{line}");
@@ -923,8 +927,9 @@ impl Session {
             // `open` / `new_project` replace the session; stay bound. After
             // `open` the session works in the opened project's folder, so
             // what it writes (vector documents, renders) lands there.
-            let switched = matches!(tool, "open" | "new_project");
-            if tool == "open" && r.is_ok() {
+            let converted = tool == "project_care" && a.get("action").and_then(Value::as_str) == Some("convert");
+            let switched = matches!(tool, "open" | "new_project") || converted;
+            if (tool == "open" || converted) && r.is_ok() {
                 self.home = self.doc.folder.as_ref().map(|f| f.root().to_path_buf());
             } else if !switched || tool == "new_project" {
                 self.home = Some(dir.clone());
@@ -2576,10 +2581,18 @@ impl Session {
                 text(self.summary())
             }
             "open" => {
-                let path = a.get("path").and_then(Value::as_str).ok_or("open needs \"path\" (a project folder)")?;
+                let path = a.get("path").and_then(Value::as_str).ok_or("open needs \"path\" (a .zornov package or a project folder)")?;
                 let doc = services::project::open(std::path::Path::new(path))?;
                 *self = Session::new(doc);
-                text(self.summary())
+                let mut summary = self.summary();
+                if let (Some(o), Some(f)) = (summary.as_object_mut(), self.doc.folder.as_ref()) {
+                    let package = f.layout() == studio_model::file::Layout::Package;
+                    o.insert("layout".into(), json!(if package { "package" } else { "folder" }));
+                    if !package {
+                        o.insert("convert".into(), json!("an older project folder; project_care action \"convert\" makes it a .zornov package"));
+                    }
+                }
+                text(summary)
             }
             "save" => {
                 let path = a.get("path").and_then(Value::as_str).map(PathBuf::from);
@@ -2641,25 +2654,38 @@ impl Session {
                 let to_timeline = a.get("to_timeline").and_then(Value::as_bool).unwrap_or(false);
                 // Formats Studio cannot decode are converted first.
                 let mut converted = Vec::new();
+                let mut convert_failed: Vec<String> = Vec::new();
                 let paths: Vec<PathBuf> = paths
                     .into_iter()
-                    .map(|p| match crate::convert::ensure_playable(&p) {
+                    .filter_map(|p| match crate::convert::ensure_playable(&p) {
                         Ok(q) => {
                             if q != p {
                                 converted.push(json!({"from": p.display().to_string(), "to": q.display().to_string()}));
                             }
-                            q
+                            Some(q)
                         }
-                        Err(_) => p,
+                        Err(e) => {
+                            convert_failed.push(format!("{}: {e}", p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())));
+                            None
+                        }
                     })
                     .collect();
+                // Nothing could be converted: the call failed, with the reason.
+                if paths.is_empty() && !convert_failed.is_empty() {
+                    return Err(convert_failed.join("; "));
+                }
                 let before: BTreeMap<u32, Value> = self.doc.project.clips.iter().map(|c| (c.id, self.clip_line(c))).collect();
                 let (report, clips) = if to_timeline {
                     services::project::import_to_timeline(&mut self.doc, &paths)?
                 } else {
                     (services::project::import_media(&mut self.doc, &paths), Vec::new())
                 };
-                text(json!({"media": report.ids, "failed": report.failed, "converted": converted, "clips": clips, "changed": self.changes(&before), "revision": self.doc.history.revision()}))
+                let mut failed = convert_failed;
+                failed.extend(report.failed.iter().cloned());
+                if report.ids.is_empty() && !failed.is_empty() {
+                    return Err(failed.join("; "));
+                }
+                text(json!({"media": report.ids, "failed": failed, "converted": converted, "clips": clips, "changed": self.changes(&before), "revision": self.doc.history.revision()}))
             }
             "make_playable" => {
                 // Media already in the project in a format Studio cannot
@@ -2715,7 +2741,7 @@ impl Session {
                     web::refuse_private(url)?;
                 }
                 let home = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()));
-                let dir = download::folder_for(home.as_deref());
+                let dir = download::folder_for_url(home.as_deref(), url);
                 let pick = download::Pick { quality: a.get("quality").and_then(Value::as_str).map(str::to_owned), language: a.get("language").and_then(Value::as_str).map(str::to_owned) };
                 let fetched = download::fetch_pick(url, &dir, a.get("name").and_then(Value::as_str), &pick)?;
                 let file = fetched.file.clone();

@@ -11,6 +11,10 @@
 //! cargo xtask sbs REF SHOT OUT [WIDTH]   a reference above a Studio shot
 //! cargo xtask signing           the local signing identity (made once)
 //! cargo xtask release-mac       Developer ID signed, notarized DMG (docs/releasing.md)
+//! cargo xtask check-release [APP] [--no-notarize] [--record-size [--allow-growth]]
+//!                               fails on a Zornov.app with host paths, symbols,
+//!                               wrong entitlements, signing, libraries or a
+//!                               binary over packaging/macos/size-budget.conf
 //! cargo xtask package-deb       dist/release/zornov_<ver>_<arch>.deb
 //! cargo xtask package-appimage  dist/release/Zornov-<ver>-<arch>.AppImage
 //! cargo xtask package-msi       dist/release/Zornov-<ver>-windows-<arch>.msi
@@ -33,6 +37,7 @@
 //! `STUDIO_BUNDLE_LIBRARY=1`.
 
 mod assets;
+mod check_release;
 mod licenses;
 mod mcpb;
 mod pkg;
@@ -50,6 +55,7 @@ fn main() -> ExitCode {
         Some("package-windows") => package_windows(),
         Some("sbs") => sbs(&args[1..]),
         Some("release-mac") => release::release_mac(&args[1..]),
+        Some("check-release") => check_release::check_release(&args[1..]),
         Some("package-deb") => pkg::package_deb(),
         Some("package-appimage") => pkg::package_appimage(),
         Some("package-msi") => pkg::package_msi(),
@@ -63,7 +69,7 @@ fn main() -> ExitCode {
         Some("headers") => headers(args.get(1).is_some_and(|a| a == "--check")),
         #[cfg(target_os = "macos")]
         Some("signing") => signing::identity().map(|s| format!("signing with \"{}\" ({}) from {}", signing::NAME, s.hash, signing::keychain().display())),
-        _ => Err("usage: cargo xtask bundle | release-mac | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
+        _ => Err("usage: cargo xtask bundle | release-mac | check-release [APP] [--no-notarize] [--record-size [--allow-growth]] | package-linux | package-deb | package-appimage | package-windows | package-msi | package-mcpb | update-key | feed | licenses | assets-lock | assets-check | signing | headers [--check] | sbs REF SHOT OUT [WIDTH]".into()),
     };
     match r {
         Ok(out) => {
@@ -112,6 +118,14 @@ fn build(repro: bool) -> Result<PathBuf, String> {
         flags += &format!(" --remap-path-prefix={}=/zornov", root().display());
         if let Some(home) = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(|h| PathBuf::from(h).join(".cargo"))) {
             flags += &format!(" --remap-path-prefix={}=/cargo", home.display());
+        }
+        // (rustc takes the last matching remap, so the narrower one goes last.) The toolchain's own sources (std, core, alloc: panic locations) live under the sysroot in the user's home.
+        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        if let Ok(out) = Command::new(rustc).current_dir(root()).args(["--print", "sysroot"]).output() {
+            let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if out.status.success() && !sysroot.is_empty() {
+                flags += &format!(" --remap-path-prefix={sysroot}=/rustup --remap-path-prefix={sysroot}/lib/rustlib/src/rust=/rust");
+            }
         }
         c.env("RUSTFLAGS", flags.trim()).env("SOURCE_DATE_EPOCH", repro::epoch().to_string()).arg("--locked");
     }
@@ -200,6 +214,10 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
     std::fs::copy(exe, macos.join("zornov")).map_err(|e| format!("cannot copy the binary: {e}"))?;
     write_notices(notices, &app.join("Contents/Resources/Licenses"))?;
     std::fs::copy(root().join("packaging/brand/zornov.icns"), app.join("Contents/Resources/AppIcon.icns")).map_err(|e| format!("cannot copy the app icon: {e}"))?;
+    // The icon of a project package: a document icon of its own when
+    // packaging/brand has one, the app icon until then.
+    let project_icon = ["zornov-project.icns", "zornov.icns"].iter().map(|n| root().join("packaging/brand").join(n)).find(|p| p.is_file()).expect("zornov.icns exists");
+    std::fs::copy(project_icon, app.join("Contents/Resources/ProjectIcon.icns")).map_err(|e| format!("cannot copy the project icon: {e}"))?;
     if let Some(core) = content {
         copy_dir(core, &app.join("Contents/content-build/core"))?;
     }
@@ -221,6 +239,34 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Zornov records voice-overs and sound from your microphone when you press Record.</string>
   <key>NSCameraUsageDescription</key><string>Zornov records from your camera when you press Record.</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.zornov.project</string>
+      <key>UTTypeDescription</key><string>Zornov Project</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>com.apple.package</string>
+        <string>public.composite-content</string>
+      </array>
+      <key>UTTypeIconFiles</key><array><string>ProjectIcon</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>zornov</string></array>
+      </dict>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Zornov Project</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSItemContentTypes</key><array><string>com.zornov.project</string></array>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSTypeIsPackage</key><true/>
+      <key>CFBundleTypeIconFile</key><string>ProjectIcon</string>
+    </dict>
+  </array>
 </dict></plist>
 "#,
         short = release::VERSION

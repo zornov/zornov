@@ -41,6 +41,7 @@ exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "studio-ai" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-app" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-audio" },
+    { allow = ["AGPL-3.0-or-later"], crate = "studio-av1-enc" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-canvas" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-cloud-server" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-colour" },

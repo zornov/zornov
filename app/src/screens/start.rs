@@ -37,6 +37,10 @@ const PRESETS: &[Preset] = &[
     Preset { name: "Portrait", ratio: "4:5", w: 1080, h: 1350, hint: "Feed posts" },
 ];
 
+/// Up to this many recent projects are shown as picture tiles; more become
+/// a list with their folders and dates.
+const RECENT_TILES: usize = 4;
+
 /// Height of the strip at the top kept clear for the window buttons.
 pub const TITLE_BAR_H: f32 = 52.0;
 
@@ -45,11 +49,24 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let full = ui.max_rect();
     window_drag_area(ui, Rect::from_min_size(full.min, Vec2::new(full.width(), TITLE_BAR_H)));
     let dialogs = app.cli.shot.is_none();
+    app.files_frame(&ui.ctx().clone());
+    app.recovered_panel(&ui.ctx().clone());
 
     // Shortcuts.
     let cmd = egui::Modifiers::COMMAND;
+    if dialogs && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::S))) {
+        // Save works here as it does in the editor: the project left open
+        // behind this screen, if it has anything to save.
+        let ctx = ui.ctx().clone();
+        if app.doc.dirty() {
+            app.save(&ctx, false);
+        } else {
+            kit::push(&ctx, "Nothing to save", None, Some(Icon::Info));
+        }
+        return;
+    }
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::N))) {
-        new_project(app, &PRESETS[0]);
+        new_project(app, ui.ctx(), &PRESETS[0]);
         return;
     }
     if dialogs && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::O))) {
@@ -96,7 +113,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         if let Some(pr) = PRESETS.get(i) {
             let size = format!("{}×{}", pr.w, pr.h);
             if preset_card(ui, r, pr.name, pr.ratio, &size, "", Some((pr.w, pr.h))).on_hover_text(pr.hint).clicked() {
-                new_project(app, pr);
+                new_project(app, ui.ctx(), pr);
                 return;
             }
         } else {
@@ -131,7 +148,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
     match go {
         Some(Side::Demo) => {
-            app.open_project(view::demo());
+            let ctx = ui.ctx().clone();
+            app.replace(&ctx, files::Replace::Sample(view::demo()));
             return;
         }
         Some(Side::Open) if dialogs => {
@@ -149,9 +167,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let custom_id = egui::Id::unique("start-custom");
     let mut create = None;
     kit::popover(ui.ctx(), custom_id, custom_rect, kit::Side::BelowRight, 260.0, |ui| {
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
         ui.horizontal(|ui| {
-            ui.add_space(6.0);
+            ui.add_space(theme::space::SM);
             ui.label(egui::RichText::new(crate::i18n::shown("Custom canvas")).font(theme::section_title()).color(t.text));
         });
         egui::Frame::new().inner_margin(egui::Margin::symmetric(6, 6)).show(ui, |ui| {
@@ -163,7 +181,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
                     app.start.custom_fps = i;
                 }
             });
-            ui.add_space(6.0);
+            ui.add_space(theme::space::SM);
             ui.horizontal(|ui| {
                 ui.add_space(kit::LABEL_W);
                 if Button::primary("Create").show(ui).clicked() {
@@ -178,7 +196,10 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         p.width = w;
         p.height = h;
         p.fps = fps;
-        app.open_project(p);
+        // Like a preset: its own folder at once, so it is saved and autosaved.
+        p.name = crate::i18n::tf("Untitled custom".to_string());
+        let ctx = ui.ctx().clone();
+        app.replace(&ctx, files::Replace::New(p));
         return;
     }
 
@@ -211,7 +232,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         let mut eui = gui.new_child(egui::UiBuilder::new().max_rect(r));
         if kit::empty_state(&mut eui, Icon::FilmSlate, sentence, action) {
             if q.is_empty() {
-                new_project(app, &PRESETS[0]);
+                new_project(app, ui.ctx(), &PRESETS[0]);
             } else {
                 app.start.search.clear();
             }
@@ -222,13 +243,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mut open_sample: Option<&view::Recent> = None;
     let mut new_from: Option<view::Project> = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_v(&mut gui, |ui| {
-        ui.add_space(4.0);
+        ui.add_space(theme::space::XS);
         ui.horizontal(|ui| {
-            ui.add_space(4.0);
+            ui.add_space(theme::space::XS);
             ui.vertical(|ui| {
                 ui.set_width(content_w);
-                if app.start.search.is_empty() {
-                    new_from = crate::templates::show_rows(app, ui);
+                if recents.is_empty() && q.is_empty() {
+                    // First run: say where to begin.
+                    ui.label(egui::RichText::new(crate::i18n::shown("Welcome to Zornov")).font(theme::section_title()).color(t.text));
+                    ui.label(egui::RichText::new(crate::i18n::shown("Pick a canvas above to start, open a project, or try a sample below")).font(theme::caption()).color(t.text_2));
+                    ui.add_space(theme::space::MD);
                 }
                 // Each project shows a picture from its own media, looked up a
                 // few projects per frame so a long list never stalls a frame.
@@ -243,34 +267,61 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
                     ui.ctx().request_repaint();
                 }
                 let covers: Vec<Option<u32>> = recents.iter().map(|r| app.start.covers.get(&r.path).cloned().flatten().map(|(p, secs)| app.thumbs.file_seed(&p, secs))).collect();
-                let thumbs = &mut app.thumbs;
                 if has_recents && !recents.is_empty() {
-                    ui.add_space(8.0);
+                    ui.add_space(theme::space::SM);
                     ui.label(egui::RichText::new(crate::i18n::shown("Recent projects")).font(theme::section_title()).color(t.text));
-                    ui.add_space(8.0);
-                    let badges: Vec<String> = recents.iter().map(|r| view::format_duration(r.length)).collect();
-                    let subs: Vec<String> = recents.iter().map(|r| files::edited_label(r.edited)).collect();
-                    let out = kit::TileGrid::new("recents").min_width(168.0).surface(t.ground).show(
-                        ui,
-                        recents.len(),
-                        |i| kit::TileInfo { label: recents[i].name.as_str(), badge: Some(badges[i].as_str()), sub: Some(subs[i].as_str()), selected: false, addable: false, progress: None, tip: None, added: false },
-                        |i| i,
-                        &mut |p, r, i, hover, _| {
-                            let rec = &recents[i];
-                            let seed = covers[i].unwrap_or_else(|| files::seed_of(&rec.path));
-                            letterboxed(p, thumbs, r, (rec.width.max(1), rec.height.max(1)), seed, hover);
-                        },
-                    );
-                    if let Some(i) = out.clicked.or(out.double_clicked) {
-                        open = Some(recents[i].path.clone());
-                    }
-                    if !samples.is_empty() {
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new(crate::i18n::shown("Samples")).font(theme::section_title()).color(t.text));
-                        ui.add_space(8.0);
+                    ui.add_space(theme::space::SM);
+                    if recents.len() > RECENT_TILES {
+                        // A long history reads best as a list: name, where it
+                        // lives and when it was last changed.
+                        for r in &recents {
+                            let place = studio_paths::tilde(r.path.parent().unwrap_or(&r.path));
+                            let line = format!("{place} · {}", files::edited_label(r.edited));
+                            if kit::ListRow::new(&r.name).secondary(&line).icon(Icon::FilmStrip).show(ui).response.clicked() {
+                                open = Some(r.path.clone());
+                            }
+                        }
+                    } else {
+                        let thumbs = &mut app.thumbs;
+                        let badges: Vec<String> = recents.iter().map(|r| view::format_duration(r.length)).collect();
+                        let subs: Vec<String> = recents.iter().map(|r| files::edited_label(r.edited)).collect();
+                        let out = kit::TileGrid::new("recents").min_width(168.0).surface(t.ground).show(
+                            ui,
+                            recents.len(),
+                            |i| kit::TileInfo { label: recents[i].name.as_str(), badge: Some(badges[i].as_str()), sub: Some(subs[i].as_str()), selected: false, addable: false, progress: None, tip: None, added: false },
+                            |i| i,
+                            &mut |p, r, i, hover, _| {
+                                let rec = &recents[i];
+                                let seed = covers[i].unwrap_or_else(|| files::seed_of(&rec.path));
+                                letterboxed(p, thumbs, r, (rec.width.max(1), rec.height.max(1)), seed, hover);
+                            },
+                        );
+                        if let Some(i) = out.clicked.or(out.double_clicked) {
+                            open = Some(recents[i].path.clone());
+                        }
                     }
                 }
+                if recents.is_empty() && app.start.search.is_empty() && !app.cli.flag("no-recents") {
+                    // First run: say where projects will be, instead of
+                    // leaving a gap.
+                    ui.add_space(theme::space::SM);
+                    ui.label(egui::RichText::new(crate::i18n::shown("Recent projects")).font(theme::section_title()).color(t.text));
+                    ui.add_space(theme::space::SM);
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(content_w, 160.0), Sense::hover());
+                    ui.painter().rect_filled(r, CornerRadius::same(theme::radius::PANEL), t.panel);
+                    let mut eui = ui.new_child(egui::UiBuilder::new().max_rect(r));
+                    kit::empty_state(&mut eui, Icon::FilmSlate, "Your projects will appear here. Start a new one above, or try a template below.", None);
+                }
+                // Returning users see their projects first; the templates
+                // and samples follow.
+                if app.start.search.is_empty() {
+                    new_from = crate::templates::show_rows(app, ui);
+                }
                 if !samples.is_empty() {
+                    let thumbs = &mut app.thumbs;
+                    ui.add_space(theme::space::XL);
+                    ui.label(egui::RichText::new(crate::i18n::shown("Samples")).font(theme::section_title()).color(t.text));
+                    ui.add_space(theme::space::SM);
                     let badges: Vec<String> = samples.iter().map(|r| view::format_duration(r.seconds as i64 * view::SEC)).collect();
                     let out = kit::TileGrid::new("samples").min_width(168.0).surface(t.ground).show(
                         ui,
@@ -290,7 +341,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         });
     });
     if let Some(p) = new_from {
-        crate::templates::open(app, p);
+        crate::templates::open(app, ui.ctx(), p);
         return;
     }
     if let Some(path) = open {
@@ -307,7 +358,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
             p.width = 1080;
             p.height = (1080.0 * ah as f32 / aw as f32) as u32 / 2 * 2;
         }
-        app.open_project(p);
+        let ctx = ui.ctx().clone();
+        app.replace(&ctx, files::Replace::Sample(p));
     }
 }
 
@@ -356,13 +408,12 @@ fn letterboxed(p: &egui::Painter, thumbs: &mut crate::thumbs::Thumbs, r: Rect, a
     }
 }
 
-fn new_project(app: &mut StudioApp, p: &Preset) {
+fn new_project(app: &mut StudioApp, ctx: &egui::Context, p: &Preset) {
     let mut proj = view::empty();
     proj.width = p.w;
     proj.height = p.h;
     proj.name = crate::i18n::tf(format!("Untitled {}", p.name.to_lowercase()));
-    app.open_project(proj);
-    app.give_folder();
+    app.replace(ctx, files::Replace::New(proj));
 }
 
 /// The Zornov wordmark: an accent glyph and the name.
@@ -429,5 +480,57 @@ pub fn window_drag_area(ui: &egui::Ui, rect: Rect) {
     if resp.double_clicked() {
         let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ui_tests::Harness;
+    use eframe::egui::{self, Event, PointerButton};
+
+    /// Typing in the search field narrows the projects and samples.
+    #[test]
+    fn typing_in_search_filters_the_projects() {
+        let mut h = Harness::new(&[]);
+        h.app.prefs.recents = vec![crate::files::Recent { path: "/tmp/zq-test/Zq project".into(), name: "Zq project".into(), edited: 0, length: 0, width: 1920, height: 1080 }];
+        h.frames(3);
+        let before = h.labels();
+        assert!(before.iter().any(|l| l.contains("Zq project")), "a recent project is listed first: {before:?}");
+        // The search field sits at the right end of the header.
+        let at = egui::pos2(1200.0, 66.0);
+        let press = |down| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed: down, modifiers: egui::Modifiers::NONE };
+        h.with_events(vec![Event::PointerMoved(at)]);
+        h.with_events(vec![press(true)]);
+        h.with_events(vec![press(false)]);
+        h.with_events(vec![Event::Text("zzqx".into())]);
+        h.frames(2);
+        assert_eq!(h.app.start.search, "zzqx", "the typed text reaches the field");
+        let after = h.labels();
+        assert!(!after.iter().any(|l| l.contains("Zq project")), "projects are filtered out: {after:?}");
+        assert!(after.iter().any(|l| l == "Clear search"), "the empty search offers to clear it: {after:?}");
+    }
+
+    /// Recent projects come before the templates, then the samples.
+    #[test]
+    fn recent_projects_come_first() {
+        let mut h = Harness::new(&[]);
+        h.app.prefs.recents = vec![crate::files::Recent { path: "/tmp/zq-test/Zq project".into(), name: "Zq project".into(), edited: 0, length: 0, width: 1920, height: 1080 }];
+        h.frames(3);
+        let nodes = &h.last.as_ref().unwrap().platform_output.accesskit_update.as_ref().unwrap().nodes;
+        let top = |name: &str| nodes.iter().filter(|(_, n)| n.label().or(n.value()) == Some(name)).filter_map(|(_, n)| n.bounds()).map(|b| b.y0).fold(f64::INFINITY, f64::min);
+        let (recent, templates, samples) = (top("Recent projects"), top("Start from a template"), top("Samples"));
+        assert!(recent.is_finite() && templates.is_finite(), "both headings are drawn");
+        assert!(recent < templates, "recent projects ({recent}) above templates ({templates})");
+        assert!(samples.is_infinite() || templates < samples, "samples last");
+    }
+
+    /// More than four recent projects become a list with their folders.
+    #[test]
+    fn a_long_history_is_a_list() {
+        let mut h = Harness::new(&[]);
+        h.app.prefs.recents = (0..6).map(|i| crate::files::Recent { path: format!("/tmp/zq-test/P{i}").into(), name: format!("Zq list {i}"), edited: 0, length: 0, width: 1920, height: 1080 }).collect();
+        h.frames(3);
+        let l = h.labels();
+        assert!((0..6).all(|i| l.iter().any(|s| s == &format!("Zq list {i}"))), "every project is listed: {l:?}");
     }
 }

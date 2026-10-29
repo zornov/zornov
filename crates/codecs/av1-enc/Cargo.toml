@@ -1,0 +1,20 @@
+[package]
+name = "studio-av1-enc"
+version.workspace = true
+edition.workspace = true
+license = "AGPL-3.0-or-later"
+description = "Clean-room AV1 encoder, written from the AV1 Bitstream & Decoding Process Specification. Reuses the tables, CDFs, transforms and prediction of studio-av1; every stream is checked against studio-av1 and VideoToolbox."
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+studio-av1 = { path = "../av1" }
+rayon = { version = "1", optional = true }
+
+[dev-dependencies]
+# The phase (a) gate writes an MP4 with the muxer and decodes it on the video hardware.
+studio-encode = { path = "../../media/encode" }
+studio-hw = { path = "../../media/hw" }
+studio-mp4 = { path = "../../media/mp4" }

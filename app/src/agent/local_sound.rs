@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use studio_synth::dsp::{RATE, Stereo};
 use studio_synth::music::{Cue, CueKind, MusicSpec};
 use studio_synth::sing::{SungNote, Voice, VoiceKind};
+use studio_model as m;
 use studio_synth::theory::parse_pitch;
 
 /// A file-name-safe stem from words.
@@ -161,8 +162,13 @@ fn cue_list(op: &Value, offset: f64) -> Result<Vec<Cue>, String> {
 }
 
 impl Session {
-    fn made_dir(&self, sub: &str) -> std::path::PathBuf {
-        self.home.clone().map(|h| h.join(sub)).unwrap_or_else(|| studio_paths::cache().join(format!("made-{sub}")))
+    fn made_dir(&self, kind: m::file::MadeKind) -> std::path::PathBuf {
+        let sub = match kind {
+            m::file::MadeKind::Sung => "sung",
+            m::file::MadeKind::Music => "music",
+            _ => "sfx",
+        };
+        self.home.clone().map(|h| m::file::ProjectFolder::new(h).generated_dir(kind)).unwrap_or_else(|| studio_paths::cache().join(format!("made-{sub}")))
     }
 
     /// Imports a made WAV and returns its media id.
@@ -198,7 +204,7 @@ impl Session {
             _ => return Err("sfx needs \"at\" (where it starts) or \"ends_at\" (where it peaks or ends)".into()),
         }
         .max(0.0);
-        let dir = self.made_dir("sfx");
+        let dir = self.made_dir(m::file::MadeKind::Sounds);
         let media = self.import_made(&dir, &format!("{stem}-{variant}"), &made.audio)?;
         let mut place = json!({"op": "place", "media": media, "at": at, "lane": op.get("lane").cloned().unwrap_or(json!("sound"))});
         if let Some(v) = f(op, "volume") {
@@ -277,7 +283,7 @@ impl Session {
         let seed = op.get("seed").and_then(Value::as_u64).unwrap_or_else(|| self.doc.project.media.iter().filter(|m| m.name.starts_with("sung-")).count() as u64 + 1);
         let stems = studio_synth::sing::sing(&parts, seed);
         let at = f(op, "at").unwrap_or(0.0).max(0.0);
-        let dir = self.made_dir("sung");
+        let dir = self.made_dir(m::file::MadeKind::Sung);
         let mut said = Vec::new();
         let mut warned = Vec::new();
         for (st, v) in stems.iter().zip(&parts) {
@@ -351,7 +357,7 @@ impl Session {
         let take = op.get("variant").and_then(Value::as_u64).or_else(|| op.get("seed").and_then(Value::as_u64)).unwrap_or_else(|| self.doc.project.media.iter().filter(|m| m.name.starts_with(&format!("{prefix}-"))).count() as u64);
         spec.seed ^= take.wrapping_mul(0x9E37_79B9_7F4A_7C15);
         let piece = studio_synth::music::compose(&spec)?;
-        let dir = self.made_dir("music");
+        let dir = self.made_dir(m::file::MadeKind::Music);
         let media = self.import_made(&dir, &format!("{prefix}-{take}"), &piece.audio)?;
         // Made music for the whole film replaces the made music already under it.
         if at <= 0.01 && op.get("duration").is_none() && op.get("length").is_none() {

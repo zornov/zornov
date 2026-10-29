@@ -33,16 +33,15 @@ pub struct Step {
     pub target: Target,
 }
 
+/// Five stops, in the order of the work: bring media in, cut it, see it,
+/// adjust it, send it out. Workspaces, the AI editor and Help are tips that
+/// appear when they are useful (see [`TIPS`]).
 pub const STEPS: &[Step] = &[
-    Step { id: "welcome", target: Target::None },
     Step { id: "library", target: Target::Region(crate::a11y::Region::Library) },
+    Step { id: "timeline", target: Target::Region(crate::a11y::Region::Timeline) },
     Step { id: "viewer", target: Target::Region(crate::a11y::Region::Viewer) },
     Step { id: "inspector", target: Target::Region(crate::a11y::Region::Inspector) },
-    Step { id: "timeline", target: Target::Region(crate::a11y::Region::Timeline) },
-    Step { id: "workspaces", target: Target::Named("workspace-tabs") },
-    Step { id: "ai", target: Target::None },
     Step { id: "export", target: Target::Named("export") },
-    Step { id: "help", target: Target::None },
 ];
 
 /// Message ids the tour uses.
@@ -365,7 +364,8 @@ mod tests {
     fn steps_cover_the_regions_in_order() {
         let regions: Vec<_> = STEPS.iter().filter_map(|s| if let Target::Region(r) = s.target { Some(r) } else { None }).collect();
         use crate::a11y::Region::*;
-        assert_eq!(regions, [Library, Viewer, Inspector, Timeline]);
+        assert_eq!(regions, [Library, Timeline, Viewer, Inspector]);
+        assert_eq!(STEPS.len(), 5, "library, timeline, viewer, inspector, export");
     }
 
     /// ⌘Z undoes only the person's own edits; the AI editor's work comes

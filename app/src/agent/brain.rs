@@ -495,6 +495,23 @@ fn asks(tool: &str, args: &Value, ask_first: bool) -> Option<String> {
     }
 }
 
+/// The decision a call needs when there is no window to ask in (headless
+/// MCP): the same [`asks`] and [`outside::asks_after_outside`] the window's
+/// gate uses, with "ask before every edit" off, and the words it would have
+/// shown. `export`, `open` and `new_project` are the MCP client's own
+/// request, as an export the person asked for is in the window; the rest of
+/// the always-ask set (plugins, account, share, project care, saving
+/// elsewhere, other projects) is refused, whatever the call's arguments say.
+pub(super) fn needs_ok(tool: &str, args: &Value, read_outside: bool) -> Option<String> {
+    let own_request = matches!(tool, "export" | "open" | "new_project");
+    asks(tool, args, false).filter(|_| !own_request).or_else(|| read_outside.then(|| super::outside::asks_after_outside(tool, args)).flatten())
+}
+
+/// What headless MCP answers when a call needs the person's OK.
+pub(super) fn not_run(why: &str) -> String {
+    format!("NOT RUN: this needs the person's OK, and there is no Zornov window to ask in: {why}. Tell the person what you wanted to do; they can do it in the Zornov window. Nothing in the call's arguments can approve it.")
+}
+
 /// Spending, selling, signing in or pointing the app at another server
 /// always asks: money and identity are the person's to commit.
 fn account_ask(args: &Value) -> Option<String> {
@@ -523,6 +540,7 @@ fn care_ask(args: &Value) -> Option<String> {
         "restore" => Some("Restore an earlier version of the project (the current one is kept as a restore point)".into()),
         "restore_backup" => Some(format!("Restore the backup {}", args.get("from").and_then(Value::as_str).unwrap_or(""))),
         "clean" if args.get("apply").and_then(Value::as_bool) == Some(true) => Some("Delete the files project care found unused".into()),
+        "convert" if args.get("apply").and_then(Value::as_bool) == Some(true) => Some(if args.get("copy").and_then(Value::as_bool) == Some(true) { "Make a .zornov package copy of this project (the original stays as it is)".into() } else { "Convert this project folder into a .zornov package (its files are moved; a journal puts them back if anything fails)".into() }),
         "relocate" => Some(format!("Move the project's media to {}", args.get("folder").and_then(Value::as_str).unwrap_or("another folder"))),
         _ => None,
     }
@@ -1479,6 +1497,8 @@ mod tests {
         assert!(asks("account", &json!({"action": "status"}), false).is_none());
         assert!(asks("project_care", &json!({"action": "clean", "apply": true}), false).is_some());
         assert!(asks("project_care", &json!({"action": "clean"}), false).is_none());
+        assert!(asks("project_care", &json!({"action": "convert", "apply": true}), false).is_some(), "moving a project's files asks");
+        assert!(asks("project_care", &json!({"action": "convert"}), false).is_none(), "the plan only reads");
         let wait = std::time::Duration::from_secs(5);
         let (calls, rx) = mpsc::channel();
         let (events, ev) = mpsc::channel();

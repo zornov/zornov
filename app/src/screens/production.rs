@@ -8,6 +8,7 @@
 //! is read again when it changes on disk).
 
 use crate::app::{Overlay, StudioApp};
+use crate::icons::Icon;
 use crate::kit;
 use crate::theme;
 use eframe::egui::{self, Color32, Rect, RichText, Vec2};
@@ -52,6 +53,8 @@ pub struct ProductionUi {
     new_target: String,
     new_step: String,
     who: String,
+    // Asked for by the empty state; carried out where the app is at hand.
+    open_story: bool,
 }
 
 type Shared = Arc<Mutex<ProductionUi>>;
@@ -112,41 +115,63 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let out = kit::modal(ctx, egui::Id::new("production-dialog"), Vec2::new(1080.0, 700.0), "Production", |ui| body(ui, &mut st, &story, dir.as_deref()));
     st.story = story;
-    if out.close {
+    let story_panel = std::mem::take(&mut st.open_story);
+    drop(st);
+    if story_panel {
+        app.editor.rail = crate::editor::library::RailItem::Story;
+    }
+    if out.close || story_panel {
         app.overlay = Overlay::None;
     }
 }
 
+/// The tabs worth showing: all of them with a script, otherwise only the
+/// ones that work without one.
+fn visible_tabs(has_script: bool) -> Vec<usize> {
+    (0..TABS.len()).filter(|i| has_script || !matches!(i, 1 | 2)).collect()
+}
+
 fn body(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: Option<&Path>) {
     let t = theme::tokens(ui.ctx());
-    egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
+    let has_script = !story.scenes.is_empty();
+    // Without a script only Overview (which says so), Budget and Tasks have
+    // anything to show; Breakdown and Schedule appear with the script.
+    let shown_tabs = visible_tabs(has_script);
+    if !shown_tabs.contains(&st.tab) {
+        st.tab = 0;
+    }
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(theme::space::LG as i8, theme::space::SM as i8)).show(ui, |ui| {
+        let labels: Vec<&str> = shown_tabs.iter().map(|&i| TABS[i]).collect();
+        let mut at = shown_tabs.iter().position(|&i| i == st.tab).unwrap_or(0);
         kit::scroll_strip(ui, "production-tabs", |ui| {
-            for (i, name) in TABS.iter().enumerate() {
-                if ui.selectable_label(st.tab == i, RichText::new(*name).font(theme::body())).clicked() {
-                    st.tab = i;
-                }
+            if kit::tab_bar(ui, "production-tabs", &mut at, &labels) {
+                st.tab = shown_tabs[at];
             }
         });
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if !st.flash.is_empty() && ui.small_button("✕").clicked() {
-                    st.flash.clear();
-                }
-                kit::label_trunc(ui, RichText::new(&st.flash).font(theme::caption()).color(t.text_2));
+        if !st.flash.is_empty() {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if kit::IconButton::new(Icon::X, "Dismiss").compact().show(ui).clicked() {
+                        st.flash.clear();
+                    }
+                    kit::label_trunc(ui, RichText::new(&st.flash).font(theme::caption()).color(t.text_2));
+                });
             });
-        });
-        ui.separator();
+        }
         let Some(dir) = dir else {
-            ui.add_space(24.0);
-            ui.label("Save the project first: the production office is kept in its folder.");
+            let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+            kit::empty_state(&mut empty, Icon::FilmSlate, "Save the project first. The production office is kept in its folder.", None);
             return;
         };
-        if story.scenes.is_empty() {
-            ui.add_space(24.0);
-            ui.label("There is no script yet. Import a screenplay with the Story tools (or ask the AI), then come back to break it down, schedule it and budget it.");
-            if st.tab != 3 && st.tab != 4 {
-                return;
+        if !has_script && st.tab == 0 {
+            // One empty state instead of five tabs saying the same thing.
+            // (TODO(shell): Story's own import dialog is private to the
+            // editor module; once it is `pub(crate)` this can import in place.)
+            let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+            if kit::empty_state(&mut empty, Icon::FilmSlate, "No script yet. Import a screenplay in Story, then come back to break it down, schedule it and budget it.", Some(("Open Story", Icon::ArrowSquareOut))) {
+                st.open_story = true;
             }
+            return;
         }
         let before = st.prod.clone();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_v(ui, |ui| match st.tab {
@@ -188,8 +213,13 @@ fn rgb(c: [u8; 3]) -> Color32 {
     Color32::from_rgb(c[0], c[1], c[2])
 }
 
+/// Where the call sheets, reports and budgets are written.
+fn papers_dir(dir: &Path) -> PathBuf {
+    studio_model::file::ProjectFolder::new(dir).generated_dir(studio_model::file::MadeKind::Production)
+}
+
 fn write_pdf(st: &mut ProductionUi, dir: &Path, name: &str, bytes: Vec<u8>) {
-    let d = dir.join("production");
+    let d = papers_dir(dir);
     let path = d.join(name);
     st.flash = match std::fs::create_dir_all(&d).and_then(|_| std::fs::write(&path, bytes)) {
         Ok(()) => crate::i18n::tf(format!("Wrote {}", path.display())),
@@ -265,7 +295,7 @@ fn breakdown(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, ) {
         }
         ui.label(RichText::new(crate::i18n::shown("Reads each scene for what it needs; fix what it got wrong with the tags.")).font(theme::caption()));
     });
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(250.0);
@@ -286,7 +316,7 @@ fn breakdown(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, ) {
             if !f.summary.is_empty() {
                 ui.label(&f.summary);
             }
-            ui.add_space(6.0);
+            ui.add_space(theme::space::SM);
             let scene = f.id.clone();
             let mut remove: Option<String> = None;
             for (cat, _) in &sheet.groups {
@@ -310,7 +340,7 @@ fn breakdown(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, ) {
             if let Some(id) = remove {
                 st.prod.untag(&scene, &id);
             }
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             ui.horizontal_wrapped(|ui| {
                 egui::ComboBox::from_id_salt("tag-cat").selected_text(Category::ALL[st.tag_cat].title()).show_ui(ui, |ui| {
                     crate::kit::note_list(ui);
@@ -363,13 +393,13 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
                     write_pdf(st, dir, &format!("call-sheet-day-{}.pdf", i + 1), report::call_sheet_pdf(&c));
                 }
             }
-            st.flash = crate::i18n::tf(format!("Wrote {n} call sheets to {}", dir.join("production").display()));
+            st.flash = crate::i18n::tf(format!("Wrote {n} call sheets to {}", papers_dir(dir).display()));
         }
     });
     for w in st.prod.schedule_warnings(story) {
         ui.label(RichText::new(format!("⚠ {w}")).font(theme::caption()).color(theme::tokens(ui.ctx()).warn));
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     let strips = st.prod.strips(story);
     let ndays = st.prod.schedule.days.len();
     let mut shown: Option<usize> = Some(usize::MAX);
@@ -377,7 +407,7 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
     for (i, s) in strips.iter().enumerate() {
         if Some(s.day.unwrap_or(usize::MAX - 1)) != shown {
             shown = Some(s.day.unwrap_or(usize::MAX - 1));
-            ui.add_space(6.0);
+            ui.add_space(theme::space::SM);
             match s.day {
                 Some(d) => {
                     let date = st.prod.schedule.days[d].date.clone().unwrap_or_default();
@@ -433,7 +463,7 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
     }
     let dood = st.prod.dood();
     if !dood.rows.is_empty() {
-        ui.add_space(12.0);
+        ui.add_space(theme::space::MD);
         ui.label(RichText::new(crate::i18n::shown("Day out of days")).strong());
         kit::scroll_wide(ui, "dood-scroll", |ui| egui::Grid::new("dood").striped(true).show(ui, |ui| {
             ui.label("");
@@ -496,11 +526,11 @@ fn budget(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path) {
     let r = st.prod.budget_report();
     let cur = r.currency.clone();
     if st.prod.budget.accounts.is_empty() {
-        ui.add_space(12.0);
+        ui.add_space(theme::space::MD);
         ui.label("No budget yet: pick a template and build it from the breakdown.");
         return;
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     // Tables keep their columns: wider than the dialog, they scroll sideways.
     kit::scroll_wide(ui, "top-sheet-scroll", |ui| egui::Grid::new("top-sheet").striped(true).min_col_width(70.0).show(ui, |ui| {
         for h in ["Acct", "Account", "Budget", "Actual", "At completion", "Variance"] {
@@ -539,7 +569,7 @@ fn budget(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path) {
         ui.end_row();
     }));
     ui.label(RichText::new(crate::i18n::tf(format!("AI generation so far {} over {} runs{}", money(r.ai_spend, &cur), st.prod.spend.len(), if r.ai_unbudgeted > 0.0 { " (not in any budget line: add one with feed ai_spend)" } else { "" }))).font(theme::caption()));
-    ui.add_space(8.0);
+    ui.add_space(theme::space::SM);
     // Actuals: pick a line, type what was spent.
     let lines: Vec<(u64, String, f64, f64)> = st.prod.budget.accounts.iter().flat_map(|a| a.lines.iter().map(move |l| (a, l))).map(|(a, l)| (l.id, format!("{} {}", a.code, l.desc), st.prod.budget.line_budget(l), st.prod.budget.line_actual(l))).collect();
     ui.horizontal_wrapped(|ui| {
@@ -563,7 +593,7 @@ fn budget(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path) {
         }
     });
     // Costs per scene.
-    ui.add_space(10.0);
+    ui.add_space(theme::space::MD);
     ui.label(RichText::new(crate::i18n::shown("Cost per scene")).strong());
     kit::scroll_wide(ui, "scene-costs-scroll", |ui| egui::Grid::new("scene-costs").striped(true).show(ui, |ui| {
         for h in ["Scene", "Budget", "Spent", "Per second"] {
@@ -764,6 +794,13 @@ mod tests {
             out.textures_delta.clear();
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tabs_without_content_stay_hidden_until_there_is_a_script() {
+        let names = |has| visible_tabs(has).into_iter().map(|i| TABS[i]).collect::<Vec<_>>();
+        assert_eq!(names(false), ["Overview", "Budget", "Tasks"]);
+        assert_eq!(names(true), TABS);
     }
 
     #[test]

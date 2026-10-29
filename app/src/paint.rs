@@ -17,6 +17,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use studio_canvas::Canvas;
 use studio_canvas::flipbook::Flipbook;
+use studio_model as m;
 
 static CANVAS: OnceLock<Mutex<Canvas>> = OnceLock::new();
 
@@ -29,7 +30,7 @@ pub fn canvas() -> MutexGuard<'static, Canvas> {
 /// Where a project's pictures are kept.
 pub fn pictures_dir(project_root: Option<&Path>) -> PathBuf {
     match project_root {
-        Some(r) => r.join("Pictures"),
+        Some(r) => m::file::ProjectFolder::new(r).media_of(m::file::MediaKind::Pictures),
         None => studio_paths::studio().join("Pictures"),
     }
 }
@@ -137,4 +138,58 @@ pub fn apply(ops: &[serde_json::Value]) -> Result<serde_json::Value, String> {
 pub fn test_lock() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Turn what a person typed in an "Options" field into command parameters:
+/// `radius 4, mode soft` or `radius=4; smart=yes` become an object of
+/// numbers, flags and words. Text that is already a `{…}` object passes
+/// through, so the options an AI suggested can be pasted in.
+pub fn options_to_params(text: &str) -> Result<serde_json::Value, String> {
+    use serde_json::{Map, Value};
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(Value::Object(Map::new()));
+    }
+    if text.starts_with('{') {
+        return serde_json::from_str(text).map_err(|_| "Those options could not be read. Write them like: radius 4, mode soft".to_owned());
+    }
+    let mut out = Map::new();
+    for entry in text.split([',', ';', '\n']) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let cut = entry.find(['=', ':', ' ']).ok_or_else(|| format!("“{entry}” needs a value, like: {entry} 4"))?;
+        let (key, rest) = entry.split_at(cut);
+        let value = rest.trim_start_matches(['=', ':', ' ']).trim().trim_matches('"');
+        if key.is_empty() || value.is_empty() {
+            return Err(format!("“{entry}” needs a value, like: radius 4"));
+        }
+        let v = match value.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" => Value::Bool(true),
+            "false" | "no" | "off" => Value::Bool(false),
+            _ => match value.parse::<f64>() {
+                Ok(n) => serde_json::Number::from_f64(n).map_or_else(|| Value::String(value.to_owned()), Value::Number),
+                Err(_) => Value::String(value.to_owned()),
+            },
+        };
+        out.insert(key.to_owned(), v);
+    }
+    Ok(Value::Object(out))
+}
+
+#[cfg(test)]
+mod options_tests {
+    use super::options_to_params as p;
+    use serde_json::json;
+
+    #[test]
+    fn plain_options_become_parameters() {
+        assert_eq!(p("").unwrap(), json!({}));
+        assert_eq!(p("radius 4, mode soft").unwrap(), json!({"radius": 4.0, "mode": "soft"}));
+        assert_eq!(p("radius=4; smart=yes").unwrap(), json!({"radius": 4.0, "smart": true}));
+        assert_eq!(p("{\"radius\": 2}").unwrap(), json!({"radius": 2}));
+        assert!(p("radius").is_err());
+        assert!(p("{broken").is_err());
+    }
 }

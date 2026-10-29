@@ -259,7 +259,7 @@ impl Session {
         let who = st(a, "as").map(str::to_owned).unwrap_or_else(collab::identity);
         match action.as_str() {
             "package" => {
-                let parent = st(a, "path").map(PathBuf::from).unwrap_or_else(|| root.join("Review"));
+                let parent = st(a, "path").map(PathBuf::from).unwrap_or_else(|| m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Review));
                 let dir = package::folder_in(&parent, &self.doc.model.active().name);
                 let store = comments::Store::load(&root)?;
                 let index = versions::Index::load(&root)?;
@@ -481,7 +481,7 @@ mod tests {
         let csv = call(&mut s, "comments", json!({"action": "export", "format": "csv", "status": "all"}));
         assert!(csv["text"].as_str().unwrap().contains("hold longer"));
         // Notes are files beside the project, not edits.
-        assert!(proj.join("review/comments.json").exists());
+        assert!(crate::collab::comments::file(&proj).exists());
         let err = s.run("comments", &json!({"action": "resolve", "id": "nope"})).err().unwrap();
         assert!(err.contains("director-2"), "names the notes there are: {err}");
     }

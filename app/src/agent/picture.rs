@@ -35,9 +35,12 @@ fn s<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
 }
 
 impl Session {
+    fn picture_root(&self) -> Option<PathBuf> {
+        self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()))
+    }
+
     fn pictures_home(&self) -> PathBuf {
-        let root = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()));
-        crate::paint::pictures_dir(root.as_deref())
+        crate::paint::pictures_dir(self.picture_root().as_deref())
     }
 
     pub(super) fn picture(&mut self, a: &Value) -> Result<Vec<Content>, String> {
@@ -140,7 +143,10 @@ impl Session {
             let st = c.engine.active().ok_or("no picture open")?;
             (saved, fb, studio_canvas::stem(&st.doc.name).to_owned(), (st.doc.size.width, st.doc.size.height), st.revision)
         };
-        let placed = self.pictures_home().join("Placed");
+        let placed = match self.picture_root() {
+            Some(r) => studio_model::file::ProjectFolder::new(r).generated_dir(studio_model::file::MadeKind::Placed),
+            None => self.pictures_home().join("Placed"),
+        };
         std::fs::create_dir_all(&placed).map_err(|e| e.to_string())?;
         let tag = format!("{name}-{rev}-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 100_000));
         let sources: Vec<PathBuf> = match (&fb, saved["frames"].as_array()) {
@@ -380,7 +386,8 @@ mod tests {
         let v = text(&parts);
         assert_eq!(v["picture"]["picture"], "Sunset", "{v}");
         assert!(matches!(parts.get(1), Some(Content::Jpeg(j)) if j.len() > 500), "a look comes back");
-        assert!(dir.join("Pictures/Sunset.pcraft").exists() && dir.join("Pictures/Sunset.png").exists(), "kept in the project");
+        let pictures = crate::paint::pictures_dir(Some(&dir));
+        assert!(pictures.join("Sunset.pcraft").exists() && pictures.join("Sunset.png").exists(), "kept in the project");
         let v = text(&s.call("picture", &json!({"ops": [{"op": "to_timeline", "at": 1.0, "duration": 3.0}]})).unwrap());
         assert!(v["results"][0]["changed"].is_array() || v["results"][0]["added"].is_array() || !v["results"][0].is_null(), "{v}");
         assert_eq!(s.doc.project.clips.len(), 1, "one clip on the timeline");
@@ -416,7 +423,7 @@ mod tests {
         .unwrap();
         let v = text(&s.call("picture", &json!({"ops": [{"op": "to_timeline", "at": 0.0}], "look": 128})).unwrap());
         assert_eq!(v["picture"]["flipbook"]["drawings"], 3, "{v}");
-        assert!(dir.join("Pictures/Ball.frames/0003.png").exists());
+        assert!(crate::paint::pictures_dir(Some(&dir)).join("Ball.frames/0003.png").exists());
         // Three drawings on twos at 12 fps: half a second, merged into one clip.
         let clips = &s.doc.project.clips;
         assert_eq!(clips.len(), 1, "merged into one clip");

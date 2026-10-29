@@ -5587,6 +5587,9 @@ dependencies = [
  "eframe",
  "libc",
  "libsqlite3-sys",
+ "objc2 0.5.3",
+ "objc2-app-kit 0.2.2",
+ "objc2-foundation 0.2.2",
  "png 0.18.1",
  "resvg 0.48.1",
  "rfd",
@@ -5647,6 +5650,7 @@ dependencies = [
  "studio-webmedia",
  "studio-world",
  "windows-sys 0.61.2",
+ "winit",
  "winresource",
  "zip",
 ]
@@ -5664,6 +5668,17 @@ version = "0.1.3"
 dependencies = [
  "rayon",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "studio-av1-enc"
+version = "0.1.3"
+dependencies = [
+ "rayon",
+ "studio-av1",
+ "studio-encode",
+ "studio-hw",
+ "studio-mp4",
 ]
 
 [[package]]
@@ -5760,6 +5775,7 @@ dependencies = [
  "studio-encode",
  "studio-h264",
  "studio-hevc",
+ "studio-hw",
  "studio-mp4",
  "studio-sound",
 ]
@@ -5829,6 +5845,11 @@ dependencies = [
 [[package]]
 name = "studio-hw"
 version = "0.1.0"
+dependencies = [
+ "studio-av1",
+ "studio-encode",
+ "studio-mp4",
+]
 
 [[package]]
 name = "studio-i18n"
@@ -6317,6 +6338,7 @@ dependencies = [
  "studio-paths",
  "studio-plugin-api",
  "wasmtime",
+ "wat",
 ]
 
 [[package]]
@@ -6362,7 +6384,9 @@ dependencies = [
  "naga 30.0.1",
  "pollster 0.4.0",
  "serde_json",
+ "studio-av1",
  "studio-colour",
+ "studio-encode",
  "studio-fx",
  "studio-gpu-device",
  "studio-h264",
@@ -7471,7 +7495,6 @@ dependencies = [
  "wasmtime-internal-jit-icache-coherence",
  "wasmtime-internal-unwinder",
  "wasmtime-internal-versioned-export-macros",
- "wat",
  "windows-sys 0.61.2",
 ]
 

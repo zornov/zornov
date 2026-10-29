@@ -12,10 +12,14 @@
 //! zornov [--screen start|editor|export|settings|gallery] [--theme dark|light]
 //!        [--size 1440x900] [--project demo|empty|one|big] [--select N]
 //!        [--shot out.png] [--frames N] [--fresh]
+//! zornov app --ui-script FILE --ui-out DIR [--ui-log FILE] [--size WxH] [--theme dark|light] [--ui-ppp 2]
 //! ```
 //!
 //! `--shot` renders `--frames` frames (default 40), saves a screenshot of the
 //! window as PNG and exits.
+//!
+//! `--ui-script` runs the app with no window, drives it from a script and
+//! paints pictures offscreen (see `ui_script.rs` for the steps).
 //!
 //! On Windows this is a window program, so a double click or the Start menu
 //! opens the editor with no console beside it; the terminal side runs through
@@ -25,6 +29,7 @@
 
 mod agent;
 mod convert;
+mod open_files;
 mod transcode;
 mod psd_import;
 mod release;
@@ -55,8 +60,8 @@ mod onboarding;
 mod templates;
 #[cfg(test)]
 mod ui_tests;
-#[cfg(test)]
 mod ui_shot;
+mod ui_script;
 #[cfg(test)]
 mod ui_overflow;
 mod access;
@@ -137,6 +142,11 @@ fn main() -> eframe::Result {
     plugins::start();
     // `zornov mcp`: the agent server on stdin / stdout, no window.
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    // `zornov app --ui-script FILE --ui-out DIR`: the app drives itself, no window.
+    if argv.iter().any(|a| a == "--ui-script") {
+        let rest = if argv.first().is_some_and(|a| a == "app") { &argv[1..] } else { &argv[..] };
+        std::process::exit(ui_script::main(cli::Cli::parse(rest.iter().cloned())));
+    }
     match argv.first().map(String::as_str) {
         Some("mcp") => agent::trace::exit(agent::cli::mcp(&argv[1..])),
         // `zornov agent TOOL JSON`: one call from a shell or script.
@@ -194,5 +204,15 @@ fn main() -> eframe::Result {
         persistence_path: cli.fresh.then(|| std::env::temp_dir().join(format!("studio-fresh-{}", std::process::id()))),
         ..Default::default()
     };
+    // On macOS the event loop is made here, so Finder's open request (sent as the
+    // application starts, when a double-click launched it) finds its method.
+    #[cfg(target_os = "macos")]
+    {
+        let event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build().map_err(eframe::Error::WinitEventLoop)?;
+        open_files::install();
+        let mut app = eframe::create_native("Zornov", options, Box::new(move |cc| Ok(Box::new(app::StudioApp::new(cc, cli)))), &event_loop);
+        event_loop.run_app(&mut app).map_err(eframe::Error::WinitEventLoop)
+    }
+    #[cfg(not(target_os = "macos"))]
     eframe::run_native("Zornov", options, Box::new(move |cc| Ok(Box::new(app::StudioApp::new(cc, cli)))))
 }

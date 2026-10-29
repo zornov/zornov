@@ -359,7 +359,7 @@ pub fn text_style_rows(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
     let tk = theme::tokens(ui.ctx());
     let has = |k: &str| g.params.contains_key(k);
     // Font family: the library's families, "Style default" first.
-    let families = crate::text_look::engine().fonts.families();
+    let families = crate::text_look::engine().fonts.families_shared();
     let mut names: Vec<&str> = vec!["Style default"];
     names.extend(families.iter().map(String::as_str));
     let cur = match g.params.get("font") {

@@ -353,6 +353,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, area: Rect) -> bool
     outliner(app, ui, body, &objs);
     crate::editor::model_edit::input::end_frame(&ctx);
     super::save(&app.doc);
+    if super::save_waiting() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+    }
     true
 }
 
@@ -1592,7 +1595,8 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
     let orients = ["World", "Local", "View", "Normal"];
     let all_orients = [Orient::World, Orient::Local, Orient::View, Orient::Normal];
     let oi = all_orients.iter().position(|o| *o == ws.orient).unwrap_or(0);
-    if let Some(i) = kit::menu_button(&mut bui, "viewport-orient", oi, &orients, 70.0, None) {
+    let ow = super::super::viewer::menu_w(&bui, &orients);
+    if let Some(i) = kit::menu_button(&mut bui, "viewport-orient", oi, &orients, ow, None) {
         super::with(|w| {
             w.orient = all_orients[i];
             w.changed();
@@ -1601,7 +1605,8 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
     let pivots = ["Median", "Each", "Cursor", "Bounds", "Active"];
     let all_pivots = [Pivot::Median, Pivot::Individual, Pivot::Cursor, Pivot::Bounds, Pivot::Active];
     let pi = all_pivots.iter().position(|o| *o == ws.pivot).unwrap_or(0);
-    if let Some(i) = kit::menu_button(&mut bui, "viewport-pivot", pi, &pivots, 74.0, None) {
+    let pw = super::super::viewer::menu_w(&bui, &pivots);
+    if let Some(i) = kit::menu_button(&mut bui, "viewport-pivot", pi, &pivots, pw, None) {
         super::with(|w| {
             w.pivot = all_pivots[i];
             w.changed();
@@ -1672,7 +1677,7 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
     let mut act: Option<&str> = None;
     let mut go_axis: Option<Axis> = None;
     let mut go_mark: Option<usize> = None;
-    kit::popover(&ctx, view_id, resp.rect, kit::Side::Below, 240.0, |ui| {
+    kit::popover(&ctx, view_id, resp.rect, kit::Side::Below, 240.0, |ui| super::super::viewer::tall_menu(ui, |ui| {
         kit::menu_heading(ui, "Look through");
         if MenuItem::new("Editor view").checked(ws.look == Look::Editor).show(ui).clicked() {
             act = Some("editor");
@@ -1769,7 +1774,7 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
         if MenuItem::new("Save this view").show(ui).clicked() {
             act = Some("bookmark");
         }
-    });
+    }));
     if let Some(a) = go_axis {
         super::with(|w| {
             leave_camera(w, &app.doc, time);

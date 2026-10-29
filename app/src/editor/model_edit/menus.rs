@@ -93,6 +93,23 @@ fn list(ui: &mut egui::Ui, menu: Menu, chosen: &mut Option<&'static str>) {
     }
 }
 
+/// Adds the shape `id` as a new 3D object at the 3D cursor, the one path the
+/// viewer's Add menu and this workspace's Add share.
+pub fn add_shape(app: &mut StudioApp, ctx: &egui::Context, id: &'static str) {
+    let args = Map::new();
+    match super::add_object(app, ctx, id, &args) {
+        Ok(clip) => OBJECT_LAST.with(|o| *o.borrow_mut() = Some((clip, id, args))),
+        Err(e) => {
+            kit::push(ctx, e, None, Some(Icon::Warning));
+        }
+    }
+}
+
+/// The shapes of the Add menu: (id, label).
+pub fn shapes() -> Vec<(&'static str, &'static str)> {
+    TOOLS.iter().filter(|t| t.menu == Menu::Add).map(|t| (t.id, t.label)).collect()
+}
+
 /// The bar along the top of the workspace.
 pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
     let ctx = ui.ctx().clone();
@@ -108,7 +125,8 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
     if candidate {
         let labels: Vec<&str> = Stage::ALL.iter().map(|s| s.label()).collect();
         let i = Stage::ALL.iter().position(|s| *s == stage).unwrap_or(0);
-        if let Some(k) = kit::menu_button(&mut bui, "model-stage", i, &labels, 112.0, None)
+        let sw = crate::editor::viewer::menu_w(&bui, &labels);
+        if let Some(k) = kit::menu_button(&mut bui, "model-stage", i, &labels, sw, None)
             && let Err(e) = super::enter(app, &ctx, Stage::ALL[k])
         {
             kit::push(&ctx, e, None, Some(Icon::Info));
@@ -126,21 +144,17 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
             let mut add: Option<&'static str> = None;
             kit::popover(&ctx, id, resp.rect, kit::Side::Below, 220.0, |ui| {
                 kit::menu_heading(ui, "Mesh");
-                for t in TOOLS.iter().filter(|t| t.menu == Menu::Add) {
-                    if item(ui, t) {
-                        add = Some(t.id);
+                crate::editor::viewer::tall_menu(ui, |ui| {
+                    for t in TOOLS.iter().filter(|t| t.menu == Menu::Add) {
+                        if item(ui, t) {
+                            add = Some(t.id);
+                        }
                     }
-                }
+                });
             });
             if let Some(id) = add {
                 kit::set_open(&ctx, egui::Id::unique("model-object-add"), false);
-                let args = Map::new();
-                match super::add_object(app, &ctx, id, &args) {
-                    Ok(clip) => OBJECT_LAST.with(|o| *o.borrow_mut() = Some((clip, id, args))),
-                    Err(e) => {
-                        kit::push(&ctx, e, None, Some(Icon::Warning));
-                    }
-                }
+                add_shape(app, &ctx, id);
             }
             if candidate && kit::Button::ghost("Edit").compact().shortcut("Tab").show(&mut bui).on_hover_text(crate::i18n::t("Edit the selected model's vertices, edges and faces")).clicked()
                 && let Err(e) = super::enter(app, &ctx, Stage::Edit)
@@ -167,7 +181,7 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
                 if resp.clicked() {
                     kit::toggle_open(&ctx, id);
                 }
-                kit::popover(&ctx, id, resp.rect, kit::Side::Below, 280.0, |ui| list(ui, menu, &mut chosen));
+                kit::popover(&ctx, id, resp.rect, kit::Side::Below, 280.0, |ui| crate::editor::viewer::tall_menu(ui, |ui| list(ui, menu, &mut chosen)));
                 if chosen.is_some() {
                     kit::set_open(&ctx, id, false);
                 }
@@ -205,7 +219,7 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
                 let refs: Vec<&str> = names.iter().map(String::as_str).collect();
                 let fi = tools::FALLOFFS.iter().position(|(_, f)| *f == p.falloff).unwrap_or(0);
                 kit::labeled_row(ui, "Falloff", |ui| {
-                    if let Some(i) = kit::menu_button(ui, "model-falloff", fi, &refs, 120.0, None) {
+                    if let Some(i) = kit::menu_button(ui, "model-falloff", fi, &refs, crate::editor::viewer::menu_w(ui, &refs), None) {
                         p.falloff = tools::FALLOFFS[i].1;
                     }
                 });
@@ -227,7 +241,8 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
             // Snapping target.
             let names: Vec<&str> = SnapTo::ALL.iter().map(|s| s.label()).collect();
             let si = SnapTo::ALL.iter().position(|s| *s == snap_to).unwrap_or(0);
-            if let Some(i) = kit::menu_button(&mut bui, "model-snap-to", si, &names, 70.0, None) {
+            let nw = crate::editor::viewer::menu_w(&bui, &names);
+            if let Some(i) = kit::menu_button(&mut bui, "model-snap-to", si, &names, nw, None) {
                 with(|s| {
                     if let Some(s) = s {
                         s.snap_to = SnapTo::ALL[i];

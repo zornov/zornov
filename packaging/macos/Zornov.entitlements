@@ -2,6 +2,7 @@
 <!-- Copyright 2026 Ashrox LLC and contributors -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Hardened-runtime entitlements for the Developer ID build (not sandboxed). -->
+<!-- Plugins are WebAssembly that wasmtime compiles to machine code in memory, which hardened runtime kills without allow-unsigned-executable-memory (Library ▸ Tools ▸ Available crashed the signed app). allow-jit alone is not enough: wasmtime does not map its code with MAP_JIT. -->
 <!-- The microphone (voice-overs, recording) and the camera (recording, live). Screen recording needs no entitlement; the system asks the person. Add others only when a new dependency needs them. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -9,6 +10,8 @@
   <key>com.apple.security.device.audio-input</key>
   <true/>
   <key>com.apple.security.device.camera</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
 </dict>
 </plist>

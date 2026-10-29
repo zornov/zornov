@@ -25,9 +25,8 @@ pub(super) fn is_on(ctx: &egui::Context) -> bool {
     ctx.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(on_id()))
 }
 
-pub(super) fn toggle(ctx: &egui::Context) {
-    let on = is_on(ctx);
-    ctx.data_mut(|d| d.insert_persisted(on_id(), !on));
+pub(super) fn set_on(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_persisted(on_id(), on));
 }
 
 /// One curve: a track's component.
@@ -42,6 +41,7 @@ pub struct Curve {
     pub unit: &'static str,
 }
 
+// TODO(kit): curve colours as theme tokens.
 const COLOURS: [Color32; 8] = [
     Color32::from_rgb(240, 98, 88),
     Color32::from_rgb(98, 200, 120),
@@ -201,6 +201,8 @@ struct State {
     normalise: bool,
     /// (path, component, key index)
     selected: Option<(String, Option<usize>, usize)>,
+    /// A right-click between keys: (curve path, clip-local time, where).
+    add_at: Option<(String, Time, Pos2)>,
 }
 
 /// Draws the graph editor in `area` (left: the curve list in `list`;
@@ -403,25 +405,57 @@ pub(super) fn show(app: &mut StudioApp, ui: &mut egui::Ui, list: Rect, plot: Rec
     if resp.drag_stopped() {
         ui.data_mut(|d| d.remove::<Drag>(drag_id));
     }
-    // Double-click on a curve: a key there.
-    if resp.double_clicked()
-        && hot.is_none()
-        && let Some(q) = pointer
-    {
-        let local = (view.t(q.x) - mc.start).clamp(0, mc.duration);
-        let local = on_frame(local);
-        let near = visible.iter().zip(&ranges).find(|((_, c), r)| mc.property_at(&c.path, local).and_then(|v| comp(&v, c.comp)).is_some_and(|v| (y_of(v, **r) - q.y).abs() < 8.0));
-        if let Some(((_, c), _)) = near
-            && let Some(tr) = mc.keyframes.get(&c.path)
+    // The curve under the pointer and the clip-local frame there, for a
+    // double-click or a right-click between keys.
+    let curve_at = |q: Pos2| -> Option<(String, Time)> {
+        let local = on_frame((view.t(q.x) - mc.start).clamp(0, mc.duration));
+        let ((_, c), _) = visible.iter().zip(&ranges).find(|((_, c), r)| mc.property_at(&c.path, local).and_then(|v| comp(&v, c.comp)).is_some_and(|v| (y_of(v, **r) - q.y).abs() < 8.0))?;
+        let tr = mc.keyframes.get(&c.path)?;
+        tr.key_at(local).is_none().then(|| (c.path.clone(), local))
+    };
+    let add_key = |app: &mut StudioApp, path: &str, local: Time| {
+        if let Some(tr) = mc.keyframes.get(path)
             && tr.key_at(local).is_none()
             && let Some(v) = tr.eval(local)
         {
             let mut changed = mc.clone();
             let interp = tr.keys.iter().rev().find(|k| k.time < local).map_or(m::Interp::Ease, |k| k.interp);
-            if let Some(t2) = changed.keyframes.get_mut(&c.path) {
+            if let Some(t2) = changed.keyframes.get_mut(path) {
                 t2.set_key(m::Keyframe::new(local, v, interp));
             }
             app.doc.apply("Add keyframe", m::Edit::SetClip { seq, clip: Box::new(changed) });
+        }
+    };
+    // Double-click on a curve: a key there. A double-click on empty space
+    // does nothing; the clip stays selected.
+    if resp.double_clicked()
+        && hot.is_none()
+        && let Some(q) = pointer
+        && let Some((path, local)) = curve_at(q)
+    {
+        add_key(app, &path, local);
+    }
+    // Right-click a curve between keys: "Add keyframe" there.
+    let add_menu_id = egui::Id::unique(("graph-add-menu", id));
+    if resp.secondary_clicked()
+        && hot.is_none()
+        && let Some(q) = pointer
+        && let Some((path, local)) = curve_at(q)
+    {
+        st.add_at = Some((path, local, q));
+        kit::set_open(ui.ctx(), add_menu_id, true);
+    }
+    if let Some((path, local, q)) = st.add_at.clone() {
+        let mut add = false;
+        kit::popover(ui.ctx(), add_menu_id, Rect::from_center_size(q, Vec2::splat(2.0)), kit::Side::Below, 160.0, |ui| {
+            add = MenuItem::new("Add keyframe").icon(crate::icons::Icon::Diamond).show(ui).clicked();
+        });
+        if add {
+            kit::set_open(ui.ctx(), add_menu_id, false);
+            add_key(app, &path, local);
+            st.add_at = None;
+        } else if !kit::is_open(ui.ctx(), add_menu_id) {
+            st.add_at = None;
         }
     }
     // Delete the selected key.
@@ -561,7 +595,7 @@ mod tests {
         let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
         app.doc = s.doc;
         app.editor.selection = vec![id];
-        toggle(&ctx);
+        set_on(&ctx, true);
         let mut frame = eframe::Frame::_new_kittest();
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 1000.0));
         let mut clock = 0.0;
@@ -603,5 +637,16 @@ mod tests {
         run(&mut app, vec![]);
         let n = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap().keyframes["transform.rotation"].keys.len();
         assert_eq!(n, 3, "a key was added on the curve");
+        // A double-click on empty space adds nothing and keeps the clip selected.
+        let empty = Pos2::new(mid_x, mid.y - 90.0);
+        run(&mut app, vec![egui::Event::PointerMoved(empty)]);
+        for _ in 0..2 {
+            run(&mut app, vec![press(empty, true)]);
+            run(&mut app, vec![press(empty, false)]);
+        }
+        run(&mut app, vec![]);
+        assert_eq!(app.editor.selection, vec![id], "the clip stays selected");
+        let n = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap().keyframes["transform.rotation"].keys.len();
+        assert_eq!(n, 3, "no key on empty space");
     }
 }

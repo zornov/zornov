@@ -405,6 +405,10 @@ impl StudioApp {
             }
         }
         let Some(path) = self.cli.shot.clone() else { return };
+        // A scripted run takes its pictures itself.
+        if self.cli.ui_script.is_some() {
+            return;
+        }
         // Wait for background thumbnails so the picture is complete.
         let settled = self.frame >= self.cli.frames as u64 && self.thumbs.pending() == 0;
         if settled && !self.shot_requested {
@@ -448,6 +452,7 @@ impl eframe::App for StudioApp {
         self.thumbs.pump(&ctx);
         self.apply_prefs(&ctx);
         self.autosave_tick();
+        self.files_frame(&ctx);
         self.keep_session();
         self.library_tick();
         self.recents_tick();
@@ -476,7 +481,7 @@ impl eframe::App for StudioApp {
         let now = ctx.input(|i| i.time);
         for job in self.jobs.tick(dt, now) {
             match (&job.error, job.cancelled) {
-                (Some(e), _) => kit::push(&ctx, format!("{} failed: {e}", job.name), None, Some(icons::Icon::Warning)),
+                (Some(e), _) => kit::push(&ctx, format!("Couldn't export {}: {e}", job.name), None, Some(icons::Icon::Warning)),
                 (None, true) => kit::push(&ctx, format!("{} cancelled", job.name), None, Some(icons::Icon::XCircle)),
                 (None, false) => {
                     let id = kit::push(&ctx, format!("{} finished", job.name), job.path.as_ref().map(|_| "Show in Finder"), Some(icons::Icon::CheckCircle));
@@ -497,6 +502,10 @@ impl eframe::App for StudioApp {
         let t = theme::tokens(&ctx);
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0, t.ground);
+        // Packages Finder asked to open (a double-click, a drop on the Dock icon).
+        for path in crate::open_files::take() {
+            self.open_folder(&ctx, Some(path));
+        }
         match self.screen {
             Screen::Start => screens::start::show(self, ui),
             Screen::Editor | Screen::Export | Screen::Settings => editor::show(self, ui),
@@ -517,6 +526,15 @@ impl eframe::App for StudioApp {
             Overlay::Production => screens::production::show(self, &ctx),
             Overlay::Help => crate::help::show(self, &ctx),
             Overlay::None => {}
+        }
+        // Toasts on the screens with no viewer; the editor draws its own
+        // (above the transport), never both.
+        if !matches!(self.screen, Screen::Editor | Screen::Export | Screen::Settings) {
+            if let Some(id) = kit::show_overlay(&ctx) {
+                if let Some((_, path)) = self.reveal.take().filter(|(rid, _)| *rid == id) {
+                    let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
+                }
+            }
         }
         crate::release::notice(self, &ctx);
         if self.bench.is_some() {

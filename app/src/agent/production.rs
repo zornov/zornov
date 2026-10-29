@@ -251,7 +251,7 @@ impl Session {
 
     fn production_out_dir(&self) -> PathBuf {
         match self.production_dir() {
-            Some(d) => d.join("production"),
+            Some(d) => studio_model::file::ProjectFolder::new(d).generated_dir(studio_model::file::MadeKind::Production),
             None => studio_paths::cache().join("production"),
         }
     }
@@ -863,7 +863,7 @@ mod tests {
         for what in ["breakdown", "schedule", "budget", "pipeline", "progress"] {
             let e = prod(&mut s, json!({"do": "export", "what": what}));
             let path = e["written"].as_str().unwrap();
-            assert!(path.replace('\\', "/").contains("/production/"), "{path}");
+            assert!(path.replace('\\', "/").to_lowercase().contains("/production/"), "{path}");
             assert!(std::fs::read(path).unwrap().starts_with(b"%PDF"), "{what}");
         }
         let all = prod(&mut s, json!({"do": "export", "what": "all_call_sheets"}));

@@ -40,6 +40,26 @@ with no standard text there fails the build, so add the text when
 `deny.toml` allows a new licence. Identical texts are given once. The file
 depends only on the lock file, so it is the same on every machine.
 
+## The project document type (macOS)
+
+A Zornov project is a `.zornov` package: one item in Finder that Zornov opens.
+The `Info.plist` that `cargo xtask bundle` writes declares the type
+(`com.zornov.project`, conforming to `com.apple.package` and
+`public.composite-content`) and Zornov as its editor, with `ProjectIcon.icns`
+as the icon. Until `packaging/brand/zornov-project.icns` exists the app icon is
+used for it. After a bundle, check that the system knows the type, with a
+package made by the app (not a project of yours):
+
+```
+mdls -name kMDItemContentType -name kMDItemContentTypeTree Name.zornov
+```
+
+It should name `com.zornov.project`, then `com.apple.package`. If it shows a
+`dyn.` type instead, register the app once with
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f dist/Zornov.app`.
+Double-clicking the package should open it in Zornov; this cannot be tested
+without the window.
+
 ## One-time setup: macOS signing and notarization
 
 You need an Apple Developer Program membership.
@@ -71,6 +91,18 @@ staples it, builds the DMG, signs, notarizes and staples that too, and writes
 the signed update archive. Options: `--no-notarize` (signed DMG, no Apple
 round trip), `--identity ID`, `--exe PATH` (use a binary you already built).
 Without credentials it fails with the list of what is missing.
+
+`release-mac` ends its signing with `cargo xtask check-release` on the stapled
+app (host paths, stripped symbols, entitlements, Developer ID signature,
+linked libraries, update key and version, size budget), so a failing app never
+reaches the DMG. Run `cargo xtask check-release [APP] [--no-notarize]` on any
+`Zornov.app` (default `dist/release/macos/Zornov.app`); it lists every failure
+with its fix. An ad hoc build (`--identity -`) skips it.
+
+The size budget is `packaging/macos/size-budget.conf`: the binary may grow
+`growth_percent` over `binary_bytes` before a release fails. When a change makes
+the app smaller, keep the gain with `cargo xtask check-release APP --record-size`;
+that only lowers the budget, and raising it needs `--allow-growth` as well.
 
 The entitlements file asks for only the microphone (voice-overs). Zornov loads
 no third-party libraries and generates no code at run time, so it needs

@@ -38,7 +38,7 @@ pub enum Panel {
     Record,
     /// The cutting room's lists: timeline index, checks, takes, sequences, script.
     Editorial,
-    /// The AI editor: its conversations, steps and composer.
+    /// The Assistant: its conversations, steps and composer.
     Ai,
 }
 
@@ -57,7 +57,7 @@ impl Panel {
             Panel::Review => "Review",
             Panel::Record => "Record",
             Panel::Editorial => "Editorial",
-            Panel::Ai => "AI editor",
+            Panel::Ai => "Assistant",
         }
     }
 
@@ -128,7 +128,8 @@ impl Panel {
         self != Panel::Viewer
     }
 
-    /// Panels that can also float in a window of their own.
+    /// Panels that can also be floated in a window of their own, by choice
+    /// ("Float in a window"): they open docked, never over the editor.
     pub fn floats(self) -> bool {
         matches!(self, Panel::Review | Panel::Record | Panel::Editorial)
     }
@@ -716,12 +717,18 @@ impl Tree {
         let (target, zone) = match p {
             Panel::Library => (Some(Panel::Viewer), Zone::Left),
             Panel::Timeline => (None, Zone::Bottom),
-            Panel::Sound if self.is_open(Panel::Timeline) => (Some(Panel::Timeline), Zone::Tab),
+            // The mixer beside the timeline, never in its place: levels are
+            // set while the clips go by.
+            Panel::Sound if self.is_open(Panel::Timeline) => (Some(Panel::Timeline), Zone::Right),
             Panel::Sound => (None, Zone::Bottom),
-            // The AI editor and the cutting room's lists where the Library is
-            // (the AI editor used to be a Library section).
-            Panel::Ai | Panel::Editorial if self.is_open(Panel::Library) => (Some(Panel::Library), Zone::Tab),
-            Panel::Ai | Panel::Editorial => (Some(Panel::Viewer), Zone::Left),
+            // The browser zone holds the tools that bring things in: the AI
+            // editor, the cutting room's lists and Record (the AI editor used
+            // to be a Library section).
+            Panel::Ai | Panel::Editorial | Panel::Record if self.is_open(Panel::Library) => (Some(Panel::Library), Zone::Tab),
+            Panel::Ai | Panel::Editorial | Panel::Record => (Some(Panel::Viewer), Zone::Left),
+            // Review notes, versions and the team join the Inspector's zone.
+            Panel::Review if self.is_open(Panel::Inspector) => (Some(Panel::Inspector), Zone::Tab),
+            // Scopes beside the picture (the Viewer keeps its minimum width).
             _ => (Some(Panel::Viewer), Zone::Right),
         };
         self.dock(p, target, zone, lay)

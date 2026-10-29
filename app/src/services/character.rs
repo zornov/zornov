@@ -403,7 +403,7 @@ pub fn link_to_bone(doc: &mut Doc, child: u32, parent: u32, bone: u32, at: Time)
 /// temporary one).
 pub fn parts_dir(doc: &Doc) -> PathBuf {
     let home = if cfg!(test) { std::env::temp_dir().join("studio-tests") } else { studio_paths::studio() };
-    doc.folder.as_ref().map(|f| f.root().join("Parts")).unwrap_or_else(|| home.join("Parts"))
+    doc.folder.as_ref().map(|f| f.generated_dir(m::file::MadeKind::Parts)).unwrap_or_else(|| home.join("Parts"))
 }
 
 fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) -> Result<(), String> {

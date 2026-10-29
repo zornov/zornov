@@ -4,31 +4,64 @@
 //! Shared components. Each is built once here and reused by every screen,
 //! so spacing, states and motion stay identical everywhere (spec §3).
 //!
+//! # Which component for what
+//!
+//! | Need | Use |
+//! |---|---|
+//! | The one main action of a view | [`Button::primary`] (one per surface) |
+//! | An ordinary action | [`Button::secondary`] |
+//! | An action in a toolbar or a quiet inline action | [`Button::ghost`] |
+//! | A destructive action | [`Button::new`] with [`Kind::Danger`] |
+//! | An action with only an icon | [`IconButton`] (always has a tooltip, add the shortcut) |
+//! | An on/off setting | [`toggle`] |
+//! | Tabs of a panel or screen | [`tab_bar`] |
+//! | Switching a mode or a view inside a tab | [`segmented`] |
+//! | Filtering by category | [`chip`] / [`chip_group`] |
+//! | Choosing one value from a list | [`menu_button`] |
+//! | A command menu opened from a button | [`menu_group_button`] with [`MenuItem`]s, [`menu_group`] for labelled sections |
+//! | Related toolbar controls | [`toolbar_group`] (give it a label; it is the group's tooltip) |
+//! | A row in a list with hover actions | [`ListRow`] |
+//! | A grid of thumbnails | [`TileGrid`] |
+//! | Nothing to show yet | [`empty_state`] (icon, one sentence, one action) |
+//! | A collapsible block of settings | [`Section`] |
+//! | A value you drag | [`slider`] / the fields in `field` |
+//! | A message that goes away | [`toast`] |
+//! | A dialog or a sheet | [`modal`] / [`sheet`] |
+//!
+//! Spacing, sizes and colours come from [`crate::theme`]; do not write
+//! numbers or colour literals in a screen.
+//!
 //! Every widget computes a [`State`] from its response and paints from that
 //! state alone. The gallery passes forced states to show each variant
 //! side by side.
 
 pub mod anim;
+pub mod bars;
 pub mod button;
 pub mod colour;
+pub mod confirm;
 pub mod controls;
 pub mod empty;
 pub mod field;
 pub mod fit;
 pub mod popover;
+pub mod rows;
 pub mod section;
 pub mod slider;
 pub mod tiles;
 pub mod toast;
 
 pub use anim::*;
+pub use bars::*;
 pub use button::*;
 pub use colour::*;
+pub use confirm::*;
 pub use controls::*;
 pub use empty::*;
 pub use field::*;
 pub use fit::*;
 pub use popover::*;
+pub use rows::*;
 pub use section::*;
 pub use slider::*;
 pub use tiles::*;

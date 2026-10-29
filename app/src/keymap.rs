@@ -60,11 +60,36 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, key))
 }
 
+/// Editing keys that have an id (so they can be rebound, and show in
+/// menus) but no row in Settings ▸ Shortcuts yet: (id, name, default).
+// TODO(settings): move these rows into `SHORTCUTS` and delete this table.
+pub const EXTRA: &[(&str, &str, &str)] = &[
+    ("second-back", "Back one second", "⇧←"),
+    ("second-fwd", "Forward one second", "⇧→"),
+    ("to-start", "Go to start", "Home"),
+    ("to-end", "Go to end", "End"),
+    ("delete-fwd", "Delete (forward delete key)", "⌦"),
+    ("zoom-in-plus", "Zoom in (plus key)", "⌘+"),
+    ("group", "Group clips", "⌘G"),
+    ("ungroup", "Ungroup clips", "⇧⌘G"),
+    ("link", "Link clips", "⇧⌘L"),
+    ("unlink", "Unlink clips", "⌥⇧⌘L"),
+    ("freeze", "Freeze frame at playhead", "⌥F"),
+    ("reverse", "Reverse clip", "⌃R"),
+    ("copy-look", "Copy look", "⌥⌘C"),
+    ("paste-look", "Paste look", "⌥⌘V"),
+];
+
+/// Every action with keys: the Settings table, then [`EXTRA`].
+fn table() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
+    SHORTCUTS.iter().chain(EXTRA.iter())
+}
+
 /// The keys of an action: the person's, or the default.
 pub fn keys<'a>(prefs: &'a Prefs, id: &str) -> Option<&'a str> {
     match prefs.shortcuts.iter().find(|(a, _)| a == id) {
         Some((_, k)) => Some(k.as_str()).filter(|k| !k.is_empty()),
-        None => SHORTCUTS.iter().find(|(a, _, _)| *a == id).map(|(_, _, d)| *d).filter(|d| !d.is_empty()),
+        None => table().find(|(a, _, _)| *a == id).map(|(_, _, d)| *d).filter(|d| !d.is_empty()),
     }
 }
 
@@ -73,7 +98,7 @@ pub fn keys<'a>(prefs: &'a Prefs, id: &str) -> Option<&'a str> {
 /// their own handlers). Shortcuts with more modifiers are tried first, so
 /// ⇧⌘Z is redo, not undo.
 pub fn pressed(ctx: &egui::Context, prefs: &Prefs, ids: &[&str]) -> Vec<&'static str> {
-    let mut table: Vec<(&'static str, KeyboardShortcut)> = SHORTCUTS.iter().filter(|(id, _, _)| ids.contains(id)).filter_map(|(id, _, _)| Some((*id, parse(keys(prefs, id)?)?))).collect();
+    let mut table: Vec<(&'static str, KeyboardShortcut)> = table().filter(|(id, _, _)| ids.contains(id)).filter_map(|(id, _, _)| Some((*id, parse(keys(prefs, id)?)?))).collect();
     let count = |m: Modifiers| m.ctrl as u8 + m.alt as u8 + m.shift as u8 + (m.command || m.mac_cmd) as u8;
     table.sort_by_key(|(_, k)| std::cmp::Reverse(count(k.modifiers)));
     let mut out = Vec::new();
@@ -92,10 +117,67 @@ pub fn hit(ctx: &egui::Context, prefs: &Prefs, id: &str) -> bool {
     !pressed(ctx, prefs, &[id]).is_empty()
 }
 
+/// Who has the keyboard. The editor's own shortcuts (split, delete, select
+/// all, shuttle…) belong to the timeline and the viewer; any other panel or
+/// editor that works on keys of its own says so with [`claim`], and the
+/// dispatcher then leaves those keys alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KeyOwner {
+    /// A panel with a selection of its own (the node graph, the curve
+    /// editor, shapes): Delete, ⌘A, letters and arrows are its. Space still
+    /// plays and ⌘Z still undoes the project.
+    Panel,
+    /// As `Panel`, for an editor with its own undo history: ⌘Z is its too.
+    PanelUndo,
+    /// Typing: every key without ⌘, ⌃ or ⌥ is text, Space and Delete included.
+    Text,
+}
+
+fn claim_id() -> egui::Id {
+    egui::Id::unique("key-owner")
+}
+
+/// Says that the caller owns the keyboard this frame. Call it every frame the
+/// panel is focused (or hovered, for one that takes keys under the pointer);
+/// the dispatcher runs before the panels draw and reads the last frame's claim.
+pub fn claim(ctx: &egui::Context, owner: KeyOwner) {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        let kept = d.get_temp::<(u64, KeyOwner)>(claim_id()).filter(|(at, _)| *at == now).map(|(_, o)| o);
+        d.insert_temp(claim_id(), (now, kept.map_or(owner, |k| k.max(owner))));
+    });
+}
+
+/// Who claimed the keyboard this frame or the one before, if anyone did.
+pub fn owner(ctx: &egui::Context) -> Option<KeyOwner> {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<(u64, KeyOwner)>(claim_id())).filter(|(at, _)| now.saturating_sub(*at) <= 1).map(|(_, o)| o)
+}
+
+/// Whether the editor's action `id` may run while `owner` has the keyboard:
+/// the app-wide ones (export, the assistant, workspaces and panels, which all
+/// use ⌘ or ⌥), Space to play and, unless the owner has its own history, undo.
+pub fn allowed_under(owner: Option<KeyOwner>, prefs: &Prefs, id: &str) -> bool {
+    let Some(owner) = owner else { return true };
+    let chord = keys(prefs, id).and_then(parse).is_some_and(|k| k.modifiers.command || k.modifiers.mac_cmd || k.modifiers.ctrl || k.modifiers.alt);
+    match id {
+        "export" | "agent" | "all-projects" => chord,
+        "undo" | "redo" => owner == KeyOwner::Panel,
+        "play" => owner != KeyOwner::Text,
+        _ => (id.starts_with("workspace-") || id.starts_with("panel-")) && chord,
+    }
+}
+
+/// The actions of `ids` that may run now (see [`allowed_under`]).
+pub fn scoped<'a>(ctx: &egui::Context, prefs: &Prefs, ids: &[&'a str]) -> Vec<&'a str> {
+    let o = owner(ctx);
+    ids.iter().copied().filter(|id| allowed_under(o, prefs, id)).collect()
+}
+
 /// Actions sharing a shortcut: (keys, actions) for every clash.
 pub fn conflicts(prefs: &Prefs) -> Vec<(String, Vec<&'static str>)> {
     let mut by: Vec<(KeyboardShortcut, String, Vec<&'static str>)> = Vec::new();
-    for (id, _, _) in SHORTCUTS {
+    for (id, _, _) in table() {
         let Some(k) = keys(prefs, id) else { continue };
         let Some(s) = parse(k) else { continue };
         match by.iter_mut().find(|(x, _, _)| *x == s) {
@@ -121,6 +203,7 @@ pub const FIXED: &[(&str, &str, &str)] = &[
     ("⇧⌘S", "Save as", "app.rs"),
     ("⌘I", "Import media", "app.rs"),
     ("⇧⌘P", "Paint", "app.rs"),
+    ("⌘\\", "Maximise panel", "editor/dock_ui.rs"),
     ("F1", "Search help", "app.rs"),
     ("⌘L", "Loop playback", "editor/viewer.rs"),
     ("⇧G", "Graph editor", "editor/timeline.rs"),
@@ -159,12 +242,25 @@ pub fn hint(prefs: &Prefs, id: &str) -> String {
 
 /// The display name of an action.
 pub fn name(id: &str) -> &'static str {
-    SHORTCUTS.iter().find(|(a, _, _)| *a == id).map_or("", |(_, n, _)| *n)
+    table().find(|(a, _, _)| *a == id).map_or("", |(_, n, _)| *n)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extra_keys_parse_and_clash_with_nothing() {
+        let prefs = Prefs::default();
+        for (id, _, d) in EXTRA {
+            assert!(parse(d).is_some(), "{id}: {d}");
+            assert!(SHORTCUTS.iter().all(|(o, _, _)| o != id), "{id} is listed twice");
+            assert_eq!(keys(&prefs, id), Some(*d));
+        }
+        let clash: Vec<_> = conflicts(&prefs).into_iter().filter(|(_, ids)| ids.iter().any(|i| EXTRA.iter().any(|e| e.0 == *i))).collect();
+        assert!(clash.is_empty(), "{clash:?}");
+        assert_eq!(name("group"), "Group clips");
+    }
 
     #[test]
     fn reads_what_settings_writes() {
@@ -291,5 +387,21 @@ mod tests {
         p.shortcuts.push(("split".into(), "B".into()));
         assert_eq!(clashes_with(&p, "split"), vec!["blade"]);
         assert_eq!(keys(&p, "split"), Some("B"));
+    }
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+
+    #[test]
+    fn a_claim_lets_through_only_the_app_wide_keys() {
+        let p = Prefs::default();
+        let all = |o| ["undo", "redo", "play", "split", "delete", "select-all", "export", "workspace-edit", "panel-library", "marker", "in", "frame-fwd", "shuttle-fwd", "duplicate"].map(|id| (id, allowed_under(o, &p, id)));
+        assert!(all(None).iter().all(|(_, ok)| *ok), "nobody owns the keyboard: everything runs");
+        let allowed = |o| all(o).into_iter().filter(|(_, ok)| *ok).map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(allowed(Some(KeyOwner::Panel)), ["undo", "redo", "play", "export", "workspace-edit", "panel-library"]);
+        assert_eq!(allowed(Some(KeyOwner::PanelUndo)), ["play", "export", "workspace-edit", "panel-library"]);
+        assert_eq!(allowed(Some(KeyOwner::Text)), ["export", "workspace-edit", "panel-library"]);
     }
 }

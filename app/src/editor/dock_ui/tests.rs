@@ -64,6 +64,14 @@ impl Drive {
     fn drag(&mut self, from: Pos2, to: Pos2) {
         self.drag_with(from, to, |_| {});
     }
+    fn double_click(&mut self, at: Pos2) {
+        self.step(vec![Event::PointerMoved(at)]);
+        for _ in 0..2 {
+            self.step(vec![Drive::button(at, true)]);
+            self.step(vec![Drive::button(at, false)]);
+        }
+        self.frames(2);
+    }
     fn lay(&self) -> Layout {
         self.h.app.editor.dock_layout.clone().expect("drawn")
     }
@@ -279,31 +287,102 @@ fn the_ai_layout_tool_moves_panels() {
 }
 
 #[test]
-fn a_floating_panel_docks_and_floats_again() {
+fn a_secondary_panel_opens_docked_and_floats_only_by_choice() {
     let mut d = Drive::new(big());
     let ctx = d.h.ctx.clone();
     crate::editor::review::set_open(true);
     d.frames(2);
-    assert!(!docked(&ctx, Panel::Review));
-    let lay = d.lay();
-    let mut app = std::mem::replace(&mut d.h.app.editor.dock, Tree::default());
-    app.dock(Panel::Review, Some(Panel::Viewer), Zone::Right, &lay);
-    d.h.app.editor.dock = app;
-    d.frames(2);
-    assert!(docked(&ctx, Panel::Review) && crate::editor::review::is_open());
-    // The Layout menu's checkmark and closing it.
+    assert!(docked(&ctx, Panel::Review), "turning Review on docks it");
+    let tree = &d.h.app.editor.dock;
+    assert!(tree.is_showing(Panel::Review) && tree.find(Panel::Review) == tree.find(Panel::Inspector), "a tab in the Inspector's zone");
+    // The Panels checkmark and closing it.
     assert!(panel_shown(&d.h.app, &ctx, Panel::Review, false));
     toggle_panel(&mut d.h.app, &ctx, Panel::Review, false);
     d.frames(2);
     assert!(!crate::editor::review::is_open() && !d.h.app.editor.dock.is_open(Panel::Review));
-    // Back, then out into its own place.
+    // Back, then out into a window of its own because the person said so.
     toggle_panel(&mut d.h.app, &ctx, Panel::Review, false);
     d.frames(2);
     assert!(d.h.app.editor.dock.is_open(Panel::Review));
     float(&mut d.h.app, &ctx, Panel::Review);
     d.frames(2);
-    assert!(!d.h.app.editor.dock.contains(Panel::Review) && crate::editor::review::is_open());
+    assert!(!d.h.app.editor.dock.contains(Panel::Review) && crate::editor::review::is_open() && !docked(&ctx, Panel::Review));
+    // Closed, it is not a floating panel any more: the next time it docks.
     crate::editor::review::set_open(false);
+    d.frames(2);
+    crate::editor::review::set_open(true);
+    d.frames(2);
+    assert!(docked(&ctx, Panel::Review));
+    crate::editor::review::set_open(false);
+}
+
+/// The four zones are browser | viewer | inspector | timeline: tools open as
+/// tabs or beside their zone, never over the picture or in the timeline's place.
+#[test]
+fn secondary_panels_never_cover_the_viewer_or_replace_the_timeline() {
+    for p in [Panel::Review, Panel::Record, Panel::Editorial, Panel::Scopes, Panel::Sound, Panel::Ai] {
+        let mut d = Drive::new(big());
+        let ctx = d.h.ctx.clone();
+        open_panel(&mut d.h.app, &ctx, p, false);
+        d.frames(3);
+        assert!(d.h.app.editor.dock.is_showing(p), "{p:?} is docked and showing");
+        assert!(!d.h.app.editor.dock.is_popped(p), "{p:?} is not in a window");
+        assert!(d.h.app.editor.dock.is_showing(Panel::Timeline), "{p:?}: the timeline is still showing");
+        assert!(d.h.app.editor.dock.is_showing(Panel::Viewer), "{p:?}: the viewer is still showing");
+        let (panel, viewer, timeline) = (d.rect(p), d.rect(Panel::Viewer), d.rect(Panel::Timeline));
+        assert!(!panel.intersects(viewer.shrink(1.0)), "{p:?} {panel:?} is over the viewer {viewer:?}");
+        assert!(viewer.width() >= crate::editor::VIEWER_MIN, "{p:?}: the viewer keeps its width ({viewer:?})");
+        assert!(timeline.height() >= crate::editor::TIMELINE_MIN, "{p:?}: the timeline keeps its height ({timeline:?})");
+    }
+}
+
+#[test]
+fn the_mixer_sits_beside_the_timeline() {
+    let mut d = Drive::new(big());
+    let ctx = d.h.ctx.clone();
+    open_panel(&mut d.h.app, &ctx, Panel::Sound, false);
+    d.frames(3);
+    let (t, s) = (d.rect(Panel::Timeline), d.rect(Panel::Sound));
+    assert!(t.right() <= s.left() + 1.0 && (t.center().y - s.center().y).abs() < 4.0, "the mixer {s:?} is right of the timeline {t:?}");
+    assert!(d.h.app.editor.dock.is_showing(Panel::Timeline));
+}
+
+#[test]
+fn a_panel_maximises_and_restores() {
+    let mut d = Drive::new(big());
+    let ctx = d.h.ctx.clone();
+    let before = d.rect(Panel::Timeline);
+    // Double-click on the timeline's empty header space (the padding above its buttons).
+    d.double_click(egui::pos2(before.left() + before.width() * 0.05, before.top() + 5.0));
+    assert_eq!(d.h.app.editor.maximised, Some(Panel::Timeline), "double-click on a header maximises");
+    let body = d.lay().body;
+    assert_eq!(d.screen(d.lay().tile_of(Panel::Timeline).unwrap().rect).height(), before.height(), "the stored layout is the real one");
+    let drawn = d.h.app.editor.last_layout().body;
+    assert_eq!(drawn, body);
+    // The shortcut restores; View ▸ Maximise panel is the same toggle.
+    let chord = crate::keymap::parse("⌘\\").unwrap();
+    d.step(vec![Event::Key { key: chord.logical_key, physical_key: Some(chord.logical_key), pressed: true, repeat: false, modifiers: chord.modifiers }]);
+    d.frames(2);
+    assert_eq!(d.h.app.editor.maximised, None, "⌘\\ restores");
+    d.step(vec![Event::Key { key: chord.logical_key, physical_key: Some(chord.logical_key), pressed: true, repeat: false, modifiers: chord.modifiers }]);
+    d.frames(2);
+    assert!(d.h.app.editor.maximised.is_some(), "and maximises the panel last clicked (or the timeline)");
+    // Closing the maximised panel leaves no blank dock.
+    close_panel(&mut d.h.app, &ctx, Panel::Timeline, false);
+    d.frames(3);
+    assert_eq!(d.h.app.editor.maximised, None);
+}
+
+#[test]
+fn a_tab_maximises_its_panel_on_double_click() {
+    let mut d = Drive::new(big());
+    crate::editor::agent_panel::open(&mut d.h.app);
+    d.frames(3);
+    let ctx = d.h.ctx.clone();
+    let tab = tab_rect(&ctx, Panel::Library).expect("the Library's tab");
+    d.double_click(tab.center());
+    assert_eq!(d.h.app.editor.maximised, Some(Panel::Library));
+    assert!(d.h.app.editor.dock.is_showing(Panel::Library));
 }
 
 #[test]
@@ -395,21 +474,25 @@ fn a_panel_pops_out_into_its_own_window_and_docks_back() {
 }
 
 #[test]
-fn editorial_docks_and_floats() {
+fn editorial_opens_docked_in_the_browser_zone() {
     let mut d = Drive::new(big());
     let ctx = d.h.ctx.clone();
     d.h.app.editor.cutting.panel.open = true;
     d.frames(2);
-    assert!(!docked(&ctx, Panel::Editorial));
-    let lay = d.lay();
-    d.h.app.editor.dock.dock(Panel::Editorial, Some(Panel::Viewer), Zone::Right, &lay);
-    d.frames(2);
     assert!(docked(&ctx, Panel::Editorial) && d.h.app.editor.cutting.panel.open);
-    assert!(d.rect(Panel::Editorial).left() >= d.rect(Panel::Viewer).right());
+    let tree = &d.h.app.editor.dock;
+    assert!(tree.find(Panel::Editorial) == tree.find(Panel::Library), "a tab with the Library");
     // Its shortcut (the flag) closes the docked panel.
     d.h.app.editor.cutting.panel.open = false;
     d.frames(2);
     assert!(!d.h.app.editor.dock.is_open(Panel::Editorial));
+    // Dragged out beside the viewer it is still a docked panel.
+    d.h.app.editor.cutting.panel.open = true;
+    d.frames(2);
+    let lay = d.lay();
+    d.h.app.editor.dock.dock(Panel::Editorial, Some(Panel::Viewer), Zone::Right, &lay);
+    d.frames(2);
+    assert!(d.rect(Panel::Editorial).left() >= d.rect(Panel::Viewer).right());
 }
 
 #[test]
@@ -461,4 +544,52 @@ fn the_view_menu_toggles_the_inspector() {
         click(&mut d, item);
         assert_eq!(panel_shown(&d.h.app, &ctx, Panel::Inspector, false), want);
     }
+}
+
+#[test]
+fn closing_a_panel_gives_its_keys_back_to_the_editor() {
+    let mut d = Drive::new(big());
+    let ctx = d.h.ctx.clone();
+    ctx.data_mut(|x| x.insert_temp(scope_id(), KeyScope::Panel(Panel::Sound)));
+    close_panel(&mut d.h.app, &ctx, Panel::Sound, false);
+    assert_eq!(ctx.data(|x| x.get_temp::<KeyScope>(scope_id())), Some(KeyScope::Editor));
+    // A panel that is not on screen cannot keep the keys either.
+    assert_eq!(live_scope(KeyScope::Panel(Panel::Review), &[Panel::Timeline]), KeyScope::Editor);
+    assert_eq!(live_scope(KeyScope::Panel(Panel::Timeline), &[Panel::Timeline]), KeyScope::Panel(Panel::Timeline));
+}
+
+#[test]
+fn switching_workspace_gives_the_keys_back_to_the_editor() {
+    let mut d = Drive::new(big());
+    let ctx = d.h.ctx.clone();
+    ctx.data_mut(|x| x.insert_temp(scope_id(), KeyScope::Panel(Panel::Review)));
+    let w = crate::workspaces::all().remove(0);
+    crate::workspaces::switch(&mut d.h.app, &ctx, &w);
+    assert_eq!(ctx.data(|x| x.get_temp::<KeyScope>(scope_id())), Some(KeyScope::Editor));
+}
+
+#[test]
+fn a_cut_that_is_gone_leaves_the_inspector_on_the_project() {
+    let mut d = Drive::new(big());
+    d.h.app.editor.selection.clear();
+    d.h.app.editor.selected_cut = Some(987_654);
+    d.frames(3);
+    assert_eq!(d.h.app.editor.selected_cut, None);
+}
+
+#[test]
+fn a_panel_floated_last_run_comes_back_floated() {
+    let h = Harness::new(&["--screen", "editor"]);
+    let ctx = h.ctx.clone();
+    let mut d = Drive { h, frame: eframe::Frame::_new_kittest(), t: 0.0, size: big() };
+    // As the memory of the last run: Review was floated, and is off now.
+    set_floated(&ctx, Panel::Review, true);
+    crate::editor::review::set_open(false);
+    d.frames(3);
+    assert!(crate::editor::review::is_open(), "Review is open again");
+    assert!(!d.h.app.editor.dock.contains(Panel::Review), "in its own window, not docked");
+    // Closing it is remembered too.
+    close_panel(&mut d.h.app, &ctx, Panel::Review, false);
+    d.frames(3);
+    assert!(!floated(&ctx, Panel::Review));
 }

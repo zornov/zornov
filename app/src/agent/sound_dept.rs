@@ -14,6 +14,7 @@
 use super::{Session, f, secs};
 use crate::sound_desk::{self as desk, AdrCue, Desk, LaneMix, Send};
 use serde_json::{Value, json};
+use studio_model as m;
 use studio_sound::loudness::LoudnessTarget;
 use studio_sound::mixer::BusKind;
 use studio_sound::surround::Layout;
@@ -543,7 +544,7 @@ impl Session {
         };
         let dir = match a.get("path").and_then(Value::as_str) {
             Some(p) => std::path::PathBuf::from(p),
-            None => self.home.clone().map(|h| h.join("Stems")).ok_or("stems needs \"path\" (a folder) when the project has no folder")?,
+            None => self.home.clone().map(|h| m::file::ProjectFolder::new(h).export_dir(m::file::ExportKind::Stems)).ok_or("stems needs \"path\" (a folder) when the project has no folder")?,
         };
         let title = self.project_title();
         let written = desk::render::export_stems(&self.doc.model, &dir, layout, a.get("separate_bg").and_then(Value::as_bool) == Some(true), &title)?;

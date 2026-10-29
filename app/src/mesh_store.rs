@@ -109,7 +109,7 @@ pub fn export_model(c: &m::Clip, mesh: &Mesh, path: &std::path::Path) -> Result<
 /// This project's models folder (a shared one until it is saved).
 pub fn dir(doc: &Doc) -> std::path::PathBuf {
     match doc.folder.as_ref() {
-        Some(f) => f.root().join("Models"),
+        Some(f) => f.media_of(m::file::MediaKind::Models3d),
         None => std::env::temp_dir().join("Zornov Models"),
     }
 }
@@ -137,7 +137,8 @@ pub fn save(doc: &Doc, mesh: &Mesh) -> Result<String, String> {
 /// of superseded `.smesh` files behind. Files younger than a minute stay
 /// (one may be written and not yet pointed at). Returns bytes freed.
 pub fn prune(root: &std::path::Path, history: &str) -> u64 {
-    let models = root.join("Models");
+    let pf = m::file::ProjectFolder::new(root);
+    let models = pf.media_of(m::file::MediaKind::Models3d);
     let Ok(entries) = std::fs::read_dir(&models) else { return 0 };
     let mut refs = String::from(history);
     let mut read = |p: &std::path::Path| {
@@ -145,7 +146,7 @@ pub fn prune(root: &std::path::Path, history: &str) -> u64 {
             refs.push_str(&t);
         }
     };
-    for d in [root.to_path_buf(), root.join("versions"), root.join(".cache"), root.join("cache")] {
+    for d in pf.reference_dirs() {
         for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
             let p = e.path();
             if p.extension().is_some_and(|x| x == "json" || x == "jsonl") {
@@ -158,7 +159,7 @@ pub fn prune(root: &std::path::Path, history: &str) -> u64 {
     for e in entries.flatten() {
         let p = e.path();
         let Some(name) = p.file_name().and_then(|n| n.to_str()) else { continue };
-        if !(name.ends_with(".smesh") || name.ends_with(".smodel")) || refs.contains(name) {
+        if !is_content_named(name) || refs.contains(name) {
             continue;
         }
         let Ok(md) = e.metadata() else { continue };
@@ -170,6 +171,14 @@ pub fn prune(root: &std::path::Path, history: &str) -> u64 {
         }
     }
     freed
+}
+
+/// Whether `name` is one this module wrote: the content hash, then
+/// `.smesh` or `.smodel`. In a package the folder also holds models the
+/// person imported, which are never judged unused.
+fn is_content_named(name: &str) -> bool {
+    let Some(stem) = name.strip_suffix(".smesh").or_else(|| name.strip_suffix(".smodel")) else { return false };
+    stem.len() == 16 && stem.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// The model file a clip shows, if it is a model clip.
@@ -315,7 +324,7 @@ pub fn new_clip(id: u64, lane: u64, at: i64, dur: i64, file: String, name: &str)
 /// After a project moves, model files are found again in its own
 /// `Models` folder by name.
 pub fn relink(project: &mut m::Project, root: &std::path::Path) {
-    let models = root.join("Models");
+    let models = m::file::ProjectFolder::new(root).media_of(m::file::MediaKind::Models3d);
     for seq in &mut project.sequences {
         for c in &mut seq.clips {
             let Some(file) = file_of(c) else { continue };
@@ -387,5 +396,19 @@ pub fn import_models(app: &mut crate::app::StudioApp, ctx: &eframe::egui::Contex
                 crate::kit::push(ctx, format!("Could not import {name}: {e}"), None, Some(crate::icons::Icon::Warning));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::is_content_named;
+
+    #[test]
+    fn only_names_this_module_wrote_are_judged_unused() {
+        assert!(is_content_named("ba8912fc457eb160.smesh"));
+        assert!(is_content_named("0123456789abcdef.smodel"));
+        assert!(!is_content_named("chair.smesh"), "a model the person imported");
+        assert!(!is_content_named("ba8912fc457eb160.glb"));
+        assert!(!is_content_named("ba8912fc457eb16.smesh"));
     }
 }

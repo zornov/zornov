@@ -153,6 +153,12 @@ pub fn production_script(h: &mut Harness) {
     h.app.overlay = Overlay::Production;
 }
 
+/// Review, opened as a panel (View > Panels, or the Review workspace).
+fn open_review(h: &mut Harness) {
+    let ctx = h.ctx.clone();
+    crate::editor::dock_ui::open_panel(&mut h.app, &ctx, crate::dock::Panel::Review, false);
+}
+
 /// Paint with a picture open and every side section unfolded.
 pub fn paint_picture(h: &mut Harness) {
     let _ = crate::paint::apply(&[serde_json::json!({"op": "new", "name": "Overflow", "width": 683, "height": 1024, "background": "white"})]);
@@ -187,18 +193,21 @@ pub fn surfaces() -> Vec<Surface> {
         s("insp-audio", ED, |h| select(h, ClipKind::Audio), &[]),
         s("insp-audio-speed", ED, |h| select(h, ClipKind::Audio), &["Speed"]),
         s("insp-fx", ED, |h| select(h, ClipKind::Fx), &[]),
-        s("sound", ED, nothing, &["Sound: mixer, loudness and stems, dialogue and ADR, subtitles and dubs"]),
-        s("review", ED, nothing, &["Review"]),
-        s("review-saved", ED, saved_project, &["Review"]),
-        s("compositor", ED, select_first_clip, &["Compositor: the selected clip's node graph (keys, cleanup, set extension, depth of field)"]),
-        s("graph", ED, select_first_clip, &["Graph editor: the selected clip's animation as curves"]),
+        s("sound", ED, nothing, &["More", "Sound"]),
+        s("review", ED, open_review, &[]),
+        s("review-saved", ED, |h| {
+            saved_project(h);
+            open_review(h);
+        }, &[]),
+        s("compositor", ED, select_first_clip, &["Nodes"]),
+        s("graph", ED, select_first_clip, &["Curves"]),
         s("vector", ED, nothing, &["Vector art: draw logos, icons, illustrations and infographics"]),
         s("capture", ED, nothing, &["Record, voice-over, prompter and live"]),
         s("viewport-3d", ED, nothing, &["3D workspace"]),
         s("scopes", ED, nothing, &["Scopes"]),
         s("mograph", ED, nothing, &["Motion graphics: templates, shapes, charts, 3D text"]),
         s("annotate", ED, nothing, &["Annotate for the AI"]),
-        s("editorial", ED, nothing, &["Editorial: timeline index, gaps and duplicates, takes, sequences, find takes for a script line, edit by words (⌥E)"]),
+        s("editorial", ED, nothing, &["More", "Editorial"]),
         s("library", ED, |h| h.app.overlay = Overlay::Library, &[]),
         s("library-saved", ED, |h| {
             saved_project(h);
@@ -255,7 +264,7 @@ fn openers(h: &Harness) -> Vec<(accesskit::Role, String)> {
 }
 
 /// Named buttons that open a menu or popover.
-const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout", "3D camera and lights", "Background jobs", "Overlays", "Add", "More", "Safety", "Rights"];
+const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout", "Background jobs", "Overlays", "Add", "More", "Safety", "Rights"];
 
 /// Visit every surface at every size, open each tab, drop-down and menu on
 /// it, and collect what is cut off.
@@ -341,48 +350,56 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
     for (w, hh) in [(960.0, 600.0), (1440.0, 900.0)] {
         for s in surfaces().into_iter().filter(|s| CHECKED.contains(&s.name)) {
             visited += 1;
-            let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
-            let _viewport = crate::editor::viewport::test_lock();
-            let mut h = Harness::new(s.args).sized(w, hh);
-            (s.setup)(&mut h);
-            h.frames(8);
-            for c in s.clicks {
-                assert!(h.click(c), "{}: {c} can be clicked", s.name);
-            }
-            let (cuts, over) = (h.cut_text(), h.overlaps());
-            if s.name.starts_with("paint") {
-                let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
-            }
-            for c in s.clicks.iter().rev() {
-                h.click(c);
-            }
-            assert!(cuts.is_empty(), "{} at {w}×{hh}: text cut off with no way to see it: {cuts:#?}", s.name);
-            assert!(over.is_empty(), "{} at {w}×{hh}: drawn over each other: {over:#?}", s.name);
+            // A thread of its own for each, so what one surface leaves in
+            // thread-local state (the Review panel's, say) does not reach
+            // the next.
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
+                        let _viewport = crate::editor::viewport::test_lock();
+                        let mut h = Harness::new(s.args).sized(w, hh);
+                        (s.setup)(&mut h);
+                        h.frames(8);
+                        for c in s.clicks {
+                            assert!(h.click(c), "{}: {c} can be clicked", s.name);
+                        }
+                        let (cuts, over) = (h.cut_text(), h.overlaps());
+                        if s.name.starts_with("paint") {
+                            let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
+                        }
+                        for c in s.clicks.iter().rev() {
+                            h.click(c);
+                        }
+                        assert!(cuts.is_empty(), "{} at {w}×{hh}: text cut off with no way to see it: {cuts:#?}", s.name);
+                        assert!(over.is_empty(), "{} at {w}×{hh}: drawn over each other: {over:#?}", s.name);
+                    })
+                    .join()
+                    .unwrap_or_else(|e| std::panic::resume_unwind(e));
+            });
         }
     }
     assert_eq!(visited, 2 * CHECKED.len(), "every listed surface was looked at");
 }
 
-/// The viewer's 3D menu (screenshot case: it ran past the window's bottom):
-/// it stays inside the window and scrolls to its last item.
+/// The viewer's Add menu (screenshot case: its 3D menu ran past the window's
+/// bottom): it stays inside the window and scrolls to its last item.
 #[test]
 fn a_menu_taller_than_the_window_fits_it_and_scrolls_to_the_end() {
-    let last = studio_fx::particles::PRESETS.last().expect("particle presets").name;
+    let last = "Add a note";
     for (w, hh) in [(960.0, 600.0), (1440.0, 900.0), (2000.0, 1300.0)] {
         let _viewport = crate::editor::viewport::test_lock();
         let mut h = Harness::new(&["--screen", "editor"]).sized(w, hh);
         h.frames(6);
-        assert!(h.click("3D camera and lights"), "the 3D menu opens");
-        let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("viewer-3d-menu").with("area"))).expect("the menu's area");
+        let add = egui::Id::unique("viewer-add");
+        crate::kit::set_open(&h.ctx, add, true);
+        h.frames(6);
+        let area = h.ctx.memory(|m| m.area_rect(add.with("area"))).expect("the Add menu's area");
         let screen = Rect::from_min_size(egui::Pos2::ZERO, h.size);
         assert!(screen.contains_rect(area), "the menu {area:?} is inside the window {screen:?}");
-        // Taller than the window: it takes the room below its button.
-        assert!(area.bottom() > screen.bottom() - 40.0, "the menu uses the height it has: {area:?} in {screen:?}");
-        let visible = |h: &Harness| h.find_text(last).is_some_and(|r| screen.contains_rect(r) && r.bottom() <= area.bottom());
-        // A window tall enough shows it all; otherwise the end starts out of view.
-        if hh < 1200.0 {
-            assert!(!visible(&h), "{last} starts out of view at {w}×{hh}");
-        }
+        let visible = |h: &Harness| h.find_text(last).is_some_and(|r| area.contains_rect(r));
+        // Longer than its room, so the end starts out of view.
+        assert!(!visible(&h), "{last} starts out of view at {w}×{hh}");
         h.wheel(area.center(), 400.0);
         h.wheel(area.center(), 400.0);
         assert!(visible(&h), "wheeling brings {last} into view at {w}×{hh}");

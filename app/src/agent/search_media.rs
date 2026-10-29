@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
+use studio_model as m;
 
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Zornov";
 const DEFAULT_MAX: usize = 8;
@@ -597,7 +598,7 @@ impl Session {
         if plan.is_empty() {
             return Err(format!("Poly Haven has no downloadable files for {id}"));
         }
-        let dir = super::download::folder_for(home).join("PolyHaven").join(id);
+        let dir = super::download::folder_for_kind(home, m::file::MediaKind::Models3d).join("PolyHaven").join(id);
         std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make {}: {e}", dir.display()))?;
         let mut saved = Vec::new();
         for (rel, url) in &plan {
