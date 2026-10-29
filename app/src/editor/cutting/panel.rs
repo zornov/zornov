@@ -121,7 +121,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, grip: bool) {
         }
     });
     ui.separator();
-    egui::ScrollArea::vertical().id_salt("editorial-lists").auto_shrink([false, false]).show(ui, |ui| match app.editor.cutting.panel.tab {
+    egui::ScrollArea::vertical().id_salt("editorial-lists").auto_shrink([false, false]).show_v(ui, |ui| match app.editor.cutting.panel.tab {
         Tab::Index => index(app, ui),
         Tab::Checks => checks(app, ui),
         Tab::Takes => takes(app, ui),
@@ -147,18 +147,19 @@ fn index(app: &mut StudioApp, ui: &mut egui::Ui) {
     let want = p.filter.trim().to_lowercase();
     let rows = ed::timeline_index(&app.doc.model, app.doc.model.active());
     let mut go = None;
-    // A table keeps its columns: wider than the window, it scrolls sideways.
-    kit::scroll_wide(ui, "cut-index-scroll", |ui| egui::Grid::new("cut-index").striped(true).num_columns(4).show(ui, |ui| {
-        for r in rows.iter().filter(|r| want.is_empty() || r.name.to_lowercase().contains(&want) || r.detail.to_lowercase().contains(&want) || r.kind.contains(&want)) {
+    // Two lines a row, so the list fits the panel at any width: the time,
+    // kind and name, then the detail under them.
+    for r in rows.iter().filter(|r| want.is_empty() || r.name.to_lowercase().contains(&want) || r.detail.to_lowercase().contains(&want) || r.kind.contains(&want)) {
+        ui.horizontal_wrapped(|ui| {
             if ui.link(secs(r.start)).clicked() {
                 go = Some((r.start, r.clip));
             }
             ui.label(RichText::new(r.kind).font(theme::caption()));
             ui.label(&r.name);
-            ui.label(RichText::new(&r.detail).font(theme::caption()));
-            ui.end_row();
-        }
-    }));
+        });
+        ui.label(RichText::new(&r.detail).font(theme::caption()));
+        ui.add_space(2.0);
+    }
     if let Some((t, c)) = go {
         jump(app, t, c);
     }
