@@ -481,7 +481,7 @@ impl eframe::App for StudioApp {
         let now = ctx.input(|i| i.time);
         for job in self.jobs.tick(dt, now) {
             match (&job.error, job.cancelled) {
-                (Some(e), _) => kit::push(&ctx, format!("{} failed: {e}", job.name), None, Some(icons::Icon::Warning)),
+                (Some(e), _) => kit::push(&ctx, format!("Couldn't export {}: {e}", job.name), None, Some(icons::Icon::Warning)),
                 (None, true) => kit::push(&ctx, format!("{} cancelled", job.name), None, Some(icons::Icon::XCircle)),
                 (None, false) => {
                     let id = kit::push(&ctx, format!("{} finished", job.name), job.path.as_ref().map(|_| "Show in Finder"), Some(icons::Icon::CheckCircle));
