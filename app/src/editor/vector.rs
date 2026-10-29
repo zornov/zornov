@@ -456,6 +456,7 @@ fn handles(doc: &Document, id: NodeId) -> Vec<(usize, usize, Part, Point)> {
 /// Draws the editor's contents into `ui` (the window body), with `host`
 /// for what lives in the app.
 pub fn body(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
+    claim_keys(ui);
     toolbar(ui, e, host);
     ui.separator();
     let avail = ui.available_size();
@@ -466,11 +467,66 @@ pub fn body(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
     });
 }
 
+/// The drawing's keys are its own while the pointer is over it or a field in
+/// it has focus: Delete, ⌘A and the letters never reach the timeline, and the
+/// editor has its own undo. A text field takes every printable key.
+fn claim_keys(ui: &egui::Ui) {
+    use crate::keymap::{KeyOwner, claim};
+    let ctx = ui.ctx();
+    if ctx.egui_wants_keyboard_input() {
+        claim(ctx, KeyOwner::Text);
+    } else if ui.rect_contains_pointer(ui.max_rect()) {
+        claim(ctx, KeyOwner::PanelUndo);
+    }
+}
+
+/// The icon a tool wears in the strip; its name and key go in the tooltip.
+fn tool_icon(t: Tool) -> Icon {
+    match t {
+        Tool::Select => Icon::Cursor,
+        Tool::Direct => Icon::Selection,
+        Tool::Pen => Icon::Path,
+        Tool::Curvature => Icon::Waveform,
+        Tool::Pencil => Icon::Eyedropper,
+        Tool::Rect => Icon::Rectangle,
+        Tool::Ellipse => Icon::Circle,
+        Tool::Polygon => Icon::Diamond,
+        Tool::Star => Icon::Star,
+        Tool::Line => Icon::Minus,
+        Tool::Text => Icon::TextT,
+        Tool::Knife => Icon::Scissors,
+        Tool::Eraser => Icon::XCircle,
+        Tool::Blob => Icon::DropHalf,
+    }
+}
+
+/// A button that opens a popover menu below it; `add` fills the menu. The
+/// menu closes when `add` returns true.
+fn menu_popover(ui: &mut egui::Ui, name: &str, add: impl FnOnce(&mut egui::Ui) -> bool) {
+    let id = ui.scope_id().with(("vector-menu", name));
+    let resp = kit::Button::secondary(name).trailing(Icon::CaretDown).compact().show(ui);
+    if resp.clicked() {
+        kit::toggle_open(ui.ctx(), id);
+    }
+    if kit::popover(ui.ctx(), id, resp.rect, kit::Side::Below, 200.0, add) == Some(true) {
+        kit::set_open(ui.ctx(), id, false);
+    }
+}
+
 fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
+    use crate::theme;
+    let gap = theme::space::SECTION_GAP;
     ui.horizontal_wrapped(|ui| {
-        for (t, name, key) in Tool::ALL {
-            let label = if key.is_empty() { name.to_string() } else { format!("{name} {key}") };
-            if ui.selectable_label(e.tool == t, label).clicked() {
+        // Groups: select, paths, shapes, type, erasing.
+        for (i, (t, name, key)) in Tool::ALL.into_iter().enumerate() {
+            if matches!(i, 2 | 5 | 10 | 11) {
+                ui.add_space(gap);
+            }
+            let mut b = IconButton::new(tool_icon(t), name).active(e.tool == t).compact();
+            if !key.is_empty() {
+                b = b.shortcut(key);
+            }
+            if b.show(ui).clicked() {
                 if e.tool != t {
                     e.pen.clear();
                 }
@@ -479,15 +535,18 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
         }
     });
     ui.horizontal_wrapped(|ui| {
-        ui.label("Fill");
+        let t = theme::tokens(ui.ctx());
+        let cap = |ui: &mut egui::Ui, s: &str| ui.label(egui::RichText::new(s).font(theme::caption()).color(t.text_2));
+        cap(ui, "Fill");
         ui.color_edit_button_srgba(&mut e.fill);
-        if ui.small_button("none").clicked() {
+        if kit::Button::ghost("No fill").compact().show(ui).clicked() {
             e.fill = Color32::TRANSPARENT;
         }
-        ui.label("Stroke");
+        ui.add_space(theme::space::GAP);
+        cap(ui, "Stroke");
         ui.color_edit_button_srgba(&mut e.stroke);
         kit::Slider::new("Stroke width", &mut e.stroke_width, 0.0..=200.0).default(1.0).unit("pt").decimals(1).with_value().width(140.0).show(ui);
-        if !e.selection.is_empty() && ui.button("Apply to selection").clicked() {
+        if !e.selection.is_empty() && kit::Button::secondary("Apply to selection").compact().show(ui).clicked() {
             let mut op = e.paint_args();
             op["op"] = json!("style");
             op["ids"] = json!(e.selection);
@@ -496,27 +555,27 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
             }
             let _ = e.run(op);
         }
-        ui.separator();
+        ui.add_space(gap);
         match e.tool {
             Tool::Polygon | Tool::Star => {
-                ui.label(if e.tool == Tool::Star { "Points" } else { "Sides" });
+                cap(ui, if e.tool == Tool::Star { "Points" } else { "Sides" });
                 let mut sides = e.sides as i32;
                 kit::slider_i32(ui, "Sides", &mut sides, 3..=64, Some(140.0));
                 e.sides = sides as _;
             }
             Tool::Text => {
-                ui.add(egui::TextEdit::singleline(&mut e.text).desired_width(160.0));
+                kit::text_field(ui, &mut e.text, "Text", None, 160.0, None);
                 kit::Slider::new("Font size", &mut e.font_size, 4.0..=1000.0).default(16.0).unit("pt").logarithmic(true).with_value().width(140.0).show(ui);
             }
             Tool::Eraser | Tool::Blob => {
-                ui.label("Size");
+                cap(ui, "Size");
                 kit::Slider::new("Size", &mut e.brush, 1.0..=500.0).default(10.0).unit("px").logarithmic(true).with_value().width(140.0).show(ui);
             }
             Tool::Pen | Tool::Curvature => {
-                if ui.button("Finish (Enter)").clicked() {
+                if kit::Button::secondary("Finish").shortcut("Enter").compact().show(ui).clicked() {
                     e.finish_path(false);
                 }
-                if ui.button("Close").clicked() {
+                if kit::Button::ghost("Close path").compact().show(ui).clicked() {
                     e.finish_path(true);
                 }
             }
@@ -526,96 +585,130 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
     ui.horizontal_wrapped(|ui| {
         let sel = e.selection.clone();
         let many = sel.len() >= 2;
-        for (label, mode) in [("Unite", "unite"), ("Minus front", "minus_front"), ("Intersect", "intersect"), ("Exclude", "exclude"), ("Divide", "divide"), ("Trim", "trim"), ("Merge", "merge"), ("Crop", "crop")] {
-            if ui.add_enabled(many || (mode == "divide" && !sel.is_empty()), egui::Button::new(label).small()).clicked() {
-                let _ = e.run(json!({"op": "pathfinder", "ids": sel, "mode": mode}));
-            }
-        }
-        ui.separator();
-        for (label, how) in [("←", "left"), ("↔", "center"), ("⇥", "right"), ("↑", "top"), ("↕", "middle"), ("↓", "bottom")] {
-            if ui.add_enabled(!sel.is_empty(), egui::Button::new(label).small()).on_hover_text(format!("Align {how} (one object: to the artboard)")).clicked() {
-                let mut op = json!({"op": "align", "ids": sel, "how": how});
-                if sel.len() == 1 {
-                    op["to"] = json!("artboard");
+        let one = sel.len() == 1;
+        let some = !sel.is_empty();
+        let mut ops_to_run: Vec<Value> = Vec::new();
+        menu_popover(ui, "Combine", |ui| {
+            let mut hit = false;
+            for (label, mode) in [("Unite", "unite"), ("Minus front", "minus_front"), ("Intersect", "intersect"), ("Exclude", "exclude"), ("Divide", "divide"), ("Trim", "trim"), ("Merge", "merge"), ("Crop", "crop")] {
+                let on = many || (mode == "divide" && some);
+                if kit::MenuItem::new(label).enabled(on).show(ui).clicked() {
+                    ops_to_run.push(json!({"op": "pathfinder", "ids": sel, "mode": mode}));
+                    hit = true;
                 }
+            }
+            hit
+        });
+        menu_popover(ui, "Align", |ui| {
+            let mut hit = false;
+            kit::menu_heading(ui, if one { "Align to the artboard" } else { "Align selection" });
+            for (label, how) in [("Left", "left"), ("Centre", "center"), ("Right", "right"), ("Top", "top"), ("Middle", "middle"), ("Bottom", "bottom")] {
+                if kit::MenuItem::new(label).enabled(some).show(ui).clicked() {
+                    let mut op = json!({"op": "align", "ids": sel, "how": how});
+                    if one {
+                        op["to"] = json!("artboard");
+                    }
+                    ops_to_run.push(op);
+                    hit = true;
+                }
+            }
+            kit::menu_separator(ui);
+            if kit::MenuItem::new("Distribute horizontally").enabled(sel.len() >= 3).show(ui).clicked() {
+                ops_to_run.push(json!({"op": "distribute", "ids": sel, "axis": "horizontal"}));
+                hit = true;
+            }
+            hit
+        });
+        let mut clear = false;
+        menu_popover(ui, "Arrange", |ui| {
+            let mut hit = false;
+            let mut item = |ui: &mut egui::Ui, label: &str, on: bool, op: Value| {
+                if kit::MenuItem::new(label).enabled(on).show(ui).clicked() {
+                    ops_to_run.push(op);
+                    hit = true;
+                }
+            };
+            if let Some(&first) = sel.first() {
+                item(ui, "Bring to front", one, json!({"op": "arrange", "id": first, "how": "front"}));
+                item(ui, "Send to back", one, json!({"op": "arrange", "id": first, "how": "back"}));
+            } else {
+                item(ui, "Bring to front", false, Value::Null);
+                item(ui, "Send to back", false, Value::Null);
+            }
+            let id0 = sel.first().copied().unwrap_or(0);
+            kit::menu_separator(ui);
+            item(ui, "Group", many, json!({"op": "group", "ids": sel}));
+            item(ui, "Ungroup", one, json!({"op": "ungroup", "id": id0}));
+            item(ui, "Clip with the front shape", many, json!({"op": "clip", "ids": sel}));
+            kit::menu_separator(ui);
+            item(ui, "Outline type", one, json!({"op": "outline_text", "id": id0}));
+            item(ui, "Outline stroke", one, json!({"op": "outline_stroke", "id": id0}));
+            item(ui, "Expand", one, json!({"op": "expand", "id": id0}));
+            item(ui, "Trace image into shapes", one, json!({"op": "trace", "id": id0, "preset": "6 colors"}));
+            item(ui, "Add drop shadow", one, json!({"op": "effect", "ids": sel, "effect": {"type": "drop_shadow", "dx": 6, "dy": 8, "blur": 18, "color": "#00000059"}}));
+            item(ui, "Repeat around a circle", one, json!({"op": "repeat", "ids": sel, "kind": "radial", "count": 8}));
+            hit
+        });
+        ui.add_space(theme::space::GAP);
+        ui.add_enabled_ui(some, |ui| {
+            if IconButton::new(Icon::Copy, "Duplicate").compact().show(ui).clicked() {
+                ops_to_run.push(json!({"op": "duplicate", "ids": sel}));
+            }
+            if IconButton::new(Icon::Trash, "Delete").compact().show(ui).clicked() {
+                ops_to_run.push(json!({"op": "delete", "ids": sel}));
+                clear = true;
+            }
+        });
+        ui.add_space(gap);
+        ui.add_enabled_ui(!e.undo.is_empty(), |ui| {
+            if IconButton::new(Icon::ArrowUUpLeft, "Undo").compact().show(ui).clicked() {
+                e.undo();
+            }
+        });
+        ui.add_enabled_ui(!e.redo.is_empty(), |ui| {
+            if IconButton::new(Icon::ArrowUUpRight, "Redo").compact().show(ui).clicked() {
+                e.redo();
+            }
+        });
+        for op in ops_to_run {
+            if !op.is_null() {
                 let _ = e.run(op);
             }
         }
-        if ui.add_enabled(sel.len() >= 3, egui::Button::new("Distribute").small()).clicked() {
-            let _ = e.run(json!({"op": "distribute", "ids": sel, "axis": "horizontal"}));
-        }
-    });
-    ui.horizontal_wrapped(|ui| {
-        let sel = e.selection.clone();
-        let one = sel.len() == 1;
-        let some = !sel.is_empty();
-        if ui.add_enabled(sel.len() >= 2, egui::Button::new("Group").small()).clicked() {
-            let _ = e.run(json!({"op": "group", "ids": sel}));
-        }
-        if ui.add_enabled(one, egui::Button::new("Ungroup").small()).clicked() {
-            let _ = e.run(json!({"op": "ungroup", "id": sel[0]}));
-        }
-        if ui.add_enabled(sel.len() >= 2, egui::Button::new("Clip").small()).on_hover_text("The frontmost shape clips the others").clicked() {
-            let _ = e.run(json!({"op": "clip", "ids": sel}));
-        }
-        for (label, how) in [("Front", "front"), ("Back", "back")] {
-            if ui.add_enabled(one, egui::Button::new(label).small()).clicked() {
-                let _ = e.run(json!({"op": "arrange", "id": sel[0], "how": how}));
-            }
-        }
-        if ui.add_enabled(some, egui::Button::new("Duplicate").small()).clicked() {
-            let _ = e.run(json!({"op": "duplicate", "ids": sel}));
-        }
-        if ui.add_enabled(some, egui::Button::new("Delete").small()).clicked() {
-            let _ = e.run(json!({"op": "delete", "ids": sel}));
+        if clear {
             e.selection.clear();
         }
-        if ui.add_enabled(one, egui::Button::new("Outline type").small()).clicked() {
-            let _ = e.run(json!({"op": "outline_text", "id": sel[0]}));
-        }
-        if ui.add_enabled(one, egui::Button::new("Outline stroke").small()).clicked() {
-            let _ = e.run(json!({"op": "outline_stroke", "id": sel[0]}));
-        }
-        if ui.add_enabled(one, egui::Button::new("Expand").small()).clicked() {
-            let _ = e.run(json!({"op": "expand", "id": sel[0]}));
-        }
-        if ui.add_enabled(one, egui::Button::new("Trace").small()).on_hover_text("Trace an image into shapes (6 colours)").clicked() {
-            let _ = e.run(json!({"op": "trace", "id": sel[0], "preset": "6 colors"}));
-        }
-        if ui.add_enabled(one, egui::Button::new("Shadow").small()).clicked() {
-            let _ = e.run(json!({"op": "effect", "ids": sel, "effect": {"type": "drop_shadow", "dx": 6, "dy": 8, "blur": 18, "color": "#00000059"}}));
-        }
-        if ui.add_enabled(one, egui::Button::new("Radial repeat").small()).clicked() {
-            let _ = e.run(json!({"op": "repeat", "ids": sel, "kind": "radial", "count": 8}));
-        }
-        ui.separator();
-        if ui.add_enabled(!e.undo.is_empty(), egui::Button::new("Undo").small()).clicked() {
-            e.undo();
-        }
-        if ui.add_enabled(!e.redo.is_empty(), egui::Button::new("Redo").small()).clicked() {
-            e.redo();
-        }
     });
     ui.horizontal_wrapped(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut e.file_field).hint_text("file to import or export to").desired_width(260.0));
-        if ui.button("Import").clicked() && !e.file_field.is_empty() {
+        let t = theme::tokens(ui.ctx());
+        kit::text_field(ui, &mut e.file_field, "Path to a drawing", None, 220.0, None);
+        if kit::Button::secondary("Import").compact().show(ui).clicked() && !e.file_field.is_empty() {
             let f = e.file_field.clone();
             let _ = e.run(json!({"op": "import", "file": f}));
         }
-        for ext in ["svg", "pdf", "eps", "png"] {
-            if ui.button(format!("Export {}", ext.to_uppercase())).clicked() {
-                let file = if e.file_field.ends_with(&format!(".{ext}")) {
-                    e.file_field.clone()
-                } else {
-                    e.path.as_ref().map(|p| p.with_extension(ext).display().to_string()).unwrap_or_else(|| format!("art.{ext}"))
-                };
-                match e.run(json!({"op": "export", "file": file, "scale": 4})) {
-                    Ok(v) => e.status = format!("Saved {}", v["file"].as_str().unwrap_or("")),
-                    Err(err) => e.status = err,
+        let mut export: Option<&str> = None;
+        menu_popover(ui, "Export", |ui| {
+            let mut hit = false;
+            for (label, ext) in [("SVG", "svg"), ("PDF", "pdf"), ("EPS", "eps"), ("PNG", "png")] {
+                if kit::MenuItem::new(label).show(ui).clicked() {
+                    export = Some(ext);
+                    hit = true;
                 }
             }
+            hit
+        });
+        if let Some(ext) = export {
+            let file = if e.file_field.ends_with(&format!(".{ext}")) {
+                e.file_field.clone()
+            } else {
+                e.path.as_ref().map(|p| p.with_extension(ext).display().to_string()).unwrap_or_else(|| format!("art.{ext}"))
+            };
+            match e.run(json!({"op": "export", "file": file, "scale": 4})) {
+                Ok(v) => e.status = format!("Saved {}", v["file"].as_str().unwrap_or("")),
+                Err(err) => e.status = err,
+            }
         }
-        if ui.button("Place on timeline").clicked()
+        if kit::Button::secondary("Place on timeline").compact().show(ui).clicked()
             && let Some(p) = e.path.clone()
         {
             e.status = match host.place(&p) {
@@ -624,40 +717,70 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
             };
         }
         if !e.status.is_empty() {
-            ui.label(egui::RichText::new(&e.status).weak());
+            ui.label(egui::RichText::new(&e.status).font(theme::caption()).color(t.text_2));
         }
     });
 }
 
+/// Every shape and text in the drawing, for ⌘A (a group is not picked: the
+/// nodes inside it are).
+fn shape_ids(doc: &Document) -> Vec<NodeId> {
+    let mut ids = Vec::new();
+    doc.walk(&mut |n| {
+        if n.children().is_none() {
+            ids.push(n.id);
+        }
+    });
+    ids
+}
+
 fn layers(ui: &mut egui::Ui, e: &mut Editor) {
+    use crate::{icons, theme};
     let Some(doc) = e.doc.as_ref() else { return };
     if e.outline.as_ref().is_none_or(|(r, _)| *r != e.rev) {
         e.outline = Some((e.rev, ops::summary(doc)));
     }
     let summary = e.outline.as_ref().map(|(_, s)| s.clone()).unwrap_or(Value::Null);
+    let t = theme::tokens(ui.ctx());
     egui::ScrollArea::vertical().id_salt("vector-layers").show_v(ui, |ui| {
         for o in summary["objects"].as_array().into_iter().flatten() {
             let id = o["id"].as_u64().unwrap_or(0);
             let depth = o["depth"].as_u64().unwrap_or(0) as f32;
             let kind = o["type"].as_str().unwrap_or("");
             let name = o["name"].as_str().map(String::from).or_else(|| o["text"].as_str().map(|t| format!("\u{201c}{t}\u{201d}"))).unwrap_or_else(|| o["shape"].as_str().unwrap_or(kind).to_string());
-            ui.horizontal(|ui| {
-                ui.add_space(depth * 12.0);
-                let label = if kind == "layer" { egui::RichText::new(&name).strong() } else { egui::RichText::new(format!("{name}  #{id}")) };
-                let selected = e.selection.contains(&id);
-                // A long name ends in an ellipsis; the hover shows it whole.
-                if ui.add(egui::Button::selectable(selected, label).truncate()).on_hover_text(&name).clicked() && kind != "layer" {
-                    if ui.input(|i| i.modifiers.shift) {
-                        if selected {
-                            e.selection.retain(|s| *s != id);
-                        } else {
-                            e.selection.push(id);
-                        }
+            let icon = match kind {
+                "layer" => Icon::Stack,
+                "group" => Icon::Folder,
+                "text" => Icon::TextT,
+                "image" => Icon::Image,
+                "path" => Icon::Path,
+                _ => Icon::Shapes,
+            };
+            let selected = e.selection.contains(&id);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), theme::space::ROW_H), Sense::click());
+            let p = ui.painter();
+            if selected {
+                p.rect_filled(rect, theme::radius::CONTROL, t.select);
+            } else if resp.hovered() {
+                p.rect_filled(rect, theme::radius::CONTROL, t.alt);
+            }
+            let x = rect.left() + 6.0 + depth * 12.0; // TODO(kit): indent step
+            icons::paint(p, Rect::from_center_size(egui::pos2(x + 7.0, rect.center().y), Vec2::splat(14.0)), icon, 14.0, if selected { t.text } else { t.text_2 });
+            // A long name ends in an ellipsis; the hover shows it whole.
+            let font = if kind == "layer" { theme::body_medium() } else { theme::body() };
+            let cut = kit::paint_text_clipped(p, egui::pos2(x + 22.0, rect.center().y), egui::Align2::LEFT_CENTER, &name, font, t.text, (rect.right() - x - 28.0).max(0.0));
+            let resp = if cut { resp.on_hover_text(format!("{name} (#{id})")) } else { resp.on_hover_text(format!("#{id}")) };
+            if resp.clicked() && kind != "layer" {
+                if ui.input(|i| i.modifiers.shift) {
+                    if selected {
+                        e.selection.retain(|s| *s != id);
                     } else {
-                        e.selection = vec![id];
+                        e.selection.push(id);
                     }
+                } else {
+                    e.selection = vec![id];
                 }
-            });
+            }
         }
     });
 }
@@ -711,7 +834,13 @@ fn canvas(ui: &mut egui::Ui, e: &mut Editor, size: Vec2) {
     let at = pointer.map(|p| to_point(m, p));
     let shift = ui.input(|i| i.modifiers.shift);
     // Keys.
-    if resp.hovered() || ui.memory(|mm| mm.has_focus(resp.id)) {
+    // A text field (the Type tool's text, the file name) keeps its own keys.
+    let typing = ui.ctx().egui_wants_keyboard_input() && !ui.memory(|mm| mm.has_focus(resp.id));
+    if !typing && (resp.hovered() || ui.memory(|mm| mm.has_focus(resp.id))) {
+        let select_all = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A));
+        if select_all {
+            e.selection = shape_ids(&doc);
+        }
         let (enter, esc, back, del, undo, redo) = ui.input(|i| {
             (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape), i.key_pressed(egui::Key::Backspace), i.key_pressed(egui::Key::Delete), i.modifiers.command && i.key_pressed(egui::Key::Z) && !i.modifiers.shift, i.modifiers.command && i.key_pressed(egui::Key::Z) && i.modifiers.shift)
         });
@@ -949,44 +1078,42 @@ fn selected_art(app: &StudioApp) -> Option<PathBuf> {
     })
 }
 
-/// The vector art button on the viewer's toolbar.
-pub fn toolbar_button(app: &mut StudioApp, ui: &mut egui::Ui) {
+/// The vector part of the viewer's Add menu: a new drawing, or one to edit.
+/// `q` is the menu's search; `close` closes the menu after a pick.
+pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::Id) {
+    use super::viewer::{add_item, add_shows};
     let ctx = ui.ctx().clone();
-    let id = egui::Id::new("viewer-vector-menu");
-    let open = EDITOR.with(|e| e.borrow().open);
-    let resp = IconButton::new(Icon::Path, "Vector art: draw logos, icons, illustrations and infographics").active(open || kit::is_open(&ctx, id)).show(ui);
-    if resp.clicked() {
-        kit::toggle_open(&ctx, id);
-    }
     let dir = vector_dir(app);
     let selected = selected_art(app);
     let mut pick: Option<PathBuf> = None;
-    kit::popover(&ctx, id, resp.rect, kit::Side::Below, 280.0, |ui| {
-        if let Some(p) = &selected
-            && ui.button(format!("Edit {}", p.file_stem().and_then(|s| s.to_str()).unwrap_or("art"))).clicked()
-        {
-            pick = Some(p.clone());
+    let mut docs: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "svart")).collect();
+    docs.sort();
+    let edit = selected.as_ref().map(|p| format!("Edit {}", p.file_stem().and_then(|s| s.to_str()).unwrap_or("art")));
+    let names: Vec<String> = docs.iter().take(30).map(|d| d.file_stem().and_then(|s| s.to_str()).unwrap_or("?").to_owned()).collect();
+    let all = edit.iter().map(String::as_str).chain(["New drawing"]).chain(names.iter().map(String::as_str));
+    if !add_shows(q, "Vector drawing", all) {
+        return;
+    }
+    kit::menu_heading(ui, "Vector drawing");
+    if let (Some(p), Some(label)) = (&selected, &edit)
+        && add_item(ui, q, "Vector drawing", label)
+    {
+        pick = Some(p.clone());
+    }
+    if add_item(ui, q, "Vector drawing", "New drawing") {
+        let mut n = 1;
+        while dir.join(format!("Drawing {n}.svart")).exists() {
+            n += 1;
         }
-        if ui.button("New drawing").clicked() {
-            let mut n = 1;
-            while dir.join(format!("Drawing {n}.svart")).exists() {
-                n += 1;
-            }
-            pick = Some(dir.join(format!("Drawing {n}.svart")));
+        pick = Some(dir.join(format!("Drawing {n}.svart")));
+    }
+    for (d, name) in docs.into_iter().zip(&names) {
+        if add_item(ui, q, "Vector drawing", name) {
+            pick = Some(d);
         }
-        let mut docs: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "svart")).collect();
-        docs.sort();
-        if !docs.is_empty() {
-            ui.separator();
-        }
-        for d in docs.into_iter().take(30) {
-            if ui.button(d.file_stem().and_then(|s| s.to_str()).unwrap_or("?")).clicked() {
-                pick = Some(d);
-            }
-        }
-    });
+    }
     if let Some(p) = pick {
-        kit::toggle_open(&ctx, id);
+        kit::set_open(&ctx, close, false);
         EDITOR.with(|e| {
             let mut e = e.borrow_mut();
             if let Err(err) = e.load(&p) {
@@ -1110,6 +1237,44 @@ mod tests {
             }
         });
         assert_eq!(shapes, 1, "the drag drew an ellipse: {}", e.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_drawing_keeps_its_keys_and_select_all_picks_shapes() {
+        use crate::keymap::{KeyOwner, owner};
+        let dir = scratch("keys");
+        let mut e = Editor::default();
+        e.load(&dir.join("k.svart")).unwrap();
+        e.tool = Tool::Rect;
+        for (a, b) in [((100.0, 100.0), (300.0, 200.0)), ((400.0, 400.0), (500.0, 450.0))] {
+            let op = e.gesture_op(&Gesture::Shape { from: Point::new(a.0, a.1), to: Point::new(b.0, b.1) }, false).unwrap();
+            e.run(op).unwrap();
+        }
+        e.selection.clear();
+        e.tool = Tool::Select;
+        let ctx = egui::Context::default();
+        let mut host = NoHost(dir.clone());
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 900.0));
+        let frame = |ctx: &egui::Context, e: &mut Editor, host: &mut NoHost, events: Vec<egui::Event>| {
+            let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+            ctx.run_ui(input, |ui| body(ui, e, host)).drop_without_applying_deltas();
+        };
+        // Over the canvas the drawing owns the keyboard, undo included.
+        let over = egui::Event::PointerMoved(Pos2::new(800.0, 450.0));
+        frame(&ctx, &mut e, &mut host, vec![over.clone()]);
+        frame(&ctx, &mut e, &mut host, vec![over.clone()]);
+        assert_eq!(owner(&ctx), Some(KeyOwner::PanelUndo));
+        // ⌘A picks the shapes, and Delete removes them, in the drawing.
+        let key = |k| egui::Event::Key { key: k, physical_key: Some(k), pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        frame(&ctx, &mut e, &mut host, vec![key(egui::Key::A)]);
+        assert_eq!(e.selection.len(), 2, "select all picks both shapes");
+        let del = egui::Event::Key { key: egui::Key::Delete, physical_key: Some(egui::Key::Delete), pressed: true, repeat: false, modifiers: Default::default() };
+        frame(&ctx, &mut e, &mut host, vec![del]);
+        assert!(e.selection.is_empty());
+        let mut left = 0;
+        e.doc.as_ref().unwrap().walk(&mut |n| left += usize::from(matches!(n.kind, NodeKind::Shape { .. })));
+        assert_eq!(left, 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
