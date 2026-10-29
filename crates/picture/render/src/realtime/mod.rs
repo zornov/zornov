@@ -20,6 +20,7 @@
 pub mod frame;
 pub mod gpu;
 mod draw;
+pub mod readback;
 mod targets;
 
 use crate::frame::Frame;
@@ -200,6 +201,8 @@ pub struct Renderer {
     accum_n: u32,
     accum_key: u64,
     accum_cur: usize,
+    /// Pooled staging buffers for reading frames back.
+    rb: readback::Readback,
     /// Cache keys of the current world's assets, by index.
     keys: Vec<u64>,
 }
@@ -282,6 +285,7 @@ impl Renderer {
             accum_n: 0,
             accum_key: 0,
             accum_cur: 0,
+            rb: readback::Readback::new(),
             keys: Vec::new(),
         })
     }
