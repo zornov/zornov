@@ -178,6 +178,7 @@ pub const FIXED: &[(&str, &str, &str)] = &[
     ("⇧⌘S", "Save as", "app.rs"),
     ("⌘I", "Import media", "app.rs"),
     ("⇧⌘P", "Paint", "app.rs"),
+    ("⌘\\", "Maximise panel", "editor/dock_ui.rs"),
     ("F1", "Search help", "app.rs"),
     ("⌘L", "Loop playback", "editor/viewer.rs"),
     ("⇧G", "Graph editor", "editor/timeline.rs"),

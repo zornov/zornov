@@ -295,8 +295,8 @@ fn workspaces_switch_with_the_keyboard() {
     assert_eq!(h.app.editor.rail, crate::editor::RailItem::Looks);
     h.key(Key::Num6, Modifiers::ALT);
     h.frames(2);
-    assert_eq!(h.app.prefs.workspace, "Production");
-    assert!(!h.app.editor.panel_open(crate::dock::Panel::Inspector));
+    assert_eq!(h.app.prefs.workspace, "Review");
+    assert!(h.app.editor.dock.is_showing(crate::dock::Panel::Review));
     h.key(Key::Num1, Modifiers::ALT);
     h.frames(2);
     assert!(h.app.editor.panel_open(crate::dock::Panel::Inspector));

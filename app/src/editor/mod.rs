@@ -143,6 +143,8 @@ pub struct EditorState {
     pub dock_layout: Option<crate::dock::Layout>,
     /// A panel being dragged to a new place.
     pub dock_drag: Option<dock_ui::DockDrag>,
+    /// The panel filling the whole dock (View ▸ Maximise panel), if any.
+    pub maximised: Option<crate::dock::Panel>,
     /// The open flags of the panels that also show undocked, as the dock
     /// last left them (see `dock_ui::sync_flags`).
     pub dock_flags: [Option<bool>; 5],
@@ -202,6 +204,7 @@ impl EditorState {
             dock_layout: None,
             dock_drag: None,
             dock_flags: [None; 5],
+            maximised: None,
             dock_undo: None,
             focus_window: None,
             sheet_open: false,
@@ -249,6 +252,7 @@ impl EditorState {
     pub fn set_tree(&mut self, t: crate::dock::Tree) {
         self.dock = t.sanitized();
         self.dock_drag = None;
+        self.maximised = None;
         self.fit_pending = true;
     }
 
@@ -447,6 +451,16 @@ pub enum Action {
     /// File ▸ Import script.
     ImportScript,
     ExportOtio,
+    /// File ▸ Project settings…: the Inspector's Details with the canvas editor open.
+    ProjectSettings,
+    /// File ▸ Settings….
+    Settings,
+    /// Project ▸ Production….
+    Production,
+    /// Project ▸ Project health….
+    ProjectHealth,
+    /// View ▸ Maximise panel.
+    Maximise,
     /// Help ▸ Search help.
     Help,
     /// Help ▸ Welcome tour.
@@ -574,6 +588,18 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             ed.fit_pending = true;
             ed.auto_fit = true;
         }
+        Action::ProjectSettings => {
+            // The Details view is what the Inspector shows with nothing
+            // selected; "Modify" there is the canvas, frame rate and background.
+            app.editor.selection.clear();
+            app.editor.selected_cut = None;
+            dock_ui::open_panel(app, ctx, crate::dock::Panel::Inspector, ctx.content_rect().width() < NARROW);
+            ctx.data_mut(|d| d.insert_temp(egui::Id::unique("details-modify"), true));
+        }
+        Action::Settings => app.overlay = Overlay::Settings,
+        Action::Production => app.overlay = Overlay::Production,
+        Action::ProjectHealth => app.overlay = Overlay::Library,
+        Action::Maximise => dock_ui::toggle_maximised(app, ctx),
         Action::Help => crate::help::open(app, ctx, None),
         Action::Tour => {
             app.prefs.tour_done = false;
