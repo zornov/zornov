@@ -1,7 +1,7 @@
 //! Layer effects ↔ PSD `lfx2` (object-based effects descriptor) and legacy `lrFX`.
 //!
 //! Key names follow the descriptors Photoshop writes (documented by
-//! reverse-engineering in MIT-licensed psd-tools / ag-psd).
+//! the MIT-licensed psd-tools / ag-psd).
 
 use studio_pixel_color::{BlendMode, Color};
 use studio_pixel_doc::adjust::CurvePoint;

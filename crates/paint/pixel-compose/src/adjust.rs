@@ -102,7 +102,7 @@ fn apply_depth_mode(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, dept
             }
         }
         Adjustment::BrightnessContrast { brightness, contrast, .. } => {
-            // Modern (CS3+) Brightness/Contrast, reverse-engineered from Photoshop ground truth.
+            // Modern (CS3+) Brightness/Contrast, fitted to Photoshop ground truth.
             // Unlike the legacy linear scale, both are smooth curves that pin pure black and white
             // (see `modern_brightness` and `modern_contrast`), applied brightness then contrast
             // through one lookup table.
@@ -839,7 +839,7 @@ pub fn lut3d_sample(lut: &[f32], n: usize, c: [f32; 3], tetrahedral: bool) -> [f
 /// shadows, midtones and highlights slider triples (cyan–red, magenta–green, yellow–blue,
 /// −100..100).
 ///
-/// Reverse-engineered from Photoshop (a 16-bit gray ramp through every tone at ±10..±100, pairs of
+/// Fitted to Photoshop output (a 16-bit gray ramp through every tone at ±10..±100, pairs of
 /// tones, and random settings of all nine sliders, Preserve Luminosity on and off): the three
 /// tones fold into one Levels per channel (input black point, input white point, midtone gamma),
 /// within 0.8 of 255 everywhere. Folding matters: a lowered shadows and a raised highlights
