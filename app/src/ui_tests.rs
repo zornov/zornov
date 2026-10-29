@@ -372,7 +372,7 @@ fn the_tour_runs_once_and_can_be_replayed() {
     h.frames(3);
     assert!(crate::onboarding::tour_running(&h.app));
     let said = crate::a11y::last_announcement(&h.ctx);
-    assert!(said.contains("Welcome"), "{said}");
+    assert!(said.starts_with("Library"), "the tour opens on the Library: {said}");
     // Walk to the end with the keyboard.
     for _ in 0..crate::onboarding::STEPS.len() + 1 {
         h.key(Key::ArrowRight, Modifiers::NONE);
