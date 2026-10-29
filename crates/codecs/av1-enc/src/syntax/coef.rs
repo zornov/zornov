@@ -1,7 +1,8 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! M4: coefficient writer, the inverse of the decoder's `coeffs` (spec 5.11.39) for intra blocks.
+//! M4: coefficient writer, the inverse of the decoder's `coeffs` (spec 5.11.39), for intra and
+//! inter blocks.
 
 use studio_av1::cdf::Cdfs;
 use studio_av1::spec_tables::*;
@@ -26,6 +27,10 @@ pub struct TxbParams {
     pub lossless: bool,
     /// `base_q_idx > 0`; transform types are coded only then.
     pub qidx_nonzero: bool,
+    /// An inter block: transform types come from the inter sets.
+    pub is_inter: bool,
+    /// The transform type of the block's luma transform (inter chroma follows it).
+    pub luma_tx_type: usize,
 }
 
 /// The transform set of an intra block (`get_tx_set`, `reduced_tx_set = 0`).
@@ -41,19 +46,43 @@ pub fn intra_tx_set(tx_sz: usize) -> usize {
     }
 }
 
+/// The transform set of an inter block (`get_tx_set`, `reduced_tx_set = 0`).
+pub fn inter_tx_set(tx_sz: usize) -> usize {
+    let sqr = TX_SIZE_SQR[tx_sz] as usize;
+    let sqr_up = TX_SIZE_SQR_UP[tx_sz] as usize;
+    if sqr_up > TX_32X32 {
+        TX_SET_DCTONLY
+    } else if sqr_up == TX_32X32 {
+        TX_SET_INTER_3
+    } else if sqr == TX_16X16 {
+        TX_SET_INTER_2
+    } else {
+        TX_SET_INTER_1
+    }
+}
+
+fn tx_set(is_inter: bool, tx_sz: usize) -> usize {
+    if is_inter { inter_tx_set(tx_sz) } else { intra_tx_set(tx_sz) }
+}
+
+fn type_in_set(is_inter: bool, set: usize, t: usize) -> bool {
+    if is_inter { TX_TYPE_IN_SET_INTER[set][t] == 1 } else { TX_TYPE_IN_SET_INTRA[set][t] == 1 }
+}
+
 /// The transform type the decoder uses for the transform block, given what the block codes
-/// (`compute_tx_type`). `luma_type` is the type coded for luma; chroma derives its own.
+/// (`compute_tx_type`). `luma_type` is the type coded for luma (the block's only luma transform):
+/// inter chroma takes it over when its set has it, intra chroma derives one from the uv mode.
 pub fn plane_tx_type(p: &TxbParams, tx_sz: usize, luma_type: usize) -> usize {
     let sqr_up = TX_SIZE_SQR_UP[tx_sz] as usize;
     if p.lossless || sqr_up > TX_32X32 {
         return DCT_DCT;
     }
-    let set = intra_tx_set(tx_sz);
+    let set = tx_set(p.is_inter, tx_sz);
     if p.plane == 0 {
         if set > 0 && p.qidx_nonzero { luma_type } else { DCT_DCT }
     } else {
-        let t = MODE_TO_TXFM[p.uv_mode] as usize;
-        if TX_TYPE_IN_SET_INTRA[set][t] == 1 { t } else { DCT_DCT }
+        let t = if p.is_inter { luma_type } else { MODE_TO_TXFM[p.uv_mode] as usize };
+        if type_in_set(p.is_inter, set, t) { t } else { DCT_DCT }
     }
 }
 
@@ -80,20 +109,24 @@ pub fn write_coefficients(enc: &mut SymbolEncoder, cdfs: &mut Cdfs, ctx: &mut Co
     let mut cul_level = 0u32;
     let mut dc_category = 0u8;
     if eob > 0 {
-        let set = intra_tx_set(tx_sz);
+        let set = tx_set(p.is_inter, tx_sz);
         if plane == 0 && set > 0 && p.qidx_nonzero && !p.lossless {
             let sqr = TX_SIZE_SQR[tx_sz] as usize;
-            assert!(TX_TYPE_IN_SET_INTRA[set][block.tx_type] == 1, "transform type {} not in intra set {set}", block.tx_type);
-            let intra_dir = p.y_mode;
-            if set == TX_SET_INTRA_1 {
-                let s = TX_TYPE_INTRA_INV_SET1.iter().position(|&t| t as usize == block.tx_type).unwrap();
-                enc.write_symbol(&mut cdfs.intra_tx_type_set1[sqr][intra_dir], s);
+            assert!(type_in_set(p.is_inter, set, block.tx_type), "transform type {} not in set {set}", block.tx_type);
+            let position = |inv: &[u8]| inv.iter().position(|&t| t as usize == block.tx_type).unwrap();
+            if p.is_inter {
+                match set {
+                    TX_SET_INTER_1 => enc.write_symbol(&mut cdfs.inter_tx_type_set1[sqr], position(&TX_TYPE_INTER_INV_SET1)),
+                    TX_SET_INTER_2 => enc.write_symbol(&mut cdfs.inter_tx_type_set2, position(&TX_TYPE_INTER_INV_SET2)),
+                    _ => enc.write_symbol(&mut cdfs.inter_tx_type_set3[sqr], position(&TX_TYPE_INTER_INV_SET3)),
+                }
+            } else if set == TX_SET_INTRA_1 {
+                enc.write_symbol(&mut cdfs.intra_tx_type_set1[sqr][p.y_mode], position(&TX_TYPE_INTRA_INV_SET1));
             } else {
-                let s = TX_TYPE_INTRA_INV_SET2.iter().position(|&t| t as usize == block.tx_type).unwrap();
-                enc.write_symbol(&mut cdfs.intra_tx_type_set2[sqr][intra_dir], s);
+                enc.write_symbol(&mut cdfs.intra_tx_type_set2[sqr][p.y_mode], position(&TX_TYPE_INTRA_INV_SET2));
             }
         }
-        let ptt = plane_tx_type(p, tx_sz, block.tx_type);
+        let ptt = plane_tx_type(p, tx_sz, if plane == 0 { block.tx_type } else { p.luma_tx_type });
         assert_eq!(block.tx_type, ptt, "plane {plane} block must use transform type {ptt}, not {}", block.tx_type);
         let scan = scan_for(tx_sz, ptt);
         let tx_class = get_tx_class(ptt);

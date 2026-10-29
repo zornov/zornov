@@ -172,3 +172,50 @@ pub struct BlockDecision {
 pub struct SbDecision {
     pub blocks: Vec<BlockDecision>,
 }
+
+/// An inter-predicted block of an inter frame (phase (b)): one reference frame, translation only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterDecision {
+    /// Position in 4x4 units and size in 4x4 units; at least 2x2 (8x8 samples).
+    pub mi_row: u32,
+    pub mi_col: u32,
+    pub w4: u32,
+    pub h4: u32,
+    /// `NEARESTMV`, `NEARMV`, `GLOBALMV` (a zero vector, there is no global motion) or `NEWMV`:
+    /// the specification's numeric values (`studio_av1::spec_tables`).
+    pub mode: usize,
+    /// The reference frame, `LAST_FRAME` (1) to `ALTREF_FRAME` (7).
+    pub ref_frame: u8,
+    /// The candidate the mode picks from the motion vector stack: 0 for `NEARESTMV`, 1 to 3 for
+    /// `NEARMV`, 0 to 2 for `NEWMV` (which codes the difference to that candidate).
+    pub ref_mv_idx: usize,
+    /// The motion vector (row, col) in 1/8 sample units; the writer checks it against what the
+    /// mode derives from the stack.
+    pub mv: [i32; 2],
+    pub skip: bool,
+    /// Transform blocks in decode order, as for [`BlockDecision::coefs`]; ignored when `skip`.
+    pub coefs: Vec<CoefBlock>,
+}
+
+/// One block of an inter frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockMode {
+    Intra(BlockDecision),
+    Inter(InterDecision),
+}
+
+impl BlockMode {
+    /// `(mi_row, mi_col, w4, h4)`.
+    pub fn shape(&self) -> (usize, usize, usize, usize) {
+        match self {
+            BlockMode::Intra(b) => (b.mi_row as usize, b.mi_col as usize, b.w4 as usize, b.h4 as usize),
+            BlockMode::Inter(b) => (b.mi_row as usize, b.mi_col as usize, b.w4 as usize, b.h4 as usize),
+        }
+    }
+}
+
+/// What the mode decision chose for one superblock of an inter frame, blocks in decode order.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct InterSbDecision {
+    pub blocks: Vec<BlockMode>,
+}
