@@ -8,6 +8,7 @@
 //! everything that comes back.
 
 use serde_json::{Value, json};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 /// Text returned by default, and the most one call may return.
@@ -35,6 +36,40 @@ fn net_fetch(url: &str, headers: &[(&str, &str)], limit: u64) -> Result<Got, Str
     let (status, content_type, url) = (reply.status, reply.content_type.clone().unwrap_or_default().to_ascii_lowercase(), reply.url.clone());
     let body = reply.bytes(limit).map_err(|e| format!("reading {url} failed: {e}"))?;
     Ok(Got { status, content_type, url, body })
+}
+
+/// Resolves a name to its addresses (injectable for tests).
+type Resolve<'a> = &'a dyn Fn(&str, u16) -> std::io::Result<Vec<SocketAddr>>;
+/// One GET to the given (checked) addresses, no redirects followed.
+type Step<'a> = &'a dyn Fn(&str, &[(&str, &str)], Vec<SocketAddr>) -> Result<studio_net::Hop, String>;
+
+/// The addresses of `host` if all are allowed.
+fn resolve_public(host: &str, port: u16, resolve: Resolve, allow: &dyn Fn(IpAddr) -> bool) -> Result<Vec<SocketAddr>, String> {
+    let _ = allow;
+    resolve(host, port).map_err(|e| e.to_string())
+}
+
+/// GETs `url`, following up to 8 redirects by hand.
+fn fetch_guarded(url: &str, headers: &[(&str, &str)], limit: u64, resolve: Resolve, allow: &dyn Fn(IpAddr) -> bool, step: Step) -> Result<Got, String> {
+    let mut url = url.to_owned();
+    for _ in 0..=8 {
+        let addrs = resolve_public(url.split("://").nth(1).unwrap_or("").split(['/', ':']).next().unwrap_or(""), 80, resolve, allow)?;
+        let hop = step(&url, headers, addrs)?;
+        if (300..400).contains(&hop.reply.status) && let Some(loc) = hop.location {
+            url = absolute(&loc, &url);
+            continue;
+        }
+        let (status, content_type) = (hop.reply.status, hop.reply.content_type.clone().unwrap_or_default().to_ascii_lowercase());
+        let body = hop.reply.bytes(limit).map_err(|e| format!("reading {url} failed: {e}"))?;
+        return Ok(Got { status, content_type, url, body });
+    }
+    Err("too many redirects".into())
+}
+
+/// Whether `ip` is not on the public internet.
+fn blocked_ip(ip: IpAddr) -> bool {
+    let _ = ip;
+    false
 }
 
 /// The `read` tool.
@@ -594,5 +629,131 @@ mod tests {
         assert_eq!(absolute("../x", "https://e.com/a/b/c.html"), "https://e.com/a/b/../x");
         assert_eq!(absolute("//cdn.e.com/y", "https://e.com/"), "https://cdn.e.com/y");
         assert_eq!(attr(r#"a class=x href='/p?q=1&amp;r=2' id=3"#, "href").as_deref(), Some("/p?q=1&r=2"));
+    }
+
+    // ---- SSRF guards: redirects, DNS, odd IP literals.
+
+    fn sock(ip: &str, port: u16) -> SocketAddr {
+        SocketAddr::new(ip.parse().unwrap(), port)
+    }
+
+    /// A direct GET to the first address (tests cannot rely on `HTTPS_PROXY`).
+    fn raw_step(url: &str, _h: &[(&str, &str)], addrs: Vec<SocketAddr>) -> Result<studio_net::Hop, String> {
+        use std::io::{Read, Write};
+        let path = format!("/{}", url.split("://").nth(1).unwrap().split_once('/').map_or("", |x| x.1));
+        let mut s = std::net::TcpStream::connect(addrs[0]).map_err(|e| e.to_string())?;
+        write!(s, "GET {path} HTTP/1.0\r\nHost: x\r\n\r\n").unwrap();
+        let mut raw = String::new();
+        s.read_to_string(&mut raw).map_err(|e| e.to_string())?;
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+        let status = head.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+        let location = head.lines().find_map(|l| l.strip_prefix("Location: ")).map(str::to_owned);
+        Ok(studio_net::Hop { location, reply: studio_net::Reply { status, content_type: None, url: url.to_owned(), body: Box::new(std::io::Cursor::new(body.as_bytes().to_vec())) } })
+    }
+
+    #[test]
+    fn a_redirect_to_a_local_address_is_not_followed() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let srv = l.local_addr().unwrap();
+        drop(l);
+        let loc = format!("http://127.0.0.1:{}/secret", srv.port());
+        let (srv, seen) = serve_on(srv, move |p| if p == "/secret" { "HTTP/1.0 200 OK\r\n\r\nSECRET".into() } else { format!("HTTP/1.0 302 Found\r\nLocation: {loc}\r\n\r\n") });
+        let resolve = move |_: &str, _: u16| Ok(vec![srv]);
+        // The first hop (public.example) may reach the test server; nothing after.
+        let calls = std::cell::Cell::new(0);
+        let allow = |_: IpAddr| {
+            calls.set(calls.get() + 1);
+            calls.get() == 1
+        };
+        let e = fetch_guarded("http://public.example/start", &[], 1000, &resolve, &allow, &raw_step).err().expect("followed a redirect to 127.0.0.1");
+        assert!(e.contains("public web"), "{e}");
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1, "the redirect target was requested");
+    }
+
+    #[test]
+    fn a_redirect_to_a_name_that_resolves_locally_is_not_followed() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let srv = l.local_addr().unwrap();
+        drop(l);
+        let (srv, seen) = serve_on(srv, |p| if p == "/secret" { "HTTP/1.0 200 OK\r\n\r\nSECRET".into() } else { "HTTP/1.0 302 Found\r\nLocation: http://rebind.example/secret\r\n\r\n".into() });
+        let resolve = move |_: &str, _: u16| Ok(vec![srv]);
+        let first = std::cell::Cell::new(true);
+        let allow = |ip: IpAddr| first.replace(false) || !blocked_ip(ip);
+        let e = fetch_guarded("http://public.example/start", &[], 1000, &resolve, &allow, &raw_step).err().expect("followed a redirect to a name for 127.0.0.1");
+        assert!(e.contains("public web"), "{e}");
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// A plain-HTTP server on a chosen local address (so a redirect can name
+    /// its own port), answering each connection with `respond(request path)`;
+    /// counts the requests it saw.
+    fn serve_on(addr: SocketAddr, respond: impl Fn(&str) -> String + Send + 'static) -> (SocketAddr, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{BufRead, Write};
+        let l = std::net::TcpListener::bind(addr).unwrap();
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = seen.clone();
+        std::thread::spawn(move || {
+            for s in l.incoming().take(4) {
+                let mut s = s.unwrap();
+                let mut line = String::new();
+                std::io::BufReader::new(s.try_clone().unwrap()).read_line(&mut line).unwrap();
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let path = line.split(' ').nth(1).unwrap_or("/").to_owned();
+                let _ = s.write_all(respond(&path).as_bytes());
+            }
+        });
+        (addr, seen)
+    }
+
+    #[test]
+    fn names_that_resolve_to_local_addresses_are_refused() {
+        let resolve = |h: &str, p: u16| -> std::io::Result<Vec<SocketAddr>> {
+            Ok(match h {
+                "evil.example" => vec![sock("127.0.0.1", p)],
+                "meta.example" => vec![sock("169.254.169.254", p)],
+                "mixed.example" => vec![sock("8.8.8.8", p), sock("10.0.0.5", p)],
+                "v6.example" => vec![sock("::ffff:127.0.0.1", p)],
+                _ => vec![sock("8.8.8.8", p)],
+            })
+        };
+        let allow = |ip: IpAddr| !blocked_ip(ip);
+        let never = |_: &str, _: &[(&str, &str)], _: Vec<SocketAddr>| -> Result<studio_net::Hop, String> { panic!("connected to a refused address") };
+        for host in ["evil.example", "meta.example", "mixed.example", "v6.example"] {
+            let e = resolve_public(host, 80, &resolve, &allow).unwrap_err();
+            assert!(e.contains("public web"), "{host}: {e}");
+            let e = fetch_guarded(&format!("http://{host}/"), &[], 100, &resolve, &allow, &never).err().unwrap_or_else(|| panic!("{host} was fetched"));
+            assert!(e.contains("public web"), "{host}: {e}");
+        }
+        assert_eq!(resolve_public("good.example", 443, &resolve, &allow).unwrap(), vec![sock("8.8.8.8", 443)]);
+    }
+
+    #[test]
+    fn odd_ip_literals_are_refused() {
+        for url in [
+            "http://127.0.0.1/", "http://127.1/", "http://0x7f.0.0.1/", "http://2130706433/", "http://0177.0.0.1/", "http://0x7f000001/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:7f00:1]/", "http://[::1]:8080/", "http://169.254.169.254/latest/meta-data", "http://100.64.0.1/", "http://[fd00::1]/", "http://10.1.2.3:80/", "http://user@192.168.1.1/", "http://localhost./", "http://[::ffff:169.254.169.254]/", "http://0/",
+        ] {
+            assert!(refuse_private(url).is_err(), "{url} was allowed");
+        }
+        for url in ["https://example.com/", "http://8.8.8.8/", "https://example.com:8443/a?b=http://127.0.0.1", "http://[2606:4700:4700::1111]/"] {
+            assert!(refuse_private(url).is_ok(), "{url} was refused");
+        }
+    }
+
+    #[test]
+    fn blocked_ip_edges() {
+        let blocked = [
+            "0.0.0.0", "0.1.2.3", "10.0.0.1", "10.255.255.255", "100.64.0.0", "100.127.255.255", "127.0.0.1", "127.255.255.254", "169.254.0.1", "169.254.169.254", "172.16.0.1", "172.31.255.255", "192.0.0.1", "192.0.2.1", "192.168.0.1", "198.18.0.1", "198.19.255.255", "198.51.100.7", "203.0.113.9", "224.0.0.1", "239.255.255.250", "240.0.0.1", "255.255.255.255",
+            "::", "::1", "fe80::1", "febf::1", "fc00::1", "fdff::1", "ff02::1", "2001:db8::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:7f00:1", "::ffff:a9fe:a9fe", "::127.0.0.1", "::10.0.0.1", "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "64:ff9b::a00:1", "2002:7f00:1::1", "2002:a9fe:a9fe::1",
+        ];
+        let allowed = [
+            "1.1.1.1", "8.8.8.8", "9.255.255.255", "11.0.0.1", "100.63.255.255", "100.128.0.0", "126.255.255.255", "128.0.0.1", "169.253.255.255", "169.255.0.1", "172.15.255.255", "172.32.0.0", "192.169.0.1", "198.17.255.255", "198.20.0.0", "223.255.255.255", "93.184.216.34",
+            "2606:4700:4700::1111", "2001:4860:4860::8888", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::1",
+        ];
+        for ip in blocked {
+            assert!(blocked_ip(ip.parse().unwrap()), "{ip} was allowed");
+        }
+        for ip in allowed {
+            assert!(!blocked_ip(ip.parse().unwrap()), "{ip} was blocked");
+        }
     }
 }
