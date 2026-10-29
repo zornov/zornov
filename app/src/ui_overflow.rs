@@ -153,10 +153,10 @@ pub fn production_script(h: &mut Harness) {
     h.app.overlay = Overlay::Production;
 }
 
-/// The Review workspace (its tab in the top bar, or View > Workspaces).
+/// Review, opened as a panel (View > Panels, or the Review workspace).
 fn open_review(h: &mut Harness) {
-    let w = crate::workspaces::find("Review").expect("the Review workspace");
-    crate::workspaces::apply(&mut h.app, &w);
+    let ctx = h.ctx.clone();
+    crate::editor::dock_ui::open_panel(&mut h.app, &ctx, crate::dock::Panel::Review, false);
 }
 
 /// Paint with a picture open and every side section unfolded.
@@ -350,23 +350,33 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
     for (w, hh) in [(960.0, 600.0), (1440.0, 900.0)] {
         for s in surfaces().into_iter().filter(|s| CHECKED.contains(&s.name)) {
             visited += 1;
-            let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
-            let _viewport = crate::editor::viewport::test_lock();
-            let mut h = Harness::new(s.args).sized(w, hh);
-            (s.setup)(&mut h);
-            h.frames(8);
-            for c in s.clicks {
-                assert!(h.click(c), "{}: {c} can be clicked", s.name);
-            }
-            let (cuts, over) = (h.cut_text(), h.overlaps());
-            if s.name.starts_with("paint") {
-                let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
-            }
-            for c in s.clicks.iter().rev() {
-                h.click(c);
-            }
-            assert!(cuts.is_empty(), "{} at {w}×{hh}: text cut off with no way to see it: {cuts:#?}", s.name);
-            assert!(over.is_empty(), "{} at {w}×{hh}: drawn over each other: {over:#?}", s.name);
+            // A thread of its own for each, so what one surface leaves in
+            // thread-local state (the Review panel's, say) does not reach
+            // the next.
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
+                        let _viewport = crate::editor::viewport::test_lock();
+                        let mut h = Harness::new(s.args).sized(w, hh);
+                        (s.setup)(&mut h);
+                        h.frames(8);
+                        for c in s.clicks {
+                            assert!(h.click(c), "{}: {c} can be clicked", s.name);
+                        }
+                        let (cuts, over) = (h.cut_text(), h.overlaps());
+                        if s.name.starts_with("paint") {
+                            let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
+                        }
+                        for c in s.clicks.iter().rev() {
+                            h.click(c);
+                        }
+                        assert!(cuts.is_empty(), "{} at {w}×{hh}: text cut off with no way to see it: {cuts:#?}", s.name);
+                        assert!(over.is_empty(), "{} at {w}×{hh}: drawn over each other: {over:#?}", s.name);
+                    })
+                    .join()
+                    .unwrap_or_else(|e| std::panic::resume_unwind(e));
+            });
         }
     }
     assert_eq!(visited, 2 * CHECKED.len(), "every listed surface was looked at");
