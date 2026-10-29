@@ -333,9 +333,8 @@ pub fn show_rows(app: &mut StudioApp, ui: &mut eframe::egui::Ui) -> Option<Proje
 }
 
 /// Open a built project as a new, saved one.
-pub fn open(app: &mut StudioApp, project: Project) {
-    app.open_project(project);
-    app.give_folder();
+pub fn open(app: &mut StudioApp, ctx: &eframe::egui::Context, project: Project) {
+    app.replace(ctx, crate::files::Replace::New(project));
 }
 
 #[allow(dead_code)]

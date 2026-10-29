@@ -76,12 +76,17 @@ impl Queue {
     }
 
     fn expire(&mut self, now: f64) {
-        self.items.retain(|t| t.level == Level::Warning || now - t.born < LIFETIME + 0.3);
+        self.items.retain(|t| t.level == Level::Warning || now - t.born < lifetime(&t.text) + 0.3);
     }
 
     fn dismiss(&mut self, id: u64) {
         self.items.retain(|t| t.id != id);
     }
+}
+
+/// Seconds an info toast stays: longer text is read for longer.
+fn lifetime(text: &str) -> f64 {
+    (LIFETIME + text.chars().count().saturating_sub(40) as f64 * 0.05).min(8.0)
 }
 
 fn qid() -> Id {
@@ -93,6 +98,11 @@ fn qid() -> Id {
 pub fn push(ctx: &egui::Context, text: impl Into<String>, action: Option<&str>, icon: Option<Icon>) -> u64 {
     let level = if icon == Some(Icon::Warning) { Level::Warning } else { Level::Info };
     push_as(ctx, text, action, icon, level)
+}
+
+/// Show a warning or error: stays until dismissed.
+pub fn push_error(ctx: &egui::Context, text: impl Into<String>) -> u64 {
+    push_as(ctx, text, None, Some(Icon::Warning), Level::Warning)
 }
 
 /// Like [`push`] with the level chosen by the caller.
@@ -108,14 +118,19 @@ pub fn recent(ctx: &egui::Context) -> Vec<Toast> {
     ctx.data(|d| d.get_temp::<Queue>(qid()).map(|q| q.history.iter().rev().cloned().collect()).unwrap_or_default())
 }
 
-/// Forget the recent list.
-pub fn clear_recent(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Queue>(qid()).history.clear());
-}
-
 /// Draw the toasts stacked above the bottom centre of `area`, newest at the
 /// bottom. Returns the id of a toast whose action was clicked.
 pub fn show(ctx: &egui::Context, area: Rect, bottom_offset: f32) -> Option<u64> {
+    show_in(ctx, area, bottom_offset)
+}
+
+/// Draw the toasts over the whole window, for screens that have no viewer
+/// (Start, Paint, ...). Call once per frame from the app; returns a clicked action's id.
+pub fn show_overlay(ctx: &egui::Context) -> Option<u64> {
+    show_in(ctx, ctx.content_rect(), 24.0)
+}
+
+fn show_in(ctx: &egui::Context, area: Rect, bottom_offset: f32) -> Option<u64> {
     let now = ctx.input(|i| i.time);
     let mut q: Queue = ctx.data(|d| d.get_temp(qid()).unwrap_or_default());
     q.expire(now);
@@ -128,14 +143,15 @@ pub fn show(ctx: &egui::Context, area: Rect, bottom_offset: f32) -> Option<u64> 
 
     let mut clicked = None;
     let mut dismissed = None;
+    let mut held = Vec::new();
     let n = items.len();
     for (i, toast) in items.iter().enumerate() {
         let age = (now - toast.born) as f32;
         let fade_in = if reduce_motion(ctx) { 1.0 } else { ease_out((age / PANEL).min(1.0)) };
-        let fade_out = if toast.level == Level::Warning { 1.0 } else { ((LIFETIME as f32 + 0.3 - age) / 0.3).clamp(0.0, 1.0) };
+        let fade_out = if toast.level == Level::Warning { 1.0 } else { ((lifetime(&toast.text) as f32 + 0.3 - age) / 0.3).clamp(0.0, 1.0) };
         let k = fade_in.min(fade_out);
         let lift = (n - 1 - i) as f32 * STEP;
-        egui::Area::new(Id::unique(("toast", toast.id)))
+        let area_resp = egui::Area::new(Id::unique(("toast", toast.id)))
             .order(egui::Order::Foreground)
             .pivot(Align2::CENTER_BOTTOM)
             .fixed_pos(egui::pos2(area.center().x, area.bottom() - bottom_offset - lift + (1.0 - k) * 8.0))
@@ -148,6 +164,18 @@ pub fn show(ctx: &egui::Context, area: Rect, bottom_offset: f32) -> Option<u64> 
                     Hit::None => {}
                 }
             });
+        if area_resp.response.contains_pointer() {
+            held.push(toast.id);
+        }
+    }
+    if !held.is_empty() {
+        // Hovering a toast pauses its clock.
+        let dt = ctx.input(|i| i.stable_dt) as f64;
+        ctx.data_mut(|d| {
+            for t in d.get_temp_mut_or_default::<Queue>(qid()).items.iter_mut().filter(|t| held.contains(&t.id)) {
+                t.born += dt;
+            }
+        });
     }
     if let Some(id) = clicked.or(dismissed) {
         ctx.data_mut(|d| d.get_temp_mut_or_default::<Queue>(qid()).dismiss(id));
@@ -253,6 +281,8 @@ mod tests {
         assert_eq!(q.items.len(), 1);
         q.expire(1.0 + LIFETIME + 1.0);
         assert!(q.items.is_empty());
+        // Long text stays longer, but not forever.
+        assert!(lifetime(&"x".repeat(200)) > LIFETIME && lifetime(&"x".repeat(2000)) <= 8.0);
     }
 
     #[test]
@@ -275,6 +305,13 @@ mod tests {
         assert_eq!(q.items.len(), MAX_PERSISTENT);
         assert_eq!(q.items.last().unwrap().text, "Problem 29");
         assert_eq!(q.history.len(), HISTORY);
+    }
+
+    #[test]
+    fn push_error_persists() {
+        let ctx = egui::Context::default();
+        push_error(&ctx, "Could not save");
+        assert_eq!(recent(&ctx)[0].level, Level::Warning);
     }
 
     #[test]

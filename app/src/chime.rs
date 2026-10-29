@@ -4,6 +4,13 @@
 //! A short two-note chime when a long task finishes (exports end
 //! with a chime). Synthesised here and played through `studio-audio`.
 
+/// Play the chime unless the person has turned sounds off.
+pub fn play_unless(quiet: bool) {
+    if !quiet {
+        play();
+    }
+}
+
 /// Play the chime on a background thread; silent if there is no output.
 pub fn play() {
     std::thread::spawn(|| {
