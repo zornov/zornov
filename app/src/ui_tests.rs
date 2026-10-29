@@ -117,6 +117,22 @@ impl Harness {
         crate::ui_shot::overlaps(&self.ctx, &names, 0.2).into_iter().filter(|o| !by_design(&o.a, &o.b)).collect()
     }
 
+    /// A frame in which the window's close button was pressed; the commands
+    /// the app sent back (`CancelClose` when it wants to ask first).
+    pub fn close_requested(&mut self) -> Vec<egui::ViewportCommand> {
+        self.time += 1.0 / 60.0;
+        let rect = Rect::from_min_size(egui::pos2(0.0, 0.0), self.size);
+        let mut raw = RawInput { screen_rect: Some(rect), time: Some(self.time), ..Default::default() };
+        raw.viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+        let (app, frame) = (&mut self.app, &mut self.frame);
+        let mut out = self.ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, frame));
+        self.textures.apply(&out.textures_delta);
+        out.textures_delta.clear();
+        let cmds = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
+        self.last = Some(out);
+        cmds
+    }
+
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.with_events(vec![]);
@@ -867,4 +883,224 @@ fn library_production_review_and_paint_still_open() {
     let paint = h.find(Some(accesskit::Role::RadioButton), "Paint").unwrap();
     h.click_at(paint);
     assert_eq!(h.app.screen, crate::cli::Screen::Paint);
+}
+
+// --- scripted headless runs (`zornov app --ui-script`) --------------------
+
+mod scripted {
+    use super::*;
+    use crate::ui_script::{self, Session, Step};
+
+    fn scratch(name: &str, clip: bool) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zornov-ui-script-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut doc = crate::services::project::new_project(&crate::services::project::CANVASES[0]);
+        if clip {
+            let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/media/h264_baseline_cavlc.mp4");
+            crate::services::project::import_to_timeline(&mut doc, &[media]).expect("a clip on the timeline");
+        }
+        crate::services::project::save(&mut doc, Some(&dir)).expect("a scratch project");
+        dir
+    }
+
+    fn session(out: &std::path::Path, extra: &[&str]) -> Session {
+        let mut argv: Vec<String> = vec!["--ui-script".into(), "x".into(), "--ui-out".into(), out.display().to_string()];
+        argv.extend(extra.iter().map(|s| s.to_string()));
+        Session::new(crate::cli::Cli::parse(argv.into_iter()), true)
+    }
+
+    fn png(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
+        let dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).expect("the picture")));
+        let mut r = dec.read_info().unwrap();
+        let mut buf = vec![0; r.output_buffer_size().unwrap()];
+        let info = r.next_frame(&mut buf).unwrap();
+        buf.truncate(info.buffer_size());
+        (info.width, info.height, buf)
+    }
+
+    fn colours(px: &[u8]) -> usize {
+        px.chunks_exact(4).step_by(7).map(|p| [p[0], p[1], p[2]]).collect::<std::collections::HashSet<_>>().len()
+    }
+
+    #[test]
+    fn the_grammar_reads_every_step_and_names_what_is_wrong() {
+        let p = |l: &str| ui_script::parse_line(l);
+        assert_eq!(p("  # a comment").unwrap(), None);
+        assert_eq!(p("size 1800 1028").unwrap(), Some(Step::Size(1800.0, 1028.0)));
+        assert_eq!(p("home").unwrap(), Some(Step::Home));
+        assert_eq!(p("open \"/tmp/a b\"").unwrap(), Some(Step::Open("/tmp/a b".into())));
+        assert!(matches!(p("dclick 10 20 cmd shift").unwrap(), Some(Step::Click { count: 2, mods, .. }) if mods.command && mods.shift));
+        assert!(matches!(p("rclick 1 2").unwrap(), Some(Step::Click { button: egui::PointerButton::Secondary, .. })));
+        assert!(matches!(p("click \"Save as\"#2 cmd").unwrap(), Some(Step::Click { at: ui_script::Target::Label(l, 2), mods, .. }) if l == "Save as" && mods.command));
+        assert!(matches!(p("move \"File\"").unwrap(), Some(Step::Move { at: ui_script::Target::Label(_, 1) })));
+        assert!(p("click \"File").is_err() && p("click \"File\"#0").is_err() && p("move \"File\" cmd").is_err());
+        assert!(matches!(p("drag 1 2 30 40").unwrap(), Some(Step::Drag { hold: false, .. })));
+        assert!(matches!(p("drag 1 2 30 40 shift hold").unwrap(), Some(Step::Drag { hold: true, mods, .. }) if mods.shift));
+        assert!(matches!(p("drag \"Clip\"#2 30 40").unwrap(), Some(Step::Drag { from: ui_script::Target::Label(_, 2), to: (30.0, 40.0), .. })));
+        assert_eq!(p("release").unwrap(), Some(Step::Release));
+        assert!(matches!(p("scroll 5 5 -40 alt").unwrap(), Some(Step::Scroll { dy, .. }) if dy == -40.0));
+        assert!(matches!(p("key Enter").unwrap(), Some(Step::Key { key: Key::Enter, .. })));
+        assert!(matches!(p("key esc").unwrap(), Some(Step::Key { key: Key::Escape, .. })));
+        assert_eq!(p("text \"a \\\"b\\\" c\"").unwrap(), Some(Step::Text("a \"b\" c".into())));
+        assert_eq!(p("wait 0.5").unwrap(), Some(Step::Wait(0.5)));
+        assert_eq!(p("shot home").unwrap(), Some(Step::Shot("home".into())));
+        for bad in ["click 1", "click a b", "key Nonsense", "click 1 2 hyper", "shot ../x", "jump 3", "text \"open", "home now"] {
+            assert!(p(bad).is_err(), "{bad} should be refused");
+        }
+    }
+
+    #[test]
+    fn a_script_opens_a_project_clicks_a_menu_and_the_picture_is_2x_and_not_blank() {
+        let _s = serial();
+        let dir = scratch("menu", false);
+        let out = std::env::temp_dir().join(format!("zornov-ui-script-{}-menu-out", std::process::id()));
+        // Where the File menu is, from the same layout at the same size.
+        let mut h = top_bar(1440.0);
+        let at = bar_text(&mut h, "File").expect("the File menu");
+        let mut s = session(&out, &["--size", "1440x900"]);
+        let script = format!("open \"{}\"\nframes 6\nshot before\nclick {} {}\nframes 4\nshot after\nhome\nshot home\n", dir.display(), at.center().x, at.center().y);
+        let report = ui_script::run_text(&mut s, &script, &out, "test");
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+        assert_eq!(report.shots.len(), 3);
+        let (bw, bh, before) = png(&out.join("before.png"));
+        assert_eq!((bw, bh), (2880, 1800), "1440x900 points at 2x");
+        let (_, _, after) = png(&out.join("after.png"));
+        let (_, _, home) = png(&out.join("home.png"));
+        for (name, px) in [("before", &before), ("after", &after), ("home", &home)] {
+            assert!(colours(px) > 12, "{name} is not blank: {} colours", colours(px));
+        }
+        assert_ne!(before, after, "the menu opened and is in the picture");
+        assert_ne!(before, home, "home is another screen");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_label_is_clicked_like_its_coordinates_and_a_miss_is_logged() {
+        let _s = serial();
+        let out = std::env::temp_dir().join(format!("zornov-ui-script-{}-label-out", std::process::id()));
+        let mut s = session(&out, &["--size", "1440x900", "--screen", "editor"]);
+        let before = s.app.overlay;
+        let report = ui_script::run_text(&mut s, "click \"File\"\nframes 3\nclick \"Settings…\"\nframes 3\nclick \"No such thing\"\nclick \"File\"#9\nshot after\n", &out, "l.ui");
+        assert_eq!(s.app.overlay, crate::app::Overlay::Settings, "File ▸ Settings… opened by name (was {before:?})");
+        assert_eq!(report.failures.len(), 2, "{:?}", report.failures);
+        assert!(report.log.iter().filter(|l| l.starts_with("failed")).count() == 2 && report.log.last().unwrap().starts_with("ok") && report.shots.len() == 1, "{:?}", report.log);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_held_drag_keeps_the_button_down_until_the_shot_or_a_release() {
+        let _s = serial();
+        let out = std::env::temp_dir().join(format!("zornov-ui-script-{}-hold-out", std::process::id()));
+        let mut s = session(&out, &["--size", "800x600"]);
+        let down = |s: &Session| s.ctx.input(|i| i.pointer.primary_down());
+        let r = ui_script::run_text(&mut s, "drag 100 100 300 200 hold\n", &out, "h");
+        assert!(r.failures.is_empty() && down(&s), "{:?}", r.failures);
+        let r = ui_script::run_text(&mut s, "shot held\n", &out, "h");
+        assert!(r.failures.is_empty() && !down(&s), "the shot is taken, then the button is let go");
+        ui_script::run_text(&mut s, "drag 100 100 300 200 hold\nrelease\n", &out, "h");
+        assert!(!down(&s));
+        let r = ui_script::run_text(&mut s, "release\n", &out, "h");
+        assert_eq!(r.failures.len(), 1, "nothing is held");
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_failed_step_is_reported_with_its_line_and_the_run_goes_on() {
+        let _s = serial();
+        let out = std::env::temp_dir().join(format!("zornov-ui-script-{}-fail-out", std::process::id()));
+        let mut s = session(&out, &["--size", "800x600"]);
+        let report = ui_script::run_text(&mut s, "open /nonexistent/zornov\nclick 5000 5 \nfrobnicate\nshot after\n", &out, "f.ui");
+        assert_eq!(report.failures.len(), 3, "{:?}", report.failures);
+        assert!(report.failures[0].starts_with("f.ui:1:") && report.failures[2].starts_with("f.ui:3:"));
+        assert_eq!(report.shots.len(), 1, "the last step still ran");
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn the_viewer_shows_a_frame_the_gpu_rendered_when_a_clip_is_on_the_timeline() {
+        let _s = serial();
+        let dir = scratch("viewer", true);
+        let out = std::env::temp_dir().join(format!("zornov-ui-script-{}-viewer-out", std::process::id()));
+        let mut s = session(&out, &["--size", "1440x900"]);
+        if !s.on_gpu() {
+            eprintln!("no GPU here: {:?}", s.gpu_note);
+            return;
+        }
+        let report = ui_script::run_text(&mut s, &format!("open \"{}\"\nshot clip\n", dir.display()), &out, "test");
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+        assert!(!s.app.doc.project.clips.is_empty(), "a clip is on the timeline");
+        assert!(s.viewer_frames() > 0, "the preview renderer sent the viewer a frame");
+        if let Some(keep) = std::env::var_os("ZORNOV_KEEP_SHOTS") {
+            let _ = std::fs::copy(out.join("clip.png"), std::path::Path::new(&keep).join("clip.png"));
+        }
+        let (w, h, px) = png(&out.join("clip.png"));
+        // The middle of the window is the viewer: a picture there has many colours.
+        let (x0, x1, y0, y1) = (w as usize * 3 / 10, w as usize * 7 / 10, h as usize * 2 / 10, h as usize * 5 / 10);
+        let mut seen = std::collections::HashSet::new();
+        for y in (y0..y1).step_by(3) {
+            for x in (x0..x1).step_by(3) {
+                let i = (y * w as usize + x) * 4;
+                seen.insert([px[i] / 4, px[i + 1] / 4, px[i + 2] / 4]);
+            }
+        }
+        assert!(seen.len() > 24, "the viewer area holds a rendered picture: {} colours", seen.len());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+}
+
+// --- app.rs hooks: quit guard, toasts off the editor, export failures ------
+
+mod hooks {
+    use super::*;
+
+    fn painted(h: &Harness, text: &str) -> usize {
+        fn walk(shape: &egui::epaint::Shape, text: &str) -> usize {
+            match shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == text => 1,
+                egui::epaint::Shape::Vec(v) => v.iter().map(|s| walk(s, text)).sum(),
+                _ => 0,
+            }
+        }
+        h.last.as_ref().map_or(0, |o| o.shapes.iter().map(|cs| walk(&cs.shape, text)).sum())
+    }
+
+    #[test]
+    fn closing_the_window_with_unsaved_changes_asks_first() {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+        h.frames(4);
+        assert!(h.close_requested().is_empty() || !h.app.doc.dirty(), "a clean project closes without asking");
+        h.app.doc.edit("Rename", |p| p.name = "Changed".into());
+        assert!(h.app.doc.dirty());
+        let cmds = h.close_requested();
+        assert!(cmds.iter().any(|c| matches!(c, egui::ViewportCommand::CancelClose)), "closing is held back: {cmds:?}");
+        h.frames(3);
+        assert!(h.labels().iter().any(|l| l == "Don't save"), "the Save changes? dialog is up: {:?}", h.labels());
+    }
+
+    #[test]
+    fn a_toast_shows_on_the_start_screen() {
+        let mut h = Harness::new(&[]).sized(1440.0, 900.0);
+        h.frames(3);
+        assert_eq!(h.app.screen, crate::cli::Screen::Start);
+        crate::kit::push(&h.ctx, "Toast on start", None, Some(crate::icons::Icon::Info));
+        h.frames(3);
+        assert_eq!(painted(&h, "Toast on start"), 1);
+    }
+
+    #[test]
+    fn the_editor_draws_a_toast_once() {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+        h.frames(4);
+        crate::kit::push(&h.ctx, "Toast in editor", None, Some(crate::icons::Icon::Info));
+        h.frames(3);
+        assert_eq!(painted(&h, "Toast in editor"), 1, "one toast, not two");
+    }
+
+    #[test]
+    fn a_failed_export_is_worded_as_couldnt_export() {
+        let src = include_str!("app.rs");
+        assert!(src.contains("Couldn't export {}: {e}") && !src.contains("\"{} failed: {e}\""));
+    }
 }

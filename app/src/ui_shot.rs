@@ -9,6 +9,9 @@
 //! blended in gamma space, bilinear texture samples. Custom GPU callbacks
 //! (the viewer's frame, 3D viewports) are left empty.
 
+// Only the tests use the text and overlap checks.
+#![cfg_attr(not(test), allow(dead_code))]
+
 use eframe::egui::{self, epaint, Color32, Rect, TextureId};
 use std::collections::HashMap;
 
