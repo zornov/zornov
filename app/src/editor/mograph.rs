@@ -21,7 +21,6 @@ use crate::theme;
 use eframe::egui::{self, Color32};
 use serde_json::{Value, json};
 use studio_model as m;
-use crate::kit::ShowNoted;
 
 /// Runs ops on the document as one undo step, as the AI's edit tool
 /// does. Returns the ops' notes, or why nothing changed.
@@ -57,69 +56,63 @@ fn done(app: &mut StudioApp, ctx: &egui::Context, r: Result<Vec<String>, String>
     }
 }
 
-fn search_id() -> egui::Id {
-    egui::Id::new("mograph-search")
-}
-
-/// The motion graphics button on the viewer's toolbar.
-pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
+/// The motion graphics part of the viewer's Add menu: templates, shape
+/// layers, charts and 3D text. `q` is the menu's search; `close` closes the
+/// menu after a pick.
+pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::Id) {
+    use super::viewer::{add_item, add_shows};
     let ctx = ui.ctx().clone();
-    let id = egui::Id::new("viewer-mograph-menu");
-    let resp = IconButton::new(Icon::Shapes, "Motion graphics: templates, shapes, charts, 3D text").active(kit::is_open(&ctx, id)).show(ui);
-    if resp.clicked() {
-        kit::toggle_open(&ctx, id);
-    }
     let mut pick: Option<&'static str> = None;
     let mut preset: Option<&'static str> = None;
     let mut chart: Option<&'static str> = None;
     let mut text_3d = false;
-    kit::popover(&ctx, id, resp.rect, kit::Side::Below, 320.0, |ui| {
-        let mut q: String = ui.data(|d| d.get_temp(search_id())).unwrap_or_default();
-        if kit::text_field(ui, &mut q, "Search templates", Some(Icon::MagnifyingGlass), 300.0, None).changed() {
-            ui.data_mut(|d| d.insert_temp(search_id(), q.clone()));
+    let found = studio_mograph::search(q);
+    for cat in studio_mograph::Category::ALL {
+        let here: Vec<_> = found.iter().filter(|t| t.category == cat).collect();
+        if here.is_empty() {
+            continue;
         }
-        egui::ScrollArea::vertical().max_height(460.0).show_v(ui, |ui| {
-            let found = studio_mograph::search(&q);
-            for cat in studio_mograph::Category::ALL {
-                let here: Vec<_> = found.iter().filter(|t| t.category == cat).collect();
-                if here.is_empty() {
-                    continue;
-                }
-                kit::menu_heading(ui, cat.label());
-                for t in here {
-                    let r = MenuItem::new(t.name).show(ui);
-                    let r = kit::tip(r, t.description, None);
-                    if r.clicked() {
-                        pick = Some(t.id);
-                        kit::set_open(&ctx, id, false);
-                    }
-                }
+        kit::menu_heading(ui, cat.label());
+        for t in here {
+            let r = MenuItem::new(t.name).show(ui);
+            let r = kit::tip(r, t.description, None);
+            if r.clicked() {
+                pick = Some(t.id);
+                kit::set_open(&ctx, close, false);
             }
-            if q.trim().is_empty() {
-                kit::menu_heading(ui, "Shape layer");
-                for (name, desc) in studio_vector::presets::PRESETS {
-                    let label = name.replace('_', " ");
-                    let r = kit::tip(MenuItem::new(&label).show(ui), desc, None);
-                    if r.clicked() {
-                        preset = Some(name);
-                        kit::set_open(&ctx, id, false);
-                    }
-                }
-                kit::menu_heading(ui, "Chart from data");
-                for (label, kind) in [("Bar chart", "bar"), ("Line chart", "line"), ("Donut chart", "donut"), ("Pie chart", "pie"), ("Route map", "map")] {
-                    if MenuItem::new(label).show(ui).clicked() {
-                        chart = Some(kind);
-                        kit::set_open(&ctx, id, false);
-                    }
-                }
-                kit::menu_heading(ui, "3D");
-                if kit::tip(MenuItem::new("3D text").show(ui), "Extruded, bevelled letters lit by the scene; uses the selected title's words", None).clicked() {
-                    text_3d = true;
-                    kit::set_open(&ctx, id, false);
-                }
+        }
+    }
+    if add_shows(q, "Shape layer", studio_vector::presets::PRESETS.iter().map(|p| p.0)) {
+        kit::menu_heading(ui, "Shape layer");
+        for (name, desc) in studio_vector::presets::PRESETS {
+            let label = name.replace('_', " ");
+            if !add_shows(q, "Shape layer", [label.as_str()]) {
+                continue;
             }
-        });
-    });
+            let r = kit::tip(MenuItem::new(&label).show(ui), desc, None);
+            if r.clicked() {
+                preset = Some(name);
+                kit::set_open(&ctx, close, false);
+            }
+        }
+    }
+    let charts = [("Bar chart", "bar"), ("Line chart", "line"), ("Donut chart", "donut"), ("Pie chart", "pie"), ("Route map", "map")];
+    if add_shows(q, "Chart from data", charts.iter().map(|c| c.0)) {
+        kit::menu_heading(ui, "Chart from data");
+        for (label, kind) in charts {
+            if add_item(ui, q, "Chart from data", label) {
+                chart = Some(kind);
+                kit::set_open(&ctx, close, false);
+            }
+        }
+    }
+    if add_shows(q, "3D text", ["3D text"]) {
+        kit::menu_heading(ui, "3D text");
+        if kit::tip(MenuItem::new("3D text").show(ui), "Extruded, bevelled letters lit by the scene; uses the selected title's words", None).clicked() {
+            text_3d = true;
+            kit::set_open(&ctx, close, false);
+        }
+    }
     let at = app.editor.playhead as f64 / 1e6;
     if let Some(t) = pick {
         let r = run(app, "Add template", vec![json!({"op": "template", "id": t, "at": at})]);

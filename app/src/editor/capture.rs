@@ -12,7 +12,6 @@ use crate::agent::{Content, Session};
 use crate::app::StudioApp;
 use crate::icons::Icon;
 use crate::kit;
-use crate::kit::IconButton;
 use eframe::egui;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -58,14 +57,6 @@ fn panel() -> &'static Mutex<Panel> {
     P.get_or_init(|| Mutex::new(Panel { count_in: 3, bpm: 100.0, gain: 1.0, wpm: 150.0, ..Default::default() }))
 }
 
-/// The viewer toolbar's button.
-pub fn toolbar_button(ui: &mut egui::Ui) {
-    let Ok(mut p) = panel().lock() else { return };
-    if IconButton::new(Icon::Microphone, "Record, voice-over, prompter and live").active(p.open).show(ui).clicked() {
-        p.open = !p.open;
-    }
-}
-
 /// Runs a `capture` call on the open project. The window's buttons are the
 /// person's own action, so real devices are allowed in what it sends.
 fn call(app: &mut StudioApp, args: Value) -> Result<Value, String> {
@@ -87,15 +78,35 @@ fn access_label(a: Access) -> &'static str {
     }
 }
 
+/// A labelled device menu: "None" first, then each device.
 fn pick(ui: &mut egui::Ui, id: &str, label: &str, items: &[(String, String)], cur: &mut Option<String>) {
-    let name = cur.as_ref().and_then(|c| items.iter().find(|(i, _)| i == c)).map(|(_, n)| n.clone()).unwrap_or_else(|| "None".into());
-    egui::ComboBox::from_id_salt(id).selected_text(format!("{label}: {name}")).width(280.0).show_ui(ui, |ui| {
-        crate::kit::note_list(ui);
-        ui.selectable_value(cur, None, "None");
-        for (i, n) in items {
-            ui.selectable_value(cur, Some(i.clone()), n);
+    let selected = cur.as_ref().and_then(|c| items.iter().position(|(i, _)| i == c)).map_or(0, |i| i + 1);
+    let mut names: Vec<&str> = vec!["None"];
+    names.extend(items.iter().map(|(_, n)| n.as_str()));
+    kit::labeled_row(ui, label, |ui| {
+        // TODO(kit): menu width is a local constant until the kit has a fill-width menu button.
+        let width = (ui.available_width() - 6.0).clamp(140.0, 300.0);
+        if let Some(i) = kit::menu_button(ui, id, selected, &names, width, None) {
+            *cur = if i == 0 { None } else { Some(items[i - 1].0.clone()) };
         }
     });
+}
+
+/// An on/off switch with its label after it.
+fn switch(ui: &mut egui::Ui, on: &mut bool, label: &str) -> egui::Response {
+    let t = crate::theme::tokens(ui.ctx());
+    ui.horizontal(|ui| {
+        let r = kit::toggle(ui, on, label, None);
+        ui.label(egui::RichText::new(kit::shown(label)).font(crate::theme::body()).color(t.text));
+        r
+    })
+    .inner
+}
+
+/// Small explanatory text.
+fn note(ui: &mut egui::Ui, text: &str) {
+    let t = crate::theme::tokens(ui.ctx());
+    ui.label(egui::RichText::new(text).font(crate::theme::caption()).color(t.text_2));
 }
 
 fn items(d: &[device::Device]) -> Vec<(String, String)> {
@@ -131,13 +142,10 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut Pan
         if let Some(g) = grip {
             g(app, ui);
         }
-        for (i, t) in ["Record", "Voice-over", "Prompter", "Live", "Cards"].iter().enumerate() {
-            if ui.selectable_label(p.tab == i, *t).clicked() {
-                p.tab = i;
-            }
-        }
+        let tabs = ["Record", "Voice-over", "Prompter", "Live", "Cards"].map(kit::Segment::text);
+        kit::segmented(ui, "record-tabs-seg", &mut p.tab, &tabs, None, None);
     });
-    ui.separator();
+    ui.add_space(crate::theme::space::GAP);
     // Taller than the window or panel allows: the tab scrolls.
     crate::kit::scroll_panel(ui, ("record-body", p.tab), |ui| {
         match p.tab {
@@ -148,8 +156,8 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut Pan
             _ => tab_cards(app, ui, p),
         }
         if !p.message.is_empty() {
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(p.message.clone()).small());
+            ui.add_space(crate::theme::space::SECTION_GAP);
+            note(ui, &p.message.clone());
         }
     });
 }
@@ -200,9 +208,10 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
 
 fn access_row(ui: &mut egui::Ui, p: &mut Panel, kind: Kind, what: &str, request: &'static str) {
     let a = device::access(kind);
+    let t = crate::theme::tokens(ui.ctx());
     ui.horizontal_wrapped(|ui| {
-        ui.label(format!("{what}: {}", access_label(a)));
-        if a == Access::NotDetermined && ui.small_button(format!("Allow {what}…")).clicked() {
+        ui.label(egui::RichText::new(format!("{what}: {}", access_label(a))).font(crate::theme::body()).color(t.text));
+        if a == Access::NotDetermined && kit::Button::secondary(&format!("Allow {}…", what.to_lowercase())).compact().show(ui).clicked() {
             // The system's own question; asked here because the person pressed this.
             let slot = p.ask.clone();
             std::thread::spawn(move || {
@@ -217,36 +226,38 @@ fn access_row(ui: &mut egui::Ui, p: &mut Panel, kind: Kind, what: &str, request:
                 }
             });
         } else if matches!(a, Access::Denied | Access::Restricted) {
-            ui.label(egui::RichText::new(device::explain(kind, a)).small());
+            note(ui, &device::explain(kind, a));
         }
     });
 }
 
 fn tab_record(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
     let Some(d) = p.devices.clone() else { return };
+    kit::menu_heading(ui, "Access");
     access_row(ui, p, Kind::Camera, "Camera", "The camera");
     access_row(ui, p, Kind::Mic, "Microphone", "The microphone");
     access_row(ui, p, Kind::Screen, "Screen recording", "Screen recording");
-    ui.separator();
+    kit::menu_separator(ui);
+    kit::menu_heading(ui, "Sources");
     pick(ui, "rec-cam", "Camera", &items(&d.cameras), &mut p.cam);
     pick(ui, "rec-mic", "Microphone", &items(&d.mics), &mut p.mic);
     let mut screens = items(&d.screens);
     screens.extend(items(&d.windows));
     pick(ui, "rec-screen", "Screen or window", &screens, &mut p.screen);
-    if ui.small_button("Refresh devices").clicked() {
+    if kit::Button::ghost("Refresh devices").icon(Icon::ArrowCounterClockwise).compact().show(ui).clicked() {
         p.devices = None;
     }
-    ui.add_space(6.0);
+    kit::menu_separator(ui);
     if let Some(id) = p.rec {
         let secs = p.last_status.as_ref().and_then(|s| s["recordings"].as_array()).and_then(|a| a.iter().find(|x| x["session"] == id)).map(|x| x["progress"]["seconds"].as_f64().unwrap_or(0.0)).unwrap_or(0.0);
-        ui.label(format!("Recording {secs:.1} s"));
+        kit::menu_heading(ui, &format!("Recording {secs:.1} s"));
         if let Some(levels) = p.last_status.as_ref().and_then(|s| s["recordings"].as_array()).and_then(|a| a.iter().find(|x| x["session"] == id)).and_then(|x| x["progress"]["levels"].as_array()) {
             for l in levels {
                 let db = l["peak_db"].as_f64().unwrap_or(-120.0);
                 ui.add(egui::ProgressBar::new(((db + 60.0) / 60.0).clamp(0.0, 1.0) as f32).text(format!("{} {db:.0} dB{}", l["label"].as_str().unwrap_or(""), if l["clipped"] == true { "  CLIPPED" } else { "" })));
             }
         }
-        if ui.button("■  Stop and add to timeline").clicked() {
+        if kit::Button::primary("Stop and add to timeline").icon(Icon::Square).show(ui).clicked() {
             let at = app.editor.playhead as f64 / 1e6;
             match call(app, json!({"action": "stop", "session": id, "to_timeline": true, "at": at})) {
                 Ok(v) => p.message = format!("Added {} recording(s) to the timeline.", v["recorded"].as_array().map_or(0, Vec::len)),
@@ -254,7 +265,7 @@ fn tab_record(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
             }
             p.rec = None;
         }
-    } else if ui.add_enabled(p.cam.is_some() || p.mic.is_some() || p.screen.is_some(), egui::Button::new("●  Record")).clicked() {
+    } else if ui.add_enabled_ui(p.cam.is_some() || p.mic.is_some() || p.screen.is_some(), |ui| kit::Button::primary("Record").icon(Icon::Circle).show(ui)).inner.clicked() {
         let mut inputs = Vec::new();
         if p.cam.is_some() {
             inputs.push(json!({"label": "camera", "video": p.cam, "audio": p.mic}));
@@ -275,15 +286,17 @@ fn tab_voiceover(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
     let Some(d) = p.devices.clone() else { return };
     access_row(ui, p, Kind::Mic, "Microphone", "The microphone");
     pick(ui, "vo-mic", "Microphone", &items(&d.mics), &mut p.mic);
-    ui.horizontal_wrapped(|ui| {
-        ui.label("Count-in");
-        for b in [0u32, 3, 4] {
-            ui.selectable_value(&mut p.count_in, b, if b == 0 { "none".to_owned() } else { format!("{b} beats") });
+    kit::labeled_row(ui, "Count-in", |ui| {
+        const BEATS: [u32; 3] = [0, 3, 4];
+        let mut sel = BEATS.iter().position(|b| *b == p.count_in).unwrap_or(0);
+        let opts = ["None", "3 beats", "4 beats"].map(kit::Segment::text);
+        if kit::segmented(ui, "vo-count-in", &mut sel, &opts, None, None).changed() {
+            p.count_in = BEATS[sel];
         }
     });
     kit::Slider::new("tempo", &mut p.bpm, 60.0..=180.0).default(120.0).step(1.0).with_label().with_value().show(ui);
     kit::Slider::new("input level", &mut p.gain, 0.0..=2.0).default(1.0).decimals(2).with_label().with_value().show(ui);
-    ui.label(egui::RichText::new("Wear headphones: the timeline plays while you speak.").small());
+    note(ui, "Wear headphones: the timeline plays while you speak.");
     if let Some(id) = p.vo {
         let st = p.last_status.as_ref().and_then(|s| s["voiceovers"].as_array()).and_then(|a| a.iter().find(|x| x["session"] == id)).cloned();
         if let Some(st) = &st {
@@ -291,7 +304,7 @@ fn tab_voiceover(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
             let db = if db.is_finite() { db } else { -120.0 };
             ui.add(egui::ProgressBar::new(((db + 60.0) / 60.0).clamp(0.0, 1.0) as f32).text(format!("{} {:.1} s{}", st["state"].as_str().unwrap_or(""), st["seconds_recorded"].as_f64().unwrap_or(0.0), if st["clipped"] == true { "  CLIPPED" } else { "" })));
         }
-        if ui.button("■  Stop and place on the timeline").clicked() {
+        if kit::Button::primary("Stop and place on the timeline").icon(Icon::Square).show(ui).clicked() {
             app.editor.playing = false;
             match call(app, json!({"action": "stop", "session": id})) {
                 Ok(v) => p.message = format!("Voice-over placed at {:.1} s ({:.1} s). {}", v["starts_at"].as_f64().unwrap_or(0.0), v["seconds"].as_f64().unwrap_or(0.0), v["advice"].as_str().unwrap_or("")),
@@ -300,7 +313,7 @@ fn tab_voiceover(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
             p.vo = None;
             p.vo_was_recording = false;
         }
-    } else if ui.add_enabled(p.mic.is_some(), egui::Button::new("●  Record voice-over at the playhead")).clicked() {
+    } else if ui.add_enabled_ui(p.mic.is_some(), |ui| kit::Button::primary("Record voice-over at the playhead").icon(Icon::Circle).show(ui)).inner.clicked() {
         let at = app.editor.playhead as f64 / 1e6;
         match call(app, json!({"action": "voiceover", "mic": p.mic, "at": at, "count_in": p.count_in, "bpm": p.bpm, "gain": p.gain, "click": true, "user_approved": true})) {
             Ok(v) => {
@@ -314,17 +327,20 @@ fn tab_voiceover(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
 
 fn tab_prompter(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut Panel) {
     if !p.prompter_on {
-        ui.label("Script (leave empty to read the story's dialogue and narration):");
+        kit::menu_heading(ui, "Script");
+        note(ui, "Leave empty to read the story's dialogue and narration.");
         ui.add(egui::TextEdit::multiline(&mut p.script).desired_rows(5).desired_width(f32::INFINITY));
-        ui.checkbox(&mut p.follow, "Follow my voice (needs the speech model and the microphone)");
+        switch(ui, &mut p.follow, "Follow my voice");
+        note(ui, "Needs the speech model and the microphone.");
         if p.follow {
             let d = p.devices.clone().unwrap_or_default();
             access_row(ui, p, Kind::Mic, "Microphone", "The microphone");
             pick(ui, "prompter-mic", "Microphone", &items(&d.mics), &mut p.mic);
         }
         kit::Slider::new("words a minute", &mut p.wpm, 60.0..=260.0).default(150.0).step(1.0).with_label().with_value().show(ui);
-        ui.checkbox(&mut p.mirror, "Mirror (for a prompter glass)");
-        if ui.button("Start prompter").clicked() {
+        switch(ui, &mut p.mirror, "Mirror for a prompter glass");
+        ui.add_space(crate::theme::space::GAP);
+        if kit::Button::primary("Start prompter").icon(Icon::Play).show(ui).clicked() {
             let mut args = json!({"action": "prompter", "do": "load", "wpm": p.wpm, "mirror": p.mirror, "mode": if p.follow { "follow" } else { "pace" }});
             if p.script.trim().is_empty() {
                 args["scene"] = json!("all");
@@ -359,20 +375,20 @@ fn tab_prompter(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: 
         ui.image((t.id(), egui::vec2(w as f32, w as f32 * 0.5625)));
     }
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Play / pause").clicked() {
+        if kit::Button::secondary("Play or pause").icon(Icon::Play).compact().show(ui).clicked() {
             let running = p.last_status.as_ref().and_then(|s| s["prompter"]["running"].as_bool()).unwrap_or(true);
             let _ = call(app, json!({"action": "prompter", "do": if running { "pause" } else { "play" }}));
         }
-        if ui.button("Back").clicked() {
+        if kit::Button::secondary("Back").icon(Icon::SkipBack).compact().show(ui).clicked() {
             let _ = call(app, json!({"action": "prompter", "do": "back"}));
         }
-        if ui.checkbox(&mut p.mirror, "Mirror").changed() {
+        if switch(ui, &mut p.mirror, "Mirror").changed() {
             let _ = call(app, json!({"action": "prompter", "do": "settings", "mirror": p.mirror}));
         }
         if kit::Slider::new("wpm", &mut p.wpm, 60.0..=260.0).default(150.0).step(1.0).with_label().with_value().show(ui).changed() {
             let _ = call(app, json!({"action": "prompter", "do": "settings", "wpm": p.wpm}));
         }
-        if ui.button("Close").clicked() {
+        if kit::Button::ghost("Close").icon(Icon::X).compact().show(ui).clicked() {
             crate::agent::ui_stop_follow();
             let _ = call(app, json!({"action": "prompter", "do": "unload"}));
             p.prompter_on = false;
@@ -384,13 +400,14 @@ fn tab_prompter(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: 
 fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut Panel) {
     let Some(d) = p.devices.clone() else { return };
     let Some(id) = p.live else {
-        ui.label("Pick the cameras and screens to switch between, then open the mixer.");
+        note(ui, "Pick the cameras and screens to switch between, then open the mixer.");
         pick(ui, "live-cam", "Camera", &items(&d.cameras), &mut p.cam);
         let mut screens = items(&d.screens);
         screens.extend(items(&d.windows));
         pick(ui, "live-screen", "Screen or window", &screens, &mut p.screen);
         pick(ui, "live-mic", "Microphone", &items(&d.mics), &mut p.mic);
-        if ui.add_enabled(p.cam.is_some() || p.screen.is_some(), egui::Button::new("Open the mixer")).clicked() {
+        ui.add_space(crate::theme::space::GAP);
+        if ui.add_enabled_ui(p.cam.is_some() || p.screen.is_some(), |ui| kit::Button::primary("Open the mixer").icon(Icon::Faders).show(ui)).inner.clicked() {
             let mut sources = Vec::new();
             if let Some(c) = &p.cam {
                 sources.push(json!({"name": "Camera", "video": c, "audio": p.mic}));
@@ -418,62 +435,67 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
     }
     let sources: Vec<String> = p.last_status.as_ref().and_then(|s| s["productions"].as_array()).and_then(|a| a.iter().find(|x| x["session"] == id)).and_then(|x| x["state"]["sources"].as_array()).map(|a| a.iter().filter_map(|s| s["name"].as_str().map(str::to_owned)).collect()).unwrap_or_default();
     const TRANS: [&str; 5] = ["cut", "mix", "dip", "wipe", "push"];
+    const TRANS_NAMES: [&str; 5] = ["Cut", "Mix", "Dip", "Wipe", "Push"];
+    kit::menu_heading(ui, "Take to program");
     ui.horizontal_wrapped(|ui| {
-        ui.label("Take");
         for (i, name) in sources.iter().enumerate() {
-            if ui.button(name).clicked() {
+            if kit::Button::secondary(name).compact().show(ui).clicked() {
                 let t = TRANS[p.transition];
                 let _ = call(app, json!({"action": "live", "do": "take", "session": id, "to": i, "transition": t}));
             }
         }
-        egui::ComboBox::from_id_salt("live-trans").selected_text(TRANS[p.transition]).show_ui(ui, |ui| {
-            crate::kit::note_list(ui);
-            for (i, t) in TRANS.iter().enumerate() {
-                ui.selectable_value(&mut p.transition, i, *t);
-            }
-        });
+        if let Some(i) = kit::menu_button(ui, "live-trans", p.transition, &TRANS_NAMES, 90.0, None) {
+            p.transition = i;
+        }
     });
+    kit::menu_separator(ui);
+    kit::menu_heading(ui, "Title");
     ui.horizontal_wrapped(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut p.title).hint_text("Name").desired_width(120.0));
-        ui.add(egui::TextEdit::singleline(&mut p.sub).hint_text("Role").desired_width(120.0));
-        if ui.button("Title on").clicked() {
+        kit::text_field(ui, &mut p.title, "Name", None, 120.0, None);
+        kit::text_field(ui, &mut p.sub, "Role", None, 120.0, None);
+        if kit::Button::secondary("Title on").compact().show(ui).clicked() {
             let _ = call(app, json!({"action": "live", "do": "title", "session": id, "kind": "lower", "text": p.title, "sub": p.sub}));
         }
-        if ui.button("Off").clicked() {
+        if kit::Button::ghost("Off").compact().show(ui).clicked() {
             let _ = call(app, json!({"action": "live", "do": "title_off", "session": id}));
         }
     });
+    kit::menu_separator(ui);
+    kit::menu_heading(ui, "Stream");
     ui.horizontal_wrapped(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut p.stream_url).password(true).hint_text("rtmp://… or srt://…").desired_width(220.0));
-        if ui.button("Go live").clicked() {
+        // TODO(kit): the address is masked (stream keys), which kit::text_field cannot do yet.
+        ui.add(egui::TextEdit::singleline(&mut p.stream_url).password(true).font(crate::theme::control()).hint_text("rtmp://… or srt://…").desired_width(220.0));
+        if kit::Button::primary("Go live").compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "stream", "session": id, "url": p.stream_url, "user_approved": true})) {
                 Ok(_) => p.message = "Streaming.".into(),
                 Err(e) => p.message = e,
             }
         }
-        if ui.button("Stop stream").clicked() {
+        if kit::Button::secondary("Stop stream").compact().show(ui).clicked() {
             let _ = call(app, json!({"action": "live", "do": "stop_stream", "session": id}));
         }
     });
     if let Some(streams) = p.last_status.as_ref().and_then(|s| s["productions"].as_array()).and_then(|a| a.iter().find(|x| x["session"] == id)).and_then(|x| x["streams"].as_array()) {
         for s in streams {
-            ui.label(format!("{}: {} ({} sent, {} dropped)", s["target"].as_str().unwrap_or(""), s["state"].as_str().unwrap_or(""), s["sent"], s["dropped"]));
+            note(ui, &format!("{}: {} ({} sent, {} dropped)", s["target"].as_str().unwrap_or(""), s["state"].as_str().unwrap_or(""), s["sent"], s["dropped"]));
         }
     }
+    kit::menu_separator(ui);
+    kit::menu_heading(ui, "Replay and finish");
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Save last 20 s").clicked() {
+        if kit::Button::secondary("Save last 20 s").compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "replay_save", "session": id, "seconds": 20})) {
                 Ok(v) => p.message = format!("Replay saved: {}", v["saved"].as_str().unwrap_or("")),
                 Err(e) => p.message = e,
             }
         }
-        if ui.button("Replay at half speed").clicked() {
+        if kit::Button::secondary("Replay at half speed").compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "replay_play", "session": id, "seconds": 10, "speed": 0.5})) {
                 Ok(_) => p.message = "Replay is a new source: take it to program.".into(),
                 Err(e) => p.message = e,
             }
         }
-        if ui.button("■  Close and add to timeline").clicked() {
+        if kit::Button::primary("Close and add to timeline").icon(Icon::Square).compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "close", "session": id, "to_timeline": true, "at": app.editor.playhead as f64 / 1e6})) {
                 Ok(v) => p.message = format!("{} file(s) added.", v["files"].as_array().map_or(0, Vec::len)),
                 Err(e) => p.message = e,
@@ -485,7 +507,7 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
 }
 
 fn tab_cards(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
-    if ui.button("Look for cards").clicked() {
+    if kit::Button::secondary("Look for cards").icon(Icon::MagnifyingGlass).show(ui).clicked() {
         match call(app, json!({"action": "cards"})) {
             Ok(v) => {
                 let first = v["cards"].as_array().and_then(|a| a.first()).cloned();
@@ -497,11 +519,14 @@ fn tab_cards(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
             Err(e) => p.message = e,
         }
     }
-    ui.label("From (card or folder)");
-    ui.text_edit_singleline(&mut p.from);
-    ui.label("Second copy on another drive");
-    ui.text_edit_singleline(&mut p.backup);
-    if ui.add_enabled(!p.from.is_empty() && !p.backup.is_empty(), egui::Button::new("Copy, check and add to project")).clicked() {
+    kit::menu_separator(ui);
+    kit::menu_heading(ui, "From (card or folder)");
+    let w = ui.available_width();
+    kit::text_field(ui, &mut p.from, "Card or folder", Some(Icon::Folder), w, None);
+    kit::menu_heading(ui, "Second copy on another drive");
+    kit::text_field(ui, &mut p.backup, "Drive or folder", Some(Icon::HardDrives), w, None);
+    ui.add_space(crate::theme::space::GAP);
+    if ui.add_enabled_ui(!p.from.is_empty() && !p.backup.is_empty(), |ui| kit::Button::primary("Copy, check and add to project").icon(Icon::Copy).show(ui)).inner.clicked() {
         match call(app, json!({"action": "ingest", "from": p.from, "backup": p.backup, "import": true})) {
             Ok(v) => p.message = format!("{} file(s), {} MB copied; {} verified{}", v["files"], v["megabytes"], v["verified"], if v["ok"] == true { ". Every copy matches the card." } else { ". PROBLEMS: see the AI editor's report; do not wipe the card." }),
             Err(e) => p.message = e,

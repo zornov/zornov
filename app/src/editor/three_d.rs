@@ -137,49 +137,16 @@ fn mesh_change(app: &mut StudioApp, ctx: &egui::Context, id: u32, label: &str, f
     }
 }
 
-/// The camera button on the viewer's toolbar: the camera tools, and
-/// adding cameras and lights.
-pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
+/// The camera tool button in the viewer's header: what a drag in the picture does.
+pub fn camera_tool_button(ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
-    let id = egui::Id::unique("viewer-3d-menu");
+    let id = egui::Id::unique("viewer-camera-tool");
     let cur = tool(&ctx);
-    let resp = IconButton::new(Icon::Aperture, "3D camera and lights").active(cur != CamTool::Off || kit::is_open(&ctx, id)).show(ui);
+    let resp = IconButton::new(Icon::Aperture, "Camera tool: what dragging in the picture does").active(cur != CamTool::Off || kit::is_open(&ctx, id)).show(ui);
     if resp.clicked() {
         kit::toggle_open(&ctx, id);
     }
-    let mut add: Option<Option<sp::LightKind>> = None;
-    let mut shape: Option<&'static str> = None;
-    let mut from_file = false;
-    let mut particles: Option<&'static studio_fx::particles::Preset> = None;
-    let mut asked: Option<(String, serde_json::Value)> = None;
-    let sel = app.editor.selection.clone();
     kit::popover(&ctx, id, resp.rect, kit::Side::Below, 220.0, |ui| {
-        // Shots on the selected layers, and lighting set-ups: the same
-        // ops the AI editor uses, run on this window's project.
-        if !sel.is_empty() {
-            kit::menu_heading(ui, "Shot on the selection");
-            for (label, size, mv) in [("Wide shot", "wide", ""), ("Medium shot", "medium", ""), ("Close-up", "close_up", ""), ("Slow push in", "medium", "slow push in"), ("Slow orbit", "medium_wide", "slow orbit"), ("Crane up", "wide", "crane up"), ("Handheld", "medium", "handheld")] {
-                if MenuItem::new(label).show(ui).clicked() {
-                    let mut shot = serde_json::json!({"op": "shot", "on": sel, "size": size});
-                    if !mv.is_empty() {
-                        shot["move"] = serde_json::json!(mv);
-                    }
-                    asked = Some((label.to_owned(), serde_json::json!({"ops": [{"op": "three_d", "clips": sel}, shot]})));
-                    kit::set_open(&ctx, id, false);
-                }
-            }
-        }
-        kit::menu_heading(ui, "Lighting");
-        for (label, preset) in [("Three-point", "three_point"), ("Low key (noir)", "low_key"), ("High key", "high_key"), ("Golden hour", "golden_hour"), ("Moonlight", "moonlight"), ("From the backdrop", "motivated")] {
-            if MenuItem::new(label).show(ui).clicked() {
-                let mut l = serde_json::json!({"op": "lighting", "preset": preset});
-                if let Some(s) = sel.first() {
-                    l["on"] = serde_json::json!(s);
-                }
-                asked = Some((format!("{label} lighting"), serde_json::json!({"ops": [l]})));
-                kit::set_open(&ctx, id, false);
-            }
-        }
         kit::menu_heading(ui, "Drag in the viewer to");
         for (t, label) in [(CamTool::Off, "Select and move layers"), (CamTool::Orbit, "Orbit the camera"), (CamTool::Pan, "Pan the camera"), (CamTool::Dolly, "Dolly the camera")] {
             if MenuItem::new(label).checked(cur == t).show(ui).clicked() {
@@ -187,32 +154,92 @@ pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
                 kit::set_open(&ctx, id, false);
             }
         }
-        kit::menu_heading(ui, "Add");
-        for (label, what) in [("Camera", None), ("Spot light", Some(sp::LightKind::Spot)), ("Point light", Some(sp::LightKind::Point)), ("Sun light", Some(sp::LightKind::Parallel)), ("Ambient light", Some(sp::LightKind::Ambient))] {
-            if MenuItem::new(label).show(ui).clicked() {
-                add = Some(what);
-                kit::set_open(&ctx, id, false);
-            }
-        }
-        kit::menu_heading(ui, "3D model");
-        for (label, what) in [("Sphere", "sphere"), ("Sculpting sphere", "ico_sphere"), ("Cube", "cube"), ("Cylinder", "cylinder"), ("Cone", "cone"), ("Torus", "torus"), ("Capsule", "capsule"), ("Plane", "plane"), ("Human head", "head")] {
-            if MenuItem::new(label).show(ui).clicked() {
-                shape = Some(what);
-                kit::set_open(&ctx, id, false);
-            }
-        }
-        if MenuItem::new("From a file…").show(ui).clicked() {
-            from_file = true;
-            kit::set_open(&ctx, id, false);
-        }
-        kit::menu_heading(ui, "Particles");
-        for p in studio_fx::particles::PRESETS {
-            if MenuItem::new(p.name).show(ui).clicked() {
-                particles = Some(p);
-                kit::set_open(&ctx, id, false);
-            }
-        }
     });
+}
+
+/// The 3D part of the viewer's Add menu: shots and lighting on the
+/// selection, cameras, lights, models and particles. `q` is the menu's
+/// search; `close` closes the menu after a pick.
+pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::Id) {
+    use super::viewer::{add_item, add_shows};
+    let ctx = ui.ctx().clone();
+    let mut add: Option<Option<sp::LightKind>> = None;
+    let mut shape: Option<&'static str> = None;
+    let mut new_shape: Option<&'static str> = None;
+    let mut from_file = false;
+    let mut particles: Option<&'static studio_fx::particles::Preset> = None;
+    let mut asked: Option<(String, serde_json::Value)> = None;
+    let sel = app.editor.selection.clone();
+    {
+        // Shots on the selected layers, and lighting set-ups: the same
+        // ops the AI editor uses, run on this window's project.
+        let shots = [("Wide shot", "wide", ""), ("Medium shot", "medium", ""), ("Close-up", "close_up", ""), ("Slow push in", "medium", "slow push in"), ("Slow orbit", "medium_wide", "slow orbit"), ("Crane up", "wide", "crane up"), ("Handheld", "medium", "handheld")];
+        if !sel.is_empty() && add_shows(q, "Camera shot on the selection", shots.iter().map(|s| s.0)) {
+            kit::menu_heading(ui, "Camera shot on the selection");
+            for (label, size, mv) in shots {
+                if add_item(ui, q, "Camera shot on the selection", label) {
+                    let mut shot = serde_json::json!({"op": "shot", "on": sel, "size": size});
+                    if !mv.is_empty() {
+                        shot["move"] = serde_json::json!(mv);
+                    }
+                    asked = Some((label.to_owned(), serde_json::json!({"ops": [{"op": "three_d", "clips": sel}, shot]})));
+                    kit::set_open(&ctx, close, false);
+                }
+            }
+        }
+        let lights = [("Three-point", "three_point"), ("Low key (noir)", "low_key"), ("High key", "high_key"), ("Golden hour", "golden_hour"), ("Moonlight", "moonlight"), ("From the backdrop", "motivated")];
+        if add_shows(q, "Lighting set-up", lights.iter().map(|s| s.0)) {
+            kit::menu_heading(ui, "Lighting set-up");
+            for (label, preset) in lights {
+                if add_item(ui, q, "Lighting set-up", label) {
+                    let mut l = serde_json::json!({"op": "lighting", "preset": preset});
+                    if let Some(s) = sel.first() {
+                        l["on"] = serde_json::json!(s);
+                    }
+                    asked = Some((format!("{label} lighting"), serde_json::json!({"ops": [l]})));
+                    kit::set_open(&ctx, close, false);
+                }
+            }
+        }
+        let rigs = [("Camera", None), ("Spot light", Some(sp::LightKind::Spot)), ("Point light", Some(sp::LightKind::Point)), ("Sun light", Some(sp::LightKind::Parallel)), ("Ambient light", Some(sp::LightKind::Ambient))];
+        if add_shows(q, "3D camera and lights", rigs.iter().map(|s| s.0)) {
+            kit::menu_heading(ui, "3D camera and lights");
+            for (label, what) in rigs {
+                if add_item(ui, q, "3D camera and lights", label) {
+                    add = Some(what);
+                    kit::set_open(&ctx, close, false);
+                }
+            }
+        }
+        // The same shapes as the 3D workspace's Add, made as editable objects.
+        let models = super::model_edit::menus::shapes();
+        if add_shows(q, "3D model", models.iter().map(|s| s.1).chain(["Capsule", "From a file…"])) {
+            kit::menu_heading(ui, "3D model");
+            for (id, label) in models {
+                if add_item(ui, q, "3D model", label) {
+                    new_shape = Some(id);
+                    kit::set_open(&ctx, close, false);
+                }
+            }
+            if add_item(ui, q, "3D model", "Capsule") {
+                shape = Some("capsule");
+                kit::set_open(&ctx, close, false);
+            }
+            if add_item(ui, q, "3D model", "From a file…") {
+                from_file = true;
+                kit::set_open(&ctx, close, false);
+            }
+        }
+        if add_shows(q, "Particles", studio_fx::particles::PRESETS.iter().map(|p| p.name)) {
+            kit::menu_heading(ui, "Particles");
+            for p in studio_fx::particles::PRESETS {
+                if add_item(ui, q, "Particles", p.name) {
+                    particles = Some(p);
+                    kit::set_open(&ctx, close, false);
+                }
+            }
+        }
+    }
     if let Some((label, args)) = asked {
         let (tx, rx) = std::sync::mpsc::channel();
         let a = app.agent.get_or_insert_with(|| super::agent_panel::AgentUi::new(&ctx));
@@ -221,26 +248,13 @@ pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
             p.push((label, rx));
         }
     }
-    // What the shot or lighting did, when it is done.
-    if let Ok(mut p) = ASKED.lock() {
-        p.retain(|(label, rx)| match rx.try_recv() {
-            Ok(r) => {
-                let said = match r {
-                    Ok(parts) => parts.iter().find_map(|c| if let crate::agent::Content::Text(t) = c { Some(t.clone()) } else { None }).map(|t| serde_json::from_str::<serde_json::Value>(&t).ok().and_then(|v| v["notes"].as_array().and_then(|n| n.last()).and_then(|n| n.as_str()).map(str::to_owned)).unwrap_or(t)).unwrap_or_default(),
-                    Err(e) => e,
-                };
-                let short: String = said.chars().take(160).collect();
-                kit::push(&ctx, format!("{label}: {short}"), None, Some(Icon::Aperture));
-                false
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => true,
-            Err(_) => false,
-        });
-    }
     if let Some(p) = particles
         && add_particles(app, p).is_some()
     {
         kit::push(&ctx, format!("{} added: change it under Effects in the Inspector", p.name), None, Some(Icon::Sparkle));
+    }
+    if let Some(id) = new_shape {
+        super::model_edit::menus::add_shape(app, &ctx, id);
     }
     if let Some(s) = shape {
         let size = app.doc.project.width.min(app.doc.project.height) as f32 * 0.4;
@@ -265,6 +279,25 @@ pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
         let has_3d = app.doc.model.active().clips.iter().any(|c| c.transform.three_d);
         let note = if has_3d { "Added; it shows on the 3D layers" } else { "Added; switch layers to 3D in the Inspector to see them through it" };
         kit::push(&ctx, note, None, Some(Icon::Aperture));
+    }
+}
+
+/// What a shot or lighting set-up did, when it is done (every frame).
+pub fn poll_asked(ctx: &egui::Context) {
+    if let Ok(mut p) = ASKED.lock() {
+        p.retain(|(label, rx)| match rx.try_recv() {
+            Ok(r) => {
+                let said = match r {
+                    Ok(parts) => parts.iter().find_map(|c| if let crate::agent::Content::Text(t) = c { Some(t.clone()) } else { None }).map(|t| serde_json::from_str::<serde_json::Value>(&t).ok().and_then(|v| v["notes"].as_array().and_then(|n| n.last()).and_then(|n| n.as_str()).map(str::to_owned)).unwrap_or(t)).unwrap_or_default(),
+                    Err(e) => e,
+                };
+                let short: String = said.chars().take(160).collect();
+                kit::push(ctx, format!("{label}: {short}"), None, Some(Icon::Aperture));
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(_) => false,
+        });
     }
 }
 

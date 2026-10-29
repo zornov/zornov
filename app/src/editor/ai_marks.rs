@@ -15,22 +15,46 @@
 use super::agent_panel::{AgentUi, Mark, MarkKind};
 use crate::app::StudioApp;
 use crate::icons::Icon;
-use crate::kit::IconButton;
+use crate::kit;
 use crate::theme;
 use crate::view::{self, SEC};
 use eframe::egui::{self, Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, Vec2};
 
-/// The two buttons, in the viewer's toolbar.
-pub fn toolbar_buttons(app: &mut StudioApp, ui: &mut egui::Ui) {
+/// While a mark tool is on, a chip in the viewer's header says so and turns
+/// it off.
+pub fn mode_chip(app: &mut StudioApp, ui: &mut egui::Ui) {
+    let Some(mode) = app.agent.as_ref().and_then(|a| a.mark_mode) else { return };
+    let label = if mode == MarkKind::Area { "Marking an area" } else { "Adding a note" };
+    if kit::Button::ghost(label).icon(Icon::Selection).compact().show(ui).on_hover_text("Click to stop marking").clicked()
+        && let Some(a) = app.agent.as_mut()
+    {
+        a.mark_mode = None;
+    }
+}
+
+/// The AI marks part of the viewer's Add menu: turn on the area or the note
+/// tool, then drag in the picture. `q` is the menu's search; `close` closes
+/// the menu after a pick.
+pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::Id) {
+    use super::viewer::{add_item, add_shows};
     let mode = app.agent.as_ref().and_then(|a| a.mark_mode);
-    let area = IconButton::new(Icon::Selection, "Select an area for the AI").active(mode == Some(MarkKind::Area)).show(ui).clicked();
-    let note = IconButton::new(Icon::Subtitles, "Annotate for the AI").active(mode == Some(MarkKind::Note)).show(ui).clicked();
-    if area || note {
-        let want = if area { MarkKind::Area } else { MarkKind::Note };
+    if !add_shows(q, "Mark for the AI", ["Select an area", "Add a note"]) {
+        return;
+    }
+    kit::menu_heading(ui, "Mark for the AI");
+    let mut want = None;
+    if add_item(ui, q, "Mark for the AI", "Select an area") {
+        want = Some(MarkKind::Area);
+    }
+    if add_item(ui, q, "Mark for the AI", "Add a note") {
+        want = Some(MarkKind::Note);
+    }
+    if let Some(want) = want {
         let a = app.agent.get_or_insert_with(|| AgentUi::new(ui.ctx()));
         a.mark_mode = if mode == Some(want) { None } else { Some(want) };
         a.drawing = None;
         a.pending_note = None;
+        kit::set_open(ui.ctx(), close, false);
     }
 }
 

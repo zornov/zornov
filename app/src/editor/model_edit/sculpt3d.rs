@@ -106,7 +106,7 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let mut b = brushes();
     let before = b;
-    if let Some(i) = kit::menu_button(ui, "sculpt3d-brush", b.brush, &BRUSHES, 96.0, None) {
+    if let Some(i) = kit::menu_button(ui, "sculpt3d-brush", b.brush, &BRUSHES, crate::editor::viewer::menu_w(ui, &BRUSHES), None) {
         b.brush = i;
     }
     kit::NumberField::new("Brush size", &mut b.radius).range(2.0..=800.0).unit("pt").width(70.0).show(ui).on_hover_text(crate::i18n::t("Brush size ([ and ])"));
