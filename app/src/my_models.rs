@@ -103,19 +103,27 @@ fn slug_of(name: &str) -> String {
 }
 
 /// Every kept model, oldest first.
+///
+/// The order only ever grows at the end: a model's place is its `created`
+/// second, then when its folder was made (to the nanosecond), then its
+/// slug. Library entries are found by position, so a model kept while an
+/// earlier answer is still in use (two kept in the same second, say) must
+/// not slide in before the ones already listed, and carrying on with a
+/// model (which rewrites its files, not its folder) must not move it.
 pub fn list_in(root: &Path) -> Vec<Meta> {
     let Ok(rd) = std::fs::read_dir(root) else { return Vec::new() };
-    let mut out: Vec<Meta> = rd
+    let mut out: Vec<(u128, Meta)> = rd
         .filter_map(|e| e.ok())
         .filter(|e| e.path().join("model.smesh").is_file())
         .filter_map(|e| {
             let mut m: Meta = serde_json::from_slice(&std::fs::read(e.path().join("asset.json")).ok()?).ok()?;
             m.slug = e.file_name().to_string_lossy().into_owned();
-            Some(m)
+            let made = e.metadata().ok().and_then(|d| d.created().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+            Some((made, m))
         })
         .collect();
-    out.sort_by(|a, b| (a.created, &a.slug).cmp(&(b.created, &b.slug)));
-    out
+    out.sort_by(|a, b| (a.1.created, a.0, &a.1.slug).cmp(&(b.1.created, b.0, &b.1.slug)));
+    out.into_iter().map(|x| x.1).collect()
 }
 
 fn category_of(mesh: &Mesh) -> &'static str {
@@ -404,6 +412,32 @@ mod tests {
         rig.weights = vec![[1.0, 0.0, 0.0, 0.0]; 16];
         m.rig = Some(std::sync::Arc::new(rig));
         m
+    }
+
+    /// Library entries are found by position, so a model kept later must
+    /// land after the ones listed, even in the same second and with a
+    /// slug that sorts first, and carrying on with one must not move it.
+    #[test]
+    fn a_model_kept_later_never_slides_in_before_an_earlier_one() {
+        let root = scratch("order");
+        let named = save_in(&root, "Zq Named", &sample(0.0), None).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let lineage = save_in(&root, "Zq Lineage", &sample(1.0), None).unwrap();
+        // The same second, as two tests in one run have.
+        for slug in [&named.slug, &lineage.slug] {
+            let f = root.join(slug).join("asset.json");
+            let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&f).unwrap()).unwrap();
+            v["created"] = serde_json::json!(1_700_000_000u64);
+            std::fs::write(&f, serde_json::to_vec(&v).unwrap()).unwrap();
+        }
+        let order = |root: &Path| list_in(root).into_iter().map(|m| m.name).collect::<Vec<_>>();
+        assert_eq!(order(&root), ["Zq Named", "Zq Lineage"], "kept first stays first");
+        // Carrying on with Named rewrites its files; it keeps its place.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let again = save_in(&root, "Zq Named", &sample(2.0), Some(&named.hash)).unwrap();
+        assert_eq!(again.slug, named.slug);
+        assert_eq!(order(&root), ["Zq Named", "Zq Lineage"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
