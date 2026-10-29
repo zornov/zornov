@@ -1,195 +1,193 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Editor top bar: back to Start, project name, menus, undo/redo, jobs,
-//! panel toggles, settings and Export.
+//! Editor top bar, left to right: Home and the menus, the workspace tabs
+//! (a dropdown when the window is too narrow for them), then the project's
+//! name and save state, the Jobs bell and Export. Panels, workspaces and the
+//! layout are in the View menu; Settings is ⌘, and File ▸ Settings.
 
 use super::{Action, run};
-use crate::app::{Jobs, Overlay, StudioApp};
+use crate::app::{Jobs, StudioApp};
 use crate::cli::Screen;
+use crate::dock::Panel;
 use crate::icons::{self, Icon};
 use crate::kit::{self, Button, IconButton, MenuItem};
 use crate::theme;
+use crate::workspaces::Workspace;
 use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Vec2};
 
 /// Space kept clear for the macOS window buttons.
 const WINDOW_BUTTONS_W: f32 = 76.0;
+/// The project's name keeps at least this much room beside the workspace tabs.
+const NAME_MIN_W: f32 = 96.0;
+/// The Paint tab: a mode of its own (a screen), after the workspaces.
+const PAINT: &str = "Paint";
 
 pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
-    let t = theme::tokens(ui.ctx());
     let ctx = ui.ctx().clone();
     crate::screens::start::window_drag_area(ui, r);
     let inner = Rect::from_min_max(egui::pos2(r.left() + WINDOW_BUTTONS_W, r.top()), egui::pos2(r.right() - 8.0, r.bottom()));
-    // Right (laid out first, so the left side knows its room): Export,
-    // then text buttons for Layout and Settings.
+    // Right (laid out first, so the left side knows its room): Export, then Jobs.
     let mut right = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)));
     right.spacing_mut().item_spacing.x = 6.0;
     let key = |id: &str| crate::keymap::hint(&app.prefs, id);
-    let (export_keys, settings_keys, home_keys) = (key("export"), key("settings"), key("all-projects"));
+    let (export_keys, home_keys) = (key("export"), key("all-projects"));
     let export_btn = Button::primary("Export").compact().shortcut(&export_keys).show(&mut right);
     crate::onboarding::note_target(&ctx, "export", export_btn.rect);
     if export_btn.clicked() {
-        app.overlay = Overlay::Export;
+        run(app, &ctx, Action::Export);
     }
-    let layout_id = egui::Id::new("topbar-layout");
-    let lresp = Button::secondary("Layout").compact().show(&mut right);
-    if lresp.clicked() {
-        kit::toggle_open(&ctx, layout_id);
-    }
-    if Button::secondary("Settings").compact().shortcut(&settings_keys).show(&mut right).clicked() {
-        app.overlay = Overlay::Settings;
-    }
-    if Button::secondary("Paint").compact().shortcut("⇧⌘P").show(&mut right).clicked() {
-        app.screen = Screen::Paint;
-    }
-    super::review::topbar_button(&mut right);
-    if Button::secondary("Library").compact().show(&mut right).on_hover_text(crate::i18n::shown("Search all your media, project health and history, backups, licences")).clicked() {
-        app.overlay = Overlay::Library;
-    }
-    if Button::secondary("Production").compact().show(&mut right).clicked() {
-        app.overlay = Overlay::Production;
-    }
-    if app.jobs.running() > 0 || !app.jobs.list.is_empty() {
-        jobs_button(&mut app.jobs, &mut right);
-    }
+    jobs_button(&mut app.jobs, &mut right);
     let right_start = right.min_rect().left();
 
     let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
     bar.spacing_mut().item_spacing.x = 4.0;
-
     if IconButton::new(Icon::House, "All projects").shortcut(&home_keys).show(&mut bar).clicked() {
         app.screen = Screen::Start;
     }
     bar.add_space(2.0);
-    let mut action = None;
-    let mut toggle: Option<crate::dock::Panel> = None;
+
     // Every panel that can be docked, checked when it is open.
-    let panels: Vec<(crate::dock::Panel, bool, String)> = crate::dock::Panel::ALL
+    let panels: Vec<(Panel, bool, String)> = Panel::ALL
         .into_iter()
         .filter(|p| p.closable())
         .map(|p| (p, super::dock_ui::panel_shown(app, &ctx, p, narrow), crate::keymap::keys(&app.prefs, &format!("panel-{}", p.key())).unwrap_or("").to_owned()))
         .collect();
+    let spaces = crate::workspaces::all();
+    let current = crate::workspaces::saved(app).and_then(|w| spaces.iter().position(|s| s.name.eq_ignore_ascii_case(&w.name)));
+    let space_keys: Vec<String> = crate::workspaces::ACTIONS.iter().map(|(id, _)| crate::keymap::keys(&app.prefs, id).unwrap_or("").to_owned()).collect();
+    let view = ViewMenu { spaces: &spaces, current, space_keys: &space_keys, panels: &panels, maximised: app.editor.maximised.is_some(), max_h: (ctx.content_rect().bottom() - r.bottom() - 24.0).max(160.0) };
+    let mut out = Picked::default();
     for (name, items) in menus(app) {
-        let (a, t) = menu(&mut bar, name, &items, &panels);
-        if a.is_some() {
-            action = a;
-        }
-        if t.is_some() {
-            toggle = t;
-        }
+        menu(&mut bar, name, &items, Some(&view).filter(|_| name == "View"), &mut out);
     }
-    // The workspace tabs only when they leave the project name its room.
-    let room = right_start - bar.cursor().left() - 12.0 - 160.0;
-    workspace_switcher(app, &mut bar, room);
-    let left_end = bar.min_rect().right();
 
-    // Centre: the project name and its save state, in the window's middle
-    // when the gap between the menus and the buttons allows, otherwise
-    // moved into that gap and cut short to fit it.
-    // The save state ("Edited") goes before the name does.
-    let gap = (left_end + 12.0)..=(right_start - 12.0);
-    let room = (gap.end() - gap.start()).max(0.0);
+    // The workspace tabs when they leave the project's name its room,
+    // otherwise one dropdown with the same list.
+    let left_end = bar.min_rect().right();
+    let gap = (right_start - left_end - 12.0).max(0.0);
+    let tabs_w = tabs_width(&bar, &spaces);
+    let tabs_fit = gap - tabs_w >= NAME_MIN_W;
+    bar.add_space(6.0);
+    let used = if tabs_fit {
+        workspace_tabs(&mut bar, &spaces, current, &mut out);
+        tabs_w
+    } else {
+        workspace_menu(&mut bar, &spaces, current, &mut out);
+        DROPDOWN_W
+    };
+
+    // Right-aligned, against the Jobs bell: the name gives way first, and
+    // the save state ("Edited") before it.
+    let room = (gap - used - 6.0).max(0.0);
     let name_w = kit::text_width(ui, &app.doc.project.name, theme::control_medium()).min(240.0) + 16.0;
     let status_w = if room >= name_w.min(120.0) + 60.0 { 60.0 } else { 0.0 };
     let w = (name_w + status_w).min(room);
-    let x = (r.center().x - w / 2.0).clamp(*gap.start(), (gap.end() - w).max(*gap.start()));
-    let centre = Rect::from_min_size(egui::pos2(x, r.top()), Vec2::new(w, r.height()));
     if w >= 40.0 {
-        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(centre).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        cui.set_clip_rect(centre.intersect(ui.clip_rect()));
+        let slot = Rect::from_min_size(egui::pos2(right_start - 12.0 - w, r.top()), Vec2::new(w, r.height()));
+        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(slot).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        cui.set_clip_rect(slot.intersect(ui.clip_rect()));
         cui.spacing_mut().item_spacing.x = 2.0;
         project_name(app, &mut cui, w - status_w, status_w > 0.0);
     }
-    // Workspaces: the panels laid out for a task.
-    let spaces = crate::workspaces::all();
-    let space_keys: Vec<String> = crate::workspaces::ACTIONS.iter().map(|(id, _)| crate::keymap::keys(&app.prefs, id).unwrap_or("").to_owned()).collect();
-    let mut pick: Option<crate::workspaces::Workspace> = None;
-    let mut save_as: Option<String> = None;
-    let mut move_panel: Option<(crate::dock::Panel, Rect)> = None;
-    let mut reset = false;
-    let max_h = (ctx.content_rect().bottom() - lresp.rect.bottom() - 24.0).max(160.0);
-    let app_ro: &StudioApp = app;
-    kit::popover(&ctx, layout_id, lresp.rect, kit::Side::BelowRight, 220.0, |ui| {
-        egui::ScrollArea::vertical().id_salt("layout-menu-scroll").max_height(max_h).show(ui, |ui| {
-        kit::menu_heading(ui, "Panels");
-        for (p, on, keys) in &panels {
-            if MenuItem::new(p.name()).checked(*on).shortcut(keys).show(ui).clicked() {
-                toggle = Some(*p);
-            }
-        }
-        kit::menu_heading(ui, "Move panel");
-        if let Some(m) = super::dock_ui::move_panel_items(app_ro, ui) {
-            move_panel = Some(m);
-        }
-        kit::menu_heading(ui, "Workspaces");
-        for (i, w) in spaces.iter().enumerate() {
-            if MenuItem::new(&w.name).shortcut(space_keys.get(i).map_or("", String::as_str)).show(ui).clicked() {
-                pick = Some(w.clone());
-            }
-        }
-        let id = egui::Id::unique("save-workspace-name");
-        let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
-        let resp = kit::text_field(ui, &mut name, "Save layout as…", None, 196.0, None);
-        if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.trim().is_empty() {
-            save_as = Some(std::mem::take(&mut name));
-        }
-        ui.ctx().data_mut(|d| d.insert_temp(id, name));
-        kit::menu_separator(ui);
-        if MenuItem::new("Reset layout").icon(Icon::ArrowCounterClockwise).show(ui).clicked() {
-            reset = true;
-        }
-        });
-    });
-    if let Some(p) = toggle {
+
+    if let Some(p) = out.panel {
         super::dock_ui::toggle_panel(app, &ctx, p, narrow);
     }
-    if let Some((p, anchor)) = move_panel {
-        kit::set_open(&ctx, layout_id, false);
-        super::dock_ui::open_menu(&ctx, p, anchor, true);
-    }
-    if reset {
-        kit::set_open(&ctx, layout_id, false);
+    if out.reset {
         super::dock_ui::reset(app, &ctx);
     }
-    if let Some(w) = pick {
+    if let Some(w) = out.workspace {
         crate::workspaces::switch(app, &ctx, &w);
     }
-    if let Some(name) = save_as {
+    if out.paint {
+        app.screen = Screen::Paint;
+    }
+    if let Some(name) = out.save_as {
         let w = crate::workspaces::current(app, &name);
         match crate::workspaces::save(w) {
             Ok(()) => kit::push(&ctx, format!("Saved the layout as \"{}\"", name.trim()), None, Some(Icon::SquaresFour)),
             Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
         };
     }
-    if let Some(a) = action {
+    if let Some(a) = out.action {
         run(app, &ctx, a);
     }
-    let _ = t;
 }
 
-/// The workspace tabs: icons with the names as tooltips, in the top bar when
-/// there is `room` for them (the Layout menu always has them).
-fn workspace_switcher(app: &mut StudioApp, ui: &mut egui::Ui, room: f32) {
-    // The built-in workspaces; the person's own are in the Layout menu.
-    let spaces = crate::workspaces::builtin();
-    if room < 6.0 + 32.0 * spaces.len() as f32 + 4.0 {
-        return;
-    }
-    ui.add_space(6.0);
-    let current = crate::workspaces::saved(app).map(|w| w.name);
-    let mut i = current.and_then(|n| spaces.iter().position(|w| w.name.eq_ignore_ascii_case(&n))).unwrap_or(0);
-    let opts: Vec<kit::Segment> = spaces.iter().map(|w| kit::Segment::icon(crate::workspaces::icon(&w.name), &w.name)).collect();
+/// What the top bar's controls asked for this frame.
+#[derive(Default)]
+struct Picked {
+    action: Option<Action>,
+    panel: Option<Panel>,
+    workspace: Option<Workspace>,
+    paint: bool,
+    save_as: Option<String>,
+    reset: bool,
+}
+
+/// What the View menu lists besides its own commands.
+struct ViewMenu<'a> {
+    spaces: &'a [Workspace],
+    current: Option<usize>,
+    space_keys: &'a [String],
+    panels: &'a [(Panel, bool, String)],
+    maximised: bool,
+    max_h: f32,
+}
+
+/// The name a workspace tab shows (the short form of a long name).
+fn tab_label(name: &str) -> &str {
+    if name == "Motion graphics" { "Motion" } else { name }
+}
+
+/// The tabs' labels: the built-in workspaces, then Paint.
+fn tab_names(spaces: &[Workspace]) -> Vec<&str> {
+    let builtin = crate::workspaces::builtin().len();
+    spaces.iter().take(builtin).map(|w| tab_label(&w.name)).chain(std::iter::once(PAINT)).collect()
+}
+
+/// How wide the tab strip is (as the kit lays out a segmented control).
+fn tabs_width(ui: &egui::Ui, spaces: &[Workspace]) -> f32 {
+    tab_names(spaces).iter().map(|n| kit::text_width(ui, n, theme::control_medium()) + 24.0).sum::<f32>() + 4.0
+}
+
+/// The workspace tabs, with their names. Your own workspaces are in the dropdown and the View menu.
+fn workspace_tabs(ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
+    let names = tab_names(spaces);
+    let builtin = names.len() - 1;
+    let opts: Vec<kit::Segment> = names.iter().map(|n| kit::Segment::text(n)).collect();
+    // A workspace of your own is none of the tabs.
+    let mut i = current.filter(|c| *c < builtin).unwrap_or(usize::MAX);
     let tabs = kit::segmented(ui, "workspace-tabs", &mut i, &opts, None, None);
     crate::onboarding::note_target(ui.ctx(), "workspace-tabs", tabs.rect);
     if tabs.changed() {
-        let ctx = ui.ctx().clone();
-        crate::workspaces::switch(app, &ctx, &spaces[i]);
+        if i == builtin {
+            out.paint = true;
+        } else {
+            out.workspace = spaces.get(i).cloned();
+        }
     }
 }
 
-fn divider(ui: &mut egui::Ui) {
-    let (r, _) = ui.allocate_exact_size(Vec2::new(9.0, 20.0), Sense::hover());
-    kit::vline(ui, r.center().x, r.top()..=r.bottom());
+/// Wide enough for "Motion" and a caret.
+const DROPDOWN_W: f32 = 132.0;
+
+/// The same list as a dropdown, for a window too narrow for the tabs.
+fn workspace_menu(ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
+    let mut names: Vec<&str> = spaces.iter().map(|w| tab_label(&w.name)).collect();
+    names.push(PAINT);
+    let cur = current.unwrap_or(0);
+    let before = ui.cursor().left();
+    let picked = kit::menu_button(ui, "workspace-menu", cur, &names, DROPDOWN_W, None);
+    crate::onboarding::note_target(ui.ctx(), "workspace-tabs", Rect::from_min_size(egui::pos2(before, ui.max_rect().top()), Vec2::new(DROPDOWN_W, 28.0)));
+    if let Some(i) = picked {
+        if i == spaces.len() {
+            out.paint = true;
+        } else {
+            out.workspace = spaces.get(i).cloned();
+        }
+    }
 }
 
 /// The name (at most `max_w` wide with its padding), double-click to rename.
@@ -266,8 +264,12 @@ fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
             item("Import timeline…", "", None, true, || Some(Action::ImportTimeline)),
             item("Import script…", "", None, true, || Some(Action::ImportScript)),
             None,
+            item("Project settings…", "", Some(Icon::Faders), true, || Some(Action::ProjectSettings)),
+            None,
             item("Export OpenTimelineIO…", "", None, true, || Some(Action::ExportOtio)),
             item("Export…", &k("export"), Some(Icon::Export), true, || Some(Action::Export)),
+            None,
+            item("Settings…", &k("settings"), Some(Icon::GearSix), true, || Some(Action::Settings)),
         ]),
         ("Edit", vec![
             item("Undo", &k("undo"), Some(Icon::ArrowUUpLeft), d.can_undo(), || Some(Action::Undo)),
@@ -284,6 +286,11 @@ fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
             item("Set in point", &k("in"), None, true, || Some(Action::RangeIn)),
             item("Set out point", &k("out"), None, true, || Some(Action::RangeOut)),
             item("Clear range", &k("clear-range"), None, d.project.range.is_some(), || Some(Action::ClearRange)),
+        ]),
+        // What used to be the Production and Library buttons.
+        ("Project", vec![
+            item("Production…", "", Some(Icon::FilmSlate), true, || Some(Action::Production)),
+            item("Project health…", "", Some(Icon::LockSimple), true, || Some(Action::ProjectHealth)),
         ]),
         ("View", vec![
             item("Zoom in", &k("zoom-in"), Some(Icon::MagnifyingGlassPlus), true, || Some(Action::ZoomIn)),
@@ -305,9 +312,9 @@ pub(crate) fn menu_rect_id(name: &str) -> egui::Id {
     egui::Id::new(("topbar-menu-rect", name.to_owned()))
 }
 
-/// A menu of `items`; the View menu also lists every dock panel in `panels`,
-/// checked when open, and returns the one chosen.
-fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], panels: &[(crate::dock::Panel, bool, String)]) -> (Option<Action>, Option<crate::dock::Panel>) {
+/// A menu of `items`. The View menu goes on with the workspaces, the panels
+/// (checked when open) and the layout commands (`view`); what is chosen goes in `out`.
+fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], view: Option<&ViewMenu>, out: &mut Picked) {
     let t = theme::tokens(ui.ctx());
     let id = ui.scope_id().with(("menu", name));
     let w = kit::text_width(ui, name, theme::control()) + 20.0;
@@ -323,41 +330,71 @@ fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], panels: &[(crate:
     if resp.clicked() {
         kit::toggle_open(ui.ctx(), id);
     }
-    let mut out = None;
-    let mut chosen = None;
     kit::popover(ui.ctx(), id, r, kit::Side::Below, 248.0, |ui| {
-        for it in items {
-            match it {
-                None => kit::menu_separator(ui),
-                Some(it) => {
-                    let mut m = MenuItem::new(it.label).enabled(it.enabled);
-                    if !it.shortcut.is_empty() {
-                        m = m.shortcut(&it.shortcut);
-                    }
-                    m = match it.icon {
-                        Some(i) => m.icon(i),
-                        // Keep labels aligned with rows that have icons.
-                        None => m.reserve_icon(),
-                    };
-                    if m.show(ui).clicked() {
-                        out = (it.action)();
-                        kit::set_open(ui.ctx(), id, false);
+        let scroll = view.map_or(f32::INFINITY, |v| v.max_h);
+        egui::ScrollArea::vertical().id_salt(("menu-scroll", name)).max_height(scroll).show(ui, |ui| {
+            for it in items {
+                match it {
+                    None => kit::menu_separator(ui),
+                    Some(it) => {
+                        let mut m = MenuItem::new(it.label).enabled(it.enabled);
+                        if !it.shortcut.is_empty() {
+                            m = m.shortcut(&it.shortcut);
+                        }
+                        m = match it.icon {
+                            Some(i) => m.icon(i),
+                            // Keep labels aligned with rows that have icons.
+                            None => m.reserve_icon(),
+                        };
+                        if m.show(ui).clicked() {
+                            out.action = (it.action)();
+                            kit::set_open(ui.ctx(), id, false);
+                        }
                     }
                 }
             }
-        }
-        if name == "View" {
-            kit::menu_separator(ui);
-            kit::menu_heading(ui, "Panels");
-            for (p, on, keys) in panels {
-                if MenuItem::new(p.name()).checked(*on).shortcut(keys).show(ui).clicked() {
-                    chosen = Some(*p);
-                    kit::set_open(ui.ctx(), id, false);
-                }
+            if let Some(v) = view {
+                view_sections(ui, id, v, out);
             }
-        }
+        });
     });
-    (out, chosen)
+}
+
+/// The View menu's workspaces, panels and layout: the one place that lists
+/// them all (the tabs are the quick way to the built-in workspaces).
+fn view_sections(ui: &mut egui::Ui, menu_id: egui::Id, v: &ViewMenu, out: &mut Picked) {
+    kit::menu_separator(ui);
+    kit::menu_heading(ui, "Workspaces");
+    for (i, w) in v.spaces.iter().enumerate() {
+        if MenuItem::new(&w.name).checked(v.current == Some(i)).shortcut(v.space_keys.get(i).map_or("", String::as_str)).show(ui).clicked() {
+            out.workspace = Some(w.clone());
+            kit::set_open(ui.ctx(), menu_id, false);
+        }
+    }
+    kit::menu_heading(ui, "Panels");
+    for (p, on, keys) in v.panels {
+        if MenuItem::new(p.name()).checked(*on).shortcut(keys).show(ui).clicked() {
+            out.panel = Some(*p);
+            kit::set_open(ui.ctx(), menu_id, false);
+        }
+    }
+    kit::menu_heading(ui, "Layout");
+    if MenuItem::new("Maximise panel").checked(v.maximised).shortcut("⌘\\").icon(Icon::CornersOut).show(ui).clicked() {
+        out.action = Some(Action::Maximise);
+        kit::set_open(ui.ctx(), menu_id, false);
+    }
+    let id = egui::Id::unique("save-workspace-name");
+    let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
+    let resp = kit::text_field(ui, &mut name, "Save layout as…", None, 196.0, None);
+    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.trim().is_empty() {
+        out.save_as = Some(std::mem::take(&mut name));
+        kit::set_open(ui.ctx(), menu_id, false);
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(id, name));
+    if MenuItem::new("Reset layout").icon(Icon::ArrowCounterClockwise).show(ui).clicked() {
+        out.reset = true;
+        kit::set_open(ui.ctx(), menu_id, false);
+    }
 }
 
 /// Jobs button: a spinner while anything runs; opens the jobs popover.
@@ -365,7 +402,7 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
     let running = jobs.running();
     let id = ui.scope_id().with("jobs");
-    let resp = IconButton::new(Icon::Bell, if running > 0 { "Background jobs (running)" } else { "Background jobs" }).active(kit::is_open(ui.ctx(), id)).show(ui);
+    let resp = IconButton::new(Icon::Bell, if running > 0 { "Jobs (running)" } else { "Jobs" }).active(kit::is_open(ui.ctx(), id)).show(ui);
     if running > 0 {
         let c = resp.rect.right_top() + Vec2::new(-7.0, 7.0);
         ui.painter().circle_filled(c, 6.5, t.panel.gamma_multiply(0.0));
@@ -376,7 +413,7 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
         kit::toggle_open(ui.ctx(), id);
     }
     kit::popover(ui.ctx(), id, resp.rect, kit::Side::BelowRight, 320.0, |ui| {
-        kit::menu_heading(ui, "Background jobs");
+        kit::menu_heading(ui, "Jobs");
         #[cfg(feature = "render")]
         crate::screens::queue::section(ui);
         if jobs.list.is_empty() {
