@@ -663,7 +663,6 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let bar = Rect::from_min_max(egui::pos2(r.left() + 12.0, r.bottom() - PILL_H), egui::pos2(r.right() - 10.0, r.bottom()));
 
     // Centre: previous frame, play, next frame (plain icons).
-    let frame = ed.frame_dur(fps);
     let mid = Rect::from_center_size(bar.center(), Vec2::new(96.0, 28.0));
 
     // Left: the playhead time in the accent, the length muted. In a narrow
@@ -685,7 +684,7 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let mut mui = ui.new_child(egui::UiBuilder::new().max_rect(mid).layout(egui::Layout::left_to_right(egui::Align::Center)));
     mui.spacing_mut().item_spacing.x = 4.0;
     if IconButton::new(Icon::CaretLeft, "Previous frame").shortcut(&back_keys).show(&mut mui).clicked() {
-        ed.playhead = (ed.playhead - frame).max(0);
+        ed.playhead = crate::services::transport::step(&app.doc, ed.playhead, -1);
         ed.playing = false;
     }
     let (pr, presp) = mui.allocate_exact_size(Vec2::splat(28.0), Sense::click());
@@ -700,7 +699,7 @@ fn transport(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         toggle_play(ed);
     }
     if IconButton::new(Icon::CaretRight, "Next frame").shortcut(&fwd_keys).show(&mut mui).clicked() {
-        ed.playhead += frame;
+        ed.playhead = crate::services::transport::step(&app.doc, ed.playhead, 1);
         ed.playing = false;
     }
 
