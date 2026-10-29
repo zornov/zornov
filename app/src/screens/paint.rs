@@ -1459,6 +1459,45 @@ mod tests {
         let _ = crate::paint::apply(&[json!({"op": "close"})]);
     }
 
+    /// The New sheet opens and offers a picture; the tool search lists names,
+    /// never command IDs or parameter text.
+    #[test]
+    fn new_sheet_and_tool_search_show_no_developer_text() {
+        let _turn = crate::paint::test_lock();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(Screen::Paint), fresh: true, ..Default::default() });
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
+        let mut labels = |app: &mut StudioApp| {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| show(app, ui));
+            let l: Vec<String> = out.platform_output.accesskit_update.iter().flat_map(|u| u.nodes.iter()).filter_map(|(_, n)| n.label().map(str::to_owned)).collect();
+            let _ = ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
+            out.textures_delta.clear();
+            l
+        };
+        labels(&mut app);
+        kit::set_open(&ctx, new_sheet_id(), true);
+        for _ in 0..8 {
+            labels(&mut app);
+        }
+        let l = labels(&mut app);
+        assert!(l.iter().any(|s| s == "Create picture"), "the New sheet offers a picture: {l:?}");
+        STATE.with(|s| {
+            let mut st = s.borrow_mut();
+            st.palette_open = true;
+            st.palette_pick = Some("file.new".into());
+        });
+        let l = labels(&mut app);
+        let l = [l, labels(&mut app)].concat();
+        for s in &l {
+            assert!(!s.contains("file.") && !s.contains("layer.") && !s.contains("JSON") && !s.contains("{"), "developer text on screen: {s}");
+        }
+        STATE.with(|s| s.borrow_mut().palette_open = false);
+    }
+
     #[test]
     fn tool_keys_are_unique() {
         let mut seen = std::collections::HashSet::new();
