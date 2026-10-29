@@ -5838,6 +5838,11 @@ dependencies = [
 [[package]]
 name = "studio-hw"
 version = "0.1.0"
+dependencies = [
+ "studio-av1",
+ "studio-encode",
+ "studio-mp4",
+]
 
 [[package]]
 name = "studio-i18n"
@@ -6371,7 +6376,9 @@ dependencies = [
  "naga 30.0.1",
  "pollster 0.4.0",
  "serde_json",
+ "studio-av1",
  "studio-colour",
+ "studio-encode",
  "studio-fx",
  "studio-gpu-device",
  "studio-h264",
