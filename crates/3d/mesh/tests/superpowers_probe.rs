@@ -101,8 +101,8 @@ fn quadruped_refuses_a_body_it_cannot_orient() {
     }
     let e = autorig::try_quadruped(&ball, None).unwrap_err();
     assert!(e.contains("forward"), "{e}");
-    // A long body with alike ends: the head end is unclear, unless told.
-    assert!(autorig::try_quadruped(&body_along(2), None).is_err());
+    // A long body with alike ends (a capsule) takes the default head end.
+    assert!(autorig::try_quadruped(&body_along(2), None).is_ok());
     assert!(autorig::try_quadruped(&body_along(2), Some([0.0, 0.0, 1.0])).is_ok());
     // A clear body is fine.
     assert!(autorig::try_quadruped(&bear_along(2, 1.0), None).is_ok());
