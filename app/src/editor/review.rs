@@ -57,6 +57,11 @@ struct ReviewUi {
     folder: String,
     path: String,
     status: Option<String>,
+    /// The note just deleted, which the status line can bring back.
+    undo_delete: Option<String>,
+    /// What the status line offers next: the render, after an approval.
+    offer_export: bool,
+    approvals: Approvals,
 }
 
 thread_local! {
@@ -92,6 +97,7 @@ pub fn tick(app: &mut StudioApp, ctx: &egui::Context) {
             u.store = Default::default();
             u.index = Default::default();
             u.team = Default::default();
+            u.approvals = Default::default();
             u.selected = None;
         }
         let Some(root) = &root else {
@@ -105,6 +111,7 @@ pub fn tick(app: &mut StudioApp, ctx: &egui::Context) {
         }
         if s[1] != u.stamps[1] || moved {
             u.index = versions::Index::load(root).unwrap_or_default();
+            u.approvals = Approvals::load(root);
         }
         if s[2] != u.stamps[2] || moved {
             u.team = team::Team::load(root).unwrap_or_default();
@@ -211,8 +218,24 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     if let Some(s) = with(|u| u.status.clone()) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(&s).color(t.text_2).font(theme::caption()));
+            if s == "Deleted the note" && with(|u| u.undo_delete.is_some()) && ui.small_button("Undo").clicked() {
+                with(|u| {
+                    if let Some(id) = u.undo_delete.take() {
+                        u.status = Some(if undelete(&mut u.store, &id) { "Brought the note back".to_owned() } else { "That note is gone for good".to_owned() });
+                        save_store(u);
+                    }
+                });
+            }
+            if with(|u| u.offer_export) && Button::primary("Export…").compact().show(ui).clicked() {
+                with(|u| u.offer_export = false);
+                super::run(app, ui.ctx(), super::Action::Export);
+            }
             if ui.small_button("×").clicked() {
-                with(|u| u.status = None);
+                with(|u| {
+                    u.status = None;
+                    u.undo_delete = None;
+                    u.offer_export = false;
+                });
             }
         });
     }
@@ -378,7 +401,10 @@ fn note_actions(app: &mut StudioApp, ui: &mut egui::Ui, c: &comments::Comment, m
         if ui.small_button("Delete").clicked() {
             with(|u| {
                 match u.store.delete(&c.id) {
-                    Ok(()) => u.status = Some("Deleted the note".to_owned()),
+                    Ok(()) => {
+                        u.status = Some("Deleted the note".to_owned());
+                        u.undo_delete = Some(c.id.clone());
+                    }
                     Err(e) => u.status = Some(format!("Could not delete the note: {e}")),
                 }
                 u.selected = None;
@@ -388,6 +414,59 @@ fn note_actions(app: &mut StudioApp, ui: &mut egui::Ui, c: &comments::Comment, m
     });
 }
 
+/// Where a version stands with the reviewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum Verdict {
+    Approved,
+    ChangesRequested,
+}
+
+/// Who said what about which version, kept beside the review files.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Approvals {
+    verdicts: Vec<(String, Verdict, String)>,
+}
+
+impl Approvals {
+    fn file(root: &Path) -> PathBuf {
+        team::file(root).with_file_name("approvals.json")
+    }
+
+    fn load(root: &Path) -> Self {
+        std::fs::read(Self::file(root)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+
+    fn save(&self, root: &Path) -> Result<(), String> {
+        let path = Self::file(root);
+        if let Some(d) = path.parent() {
+            std::fs::create_dir_all(d).map_err(|e| format!("could not write the approval: {e}"))?;
+        }
+        std::fs::write(&path, serde_json::to_vec_pretty(self).unwrap_or_default()).map_err(|e| format!("could not write the approval: {e}"))
+    }
+
+    /// The latest word on `version`, and who gave it.
+    fn of(&self, version: &str) -> Option<(Verdict, &str)> {
+        self.verdicts.iter().rev().find(|(v, _, _)| v == version).map(|(_, d, who)| (*d, who.as_str()))
+    }
+
+    fn set(&mut self, version: &str, verdict: Verdict, who: &str) {
+        self.verdicts.retain(|(v, _, _)| v != version);
+        self.verdicts.push((version.to_owned(), verdict, who.to_owned()));
+    }
+}
+
+/// Brings a deleted note back. False when there is no such note.
+fn undelete(store: &mut comments::Store, id: &str) -> bool {
+    match store.comments.iter_mut().find(|c| c.id == id && c.deleted) {
+        Some(c) => {
+            c.deleted = false;
+            c.updated = collab::now_ms();
+            true
+        }
+        None => false,
+    }
+}
+
 /// Review is finished when there are notes and none is open.
 fn finish_ready(open: usize, total: usize) -> bool {
     total > 0 && open == 0
@@ -395,7 +474,38 @@ fn finish_ready(open: usize, total: usize) -> bool {
 
 #[cfg(test)]
 mod finish_tests {
-    use super::finish_ready;
+    use super::{Approvals, Verdict, finish_ready, undelete};
+    use crate::collab::comments;
+
+    #[test]
+    fn the_latest_verdict_on_a_version_wins_and_survives_a_reload() {
+        let dir = std::env::temp_dir().join(format!("studio-approvals-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut a = Approvals::default();
+        a.set("v1", Verdict::ChangesRequested, "Sam");
+        a.set("v1", Verdict::Approved, "Kim");
+        a.set("v2", Verdict::ChangesRequested, "Sam");
+        a.save(&dir).unwrap();
+        let back = Approvals::load(&dir);
+        assert_eq!(back.of("v1"), Some((Verdict::Approved, "Kim")));
+        assert_eq!(back.of("v2"), Some((Verdict::ChangesRequested, "Sam")));
+        assert_eq!(back.of("v3"), None);
+        assert_eq!(back.verdicts.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_deleted_note_comes_back_and_a_missing_one_does_not() {
+        let p = crate::collab::testing::project();
+        let mut store = comments::Store::default();
+        let id = store.add(&p, "Sam", "Cut earlier", comments::Pin { at: 0, until: None, clip: None, region: None }, None).unwrap();
+        store.delete(&id).unwrap();
+        assert_eq!(store.open_count(), 0);
+        assert!(undelete(&mut store, &id));
+        assert_eq!(store.open_count(), 1);
+        assert!(!undelete(&mut store, &id), "it is not deleted any more");
+        assert!(!undelete(&mut store, "nope"));
+    }
 
     #[test]
     fn the_export_step_shows_once_every_note_is_resolved() {
@@ -461,7 +571,31 @@ fn versions_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
             if !v.note.is_empty() {
                 ui.label(egui::RichText::new(&v.note).font(theme::caption()).color(t.text_2));
             }
+            if let Some((verdict, who)) = with(|u| u.approvals.of(&v.id).map(|(d, w)| (d, w.to_owned()))) {
+                let (word, colour) = match verdict {
+                    Verdict::Approved => ("Approved", t.ok),
+                    Verdict::ChangesRequested => ("Changes requested", t.warn),
+                };
+                ui.label(egui::RichText::new(format!("{word} by {who}")).font(theme::caption()).color(colour));
+            }
             ui.horizontal_wrapped(|ui| {
+                for (label, verdict) in [("Approve", Verdict::Approved), ("Request changes", Verdict::ChangesRequested)] {
+                    if ui.small_button(label).clicked() {
+                        with(|u| {
+                            u.approvals.set(&v.id, verdict, &me);
+                            match u.approvals.save(&root) {
+                                Ok(()) => {
+                                    u.status = Some(match verdict {
+                                        Verdict::Approved => format!("Approved {} \"{}\"", v.id, v.name),
+                                        Verdict::ChangesRequested => format!("Requested changes on {} \"{}\"", v.id, v.name),
+                                    });
+                                    u.offer_export = verdict == Verdict::Approved;
+                                }
+                                Err(e) => u.status = Some(e),
+                            }
+                        });
+                    }
+                }
                 if ui.small_button("Compare with now").clicked() {
                     let text = versions::load(&root, &v.id).map(|(_, p)| delta::report(&p, &app.doc.model).text()).unwrap_or_else(|e| e);
                     with(|u| u.compare = Some((v.id.clone(), text)));
