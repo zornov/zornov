@@ -297,6 +297,129 @@ pub fn import_summary(r: &super::project::ImportReport) -> (String, bool) {
     (text, failed > 0)
 }
 
+// --- organising the bin -------------------------------------------------------
+
+const FOLDER_KEY: &str = "folder";
+
+/// How the bin is ordered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Sort {
+    /// Newest import first.
+    #[default]
+    Added,
+    Name,
+    Duration,
+    Kind,
+}
+
+impl Sort {
+    pub const ALL: [Sort; 4] = [Sort::Added, Sort::Name, Sort::Duration, Sort::Kind];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Sort::Added => "Date added",
+            Sort::Name => "Name",
+            Sort::Duration => "Length",
+            Sort::Kind => "Type",
+        }
+    }
+}
+
+/// The folder a media item is filed in (kept in the project, so it saves
+/// and undoes with everything else).
+pub fn folder_of(doc: &Doc, id: u32) -> Option<String> {
+    doc.model.media.iter().find(|x| x.id.0 == id as u64)?.extra.get(FOLDER_KEY)?.as_str().map(str::to_string).filter(|f| !f.is_empty())
+}
+
+/// Order `indices` (positions in the project's media) by `sort`.
+pub fn sort_media(doc: &Doc, indices: &mut [usize], sort: Sort) {
+    let media = &doc.project.media;
+    let added = |i: usize| doc.model.media.iter().find(|x| x.id.0 == media[i].id as u64).map_or(0, |x| x.imported_at);
+    match sort {
+        Sort::Added => indices.sort_by_key(|&i| std::cmp::Reverse((added(i), media[i].id))),
+        Sort::Name => indices.sort_by_key(|&i| media[i].name.to_lowercase()),
+        Sort::Duration => indices.sort_by_key(|&i| std::cmp::Reverse(media[i].dur)),
+        Sort::Kind => indices.sort_by_key(|&i| (media[i].kind as u8, media[i].name.to_lowercase())),
+    }
+}
+
+fn media_edit(doc: &mut Doc, id: u32, label: &str, change: impl FnOnce(&mut m::MediaItem)) -> Result<(), Refusal> {
+    let Some(mut item) = doc.model.media.iter().find(|x| x.id.0 == id as u64).cloned() else { return Err(Refusal("That media is no longer in the project".into())) };
+    change(&mut item);
+    let ok = doc.apply(label, m::Edit::SetMedia { item: Box::new(item) });
+    commit(ok, doc, label, String::new(), vec![]).map(|_| ())
+}
+
+/// Give media item `id` a new name: one undo step.
+pub fn rename(doc: &mut Doc, id: u32, name: &str) -> Result<String, Refusal> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Refusal("A name cannot be empty".into()));
+    }
+    media_edit(doc, id, "Rename media", |x| x.name = name.to_string())?;
+    Ok(format!("Renamed to {name}"))
+}
+
+/// File media item `id` in `folder` (empty takes it out of its folder).
+pub fn set_folder(doc: &mut Doc, id: u32, folder: &str) -> Result<String, Refusal> {
+    let folder = folder.trim().to_string();
+    media_edit(doc, id, "Move media", |x| {
+        if folder.is_empty() {
+            x.extra.remove(FOLDER_KEY);
+        } else {
+            x.extra.insert(FOLDER_KEY.into(), serde_json::json!(folder));
+        }
+    })?;
+    Ok(if folder.is_empty() { "Took it out of its folder".into() } else { format!("Moved to {folder}") })
+}
+
+// --- waveforms ---------------------------------------------------------------
+
+/// Number of bars a sound's real waveform is summed to.
+pub const PEAK_BARS: usize = 96;
+
+/// The peaks of the sound in `path`, 0..1 over `PEAK_BARS` bars, once they
+/// are known. The first ask reads the sound on a worker thread and returns
+/// `None`; the tile shows a quiet line meanwhile (never an invented wave).
+/// A file with no readable sound stays `None` for good.
+pub fn peaks(path: &std::path::Path) -> Option<Arc<Vec<f32>>> {
+    type Slot = Option<Arc<Vec<f32>>>;
+    static CACHE: Mutex<Option<HashMap<PathBuf, Slot>>> = Mutex::new(None);
+    {
+        let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let c = c.get_or_insert_with(Default::default);
+        if let Some(slot) = c.get(path) {
+            return slot.clone();
+        }
+        c.insert(path.to_path_buf(), None);
+    }
+    let path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let found = crate::sound_bridge::decoded(&path.to_string_lossy()).map(|d| Arc::new(peaks_of(&d.left)));
+        CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(path, found);
+    });
+    None
+}
+
+/// `samples` summed to `PEAK_BARS` bars of their loudest value, scaled so
+/// the loudest bar is 1.
+pub fn peaks_of(samples: &[f32]) -> Vec<f32> {
+    if samples.is_empty() {
+        return vec![0.0; PEAK_BARS];
+    }
+    let mut bars: Vec<f32> = (0..PEAK_BARS)
+        .map(|k| {
+            let (a, b) = (k * samples.len() / PEAK_BARS, ((k + 1) * samples.len() / PEAK_BARS).max(k * samples.len() / PEAK_BARS + 1).min(samples.len()));
+            samples[a.min(samples.len() - 1)..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
+        })
+        .collect();
+    let top = bars.iter().copied().fold(0.0f32, f32::max);
+    if top > 0.0 {
+        bars.iter_mut().for_each(|x| *x /= top);
+    }
+    bars
+}
+
 // --- offline media and relinking -------------------------------------------
 
 /// Whether the file behind a media path is gone. Media without a file
@@ -1035,10 +1158,10 @@ mod tests {
         let media = doc.project.media(clip.media.unwrap()).unwrap();
         assert!(media.path.as_ref().unwrap().exists());
         // The same item again is another clip of the same media, not a copy.
-        let media_count = doc.project.media.len();
+        let (media_count, media_id) = (doc.project.media.len(), media.id);
         let again = add_content(&mut doc, stickers[0] as usize, 2 * SEC, None).unwrap();
         assert_eq!(doc.project.media.len(), media_count, "no duplicate media on a repeat drag");
-        assert_eq!(doc.project.clip(again.select[0]).unwrap().media, Some(media.id));
+        assert_eq!(doc.project.clip(again.select[0]).unwrap().media, Some(media_id));
     }
 
     fn png(path: &std::path::Path, rgb: u8) {
@@ -1119,5 +1242,47 @@ mod tests {
         let out = add(&mut doc, Panel::Media, 0, near, None).unwrap();
         assert_eq!(doc.project.clips.len(), before + 1);
         assert_eq!(doc.project.clip(out.select[0]).unwrap().start, want);
+    }
+
+    #[test]
+    fn waveform_peaks_are_real_not_invented() {
+        let mut tone: Vec<f32> = (0..9600).map(|i| (i as f32 * 0.05).sin() * 0.1).collect();
+        tone[4800..4900].iter_mut().for_each(|x| *x = 0.8);
+        let p = peaks_of(&tone);
+        assert_eq!(p.len(), PEAK_BARS);
+        let loud = p.iter().position(|&x| x >= 0.999).unwrap();
+        assert_eq!(loud, 4800 * PEAK_BARS / 9600, "the loud burst sits where it is in the file");
+        assert!(p.iter().all(|&x| (0.0..=1.0).contains(&x)));
+        assert!(peaks_of(&[]).iter().all(|&x| x == 0.0), "silence stays flat");
+        assert!(peaks(std::path::Path::new("/no/such/sound.wav")).is_none());
+    }
+
+    #[test]
+    fn the_bin_sorts_renames_and_files_into_folders_undoably() {
+        let mut doc = crate::agent::Session::new(crate::services::project::new_custom("Organise", 640, 360, 30.0)).doc;
+        let dir = std::env::temp_dir().join(format!("studio-organise-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let files: Vec<PathBuf> = ["b.png", "a.png", "c.png"].iter().map(|n| dir.join(n)).collect();
+        for (k, f) in files.iter().enumerate() {
+            png(f, k as u8 * 40);
+        }
+        let r = crate::services::project::import_media(&mut doc, &files);
+        assert_eq!(r.ids.len(), 3, "{:?}", r.failed);
+        let mut idx: Vec<usize> = (0..3).collect();
+        sort_media(&doc, &mut idx, Sort::Name);
+        let names: Vec<&str> = idx.iter().map(|&i| doc.project.media[i].name.as_str()).collect();
+        assert_eq!(names, ["a.png", "b.png", "c.png"]);
+        let id = r.ids[0];
+        assert_eq!(rename(&mut doc, id, "  Opening  ").unwrap(), "Renamed to Opening");
+        assert!(rename(&mut doc, id, "  ").is_err());
+        assert_eq!(doc.project.media.iter().find(|m| m.id == id).unwrap().name, "Opening");
+        assert_eq!(folder_of(&doc, id), None);
+        assert_eq!(set_folder(&mut doc, id, "Day 1").unwrap(), "Moved to Day 1");
+        assert_eq!(folder_of(&doc, id).as_deref(), Some("Day 1"));
+        doc.undo();
+        assert_eq!(folder_of(&doc, id), None, "filing is one undo step");
+        doc.undo();
+        assert_eq!(doc.project.media.iter().find(|m| m.id == id).unwrap().name, "b.png");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
