@@ -1285,4 +1285,27 @@ mod tests {
         assert_eq!(doc.project.media.iter().find(|m| m.id == id).unwrap().name, "b.png");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The agent's import says why when nothing could be imported, and
+    /// lists the failure beside what did import otherwise.
+    #[test]
+    fn agent_import_reports_conversion_failures() {
+        let dir = std::env::temp_dir().join(format!("studio-agent-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (bad, good) = (dir.join("broken.webm"), dir.join("ok.png"));
+        std::fs::write(&bad, b"not a video").unwrap();
+        png(&good, 200);
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Agent import", 640, 360, 30.0));
+        let err = s.call("import", &serde_json::json!({"paths": [bad.display().to_string()]})).err().expect("a failure, not Done");
+        assert!(err.contains("broken.webm"), "{err}");
+        let ok = s.call("import", &serde_json::json!({"paths": [bad.display().to_string(), good.display().to_string()]})).unwrap();
+        let text = match &ok[0] {
+            crate::agent::Content::Text(t) => t.clone(),
+            _ => panic!("text expected"),
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["media"].as_array().unwrap().len(), 1, "{v}");
+        assert!(v["failed"][0].as_str().unwrap().contains("broken.webm"), "{v}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
