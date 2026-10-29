@@ -607,23 +607,7 @@ impl Decoder {
         let fh = &job.fh;
         for i in 0..NUM_REF_FRAMES {
             if (fh.refresh_frame_flags >> i) & 1 == 1 {
-                let ri = &mut self.refs[i];
-                ri.valid = true;
-                ri.frame_id = fh.current_frame_id;
-                ri.upscaled_width = fh.upscaled_width;
-                ri.frame_width = fh.frame_width;
-                ri.frame_height = fh.frame_height;
-                ri.render_width = fh.render_width;
-                ri.render_height = fh.render_height;
-                ri.mi_cols = fh.mi_cols;
-                ri.mi_rows = fh.mi_rows;
-                ri.frame_type = fh.frame_type;
-                ri.order_hint = fh.order_hint;
-                ri.saved_order_hints = fh.order_hints;
-                ri.gm_params = fh.gm_params;
-                ri.lf_deltas = fh.lf.deltas;
-                ri.seg_features = fh.seg.features;
-                ri.grain = fh.film_grain.clone();
+                self.refs[i].update_from(fh);
                 self.ref_frames[i] = Some(job.slot.clone());
             }
         }

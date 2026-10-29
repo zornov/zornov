@@ -816,11 +816,14 @@ enum VideoDecoder {
     Hardware(studio_hw::H264Decoder),
     /// The machine's video hardware (HEVC).
     HardwareHevc(studio_hw::HevcDecoder),
+    /// The machine's video hardware (AV1, 8-bit 4:2:0).
+    HardwareAv1(studio_hw::Av1Decoder),
     H264(studio_h264::Decoder),
     Hevc(studio_hevc::Decoder),
+    Av1(Box<studio_av1::Decoder>),
 }
 
-/// H.264 / HEVC video in an MP4 or MOV file.
+/// H.264 / HEVC / AV1 video in an MP4 or MOV file.
 pub struct Mp4Source {
     demuxer: studio_mp4::Demuxer,
     track: studio_mp4::Track,
@@ -833,6 +836,9 @@ pub struct Mp4Source {
     decoder: Option<VideoDecoder>,
     /// Input colour space chosen for this media, over what the file says.
     input: Option<InputColour>,
+    /// Decode on Studio's own decoders even where hardware exists (also
+    /// `STUDIO_SOFTWARE_DECODE`).
+    software_only: bool,
     /// Next sample (decode order) to feed.
     next_sample: usize,
     /// First frame not yet decoded since the decoder last started.
@@ -873,6 +879,7 @@ impl Mp4Source {
         let bit_depth = match &track.codec {
             studio_mp4::Codec::Avc { config } => config.bit_depth_luma.unwrap_or(8),
             studio_mp4::Codec::Hevc { config } => config.bit_depth_luma.max(8),
+            studio_mp4::Codec::Av1 { config } => config.bit_depth(),
             other => return Err(format!("{}: unsupported video codec {other:?}", path.display())),
         };
         // Colour from the container; the bitstream VUI overrides it per
@@ -906,6 +913,7 @@ impl Mp4Source {
             frame_of_sample,
             decoder: None,
             input: None,
+            software_only: false,
             next_sample: 0,
             next_out: 0,
             pending: std::collections::BTreeSet::new(),
@@ -918,12 +926,23 @@ impl Mp4Source {
         })
     }
 
+    /// Whether the machine's video hardware may be used.
+    fn hardware_allowed(&self) -> bool {
+        !self.software_only && std::env::var_os("STUDIO_SOFTWARE_DECODE").is_none()
+    }
+
+    /// Decodes on Studio's own decoders only (`true`), or hardware first.
+    pub fn set_software_only(&mut self, on: bool) {
+        self.software_only = on;
+        self.decoder = None;
+    }
+
     fn new_decoder(&self) -> Result<VideoDecoder, String> {
         match &self.track.codec {
             studio_mp4::Codec::Avc { config } => {
                 // Hardware first: the media engine decodes and the CPU is
                 // left to render. Studio's own decoder otherwise.
-                if config.bit_depth_luma.unwrap_or(8) == 8 && std::env::var_os("STUDIO_SOFTWARE_DECODE").is_none() {
+                if config.bit_depth_luma.unwrap_or(8) == 8 && self.hardware_allowed() {
                     if let Some(hw) = studio_hw::H264Decoder::new(&config.raw) {
                         return Ok(VideoDecoder::Hardware(hw));
                     }
@@ -934,12 +953,22 @@ impl Mp4Source {
                 let sets: Vec<Vec<u8>> = config.arrays.iter().flat_map(|a| a.nalus.iter().cloned()).collect();
                 // Hardware first here too (iPhone and camera footage is
                 // HEVC, often 4K); Studio's own decoder otherwise.
-                if std::env::var_os("STUDIO_SOFTWARE_DECODE").is_none() {
+                if self.hardware_allowed() {
                     if let Some(hw) = studio_hw::HevcDecoder::new(&sets, config.nal_length_size as usize) {
                         return Ok(VideoDecoder::HardwareHevc(hw));
                     }
                 }
                 studio_hevc::Decoder::new(&sets, config.nal_length_size as usize).map(VideoDecoder::Hevc).map_err(|e| format!("hevc: {e:?}"))
+            }
+            studio_mp4::Codec::Av1 { config } => {
+                // Hardware first (8-bit 4:2:0 on a Mac with an AV1 engine);
+                // Studio's own decoder otherwise, which also reads 10-bit.
+                if self.hardware_allowed() {
+                    if let Ok(hw) = studio_hw::Av1Decoder::new(&config.raw, self.track.width, self.track.height) {
+                        return Ok(VideoDecoder::HardwareAv1(hw));
+                    }
+                }
+                Ok(VideoDecoder::Av1(Box::new(studio_av1::Decoder::new())))
             }
             _ => Err("unsupported codec".into()),
         }
@@ -955,6 +984,10 @@ impl Mp4Source {
                 true
             }
             Some(VideoDecoder::HardwareHevc(d)) => {
+                d.reset();
+                true
+            }
+            Some(VideoDecoder::HardwareAv1(d)) => {
                 d.reset();
                 true
             }
@@ -1035,6 +1068,40 @@ impl Mp4Source {
         ))
     }
 
+    /// Frame index of a picture from Studio's AV1 decoder (its pts is the
+    /// sample index it was fed).
+    fn av1_index(&self, p: &studio_av1::Picture) -> Option<u64> {
+        self.frame_of(usize::try_from(p.pts).ok()?)
+    }
+
+    fn picture_from_av1(&self, p: &studio_av1::Picture) -> DecodedPicture {
+        let mut colour = self.colour;
+        colour.bit_depth = p.bit_depth.max(8);
+        if p.matrix_coefficients != 2 {
+            colour.matrix = crate::colour_space::Matrix::from_h273(p.matrix_coefficients);
+        }
+        if p.color_primaries != 2 {
+            colour.primaries = crate::colour_space::SourcePrimaries::from_h273(p.color_primaries);
+        }
+        if p.transfer_characteristics != 2 {
+            colour.transfer = crate::colour_space::SourceTransfer::from_h273(p.transfer_characteristics);
+        }
+        colour.full_range = p.full_range;
+        let (cw, ch) = (p.plane_width(1) as usize, p.plane_height(1) as usize);
+        let mid = 1u16 << (p.bit_depth.max(8) - 1);
+        let plane = |k: usize| -> Vec<u16> {
+            // Monochrome streams carry no chroma: neutral grey.
+            if p.mono_chrome && k > 0 { vec![mid; cw * ch] } else { p.planes[k].clone() }
+        };
+        let planes = |v: Vec<u16>| if p.bit_depth > 8 { Planes::U16(v) } else { Planes::U8(v.into_iter().map(|x| x as u8).collect()) };
+        DecodedPicture {
+            width: p.width,
+            height: p.height,
+            data: PixelData::Yuv { y: planes(plane(0)), u: planes(plane(1)), v: planes(plane(2)), chroma_width: cw as u32, chroma_height: ch as u32 },
+            colour: self.recolour(colour),
+        }
+    }
+
     fn picture_from_hevc(&self, f: &studio_hevc::Frame) -> DecodedPicture {
         let mut colour = self.colour;
         colour.bit_depth = f.bit_depth.max(8);
@@ -1101,6 +1168,15 @@ impl Mp4Source {
                 let out = d.decode(&data, self.next_sample as i64).unwrap_or_default();
                 out.into_iter().filter_map(|f| self.picture_from_hardware(f)).collect()
             }
+            Some(VideoDecoder::HardwareAv1(d)) => {
+                let out = d.decode(&data, self.next_sample as i64).unwrap_or_default();
+                out.into_iter().filter_map(|f| self.picture_from_hardware(f)).collect()
+            }
+            Some(VideoDecoder::Av1(d)) => {
+                // Pictures carry the sample index as their pts, as with H.264.
+                let out = d.decode_pts(&data, self.next_sample as i64).unwrap_or_default();
+                out.iter().filter_map(|p| Some((self.av1_index(p)?, self.picture_from_av1(p)))).collect()
+            }
             Some(VideoDecoder::H264(d)) => {
                 // The pts handed to the decoder is the sample index, which
                 // maps to a frame index exactly, whatever the reordering.
@@ -1147,6 +1223,14 @@ impl Mp4Source {
                 let out = d.flush();
                 out.into_iter().filter_map(|f| self.picture_from_hardware(f)).collect()
             }
+            Some(VideoDecoder::HardwareAv1(d)) => {
+                let out = d.flush();
+                out.into_iter().filter_map(|f| self.picture_from_hardware(f)).collect()
+            }
+            Some(VideoDecoder::Av1(d)) => {
+                let out = d.flush();
+                out.iter().filter_map(|p| Some((self.av1_index(p)?, self.picture_from_av1(p)))).collect()
+            }
             Some(VideoDecoder::H264(d)) => {
                 let out = d.flush();
                 out.iter().filter_map(|f| Some((self.h264_index(f)?, self.picture_from_h264(f)))).collect()
@@ -1171,7 +1255,7 @@ impl Mp4Source {
         }
         // The decoder has been drained; the next request restarts it (a
         // hardware session stays, emptied, for the next run).
-        if !matches!(self.decoder, Some(VideoDecoder::Hardware(_) | VideoDecoder::HardwareHevc(_))) {
+        if !matches!(self.decoder, Some(VideoDecoder::Hardware(_) | VideoDecoder::HardwareHevc(_) | VideoDecoder::HardwareAv1(_))) {
             self.decoder = None;
         }
     }
@@ -1238,6 +1322,10 @@ impl MediaSource for Mp4Source {
         done
     }
 }
+
+#[cfg(test)]
+#[path = "../../../media/encode/tests/data/svtav1_160x96_15f.rs"]
+mod av1_stream;
 
 #[cfg(test)]
 mod tests {
@@ -1338,6 +1426,107 @@ mod tests {
         assert_eq!(s.info(MediaKey(7)).unwrap().frame_count, Some(10));
     }
 
+    /// The test stream as MP4 samples: temporal units without delimiters.
+    fn av1_units() -> Vec<Vec<u8>> {
+        let stream = super::av1_stream::STREAM;
+        let mut units: Vec<Vec<u8>> = Vec::new();
+        let mut pos = 0;
+        while pos < stream.len() {
+            let h = stream[pos];
+            let hdr = 1 + (h & 4 != 0) as usize;
+            let (mut size, mut n) = (0usize, 0);
+            for i in 0..8 {
+                let b = stream[pos + hdr + i];
+                size |= ((b & 0x7f) as usize) << (i * 7);
+                n += 1;
+                if b & 0x80 == 0 {
+                    break;
+                }
+            }
+            let end = pos + hdr + n + size;
+            match (h >> 3) & 0xf {
+                2 => units.push(Vec::new()),
+                15 => {}
+                _ => units.last_mut().expect("a temporal delimiter first").extend_from_slice(&stream[pos..end]),
+            }
+            pos = end;
+        }
+        units
+    }
+
+    fn av1_mp4(name: &str) -> std::path::PathBuf {
+        use studio_encode::mux::{Muxer, Options, av1c_from_sequence_header};
+        let dir = std::env::temp_dir().join(format!("studio-render-av1-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clip.mp4");
+        let units = av1_units();
+        assert_eq!(units.len(), 15);
+        let info = av1c_from_sequence_header(&units[0][..2 + units[0][1] as usize]).unwrap();
+        let mut mux = Muxer::create(&path, Options::mp4_av1()).unwrap();
+        let track = mux.add_av1_video(info.track_info(30, 1, 200_000)).unwrap();
+        for u in &units {
+            mux.write_temporal_unit(track, u).unwrap();
+        }
+        mux.finish().unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() < super::av1_stream::STREAM.len() as u64 + 4096);
+        path
+    }
+
+    /// All 15 frames in order, plus frame 12 again after a seek back.
+    fn decode_all(src: &mut Mp4Source, path_in_use: fn(&VideoDecoder) -> bool) -> Vec<PictureRef> {
+        let mut frames: Vec<Option<PictureRef>> = vec![None; 15];
+        for i in 0..15u64 {
+            src.decode_to(i, &mut |k, p| frames[k as usize] = Some(p));
+            if i == 0 {
+                assert!(src.decoder.as_ref().is_some_and(path_in_use), "the expected decode path is in use");
+            }
+        }
+        let mut again = None;
+        src.decode_to(0, &mut |_, _| {});
+        src.decode_to(12, &mut |k, p| {
+            if k == 12 {
+                again = Some(p);
+            }
+        });
+        let frames: Vec<PictureRef> = frames.into_iter().enumerate().map(|(i, f)| f.unwrap_or_else(|| panic!("frame {i} missing"))).collect();
+        let (a, b) = (&frames[12], again.expect("frame 12 after a seek"));
+        assert!(matches!((&a.data, &b.data), (PixelData::Yuv { y: Planes::U8(x), .. }, PixelData::Yuv { y: Planes::U8(z), .. }) if *x == *z), "a seek gives the same picture");
+        frames
+    }
+
+    fn luma(p: &DecodedPicture) -> &[u8] {
+        match &p.data {
+            PixelData::Yuv { y: Planes::U8(y), .. } => y,
+            _ => panic!("8-bit planes expected"),
+        }
+    }
+
+    #[test]
+    fn mp4_source_plays_av1_on_both_paths() {
+        let path = av1_mp4("both");
+        let mut sw = Mp4Source::open(&path).unwrap();
+        assert_eq!((sw.info().width, sw.info().height, sw.info().frame_count), (160, 96, Some(15)));
+        sw.set_software_only(true);
+        let soft = decode_all(&mut sw, |d| matches!(d, VideoDecoder::Av1(_)));
+        for f in &soft {
+            assert_eq!((f.width, f.height), (160, 96));
+            assert_eq!(luma(f).len(), 160 * 96);
+        }
+        assert_ne!(luma(&soft[0]), luma(&soft[14]), "the pictures differ from frame to frame");
+        if !studio_hw::Av1Decoder::supported() {
+            eprintln!("no AV1 hardware here; hardware path skipped");
+            return;
+        }
+        let mut hw = Mp4Source::open(&path).unwrap();
+        let hard = decode_all(&mut hw, |d| matches!(d, VideoDecoder::HardwareAv1(_)));
+        let mut exact = true;
+        for (h, s) in hard.iter().zip(&soft) {
+            assert_eq!((h.width, h.height), (s.width, s.height));
+            exact &= luma(h) == luma(s);
+        }
+        assert!(exact, "hardware and software frames match");
+    }
+
     /// Decode speed, headless: frames in order, as playback asks for them.
     /// `STUDIO_DECODE_FILES=a.mp4,b.mp4 cargo test --release -p studio-render -- --ignored decode_speed --nocapture`
     /// (`STUDIO_SOFTWARE_DECODE=1` for Studio's own decoders).
@@ -1370,6 +1559,8 @@ mod tests {
                         Some(VideoDecoder::HardwareHevc(_)) => "hardware hevc",
                         Some(VideoDecoder::H264(_)) => "software h264",
                         Some(VideoDecoder::Hevc(_)) => "software hevc",
+                        Some(VideoDecoder::HardwareAv1(_)) => "hardware av1",
+                        Some(VideoDecoder::Av1(_)) => "software av1",
                         None => "none",
                     };
                     eprintln!("ask {i}: emitted {got:?} ok={ok} next_sample={} decoder={which} took={:?}", src.next_sample, t.elapsed());

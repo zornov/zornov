@@ -6,8 +6,11 @@
 //!
 //! Reads WebM / MKV (VP9, AV1 or ProRes video; Opus or AAC sound) and MP4 /
 //! MOV holding AV1, VP9 or ProRes (what video sites, screen recorders and
-//! cameras hand over), decodes with the clean-room decoders vendored from
-//! FilmCraft (`studio-vp9`, `studio-av1`, `studio-prores`, `studio-opus`,
+//! cameras hand over). AV1 in MP4 / MOV is played as it is (`Mp4Source`:
+//! the Mac's AV1 engine, else `studio-av1`) and reaches this converter only
+//! when something else in the file is not playable, such as Opus sound;
+//! AV1 in WebM / MKV always comes here. It decodes with the clean-room
+//! decoders vendored from FilmCraft (`studio-vp9`, `studio-av1`, `studio-prores`, `studio-opus`,
 //! the Matroska demuxer from craft-libs; see NOTICE), and writes the same
 //! MP4 the older converter made: even size, constant frame rate,
 //! BT.709, a sync frame every second, AAC sound.

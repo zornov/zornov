@@ -5842,6 +5842,11 @@ dependencies = [
 [[package]]
 name = "studio-hw"
 version = "0.1.0"
+dependencies = [
+ "studio-av1",
+ "studio-encode",
+ "studio-mp4",
+]
 
 [[package]]
 name = "studio-i18n"
@@ -6330,6 +6335,7 @@ dependencies = [
  "studio-paths",
  "studio-plugin-api",
  "wasmtime",
+ "wat",
 ]
 
 [[package]]
@@ -6375,7 +6381,9 @@ dependencies = [
  "naga 30.0.1",
  "pollster 0.4.0",
  "serde_json",
+ "studio-av1",
  "studio-colour",
+ "studio-encode",
  "studio-fx",
  "studio-gpu-device",
  "studio-h264",
@@ -7484,7 +7492,6 @@ dependencies = [
  "wasmtime-internal-jit-icache-coherence",
  "wasmtime-internal-unwinder",
  "wasmtime-internal-versioned-export-macros",
- "wat",
  "windows-sys 0.61.2",
 ]
 

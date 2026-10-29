@@ -1,8 +1,6 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-#![allow(unused_variables, dead_code)] // stubs: the owning module removes this when it implements the file
-
 //! M2: the encoder's CDF set, saved and loaded across frames like the decoder's (spec 7.20, 8.3).
 
 use studio_av1::cdf::Cdfs;
@@ -18,9 +16,12 @@ impl CdfContext {
     }
     /// The set to store in a reference slot at the end of a frame.
     pub fn save(&self) -> Box<Cdfs> {
-        unimplemented!("M2")
+        self.cdfs.clone()
     }
+    /// Restores a saved set as `load_cdfs` does: the adaptation counters restart at zero.
     pub fn load(saved: &Cdfs) -> CdfContext {
-        unimplemented!("M2")
+        let mut cdfs = Box::new(saved.clone());
+        cdfs.clear_counts();
+        CdfContext { cdfs }
     }
 }

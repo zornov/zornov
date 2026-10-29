@@ -358,8 +358,9 @@ mod tests {
     use super::*;
 
     fn compile(wat: &str, limits: Limits) -> CallResult<Runtime> {
-        // wasmtime reads the text format too.
-        Runtime::compile(wat.as_bytes(), limits)
+        // wasmtime is built without the text format, so convert it here.
+        let wasm = wat::parse_str(wat).map_err(|e| format!("bad test module: {e}"))?;
+        Runtime::compile(&wasm, limits)
     }
 
     const SHELL: &str = r#"

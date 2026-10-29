@@ -118,7 +118,9 @@ fn look() -> Option<PathBuf> {
     if let Ok(cwd) = std::env::current_dir() {
         starts.push(cwd);
     }
-    // Next to the crate during development.
+    // Next to the crate during development (debug builds only, so a release
+    // binary carries no path from the machine that built it).
+    #[cfg(debug_assertions)]
     starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
     for s in starts {
         for dir in s.ancestors() {
