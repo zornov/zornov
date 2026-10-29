@@ -17,6 +17,11 @@ use std::time::{Duration, Instant};
 
 static LAST: Mutex<Option<(Instant, Session)>> = Mutex::new(None);
 
+/// Whether the last note was written less than half a second ago.
+fn too_soon(last: Option<Instant>) -> bool {
+    last.is_some_and(|t| t.elapsed() < Duration::from_millis(500))
+}
+
 impl StudioApp {
     /// Every frame: notes where the window is, at most twice a second and
     /// only when something moved.
@@ -24,11 +29,12 @@ impl StudioApp {
         if self.cli.shot.is_some() || self.cli.fresh {
             return;
         }
-        let Some(root) = self.doc.folder.as_ref().map(|f| f.root().to_path_buf()).filter(|r| !crate::files::is_temporary(r)) else { return };
+        // The throttle comes first: the checks below touch the filesystem.
         let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        if last.as_ref().is_some_and(|(t, _)| t.elapsed() < Duration::from_millis(500)) {
+        if too_soon(last.as_ref().map(|(t, _)| *t)) {
             return;
         }
+        let Some(root) = self.doc.folder.as_ref().map(|f| f.root().to_path_buf()).filter(|r| !crate::files::is_temporary(r)) else { return };
         let e = &self.editor;
         let mut view = serde_json::Map::new();
         view.insert("px_per_sec".into(), json!(e.px_per_sec));
@@ -113,5 +119,17 @@ impl StudioApp {
         if crate::agent::care::sync_and_index(root.clone(), self.doc.model.clone()) {
             *last = Some((Instant::now(), root, key));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_note_is_not_due_within_half_a_second_of_the_last() {
+        assert!(!too_soon(None));
+        assert!(too_soon(Some(Instant::now())));
+        assert!(!too_soon(Instant::now().checked_sub(Duration::from_secs(1))));
     }
 }

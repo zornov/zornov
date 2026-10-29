@@ -95,8 +95,10 @@ pub fn note_project(dir: &Path) {
 
 /// A folder under the system's temporary places.
 pub fn is_temporary(dir: &Path) -> bool {
-    let tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
-    dir.starts_with(&tmp) || ["/tmp", "/private/tmp", "/private/var/folders", "/var/folders"].iter().any(|t| dir.starts_with(t))
+    // The temp dir does not move while Studio runs; resolve it once.
+    static TMP: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let tmp = TMP.get_or_init(|| std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir()));
+    dir.starts_with(tmp) || ["/tmp", "/private/tmp", "/private/var/folders", "/var/folders"].iter().any(|t| dir.starts_with(t))
 }
 
 /// Adds the projects in the shared list that `recents` does not have yet
@@ -479,6 +481,15 @@ pub enum Autosaved {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temporary_folders_are_told_from_real_ones() {
+        let tmp = std::env::temp_dir();
+        assert!(is_temporary(&tmp.join("project")));
+        assert!(is_temporary(&std::fs::canonicalize(&tmp).unwrap().join("project")));
+        assert!(is_temporary(Path::new("/private/var/folders/x")));
+        assert!(!is_temporary(Path::new("/Users/someone/Videos/Studio/Film")));
+    }
 
     #[derive(Debug)]
     struct Dropped(PathBuf);

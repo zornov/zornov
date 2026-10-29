@@ -210,6 +210,8 @@ pub struct FontLibrary {
     /// Family for generic names ("sans-serif", "serif", "monospace", "cursive", "display").
     generic: HashMap<String, String>,
     emoji: Option<EmojiSet>,
+    /// [`FontLibrary::families_shared`], built on first ask and dropped when a face is added.
+    families_cache: std::sync::OnceLock<Arc<[String]>>,
 }
 
 impl Default for FontLibrary {
@@ -223,6 +225,7 @@ impl FontLibrary {
     pub fn new() -> FontLibrary {
         let mut lib = FontLibrary {
             faces: Vec::new(),
+            families_cache: std::sync::OnceLock::new(),
             by_family: HashMap::new(),
             loaded: Mutex::new(HashMap::new()),
             files: Mutex::new(HashMap::new()),
@@ -445,6 +448,7 @@ impl FontLibrary {
         info.id = id;
         self.by_family.entry(info.family.to_lowercase()).or_default().push(self.faces.len());
         self.faces.push(info);
+        self.families_cache = std::sync::OnceLock::new();
         id
     }
 
@@ -467,6 +471,16 @@ impl FontLibrary {
 
     /// Family names, sorted, deduplicated; bundled and system together.
     pub fn families(&self) -> Vec<String> {
+        self.families_shared().to_vec()
+    }
+
+    /// [`FontLibrary::families`] without rebuilding: the list is made once
+    /// and kept until a face is added.
+    pub fn families_shared(&self) -> Arc<[String]> {
+        self.families_cache.get_or_init(|| self.build_families().into()).clone()
+    }
+
+    fn build_families(&self) -> Vec<String> {
         let mut v: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for f in &self.faces {
@@ -474,7 +488,7 @@ impl FontLibrary {
                 v.push(f.family.clone());
             }
         }
-        v.sort_by_key(|a| a.to_lowercase());
+        v.sort_by_cached_key(|a| a.to_lowercase());
         v
     }
 
@@ -665,5 +679,54 @@ mod tests {
         assert!(is_emoji_presentation('🚀'));
         assert!(!is_emoji_presentation('a'));
         assert!(!is_emoji_presentation('中'));
+    }
+
+    fn face(family: &str) -> FaceInfo {
+        FaceInfo {
+            id: FaceId(0),
+            family: family.into(),
+            weight: 400,
+            italic: false,
+            path: PathBuf::new(),
+            index: 0,
+            source: FontSource::System,
+            variable_weight: false,
+            category: String::new(),
+            licence: String::new(),
+            attribution: String::new(),
+            subsets: Vec::new(),
+            monospaced: false,
+            condensed: false,
+            classifications: Vec::new(),
+        }
+    }
+
+    /// The list as it was made before it was kept.
+    fn old_families(lib: &FontLibrary) -> Vec<String> {
+        let mut v: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for f in lib.faces() {
+            if seen.insert(f.family.to_lowercase()) {
+                v.push(f.family.clone());
+            }
+        }
+        v.sort_by_key(|a| a.to_lowercase());
+        v
+    }
+
+    #[test]
+    fn families_are_kept_and_match_the_old_list() {
+        let mut lib = FontLibrary::new();
+        for f in ["zeta", "Alpha", "alpha", "Beta", "Éclair", "beta bold", "Zeta"] {
+            lib.push(face(f));
+        }
+        assert_eq!(lib.families(), old_families(&lib));
+        let a = lib.families_shared();
+        assert!(Arc::ptr_eq(&a, &lib.families_shared()), "built once");
+        lib.push(face("Aardvark"));
+        let b = lib.families_shared();
+        assert!(!Arc::ptr_eq(&a, &b), "rebuilt after a face is added");
+        assert_eq!(b[0], "Aardvark");
+        assert_eq!(&*b, old_families(&lib).as_slice());
     }
 }

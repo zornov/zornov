@@ -92,6 +92,12 @@ fn showing(mut w: Workspace, p: crate::dock::Panel) -> Workspace {
 /// The workspaces that come with Studio. Names and descriptions are English
 /// here and translated where they are shown.
 pub fn builtin() -> Vec<Workspace> {
+    // Six dock trees are built; the top bar asks several times a frame.
+    static BUILT: std::sync::OnceLock<Vec<Workspace>> = std::sync::OnceLock::new();
+    BUILT.get_or_init(build_in).clone()
+}
+
+fn build_in() -> Vec<Workspace> {
     use crate::dock::{Panel, Zone};
     vec![
         ws("Edit", "Cut and arrange: a big timeline with your media beside it.", (true, 340.0), (true, 300.0), (true, Some(300.0)), "Media"),
@@ -140,15 +146,37 @@ fn path() -> std::path::PathBuf {
     studio_paths::studio().join("Workspaces.json")
 }
 
-fn saved_file() -> Vec<Workspace> {
+fn read_saved() -> Vec<Workspace> {
     std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// How long `all` goes on with what it read; the top bar asks every frame.
+const KEEP: std::time::Duration = std::time::Duration::from_secs(1);
+
+static ALL: std::sync::Mutex<Option<(std::time::Instant, Vec<Workspace>)>> = std::sync::Mutex::new(None);
+
+/// Drops the kept list, after this process changed the file.
+fn forget() {
+    *ALL.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// Built-in workspaces (as the person changed them) and their own.
 pub fn all() -> Vec<Workspace> {
-    let own = saved_file();
-    let mut out: Vec<Workspace> = builtin().into_iter().map(|b| own.iter().find(|o| o.name.eq_ignore_ascii_case(&b.name)).cloned().unwrap_or(b)).collect();
-    out.extend(own.into_iter().filter(|o| !builtin().iter().any(|b| b.name.eq_ignore_ascii_case(&o.name))));
+    let mut slot = ALL.lock().unwrap_or_else(|e| e.into_inner());
+    match &*slot {
+        Some((at, v)) if at.elapsed() < KEEP => v.clone(),
+        _ => {
+            let v = merged(&builtin(), read_saved());
+            *slot = Some((std::time::Instant::now(), v.clone()));
+            v
+        }
+    }
+}
+
+/// The built-in workspaces with the person's changes to them, then their own.
+fn merged(builtin: &[Workspace], own: Vec<Workspace>) -> Vec<Workspace> {
+    let mut out: Vec<Workspace> = builtin.iter().map(|b| own.iter().find(|o| o.name.eq_ignore_ascii_case(&b.name)).cloned().unwrap_or_else(|| b.clone())).collect();
+    out.extend(own.into_iter().filter(|o| !builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&o.name))));
     out
 }
 
@@ -161,9 +189,10 @@ pub fn save(w: Workspace) -> Result<(), String> {
     if w.name.trim().is_empty() {
         return Err("a workspace needs a name".into());
     }
-    let mut own = saved_file();
+    let mut own = read_saved();
     own.retain(|o| !o.name.eq_ignore_ascii_case(&w.name));
     own.push(w);
+    forget();
     if let Some(d) = path().parent() {
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
@@ -172,12 +201,13 @@ pub fn save(w: Workspace) -> Result<(), String> {
 
 /// Removes a saved workspace (a built-in one goes back to how it came).
 pub fn delete(name: &str) -> Result<(), String> {
-    let mut own = saved_file();
+    let mut own = read_saved();
     let n = own.len();
     own.retain(|o| !o.name.eq_ignore_ascii_case(name));
     if own.len() == n {
         return Err(format!("no saved workspace \"{name}\""));
     }
+    forget();
     std::fs::write(path(), serde_json::to_vec_pretty(&own).unwrap_or_default()).map_err(|e| e.to_string())
 }
 
@@ -270,6 +300,30 @@ pub fn saved(app: &StudioApp) -> Option<Workspace> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `all` as it was written before the file was kept.
+    fn old_all(own: Vec<Workspace>) -> Vec<Workspace> {
+        let mut out: Vec<Workspace> = build_in().into_iter().map(|b| own.iter().find(|o| o.name.eq_ignore_ascii_case(&b.name)).cloned().unwrap_or(b)).collect();
+        out.extend(own.into_iter().filter(|o| !build_in().iter().any(|b| b.name.eq_ignore_ascii_case(&o.name))));
+        out
+    }
+
+    #[test]
+    fn the_merged_list_is_what_all_always_was() {
+        let mine = |n: &str, w: f32| Workspace { name: n.into(), library_w: w, ..build_in().remove(0) };
+        for own in [vec![], vec![mine("colour", 111.0)], vec![mine("Mine", 222.0), mine("EDIT", 333.0), mine("Other", 444.0)]] {
+            assert_eq!(merged(&builtin(), own.clone()), old_all(own));
+        }
+        assert_eq!(builtin(), build_in(), "the kept built-ins are the made ones");
+    }
+
+    #[test]
+    fn the_kept_list_is_dropped_when_this_process_changes_it() {
+        let first = all();
+        assert_eq!(first, all(), "the same list within the second");
+        forget();
+        assert_eq!(all(), first, "read again, and the same");
+    }
 
     #[test]
     fn builtins_cover_the_tasks_and_name_real_library_sections() {
