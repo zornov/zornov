@@ -48,7 +48,7 @@ fn seq(w: u32, h: u32) -> SeqParams {
         level_idx: 8,
         use_128x128_superblock: false,
         enable_cdef: true,
-        enable_restoration: false,
+        enable_restoration: true,
         enable_order_hint: true,
         color_primaries: 1,
         transfer_characteristics: 1,
@@ -372,6 +372,7 @@ fn round_trip(w: usize, h: usize, q: u8, seed: u64, split_in_4: u32, intra_in_10
         loop_filter_level: [0, 0],
         cdef_enabled: false,
         cdef: Default::default(),
+        lr: Default::default(),
         tile_cols_log2: 0,
         tile_rows_log2: 0,
     };

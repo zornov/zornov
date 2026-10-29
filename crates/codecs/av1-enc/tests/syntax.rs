@@ -65,6 +65,7 @@ fn key(q: u8) -> FrameParams {
         loop_filter_level: [0, 0],
         cdef_enabled: false,
         cdef: Default::default(),
+        lr: Default::default(),
         tile_cols_log2: 0,
         tile_rows_log2: 0,
     }

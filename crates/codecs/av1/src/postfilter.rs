@@ -87,6 +87,13 @@ impl PostFilter {
         (self.fs.lr_unit_cols[plane], self.fs.lr_unit_rows[plane])
     }
 
+    /// Loop restoration alone: `deblocked` is the frame before CDEF, `cdef` the one after it
+    /// (the same frame when CDEF did nothing).
+    pub fn restore(&self, deblocked: &crate::frame::FrameBuf, cdef: &crate::frame::FrameBuf) -> crate::frame::FrameBuf {
+        let pool = crate::par::Pool::new(1);
+        crate::restoration::loop_restoration(&self.fs, deblocked, cdef, &pool)
+    }
+
     /// All stages, as the decoder runs them; the filtered frame.
     pub fn run(mut self) -> crate::frame::FrameBuf {
         let pool = crate::par::Pool::new(1);

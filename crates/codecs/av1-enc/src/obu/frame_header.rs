@@ -169,8 +169,19 @@ pub fn write_frame_header(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) 
             }
         }
         if seq.enable_restoration {
-            for _ in 0..3 {
-                w.put(0, 2); // lr_type = RESTORE_NONE
+            let lr = &fh.lr;
+            for p in 0..3 {
+                w.put(lr.switchable[p] as u32, 2); // lr_type: 0 NONE, 1 SWITCHABLE
+            }
+            if lr.uses_lr() {
+                // lr_unit_shift (64x64 superblocks): one bit, and one more when it is set
+                w.flag(lr.unit_shift > 0);
+                if lr.unit_shift > 0 {
+                    w.flag(lr.unit_shift > 1); // lr_unit_extra_shift
+                }
+                if lr.switchable[1] || lr.switchable[2] {
+                    w.flag(lr.uv_shift > 0); // lr_uv_shift
+                }
             }
         }
         w.flag(false); // tx_mode_select = 0: TX_MODE_LARGEST

@@ -94,6 +94,47 @@ impl Default for CdefParams {
     }
 }
 
+/// `lr_params()`: a plane either has no restoration or is switchable (every unit picks none,
+/// Wiener or self-guided).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LrParams {
+    pub switchable: [bool; 3],
+    /// Luma unit size is `64 << unit_shift` (0 to 2).
+    pub unit_shift: u8,
+    /// Chroma units are the luma size shifted right by this (0 or 1).
+    pub uv_shift: u8,
+}
+
+impl LrParams {
+    pub fn uses_lr(&self) -> bool {
+        self.switchable.iter().any(|&s| s)
+    }
+
+    pub fn unit_size(&self, plane: usize) -> usize {
+        (64usize << self.unit_shift) >> if plane > 0 { self.uv_shift } else { 0 }
+    }
+}
+
+/// What one restoration unit does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LrUnit {
+    /// 0 none, 1 Wiener, 2 self-guided (the decoder's `RESTORE_*` numbers).
+    pub kind: u8,
+    /// `[pass][tap]`: pass 0 is vertical, 1 horizontal; chroma codes no first tap.
+    pub wiener: [[i8; 3]; 2],
+    pub sgr_set: u8,
+    pub sgr_xqd: [i8; 2],
+}
+
+/// Loop restoration as coded: the frame parameters and every unit of every plane, row-major.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LrChoice {
+    pub params: LrParams,
+    pub units: [Vec<LrUnit>; 3],
+    pub unit_cols: [usize; 3],
+    pub unit_rows: [usize; 3],
+}
+
 /// Sequence-level parameters (spec 5.5), what `write_sequence_header` and `av1c` need.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeqParams {
@@ -137,6 +178,7 @@ pub struct FrameParams {
     pub loop_filter_level: [u8; 2],
     pub cdef_enabled: bool,
     pub cdef: CdefParams,
+    pub lr: LrParams,
     pub tile_cols_log2: u8,
     pub tile_rows_log2: u8,
 }
