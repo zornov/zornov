@@ -5838,6 +5838,11 @@ dependencies = [
 [[package]]
 name = "studio-hw"
 version = "0.1.0"
+dependencies = [
+ "studio-av1",
+ "studio-encode",
+ "studio-mp4",
+]
 
 [[package]]
 name = "studio-i18n"

@@ -6,3 +6,8 @@ license.workspace = true
 description = "Hardware video encode and decode through the operating system's own codecs (VideoToolbox on macOS), with Zornov's software codecs as the fallback."
 
 [dependencies]
+
+[dev-dependencies]
+studio-av1 = { path = "../../codecs/av1" }
+studio-mp4 = { path = "../mp4" }
+studio-encode = { path = "../encode" }

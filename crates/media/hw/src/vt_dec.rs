@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! VideoToolbox decompression, bound by hand: AVCC H.264 or HEVC samples in,
+//! VideoToolbox decompression, bound by hand: AVCC H.264, HEVC or AV1 samples in,
 //! 8-bit 4:2:0 planes out (the same shape Studio's software decoder
 //! gives), tagged with the sample they came from.
 
@@ -39,6 +39,8 @@ unsafe extern "C" {
     static kCFTypeDictionaryKeyCallBacks: u8;
     static kCFTypeDictionaryValueCallBacks: u8;
     fn CFRelease(cf: CFTypeRef);
+    fn CFDataCreate(alloc: CFAllocatorRef, bytes: *const u8, len: isize) -> CFTypeRef;
+    fn CFStringCreateWithCString(alloc: CFAllocatorRef, s: *const std::ffi::c_char, encoding: u32) -> CFStringRef;
     fn CFNumberCreate(alloc: CFAllocatorRef, kind: isize, value: *const c_void) -> CFTypeRef;
     fn CFDictionaryCreate(alloc: CFAllocatorRef, keys: *const CFTypeRef, values: *const CFTypeRef, n: isize, kcb: *const u8, vcb: *const u8) -> CFDictionaryRef;
 }
@@ -47,6 +49,8 @@ unsafe extern "C" {
 unsafe extern "C" {
     fn CMVideoFormatDescriptionCreateFromH264ParameterSets(alloc: CFAllocatorRef, count: usize, sets: *const *const u8, sizes: *const usize, nal_header_len: i32, out: *mut *mut c_void) -> OSStatus;
     fn CMVideoFormatDescriptionCreateFromHEVCParameterSets(alloc: CFAllocatorRef, count: usize, sets: *const *const u8, sizes: *const usize, nal_header_len: i32, extensions: CFDictionaryRef, out: *mut *mut c_void) -> OSStatus;
+    static kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms: CFStringRef;
+    fn CMVideoFormatDescriptionCreate(alloc: CFAllocatorRef, codec: u32, width: i32, height: i32, extensions: CFDictionaryRef, out: *mut *mut c_void) -> OSStatus;
     fn CMBlockBufferCreateWithMemoryBlock(alloc: CFAllocatorRef, block: *mut c_void, len: usize, block_alloc: CFAllocatorRef, custom: *const c_void, offset: usize, data_len: usize, flags: u32, out: *mut *mut c_void) -> OSStatus;
     fn CMBlockBufferReplaceDataBytes(src: *const c_void, dest: *mut c_void, offset: usize, len: usize) -> OSStatus;
     fn CMSampleBufferCreateReady(alloc: CFAllocatorRef, data: *mut c_void, desc: *mut c_void, n: isize, ntiming: isize, timing: *const c_void, nsizes: isize, sizes: *const usize, out: *mut *mut c_void) -> OSStatus;
@@ -68,6 +72,8 @@ unsafe extern "C" {
 unsafe extern "C" {
     static kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: CFStringRef;
     static kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: CFStringRef;
+    fn VTIsHardwareDecodeSupported(codec: u32) -> u8;
+    fn VTRegisterSupplementalVideoDecoderIfAvailable(codec: u32);
     fn VTDecompressionSessionCreate(alloc: CFAllocatorRef, desc: *mut c_void, spec: CFDictionaryRef, attrs: CFDictionaryRef, cb: *const OutputCallback, out: *mut *mut c_void) -> OSStatus;
     fn VTDecompressionSessionDecodeFrame(s: *mut c_void, sample: *mut c_void, flags: u32, refcon: *mut c_void, info_out: *mut u32) -> OSStatus;
     fn VTDecompressionSessionWaitForAsynchronousFrames(s: *mut c_void) -> OSStatus;
@@ -77,6 +83,9 @@ unsafe extern "C" {
 
 /// 4:2:0, 8-bit, video range, Y plane and interleaved CbCr.
 const NV12_VIDEO: u32 = u32::from_be_bytes(*b"420v");
+
+/// `kCMVideoCodecType_AV1`.
+const CODEC_AV1: u32 = u32::from_be_bytes(*b"av01");
 
 #[derive(Default)]
 struct Out {
@@ -181,6 +190,37 @@ impl Decoder {
         let mut desc: *mut c_void = std::ptr::null_mut();
         unsafe {
             if CMVideoFormatDescriptionCreateFromHEVCParameterSets(std::ptr::null(), sets.len(), ptrs.as_ptr(), sizes.as_ptr(), nal_len, std::ptr::null(), &mut desc) != 0 || desc.is_null() {
+                return None;
+            }
+        }
+        Self::with_description(desc)
+    }
+
+    /// Whether this Mac's video hardware decodes AV1.
+    pub fn av1_supported() -> bool {
+        unsafe {
+            VTRegisterSupplementalVideoDecoderIfAvailable(CODEC_AV1);
+            VTIsHardwareDecodeSupported(CODEC_AV1) != 0
+        }
+    }
+
+    /// AV1: the stream's `av1C` record (sent as the `av1C` sample-description
+    /// atom) and the coded size. `None` when there is no hardware for it.
+    pub fn new_av1(av1c: &[u8], width: u32, height: u32) -> Option<Decoder> {
+        if av1c.len() < 4 || width == 0 || height == 0 || width > i32::MAX as u32 || height > i32::MAX as u32 || !Self::av1_supported() {
+            return None;
+        }
+        let mut desc: *mut c_void = std::ptr::null_mut();
+        unsafe {
+            let key = CFStringCreateWithCString(std::ptr::null(), c"av1C".as_ptr(), 0x0800_0100);
+            let data = CFDataCreate(std::ptr::null(), av1c.as_ptr(), av1c.len() as isize);
+            let atoms = dict(&[(key, data)]);
+            let ext = dict(&[(kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms, atoms)]);
+            let st = CMVideoFormatDescriptionCreate(std::ptr::null(), CODEC_AV1, width as i32, height as i32, ext, &mut desc);
+            for r in [ext, atoms, data, key] {
+                CFRelease(r);
+            }
+            if st != 0 || desc.is_null() {
                 return None;
             }
         }
