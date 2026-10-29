@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Core: the skeleton compiles, the shared types behave, and the unbuilt encoder refuses cleanly.
+//! Core: the skeleton compiles, the shared types behave, and the encoder refuses what it cannot do.
 
 use studio_av1_enc::{Config, Encoder, Error, Frame, RateMode};
 
@@ -21,12 +21,19 @@ fn config_defaults() {
 }
 
 #[test]
-fn encoder_validates_then_says_unsupported() {
+fn encoder_validates_then_says_unsupported_for_what_is_not_built() {
     assert!(matches!(Encoder::new(Config::new(0, 360)), Err(Error::Invalid(_))));
     let mut c = Config::new(64, 64);
     c.bit_depth = 12;
     assert!(matches!(Encoder::new(c), Err(Error::Invalid(_))));
-    assert!(matches!(Encoder::new(Config::new(64, 64)), Err(Error::Unsupported(_))));
+    // 10-bit and rate control are later phases
+    c = Config::new(64, 64);
+    c.bit_depth = 10;
+    assert!(matches!(Encoder::new(c), Err(Error::Unsupported(_))));
+    let mut c = Config::new(64, 64);
+    c.rate = RateMode::Crf(30);
+    assert!(matches!(Encoder::new(c), Err(Error::Unsupported(_))));
+    assert!(Encoder::new(Config::new(64, 64)).is_ok());
 }
 
 #[test]
