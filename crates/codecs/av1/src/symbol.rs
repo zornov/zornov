@@ -7,7 +7,7 @@
 const EC_PROB_SHIFT: u32 = 6;
 const EC_MIN_PROB: u32 = 4;
 
-pub(crate) struct SymbolDecoder<'a> {
+pub struct SymbolDecoder<'a> {
     data: &'a [u8],
     /// Next byte of `data` to load into the window.
     next: usize,
@@ -124,7 +124,7 @@ impl<'a> SymbolDecoder<'a> {
 
 /// CDF adaptation (8.2.6).
 #[inline(always)]
-pub(crate) fn update_cdf(cdf: &mut [u16], n: usize, symbol: usize) {
+pub fn update_cdf(cdf: &mut [u16], n: usize, symbol: usize) {
     let count = cdf[n];
     let rate = 3 + (count > 15) as u32 + (count > 31) as u32 + (31 - (n as u32).leading_zeros()).min(2);
     // Entries below `symbol` move towards 0, the others towards 1 << 15 (the specification's

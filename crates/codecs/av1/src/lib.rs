@@ -14,24 +14,30 @@
 
 mod bits;
 mod cdef;
-mod cdf;
+/// Default and adaptive CDF sets (spec 8.3). Public for encoders; not a stable API.
+pub mod cdf;
 mod decoder;
-mod frame;
+/// Plane buffers. Public for encoders; not a stable API.
+pub mod frame;
 mod grain;
 pub mod header;
 mod inter;
 mod inter_info;
-mod intra;
+/// Intra prediction (spec 7.11.2). Public for encoders; not a stable API.
+pub mod intra;
 mod mvpred;
 mod par;
 mod postfilter;
 mod restoration;
-mod spec_tables;
+/// Constant tables extracted from the specification. Public for encoders; not a stable API.
+pub mod spec_tables;
 mod state;
 mod stats;
-mod symbol;
+/// Symbol decoder and CDF adaptation (spec 8.2). Public for encoders and tests; not a stable API.
+pub mod symbol;
 mod tile;
-mod transform;
+/// Inverse transforms (spec 7.13). Public for encoders; not a stable API.
+pub mod transform;
 
 pub use decoder::Decoder;
 pub use header::{ColorConfig, FrameHeader, SequenceHeader};

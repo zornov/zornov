@@ -5,7 +5,7 @@ use crate::spec_tables::*;
 /// Every CDF array listed by init_non_coeff_cdfs and init_coeff_cdfs. Each innermost array holds
 /// N cumulative values (the last is 32768) plus the adaptation counter.
 #[derive(Clone)]
-pub(crate) struct Cdfs {
+pub struct Cdfs {
     pub y_mode: [[u16; 14]; 4],
     pub uv_mode_cfl_not_allowed: [[u16; 14]; 13],
     pub uv_mode_cfl_allowed: [[u16; 15]; 13],
