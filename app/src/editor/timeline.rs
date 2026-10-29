@@ -282,9 +282,10 @@ fn more_menu(app: &mut StudioApp, bar: &mut egui::Ui, ctx: &egui::Context) {
         Sound,
     }
     let mut pick = None;
+    let editorial_key = crate::keymap::hint(&app.prefs, "editorial-panel");
     let (editorial, source, bodies) = (app.editor.cutting.panel.open, app.editor.cutting.show_source, super::body3d::scene_has_bodies(app));
     kit::popover(ctx, id, resp.rect, kit::Side::Below, 248.0, |ui| {
-        if MenuItem::new("Editorial").icon(Icon::List).shortcut("⌥E").checked(editorial).show(ui).clicked() {
+        if MenuItem::new("Editorial").icon(Icon::List).shortcut(&editorial_key).checked(editorial).show(ui).clicked() {
             pick = Some(Pick::Editorial);
         }
         if MenuItem::new(if source { "Back to the program" } else { "Source monitor" }).icon(Icon::FilmSlate).shortcut(if source { "⇧4" } else { "⇧2" }).show(ui).clicked() {
