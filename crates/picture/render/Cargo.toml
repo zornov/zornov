@@ -52,3 +52,7 @@ harness = false
 [[bench]]
 name = "reuse"
 harness = false
+
+[[bench]]
+name = "readback"
+harness = false
