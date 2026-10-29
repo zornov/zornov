@@ -295,7 +295,7 @@ fn breakdown(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, ) {
         }
         ui.label(RichText::new(crate::i18n::shown("Reads each scene for what it needs; fix what it got wrong with the tags.")).font(theme::caption()));
     });
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(250.0);
@@ -316,7 +316,7 @@ fn breakdown(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, ) {
             if !f.summary.is_empty() {
                 ui.label(&f.summary);
             }
-            ui.add_space(6.0);
+            ui.add_space(theme::space::SM);
             let scene = f.id.clone();
             let mut remove: Option<String> = None;
             for (cat, _) in &sheet.groups {
@@ -340,7 +340,7 @@ fn breakdown(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, ) {
             if let Some(id) = remove {
                 st.prod.untag(&scene, &id);
             }
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             ui.horizontal_wrapped(|ui| {
                 egui::ComboBox::from_id_salt("tag-cat").selected_text(Category::ALL[st.tag_cat].title()).show_ui(ui, |ui| {
                     crate::kit::note_list(ui);
@@ -399,7 +399,7 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
     for w in st.prod.schedule_warnings(story) {
         ui.label(RichText::new(format!("⚠ {w}")).font(theme::caption()).color(theme::tokens(ui.ctx()).warn));
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     let strips = st.prod.strips(story);
     let ndays = st.prod.schedule.days.len();
     let mut shown: Option<usize> = Some(usize::MAX);
@@ -407,7 +407,7 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
     for (i, s) in strips.iter().enumerate() {
         if Some(s.day.unwrap_or(usize::MAX - 1)) != shown {
             shown = Some(s.day.unwrap_or(usize::MAX - 1));
-            ui.add_space(6.0);
+            ui.add_space(theme::space::SM);
             match s.day {
                 Some(d) => {
                     let date = st.prod.schedule.days[d].date.clone().unwrap_or_default();
@@ -463,7 +463,7 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
     }
     let dood = st.prod.dood();
     if !dood.rows.is_empty() {
-        ui.add_space(12.0);
+        ui.add_space(theme::space::MD);
         ui.label(RichText::new(crate::i18n::shown("Day out of days")).strong());
         kit::scroll_wide(ui, "dood-scroll", |ui| egui::Grid::new("dood").striped(true).show(ui, |ui| {
             ui.label("");
@@ -526,11 +526,11 @@ fn budget(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path) {
     let r = st.prod.budget_report();
     let cur = r.currency.clone();
     if st.prod.budget.accounts.is_empty() {
-        ui.add_space(12.0);
+        ui.add_space(theme::space::MD);
         ui.label("No budget yet: pick a template and build it from the breakdown.");
         return;
     }
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     // Tables keep their columns: wider than the dialog, they scroll sideways.
     kit::scroll_wide(ui, "top-sheet-scroll", |ui| egui::Grid::new("top-sheet").striped(true).min_col_width(70.0).show(ui, |ui| {
         for h in ["Acct", "Account", "Budget", "Actual", "At completion", "Variance"] {
@@ -569,7 +569,7 @@ fn budget(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path) {
         ui.end_row();
     }));
     ui.label(RichText::new(crate::i18n::tf(format!("AI generation so far {} over {} runs{}", money(r.ai_spend, &cur), st.prod.spend.len(), if r.ai_unbudgeted > 0.0 { " (not in any budget line: add one with feed ai_spend)" } else { "" }))).font(theme::caption()));
-    ui.add_space(8.0);
+    ui.add_space(theme::space::SM);
     // Actuals: pick a line, type what was spent.
     let lines: Vec<(u64, String, f64, f64)> = st.prod.budget.accounts.iter().flat_map(|a| a.lines.iter().map(move |l| (a, l))).map(|(a, l)| (l.id, format!("{} {}", a.code, l.desc), st.prod.budget.line_budget(l), st.prod.budget.line_actual(l))).collect();
     ui.horizontal_wrapped(|ui| {
@@ -593,7 +593,7 @@ fn budget(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path) {
         }
     });
     // Costs per scene.
-    ui.add_space(10.0);
+    ui.add_space(theme::space::MD);
     ui.label(RichText::new(crate::i18n::shown("Cost per scene")).strong());
     kit::scroll_wide(ui, "scene-costs-scroll", |ui| egui::Grid::new("scene-costs").striped(true).show(ui, |ui| {
         for h in ["Scene", "Budget", "Spent", "Per second"] {

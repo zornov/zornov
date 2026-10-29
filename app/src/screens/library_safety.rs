@@ -489,7 +489,7 @@ fn rights_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
             st.rights = None;
         }
     });
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     // The hint under the list keeps its room: the list scrolls above it.
     let hint = "To record a licence, ask the assistant: “this track is CC BY from incompetech, credit Kevin MacLeod”.";
     let hint_h = ui.painter().layout(crate::i18n::shown(hint).into_owned(), theme::caption(), t.text_2, ui.available_width()).size().y + ui.spacing().item_spacing.y;
@@ -503,7 +503,7 @@ fn rights_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         }
         let credits: Vec<String> = r["credits"].as_array().cloned().unwrap_or_default().iter().filter_map(|c| c.as_str().map(str::to_owned)).collect();
         if !credits.is_empty() {
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(crate::i18n::shown("Credits to show")).font(theme::body_medium()).color(t.text));
                 if Button::ghost("Copy").icon(Icon::Copy).compact().show(ui).clicked() {
