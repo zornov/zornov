@@ -174,7 +174,7 @@ fn editor_controls_are_named() {
     let bad = h.unlabelled();
     assert!(bad.is_empty(), "controls without a name in the editor: {bad:?}");
     let labels = h.labels();
-    for want in ["Export", "Settings", "Layout"] {
+    for want in ["Export", "Jobs", "Edit", "Colour", "Audio", "Effects", "Motion", "Review", "Paint"] {
         assert!(labels.iter().any(|l| l == want), "{want} is in the accessibility tree: {labels:?}");
     }
 }
@@ -710,4 +710,161 @@ fn a_claim_keeps_typing_away_from_the_timeline() {
     }
     h.frames(3);
     assert_eq!(crate::keymap::owner(&h.ctx), None, "the claim lapsed");
+}
+
+// --- the top bar -------------------------------------------------------------------
+
+const MENUS: [&str; 6] = ["File", "Edit", "Clip", "Project", "View", "Help"];
+const TABS: [&str; 7] = ["Edit", "Colour", "Audio", "Effects", "Motion", "Review", "Paint"];
+
+/// Where `text` was painted in the top bar, the leftmost of them (a menu's
+/// name can also be a workspace tab's).
+fn bar_text(h: &Harness, text: &str) -> Option<egui::Rect> {
+    fn walk(shape: &egui::epaint::Shape, text: &str, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::epaint::Shape::Text(t) if t.galley.text() == text => out.push(t.galley.rect.translate(t.pos.to_vec2())),
+            egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, text, out)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for cs in &h.last.as_ref()?.shapes {
+        walk(&cs.shape, text, &mut found);
+    }
+    found.into_iter().filter(|r| r.bottom() <= crate::editor::TOPBAR_H).min_by(|a, b| a.left().total_cmp(&b.left()))
+}
+
+/// The labels of the buttons a menu adds when it opens.
+fn open_menu_items(h: &mut Harness, menu: &str) -> Vec<String> {
+    let buttons = |h: &Harness| h.nodes().into_iter().filter(|(r, _)| *r == accesskit::Role::Button).map(|(_, l)| l).collect::<Vec<_>>();
+    let before = buttons(h);
+    let at = bar_text(h, menu).unwrap_or_else(|| panic!("the {menu} menu"));
+    h.click_at(at);
+    let mut after = buttons(h);
+    for b in &before {
+        if let Some(i) = after.iter().position(|a| a == b) {
+            after.remove(i);
+        }
+    }
+    after
+}
+
+fn top_bar(w: f32) -> Harness {
+    let mut h = Harness::new(&["--screen", "editor"]).sized(w, 900.0);
+    h.frames(6);
+    h
+}
+
+/// Menus | workspace tabs with names | Jobs | Export, left to right; Settings,
+/// Layout, Library, Production, Review and Paint are no buttons of the bar.
+#[test]
+fn the_top_bar_is_menus_then_workspace_tabs_then_jobs_and_export() {
+    let h = top_bar(1440.0);
+    let buttons: Vec<String> = h.nodes().into_iter().filter(|(r, _)| *r == accesskit::Role::Button).map(|(_, l)| l).collect();
+    for gone in ["Layout", "Settings", "Library", "Production", "Review", "Paint"] {
+        assert!(!buttons.iter().any(|b| b == gone), "{gone} is not a top bar button: {buttons:?}");
+    }
+    let tab = |n: &str| h.find(Some(accesskit::Role::RadioButton), n).unwrap_or_else(|| panic!("a workspace tab named {n}"));
+    let menus: Vec<egui::Rect> = MENUS.iter().map(|m| bar_text(&h, m).unwrap_or_else(|| panic!("the {m} menu"))).collect();
+    let tabs: Vec<egui::Rect> = TABS.iter().map(|t| tab(t)).collect();
+    let jobs = h.find(None, "Jobs").expect("the Jobs bell");
+    let export = h.find(None, "Export").expect("Export");
+    assert!(menus.windows(2).all(|w| w[0].right() <= w[1].left()), "menus in order: {menus:?}");
+    assert!(tabs.windows(2).all(|w| w[0].right() <= w[1].left() + 1.0), "tabs in order: {tabs:?}");
+    assert!(menus.last().unwrap().right() <= tabs[0].left(), "the menus come before the tabs");
+    assert!(tabs.last().unwrap().right() <= jobs.left(), "the tabs come before Jobs");
+    assert!(jobs.right() <= export.left(), "Jobs comes before Export");
+    for r in menus.iter().chain(&tabs).chain([&jobs, &export]) {
+        assert!(r.top() >= 0.0 && r.bottom() <= crate::editor::TOPBAR_H + 1.0, "in the bar: {r:?}");
+    }
+}
+
+/// The tabs stay down to 1100 px with nothing cut off or drawn over; below
+/// that one Workspace dropdown has the same list.
+#[test]
+fn the_workspace_tabs_reach_1100_px_and_become_a_dropdown_below() {
+    let mut h = top_bar(1100.0);
+    for t in TABS {
+        assert!(h.find(Some(accesskit::Role::RadioButton), t).is_some(), "{t} is a tab at 1100 px");
+    }
+    let bar = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1100.0, crate::editor::TOPBAR_H));
+    let cut: Vec<_> = h.cut_text().into_iter().filter(|c| bar.contains_rect(c.rect.shrink(1.0))).collect();
+    assert!(cut.is_empty(), "text cut off in the top bar at 1100 px: {cut:#?}");
+    let over: Vec<_> = h.overlaps().into_iter().filter(|o| bar.contains(o.ra.center()) && bar.contains(o.rb.center())).collect();
+    assert!(over.is_empty(), "drawn over each other in the top bar at 1100 px: {over:#?}");
+
+    let mut h = top_bar(900.0);
+    assert!(h.find(Some(accesskit::Role::RadioButton), "Colour").is_none(), "no tabs at 900 px");
+    assert!(h.find(None, "Export").is_some(), "Export stays");
+    // The dropdown lists them all, and Paint.
+    let dd = h.find_text("Edit").expect("the dropdown shows the workspace");
+    // (At this width the menus and the dropdown both read Edit: the dropdown is the right one.)
+    h.click_at(dd);
+    let labels = h.labels();
+    for t in TABS {
+        assert!(labels.iter().any(|l| l == t), "{t} is in the dropdown: {labels:?}");
+    }
+    h.escape();
+}
+
+/// Every command has one home in the menus (the tabs, the panel and the
+/// bar's own buttons are its contextual places).
+#[test]
+fn each_menu_command_has_one_home() {
+    let mut seen: Vec<(String, &str)> = Vec::new();
+    for m in MENUS {
+        let mut h = top_bar(1440.0);
+        let items = open_menu_items(&mut h, m);
+        assert!(!items.is_empty(), "{m} opens with items");
+        seen.extend(items.into_iter().map(|i| (i, m)));
+    }
+    let names: Vec<&str> = seen.iter().map(|(i, _)| i.as_str()).collect();
+    // A workspace and its main panel may share a name (Review, Edit…): View
+    // lists them under separate headings, Workspaces and Panels.
+    for (i, m) in seen.iter().filter(|(i, _)| !TABS.contains(&i.as_str())) {
+        assert_eq!(names.iter().filter(|n| *n == i).count(), 1, "\"{i}\" (in {m}) is offered in more than one place: {seen:?}");
+    }
+    let home = |item: &str| seen.iter().find(|(i, _)| i == item).map(|(_, m)| *m);
+    for (item, menu) in [
+        ("Project settings…", "File"),
+        ("Settings…", "File"),
+        ("Export…", "File"),
+        ("Production…", "Project"),
+        ("Project health…", "Project"),
+        ("Reset layout", "View"),
+        ("Maximise panel", "View"),
+        ("Colour", "View"),
+        ("Inspector", "View"),
+        ("Review", "View"),
+    ] {
+        assert_eq!(home(item), Some(menu), "{item} lives in {menu}: {seen:?}");
+    }
+}
+
+/// The surfaces that were buttons are reached from the menus, the tabs or a panel.
+#[test]
+fn library_production_review_and_paint_still_open() {
+    use crate::app::Overlay;
+    let open = |menu: &str, item: &str| {
+        let mut h = top_bar(1440.0);
+        open_menu_items(&mut h, menu);
+        let r = h.find(Some(accesskit::Role::Button), item).unwrap_or_else(|| panic!("{item} in {menu}"));
+        h.click_at(r);
+        h
+    };
+    assert_eq!(open("Project", "Production…").app.overlay, Overlay::Production);
+    assert_eq!(open("Project", "Project health…").app.overlay, Overlay::Library);
+    assert_eq!(open("File", "Settings…").app.overlay, Overlay::Settings);
+    assert!(open("View", "Review").app.editor.dock.is_showing(crate::dock::Panel::Review), "View ▸ Review shows the panel");
+    // Project settings: the Inspector's Details with the canvas editor open.
+    let mut h = open("File", "Project settings…");
+    h.frames(3);
+    assert!(h.app.editor.selection.is_empty() && h.app.editor.dock.is_open(crate::dock::Panel::Inspector));
+    let buttons: Vec<String> = h.nodes().into_iter().filter(|(r, _)| *r == accesskit::Role::Button).map(|(_, l)| l).collect();
+    assert!(buttons.iter().any(|b| b == "Done") && !buttons.iter().any(|b| b == "Modify"), "the canvas editor is open: {buttons:?}");
+    // Paint is the last workspace tab.
+    let mut h = top_bar(1440.0);
+    let paint = h.find(Some(accesskit::Role::RadioButton), "Paint").unwrap();
+    h.click_at(paint);
+    assert_eq!(h.app.screen, crate::cli::Screen::Paint);
 }
