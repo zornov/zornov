@@ -747,11 +747,14 @@ mod tests {
             for y in 0..h {
                 for x in 0..w {
                     let sx = x + shift;
-                    let tex = ((sx * 2654435761usize) ^ (y * 40503usize)) >> 7 & 31;
+                    // Soft waves with a little grain, like a photographed scene.
+                    let wave = (((sx as f32 / 90.0).sin() + (y as f32 / 70.0).cos()) * 14.0) as i32 + 28;
+                    let grain = (((sx * 2654435761usize) ^ (y * 40503usize)) >> 9 & 3) as i32;
+                    let tex = (wave + grain).clamp(0, 70) as usize;
                     let i = (y * w + x) * 4;
                     rgba[i] = (60 + (sx / 16 % 120) + tex) as u8;
                     rgba[i + 1] = (50 + y * 140 / h + tex) as u8;
-                    rgba[i + 2] = (110 + tex * 2) as u8;
+                    rgba[i + 2] = (110 + tex) as u8;
                 }
             }
             let bx = (n as usize * 11) % (w - 300);
@@ -783,7 +786,11 @@ mod tests {
             let path = dir.join(name);
             let t = std::time::Instant::now();
             let task = start(&doc, Request { path: path.clone(), format, size: (1920, 1080), fps: 30.0, range: (0, 5 * view::SEC), quality: 70.0, bitrate_kbps: kbps, av1_speed: speed });
-            wait(&task);
+            while !task.finished.load(Ordering::Acquire) {
+                assert!(t.elapsed().as_secs() < 1500, "export timed out");
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            assert!(task.error.lock().unwrap_or_else(|e| e.into_inner()).is_none());
             (t.elapsed().as_secs_f64(), std::fs::metadata(&path).unwrap().len())
         };
         for speed in Av1Speed::ALL {
