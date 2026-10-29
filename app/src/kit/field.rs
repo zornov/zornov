@@ -322,6 +322,18 @@ pub struct RowOutput {
 
 /// Label column width in field rows.
 pub const LABEL_W: f32 = 96.0;
+/// The label column of a settings page, where the room is there.
+pub const LABEL_W_WIDE: f32 = 160.0;
+
+/// The label column in force: [`LABEL_W`], or what a page set with
+/// [`set_label_width`].
+pub fn label_width(ctx: &egui::Context) -> f32 {
+    ctx.data(|d| d.get_temp::<f32>(egui::Id::new("kit-label-w"))).unwrap_or(LABEL_W)
+}
+
+pub fn set_label_width(ctx: &egui::Context, w: f32) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("kit-label-w"), w));
+}
 
 /// Inspector row: label · slider · value field · reset · keyframe.
 pub struct FieldRow<'a> {
@@ -409,7 +421,7 @@ impl<'a> FieldRow<'a> {
         // Label: drag to scrub, double-click to reset. Narrow panels give
         // the label a little less room so the slider survives.
         let narrow = full < 260.0;
-        let label_w = if narrow { 80.0 } else { LABEL_W };
+        let label_w = if narrow { 80.0 } else { label_width(ui.ctx()) };
         // Rows without a slider have room for the full field.
         let field_w = if narrow && self.slider { self.field_w.min(56.0) } else { self.field_w.max(if self.slider { 0.0 } else { 72.0 }) };
         // Never narrower than the value it shows: the slider gives way.
@@ -464,7 +476,7 @@ impl<'a> FieldRow<'a> {
             let r = s.show(ui);
             out.changed |= r.changed();
             out.dragging |= r.dragged();
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
         } else {
             ui.add_space(middle);
         }
@@ -496,7 +508,7 @@ impl<'a> FieldRow<'a> {
             let r = keyframe_toggle(ui, k, self.forced.filter(|f| *f == Forced::Disabled));
             out.keyframe_toggled = r.changed();
         } else {
-            ui.add_space(20.0);
+            ui.add_space(theme::space::XL);
         }
         out
     }
@@ -508,8 +520,9 @@ pub fn labeled_row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.set_min_height(theme::space::CONTROL_H);
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(LABEL_W, theme::space::CONTROL_H), Sense::hover());
-        let cut = paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, LABEL_W - 8.0);
+        let lw = label_width(ui.ctx());
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(lw, theme::space::CONTROL_H), Sense::hover());
+        let cut = paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, lw - 8.0);
         tip_if_cut(resp, cut, label);
         ui.spacing_mut().item_spacing.x = 6.0;
         add(ui)

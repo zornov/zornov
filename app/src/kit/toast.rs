@@ -117,7 +117,7 @@ fn body(ui: &mut Ui, toast: &Toast, area_w: f32) -> bool {
                         clicked = true;
                     }
                 } else {
-                    ui.add_space(6.0);
+                    ui.add_space(theme::space::SM);
                 }
             });
         });

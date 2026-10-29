@@ -1,17 +1,18 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Library, Safety and Rights in one sheet: search the whole media library
+//! The Project sheet: Media, Project health and Rights. Search the whole media library
 //! (by name, label, spoken words, what pictures show), rate and tag, look
 //! at the project's health, go back through its history, back up, collect
 //! and clean up, and see which licences stand in the way of an export. The
-//! same functions the AI uses (`assets`, `project_care`).
+//! same functions the assistant uses.
 
 use crate::app::{Overlay, StudioApp};
 use crate::assets::{self, Query};
 use crate::icons::{self, Icon};
 use crate::kit::{self, Button};
-use crate::{rights, safety, theme};
+use crate::theme::{self, space};
+use crate::{rights, safety};
 use eframe::egui::{self, Align2, Rect, Sense, Vec2};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -43,7 +44,7 @@ struct State {
     label: String,
     total: i64,
     health: Option<Value>,
-    history: Vec<(String, String, String)>,
+    history: Vec<(String, u64, String)>,
     rights: Option<Value>,
     clean: Option<Value>,
     note: String,
@@ -53,15 +54,14 @@ struct State {
 }
 
 const KINDS: [&str; 4] = ["All", "Video", "Image", "Audio"];
-const TABS: [&str; 3] = ["Library", "Safety", "Rights"];
+const TABS: [&str; 3] = ["Media", "Project health", "Rights"];
 
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
-    let screen = ctx.content_rect();
-    let w = (screen.width() * 0.5).clamp(640.0, 980.0).min(screen.width() - 24.0);
-    let rect = Rect::from_min_max(egui::pos2(screen.center().x - w / 2.0, screen.top() + crate::editor::TOPBAR_H - 20.0), egui::pos2(screen.center().x + w / 2.0, screen.bottom()));
     let id = egui::Id::new("library-safety-state");
     let mut st: State = ctx.data_mut(|d| d.get_temp(id)).unwrap_or_default();
-    let out = kit::sheet(ctx, egui::Id::unique("library-safety"), rect, |ui| body(app, ui, &mut st));
+    let screen = ctx.content_rect();
+    let size = Vec2::new((screen.width() * 0.6).clamp(640.0, 980.0), (screen.height() * 0.86).clamp(420.0, 760.0));
+    let out = kit::modal(ctx, egui::Id::new("library-safety"), size, "Project", |ui| body(app, ui, &mut st));
     if st.busy {
         if let Some(done) = st.work.lock().unwrap_or_else(|e| e.into_inner()).take() {
             st.note = done;
@@ -84,25 +84,81 @@ fn root(app: &StudioApp) -> Option<std::path::PathBuf> {
 
 fn body(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     let t = theme::tokens(ui.ctx());
-    let r = ui.max_rect();
-    let mut head = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_min_size(r.min + Vec2::new(20.0, 16.0), Vec2::new(r.width() - 80.0, 32.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    for (i, name) in TABS.iter().enumerate() {
-        let b = if st.tab == i { Button::primary(name) } else { Button::ghost(name) };
-        if b.compact().show(&mut head).clicked() {
-            st.tab = i;
-        }
-    }
-    let inner = Rect::from_min_max(egui::pos2(r.left() + 20.0, r.top() + 60.0), egui::pos2(r.right() - 20.0, r.bottom() - 16.0));
-    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+    let r = ui.max_rect().shrink2(Vec2::new(space::XL, space::MD));
+    let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(r));
     let ui = &mut ui;
+    kit::tab_bar(ui, "project-sheet", &mut st.tab, &TABS);
+    ui.add_space(space::SM);
     if !st.note.is_empty() {
         ui.label(egui::RichText::new(&st.note).font(theme::body()).color(t.text_2));
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
     }
     match st.tab {
         0 => library(app, ui, st),
         1 => safety_tab(app, ui, st),
         _ => rights_tab(app, ui, st),
+    }
+}
+
+/// How long ago, in words a person says: "Just now", "12 min ago",
+/// "3 h ago", "Yesterday", "4 days ago", then the date. (Never an ISO
+/// timestamp, and no time zone to get wrong.)
+pub fn friendly_age(at_ms: u64, now_ms: u64) -> String {
+    let secs = now_ms.saturating_sub(at_ms) / 1000;
+    match secs {
+        0..=59 => "Just now".into(),
+        60..=3599 => format!("{} min ago", secs / 60),
+        3600..=86_399 => format!("{} h ago", secs / 3600),
+        86_400..=172_799 => "Yesterday".into(),
+        172_800..=604_799 => format!("{} days ago", secs / 86_400),
+        _ => {
+            let iso = crate::asset_meta::civil(at_ms / 1000);
+            let (y, m, d) = (&iso[0..4], iso[5..7].parse::<usize>().unwrap_or(1), &iso[8..10]);
+            let month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m.clamp(1, 12) - 1];
+            format!("{} {month} {y}", d.trim_start_matches('0'))
+        }
+    }
+}
+
+/// A health or rights remedy as the app words it: the sentence starts with a
+/// capital, and a remedy that is a command for the assistant (a tool name and
+/// its action) is dropped, because the buttons beside it do the job.
+fn plain_fix(fix: &str) -> Option<String> {
+    if fix.is_empty() || fix.contains("action \"") || fix.contains("project_care") || fix.contains("assets ") {
+        return None;
+    }
+    Some(capitalise(fix))
+}
+
+fn capitalise(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+/// What an issue offers instead of command syntax.
+#[derive(Clone, Copy, PartialEq)]
+enum Act {
+    Snapshot,
+    Backup,
+    Collect,
+    Clean,
+}
+
+fn issue_help(code: &str) -> (Option<&'static str>, Option<(Act, &'static str)>) {
+    match code {
+        "unreadable" => (Some("Restore the newest good snapshot from the history below."), None),
+        "missing-media" => (Some("Relink the files from the media browser."), None),
+        "media-outside" => (Some("Collecting puts every file in one folder you can move."), Some((Act::Collect, "Collect project to…"))),
+        "no-snapshots" => (Some("Keep one now, and make sure Autosave is on in Settings."), Some((Act::Snapshot, "Keep a snapshot"))),
+        "old-snapshots" => (Some("If you edited since, Autosave may be off."), None),
+        "damaged-snapshots" => (Some("Harmless. Cleaning removes old ones."), None),
+        "never-backed-up" | "backup-old" => (None, Some((Act::Backup, "Back up to…"))),
+        "big-cache" | "big-history" => (Some("Caches are rebuilt when needed."), Some((Act::Clean, "What can be cleaned?"))),
+        "low-disk" => (Some("Free some space or move the project; saving can fail on a full drive."), None),
+        _ => (None, None),
     }
 }
 
@@ -117,7 +173,7 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     };
     ui.horizontal(|ui| {
         kit::text_field(ui, &mut st.query, "Search names, tags, words said, what the picture shows", Some(Icon::MagnifyingGlass), ui.available_width() - 190.0, None);
-        if Button::secondary("Look into footage").compact().busy(st.busy).show(ui).on_hover_text("Describes frames, groups faces and gives every picture and sound a signature so search and \"more like this\" can see inside. Runs here, in the background.").clicked() {
+        if Button::secondary("Look into footage").compact().busy(st.busy).show(ui).on_hover_text("Describes frames, groups faces and fingerprints every picture and sound so search and “More like this” can see inside. Runs in the background.").clicked() {
             if let Some(root) = root(app) {
                 crate::agent::care::sync_and_index(root, app.doc.model.clone());
                 st.note = "Looking into this project's media in the background.".into();
@@ -127,20 +183,16 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         }
     });
     ui.horizontal(|ui| {
-        for (i, k) in KINDS.iter().enumerate() {
-            let b = if st.kind == i { Button::primary(k) } else { Button::ghost(k) };
-            if b.compact().show(ui).clicked() {
-                st.kind = i;
-            }
-        }
-        if (if st.stars > 0 { Button::primary("4+ stars") } else { Button::ghost("4+ stars") }).compact().show(ui).clicked() {
+        let segments: Vec<kit::Segment> = KINDS.iter().map(|k| kit::Segment::text(k)).collect();
+        kit::segmented(ui, "project-media-kind", &mut st.kind, &segments, None, None);
+        if kit::chip(ui, "4+ stars", st.stars > 0, None).clicked() {
             st.stars = if st.stars > 0 { 0 } else { 4 };
         }
-        if (if st.fav_only { Button::primary("Favourites") } else { Button::ghost("Favourites") }).compact().show(ui).clicked() {
+        if kit::chip(ui, "Favourites", st.fav_only, None).clicked() {
             st.fav_only = !st.fav_only;
         }
     });
-    ui.add_space(6.0);
+    ui.add_space(space::SM);
     // Ask again when the question changed, or after a change made here.
     let ask = (st.query.clone(), st.kind, st.stars, st.fav_only);
     if st.asked.as_ref() != Some(&ask) {
@@ -222,7 +274,8 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
             }
         }
         if st.rows.is_empty() {
-            ui.label(egui::RichText::new("Nothing matches. \"Look into footage\" lets search see inside pictures, clips and sounds.").font(theme::body()).color(t.text_2));
+            let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+            kit::empty_state(&mut empty, Icon::MagnifyingGlass, "Nothing matches. “Look into footage” lets search see inside pictures, clips and sounds.", None);
         }
     });
     if let Some(id) = more_like {
@@ -263,35 +316,64 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
 fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     let t = theme::tokens(ui.ctx());
     let Some(root) = root(app) else {
-        ui.label(egui::RichText::new(crate::i18n::shown("Save the project first; safety works on its folder.")).font(theme::body()).color(t.text_2));
+        let mut empty = ui.new_child(egui::UiBuilder::new().max_rect(ui.available_rect_before_wrap()));
+        kit::empty_state(&mut empty, Icon::HardDrives, "Save the project first. Project health works on its folder.", None);
         return;
     };
     if st.health.is_none() {
         st.health = Some(safety::health(&root, None));
-        st.history = safety::history(&root).into_iter().take(30).map(|s| (s.path.display().to_string(), safety::when(s.at_ms), format!("{}{}", s.kind, if s.label.is_empty() { String::new() } else { format!(": {}", s.label) }))).collect();
+        st.history = safety::history(&root).into_iter().take(30).map(|s| (s.path.display().to_string(), s.at_ms, format!("{}{}", capitalise(&s.kind), if s.label.is_empty() { String::new() } else { format!(": {}", s.label) }))).collect();
     }
     let h = st.health.clone().unwrap_or(Value::Null);
     let status = h["status"].as_str().unwrap_or("");
+    let mut act: Option<Act> = None;
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new(crate::i18n::tf(format!("Project is {status}"))).font(theme::body_medium()).color(if status == "healthy" { t.accent } else { t.warn }));
-        ui.label(egui::RichText::new(format!("· {} media, {} snapshots, {} free", h["media"]["files"], h["snapshots"]["total"], h["disk_free"].as_str().unwrap_or("?"))).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(capitalise(status)).font(theme::section_title()).color(if status == "healthy" { t.ok } else if status == "at risk" { t.danger } else { t.warn }));
+        ui.label(egui::RichText::new(format!("{} media · {} snapshots · {} free", h["media"]["files"], h["snapshots"]["total"], h["disk_free"].as_str().unwrap_or("?"))).font(theme::caption()).color(t.text_2));
+        if Button::ghost("Check again").compact().show(ui).clicked() {
+            st.health = None;
+        }
     });
     for i in h["issues"].as_array().cloned().unwrap_or_default() {
-        ui.label(egui::RichText::new(format!("• {}  —  {}", i["message"].as_str().unwrap_or(""), i["fix"].as_str().unwrap_or(""))).font(theme::caption()).color(t.text_2));
+        let (help, button) = issue_help(i["code"].as_str().unwrap_or(""));
+        let fix = help.map(str::to_owned).or_else(|| plain_fix(i["fix"].as_str().unwrap_or("")));
+        ui.horizontal_wrapped(|ui| {
+            let msg = capitalise(i["message"].as_str().unwrap_or(""));
+            ui.label(egui::RichText::new(match fix {
+                Some(f) => format!("{msg}. {f}"),
+                None => msg,
+            }).font(theme::caption()).color(t.text_2));
+            if let Some((a, label)) = button {
+                if Button::secondary(label).compact().busy(st.busy && a != Act::Clean).show(ui).clicked() && !st.busy {
+                    act = Some(a);
+                }
+            }
+        });
     }
-    ui.add_space(8.0);
+    ui.add_space(space::SM);
     ui.horizontal_wrapped(|ui| {
         if Button::secondary("Keep a snapshot").compact().show(ui).clicked() {
-            match safety::keep_snapshot(&root, &app.doc.model, "kept in the app") {
-                Ok(_) => {
-                    st.note = "Snapshot kept. Autosave never removes it.".into();
-                    st.health = None;
-                }
-                Err(e) => st.note = e,
-            }
+            act = Some(Act::Snapshot);
         }
-        let busy = st.busy;
-        if Button::secondary("Back up to…").compact().busy(busy).show(ui).clicked() && !busy {
+        if Button::secondary("Back up to…").compact().busy(st.busy).show(ui).clicked() && !st.busy {
+            act = Some(Act::Backup);
+        }
+        if Button::secondary("Collect project to…").compact().busy(st.busy).show(ui).clicked() && !st.busy {
+            act = Some(Act::Collect);
+        }
+        if Button::ghost("What can be cleaned?").compact().show(ui).clicked() {
+            act = Some(Act::Clean);
+        }
+    });
+    match act {
+        Some(Act::Snapshot) => match safety::keep_snapshot(&root, &app.doc.model, "kept in the app") {
+            Ok(_) => {
+                st.note = "Snapshot kept. Autosave never removes it.".into();
+                st.health = None;
+            }
+            Err(e) => st.note = e,
+        },
+        Some(Act::Backup) => {
             if let Some(dest) = rfd::FileDialog::new().set_title("Back up to a folder or drive").pick_folder() {
                 let (r2, w) = (root.clone(), st.work.clone());
                 save_now(app);
@@ -306,7 +388,7 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
                 });
             }
         }
-        if Button::secondary("Collect project to…").compact().busy(busy).show(ui).clicked() && !busy {
+        Some(Act::Collect) => {
             if let Some(dest) = rfd::FileDialog::new().set_title("Collect into a new folder").set_file_name(format!("{} collected", app.doc.project.name)).save_file() {
                 let (r2, w) = (root.clone(), st.work.clone());
                 save_now(app);
@@ -321,17 +403,14 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
                 });
             }
         }
-        if Button::secondary("Check again").compact().show(ui).clicked() {
-            st.health = None;
-        }
-    });
-    ui.add_space(6.0);
-    ui.horizontal_wrapped(|ui| {
-        if Button::ghost("What can be cleaned?").compact().show(ui).clicked() {
+        Some(Act::Clean) => {
             let o = safety::CleanOptions::default();
             st.clean = Some(safety::clean_plan(&root, &o).json(5));
         }
-        if let Some(c) = st.clean.clone() {
+        None => {}
+    }
+    if let Some(c) = st.clean.clone() {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(crate::i18n::tf(format!("Would free {} ({} files). Never media, never anything a project uses.", c["would_free"].as_str().unwrap_or("0"), c["files"]))).font(theme::caption()).color(t.text_2));
             if c["files"].as_u64().unwrap_or(0) > 0 && Button::secondary("Clean now").compact().show(ui).clicked() {
                 let o = safety::CleanOptions::default();
@@ -343,15 +422,17 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
                 st.clean = None;
                 st.health = None;
             }
-        }
-    });
-    ui.add_space(8.0);
-    ui.label(egui::RichText::new(crate::i18n::shown("History")).font(theme::body_medium()).color(t.text));
+        });
+    }
+    ui.add_space(space::MD);
+    ui.label(egui::RichText::new(crate::i18n::shown("History")).font(theme::section_title()).color(t.text));
     let mut restore: Option<String> = None;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     egui::ScrollArea::vertical().auto_shrink([false, false]).show_v(ui, |ui| {
         for (path, at, what) in &st.history {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(at).font(theme::caption()).color(t.text_2));
+                let age = friendly_age(*at, now);
+                ui.add_sized([96.0, 20.0], egui::Label::new(egui::RichText::new(age).font(theme::caption()).color(t.text_2)));
                 // Restore keeps its place at the end; a long description
                 // ends in an ellipsis and shows whole on hover.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -402,25 +483,27 @@ fn rights_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     }
     ui.horizontal_wrapped(|ui| {
         let ok = r["blocked"].as_u64().unwrap_or(0) == 0;
-        ui.label(egui::RichText::new(if ok { "Nothing stands in the way of an export" } else { "Some assets cannot be used as they are" }).font(theme::body_medium()).color(if ok { t.accent } else { t.danger }));
+        ui.label(egui::RichText::new(if ok { "Nothing stands in the way of an export" } else { "Some assets cannot be used as they are" }).font(theme::body_medium()).color(if ok { t.ok } else { t.danger }));
         ui.label(egui::RichText::new(format!("· {} assets on the timeline, {} warnings", r["used_assets"], r["warnings"])).font(theme::caption()).color(t.text_2));
         if Button::secondary("Check again").compact().show(ui).clicked() {
             st.rights = None;
         }
     });
-    ui.add_space(6.0);
+    ui.add_space(theme::space::SM);
     // The hint under the list keeps its room: the list scrolls above it.
-    let hint = "Record a licence by asking the AI (\"this track is CC BY from incompetech, credit Kevin MacLeod\") or with the assets tool.";
+    let hint = "To record a licence, ask the assistant: “this track is CC BY from incompetech, credit Kevin MacLeod”.";
     let hint_h = ui.painter().layout(crate::i18n::shown(hint).into_owned(), theme::caption(), t.text_2, ui.available_width()).size().y + ui.spacing().item_spacing.y;
     egui::ScrollArea::vertical().max_height((ui.available_height() - hint_h).max(60.0)).auto_shrink([false, false]).show_v(ui, |ui| {
         for f in r["findings"].as_array().cloned().unwrap_or_default() {
             let col = if f["level"] == "blocked" { t.danger } else { t.warn };
             ui.label(egui::RichText::new(format!("{}: {}", f["asset"].as_str().unwrap_or(""), f["message"].as_str().unwrap_or(""))).font(theme::body()).color(col));
-            ui.label(egui::RichText::new(format!("   {}", f["fix"].as_str().unwrap_or(""))).font(theme::caption()).color(t.text_2));
+            if let Some(fix) = plain_fix(f["fix"].as_str().unwrap_or("")) {
+                ui.label(egui::RichText::new(format!("   {fix}")).font(theme::caption()).color(t.text_2));
+            }
         }
         let credits: Vec<String> = r["credits"].as_array().cloned().unwrap_or_default().iter().filter_map(|c| c.as_str().map(str::to_owned)).collect();
         if !credits.is_empty() {
-            ui.add_space(8.0);
+            ui.add_space(theme::space::SM);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(crate::i18n::shown("Credits to show")).font(theme::body_medium()).color(t.text));
                 if Button::ghost("Copy").icon(Icon::Copy).compact().show(ui).clicked() {
@@ -469,4 +552,32 @@ pub fn export_block(doc: &crate::doc::Doc) -> Option<String> {
         return None;
     }
     Some(rep.findings.iter().filter(|f| f.level == "blocked").map(|f| format!("{}: {}", f.asset, f.message)).collect::<Vec<_>>().join("; "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ages_are_words_not_timestamps() {
+        let now = 1_800_000_000_000u64;
+        assert_eq!(friendly_age(now - 5_000, now), "Just now");
+        assert_eq!(friendly_age(now - 12 * 60_000, now), "12 min ago");
+        assert_eq!(friendly_age(now - 3 * 3_600_000, now), "3 h ago");
+        assert_eq!(friendly_age(now - 30 * 3_600_000, now), "Yesterday");
+        assert_eq!(friendly_age(now - 4 * 86_400_000, now), "4 days ago");
+        let old = friendly_age(now - 40 * 86_400_000, now);
+        assert!(!old.contains('T') && !old.contains('Z') && old.contains("20"), "{old}");
+    }
+
+    #[test]
+    fn remedies_never_show_tool_syntax() {
+        assert_eq!(plain_fix("project_care action \"clean\" frees them"), None);
+        assert_eq!(plain_fix("assets action \"duplicates\""), None);
+        assert_eq!(plain_fix("back up again").as_deref(), Some("Back up again"));
+        for code in ["media-outside", "no-snapshots", "never-backed-up", "big-cache"] {
+            let (help, button) = issue_help(code);
+            assert!(help.is_some() || button.is_some(), "{code} has a remedy in the screen");
+        }
+    }
 }
