@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Workspaces: the editor's panels laid out for a task. Six come with
-//! Studio (Edit, Colour, Audio, VFX, Motion graphics, Production); the
-//! person can save the current layout under a name of their own (or over a
-//! built-in one), kept in `<Studio>/Workspaces.json`.
+//! Studio (Edit, Colour, Audio, Effects, Motion, Review); the person can
+//! save the current layout under a name of their own (or over a built-in
+//! one), kept in `<Studio>/Workspaces.json`. Layouts saved under the earlier
+//! names (VFX, Motion graphics, Production) are read as the renamed ones.
 //!
 //! A workspace sets only what can be dragged anyway: the whole dock tree
 //! (which panels are where, open and how big), the Library section, whether
@@ -12,9 +13,9 @@
 //! opens on. Nothing is locked. Files from before docking (no `dock`) are
 //! read as the old fixed layout with their sizes.
 //!
-//! One click: the icon strip in the top bar (when there is room) and the
-//! Layout menu; `⌥1`–`⌥6` from the keyboard (Settings ▸ Shortcuts changes
-//! them). [`switch`] does everything (and tells a screen reader);
+//! One click: the tabs in the top bar (a dropdown when the window is narrow)
+//! and View ▸ Workspaces; `⌥1`–`⌥6` from the keyboard (Settings ▸ Shortcuts
+//! changes them). [`switch`] does everything (and tells a screen reader);
 //! [`apply`] only moves the panels.
 
 use serde::{Deserialize, Serialize};
@@ -101,16 +102,26 @@ fn build_in() -> Vec<Workspace> {
     use crate::dock::{Panel, Zone};
     vec![
         ws("Edit", "Cut and arrange: a big timeline with your media beside it.", (true, 340.0), (true, 300.0), (true, Some(300.0)), "Media"),
-        // The scopes docked under the colour controls.
-        docking(with(ws("Colour", "Grade and match shots: looks, colour controls and scopes.", (true, 280.0), (true, 380.0), (true, Some(180.0)), "Looks"), true, "Adjust"), Panel::Scopes, Some(Panel::Inspector), Zone::Bottom),
-        // The Sound panel (mixer, loudness, dialogue) a tab behind the timeline.
-        showing(docking(with(ws("Audio", "Mix sound: audio tools, a tall timeline and level controls.", (true, 320.0), (true, 300.0), (true, Some(460.0)), "Audio"), false, "Audio"), Panel::Sound, Some(Panel::Timeline), Zone::Tab), Panel::Timeline),
-        with(ws("VFX", "Effects, masks and tracking on a large viewer.", (true, 320.0), (true, 400.0), (true, Some(220.0)), "Effects"), false, "Adjust"),
-        with(ws("Motion graphics", "Titles, shapes and animation with keyframes close at hand.", (true, 320.0), (true, 340.0), (true, Some(280.0)), "Motions"), false, "Animation"),
-        // The AI editor a tab with the Library (showing), Review notes,
-        // versions and the team where the Inspector was.
-        showing(docking(docking(ws("Production", "Plan and review: your media and the AI editor, a short timeline.", (true, 380.0), (false, 300.0), (true, Some(200.0)), "AI"), Panel::Review, Some(Panel::Viewer), Zone::Right), Panel::Ai, Some(Panel::Library), Zone::Tab), Panel::Ai),
+        // The scopes docked under the colour controls, and a timeline tall
+        // enough for a few tracks.
+        docking(with(ws("Colour", "Grade and match shots: looks, colour controls and scopes.", (true, 280.0), (true, 380.0), (true, Some(240.0)), "Looks"), true, "Adjust"), Panel::Scopes, Some(Panel::Inspector), Zone::Bottom),
+        // The mixer beside the timeline, so levels can be set while the clips go by.
+        docking(with(ws("Audio", "Mix sound: audio tools, a tall timeline and level controls.", (true, 320.0), (true, 300.0), (true, Some(460.0)), "Audio"), false, "Audio"), Panel::Sound, Some(Panel::Timeline), Zone::Right),
+        with(ws("Effects", "Effects, masks and tracking on a large viewer.", (true, 320.0), (true, 400.0), (true, Some(220.0)), "Effects"), false, "Adjust"),
+        with(ws("Motion", "Titles, shapes and animation with keyframes close at hand.", (true, 320.0), (true, 340.0), (true, Some(280.0)), "Motions"), false, "Animation"),
+        // The AI editor a tab with the Library (showing); Review notes,
+        // versions and the team a tab with the Inspector.
+        showing(showing(docking(docking(ws("Review", "Plan and review: your media and the AI editor, a short timeline.", (true, 380.0), (true, 300.0), (true, Some(200.0)), "AI"), Panel::Review, Some(Panel::Inspector), Zone::Tab), Panel::Ai, Some(Panel::Library), Zone::Tab), Panel::Ai), Panel::Review),
     ]
+}
+
+/// The names the built-in workspaces had before, and what they are now.
+const RENAMED: [(&str, &str); 3] = [("VFX", "Effects"), ("Motion graphics", "Motion"), ("Production", "Review")];
+
+/// `name` as the built-in workspaces call it now (an earlier name becomes the new one).
+fn canonical(name: &str) -> &str {
+    let name = name.trim();
+    RENAMED.iter().find(|(old, _)| old.eq_ignore_ascii_case(name)).map_or(name, |(_, new)| new)
 }
 
 /// The icon of a built-in workspace (the generic one for the person's own).
@@ -120,9 +131,9 @@ pub fn icon(name: &str) -> crate::icons::Icon {
         "edit" => Icon::Scissors,
         "colour" => Icon::Palette,
         "audio" => Icon::Faders,
-        "vfx" => Icon::MagicWand,
-        "motion graphics" => Icon::Path,
-        "production" => Icon::FilmSlate,
+        "effects" | "vfx" => Icon::MagicWand,
+        "motion" | "motion graphics" => Icon::Path,
+        "review" | "production" => Icon::FilmSlate,
         _ => Icon::SquaresFour,
     }
 }
@@ -132,12 +143,12 @@ pub const ACTIONS: [(&str, &str); 6] = [
     ("workspace-edit", "Edit"),
     ("workspace-colour", "Colour"),
     ("workspace-audio", "Audio"),
-    ("workspace-vfx", "VFX"),
-    ("workspace-motion", "Motion graphics"),
-    ("workspace-production", "Production"),
+    ("workspace-vfx", "Effects"),
+    ("workspace-motion", "Motion"),
+    ("workspace-production", "Review"),
 ];
 
-/// The workspace a shortcut action stands for.
+/// The workspace a shortcut action stands for (the Effects, Motion and Review keys keep their action ids).
 pub fn for_action(action: &str) -> Option<&'static str> {
     ACTIONS.iter().find(|(a, _)| *a == action).map(|(_, n)| *n)
 }
@@ -175,13 +186,29 @@ pub fn all() -> Vec<Workspace> {
 
 /// The built-in workspaces with the person's changes to them, then their own.
 fn merged(builtin: &[Workspace], own: Vec<Workspace>) -> Vec<Workspace> {
-    let mut out: Vec<Workspace> = builtin.iter().map(|b| own.iter().find(|o| o.name.eq_ignore_ascii_case(&b.name)).cloned().unwrap_or_else(|| b.clone())).collect();
-    out.extend(own.into_iter().filter(|o| !builtin.iter().any(|b| b.name.eq_ignore_ascii_case(&o.name))));
+    let is = |o: &Workspace, b: &Workspace| canonical(&o.name).eq_ignore_ascii_case(&b.name);
+    let mut out: Vec<Workspace> = builtin
+        .iter()
+        .map(|b| {
+            own.iter().find(|o| is(o, b)).map_or_else(
+                || b.clone(),
+                |o| {
+                    // A layout kept under an earlier name is the renamed workspace's.
+                    let mut w = o.clone();
+                    if !o.name.eq_ignore_ascii_case(&b.name) && RENAMED.iter().any(|(old, _)| old.eq_ignore_ascii_case(&o.name)) {
+                        w.name = b.name.clone();
+                    }
+                    w
+                },
+            )
+        })
+        .collect();
+    out.extend(own.into_iter().filter(|o| !builtin.iter().any(|b| is(o, b))));
     out
 }
 
 pub fn find(name: &str) -> Option<Workspace> {
-    all().into_iter().find(|w| w.name.eq_ignore_ascii_case(name.trim()))
+    all().into_iter().find(|w| w.name.eq_ignore_ascii_case(canonical(name)))
 }
 
 /// Saves (or replaces) a workspace.
@@ -189,8 +216,10 @@ pub fn save(w: Workspace) -> Result<(), String> {
     if w.name.trim().is_empty() {
         return Err("a workspace needs a name".into());
     }
+    let mut w = w;
+    w.name = canonical(&w.name).to_owned();
     let mut own = read_saved();
-    own.retain(|o| !o.name.eq_ignore_ascii_case(&w.name));
+    own.retain(|o| !canonical(&o.name).eq_ignore_ascii_case(&w.name));
     own.push(w);
     forget();
     if let Some(d) = path().parent() {
@@ -203,7 +232,7 @@ pub fn save(w: Workspace) -> Result<(), String> {
 pub fn delete(name: &str) -> Result<(), String> {
     let mut own = read_saved();
     let n = own.len();
-    own.retain(|o| !o.name.eq_ignore_ascii_case(name));
+    own.retain(|o| !canonical(&o.name).eq_ignore_ascii_case(canonical(name)));
     if own.len() == n {
         return Err(format!("no saved workspace \"{name}\""));
     }
@@ -328,7 +357,7 @@ mod tests {
     #[test]
     fn builtins_cover_the_tasks_and_name_real_library_sections() {
         let names: Vec<String> = builtin().into_iter().map(|w| w.name).collect();
-        assert_eq!(names, ["Edit", "Colour", "Audio", "VFX", "Motion graphics", "Production"]);
+        assert_eq!(names, ["Edit", "Colour", "Audio", "Effects", "Motion", "Review"]);
         for w in builtin() {
             assert_eq!(rail(&w.rail).name(), w.rail, "{}", w.name);
         }
@@ -369,8 +398,22 @@ mod tests {
 
     #[test]
     fn shortcut_actions_find_their_workspace() {
-        assert_eq!(for_action("workspace-motion"), Some("Motion graphics"));
+        assert_eq!(for_action("workspace-motion"), Some("Motion"));
+        assert_eq!(for_action("workspace-vfx"), Some("Effects"));
         assert_eq!(for_action("workspace-nope"), None);
+    }
+
+    #[test]
+    fn layouts_saved_under_the_earlier_names_are_the_renamed_workspaces() {
+        let mine = |n: &str, w: f32| Workspace { name: n.into(), library_w: w, ..build_in().remove(0) };
+        let own = vec![mine("VFX", 111.0), mine("motion graphics", 222.0), mine("Production", 333.0), mine("Mine", 444.0)];
+        let all = merged(&builtin(), own);
+        let names: Vec<&str> = all.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(names, ["Edit", "Colour", "Audio", "Effects", "Motion", "Review", "Mine"], "no duplicates, no orphans");
+        assert_eq!([all[3].library_w, all[4].library_w, all[5].library_w], [111.0, 222.0, 333.0], "their changes are kept");
+        // An old name still finds it.
+        assert_eq!(canonical("VFX"), "Effects");
+        assert_eq!(canonical("Mine"), "Mine");
     }
 
     #[test]
@@ -399,11 +442,13 @@ mod tests {
         let by = |n: &str| tree_of(&builtin().into_iter().find(|w| w.name == n).unwrap());
         let colour = by("Colour");
         assert!(colour.is_showing(Panel::Scopes) && colour.find(Panel::Scopes).unwrap()[..2] == colour.find(Panel::Inspector).unwrap()[..2], "scopes under the inspector");
+        // The mixer beside the timeline, both showing.
         let audio = by("Audio");
-        assert!(audio.is_open(Panel::Sound) && audio.is_showing(Panel::Timeline) && audio.find(Panel::Sound) == audio.find(Panel::Timeline));
-        let prod = by("Production");
-        assert!(prod.is_showing(Panel::Review) && !prod.is_open(Panel::Inspector));
-        assert!(prod.is_showing(Panel::Ai) && prod.find(Panel::Ai) == prod.find(Panel::Library), "the AI editor with the Library");
+        assert!(audio.is_showing(Panel::Sound) && audio.is_showing(Panel::Timeline) && audio.find(Panel::Sound) != audio.find(Panel::Timeline));
+        assert_eq!(audio.find(Panel::Sound).unwrap()[..1], audio.find(Panel::Timeline).unwrap()[..1], "in the timeline's zone");
+        let review = by("Review");
+        assert!(review.is_showing(Panel::Review) && review.find(Panel::Review) == review.find(Panel::Inspector), "review notes with the Inspector");
+        assert!(review.is_showing(Panel::Ai) && review.find(Panel::Ai) == review.find(Panel::Library), "the AI editor with the Library");
         assert_eq!(by("Edit"), crate::dock::Tree::legacy((true, 340.0), (true, 300.0), (true, Some(300.0))));
     }
 }

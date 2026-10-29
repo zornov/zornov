@@ -9,18 +9,23 @@ use super::library::{self, LibDrag};
 use super::{Action, TlDrag, Tool, clip_fill, run};
 use crate::app::StudioApp;
 use crate::icons::{self, Icon};
-use crate::kit::{self, IconButton, Segment};
+use crate::kit::{self, IconButton, MenuItem, Segment};
 use crate::view::{self, Clip, ClipKind, Lane, LaneKind, MediaKind, Project, SEC, Time};
 use crate::theme;
 use studio_model as m;
 use eframe::egui::{self, Align2, Color32, CornerRadius, Painter, Pos2, Rect, Sense, Stroke, Vec2};
 
-pub const HEADER_W: f32 = 120.0;
+pub const HEADER_W: f32 = 160.0;
 pub(super) const TOOLBAR_H: f32 = 34.0;
 const RULER_H: f32 = 24.0;
 const CLIP_TOP: f32 = 18.0;
 const SNAP_PX: f32 = 8.0;
+// TODO(kit): theme token for the playhead and the selection outline.
+const PLAYHEAD: Color32 = Color32::WHITE;
 const LANE_GAP: f32 = 3.0;
+/// A track holding only 3D cameras and lights: one slim row each, not a full track.
+const SCENE_H: f32 = 22.0;
+const SCENE_GAP: f32 = 1.0;
 const MIN_PPS: f32 = 2.0;
 const MAX_PPS: f32 = 600.0;
 
@@ -65,17 +70,23 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let view = View { x0: track_r.left() + 12.0, pps: app.editor.px_per_sec, scroll_x: app.editor.tl_scroll.x };
 
     // Lane layout (scrolls vertically when lanes overflow).
-    let total_h: f32 = app.doc.project.lanes.iter().map(|l| l.height + LANE_GAP).sum();
+    let scene = scene_lanes(app);
+    let lane_h = |l: &Lane| if scene.contains(&l.id) { (SCENE_H, SCENE_GAP) } else { (l.height, LANE_GAP) };
+    let total_h: f32 = app.doc.project.lanes.iter().map(|l| lane_h(l).0 + lane_h(l).1).sum();
     let max_scroll_y = (total_h - lanes_r.height() + 4.0).max(0.0);
     app.editor.tl_scroll.y = app.editor.tl_scroll.y.clamp(0.0, max_scroll_y);
     let mut lane_rects: Vec<(u32, Rect)> = Vec::new();
     let mut y = lanes_r.top() + 4.0 - app.editor.tl_scroll.y;
     for l in &app.doc.project.lanes {
-        lane_rects.push((l.id, Rect::from_min_size(egui::pos2(lanes_r.left(), y), Vec2::new(lanes_r.width(), l.height))));
-        y += l.height + LANE_GAP;
+        let (h, gap) = lane_h(l);
+        lane_rects.push((l.id, Rect::from_min_size(egui::pos2(lanes_r.left(), y), Vec2::new(lanes_r.width(), h))));
+        y += h + gap;
     }
 
-    scroll_and_zoom(app, ui, track_r.union(ruler), &view, max_scroll_y, proj_dur);
+    // The compositor keeps the wheel over its graph for zooming it; the
+    // ruler still scrolls time.
+    let wheel_area = if super::comp::is_on(&ctx) { ruler } else { track_r.union(ruler) };
+    scroll_and_zoom(app, ui, wheel_area, &view, max_scroll_y, proj_dur);
     // The lanes scroll both ways, the ruler sideways with them.
     kit::note_scroll(&ctx, lanes_r, false);
     kit::note_scroll(&ctx, track_r.union(ruler), true);
@@ -147,11 +158,11 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let px = kit::snap(&ctx, view.x(app.editor.playhead)) + 0.5;
     if px >= ruler.left() - 6.0 && px <= ruler.right() + 6.0 {
         let p = ui.painter().with_clip_rect(Rect::from_min_max(egui::pos2(ruler.left() - 6.0, ruler.top()), track_r.max));
-        // A plain white line with a small handle in the ruler.
+        // A line with a small handle in the ruler.
         let top = ruler.top() + 2.0;
-        p.vline(px, top + 10.0..=track_r.bottom(), Stroke::new(1.0, Color32::WHITE));
+        p.vline(px, top + 10.0..=track_r.bottom(), Stroke::new(1.0, PLAYHEAD));
         let h = vec![egui::pos2(px - 5.0, top), egui::pos2(px + 5.0, top), egui::pos2(px + 5.0, top + 7.0), egui::pos2(px, top + 12.0), egui::pos2(px - 5.0, top + 7.0)];
-        p.add(egui::Shape::convex_polygon(h, Color32::WHITE, Stroke::NONE));
+        p.add(egui::Shape::convex_polygon(h, PLAYHEAD, Stroke::NONE));
     }
 
     // Library drop.
@@ -167,6 +178,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         p.text(egui::pos2(msg_r.left() + 40.0, msg_r.center().y), Align2::LEFT_CENTER, crate::i18n::shown("Drag media here, or press + on a Library item."), theme::body(), t.text_2);
     }
     let _ = interact;
+    context_menu(app, &ctx);
 }
 
 fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
@@ -175,16 +187,15 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
     let inner = r.shrink2(Vec2::new(10.0, 4.0));
     let mut action = None;
     let key = |id: &str| crate::keymap::hint(&app.prefs, id);
-    let keys: std::collections::HashMap<&str, String> = ["fit", "zoom-in", "zoom-out", "undo", "redo", "split", "delete", "marker", "snap", "magnetic", "select", "blade", "slip", "range"].into_iter().map(|id| (id, key(id))).collect();
+    let keys: std::collections::HashMap<&str, String> = ["fit", "snap", "magnetic", "select", "blade", "slip", "range"].into_iter().map(|id| (id, key(id))).collect();
     let k = |id: &str| keys.get(id).map_or("", String::as_str);
-    // Right: zoom (laid out first, so the tools know their room).
+    // Right: zoom (laid out first, so the tools know their room). Undo,
+    // Redo, Split, Delete, Marker and the zoom buttons are in the menus
+    // (Edit, Clip, View) and on the keys; only Fit stays beside the slider.
     let mut right = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::right_to_left(egui::Align::Center)));
     right.spacing_mut().item_spacing.x = 4.0;
     if IconButton::new(Icon::ArrowsOutLineHorizontal, "Fit sequence").shortcut(k("fit")).show(&mut right).clicked() {
         action = Some(Action::Fit);
-    }
-    if IconButton::new(Icon::MagnifyingGlassPlus, "Zoom in").shortcut(k("zoom-in")).show(&mut right).clicked() {
-        action = Some(Action::ZoomIn);
     }
     // Log-scale zoom slider.
     let mut z = ((app.editor.px_per_sec / MIN_PPS).ln() / (MAX_PPS / MIN_PPS).ln() * 100.0).clamp(0.0, 100.0);
@@ -193,87 +204,107 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, _panel: Rect) {
         zoom_to(app, MIN_PPS * (MAX_PPS / MIN_PPS).powf(z / 100.0), None, r.left() + HEADER_W + 12.0);
         app.editor.auto_fit = false;
     }
-    if IconButton::new(Icon::MagnifyingGlassMinus, "Zoom out").shortcut(k("zoom-out")).show(&mut right).clicked() {
-        action = Some(Action::ZoomOut);
-    }
     if inner.width() > 820.0 {
         divider(&mut right);
         let n = app.editor.selection.len();
         let label = if n == 0 { format!("{} clips", app.doc.project.clips.len()) } else { format!("{n} selected") };
         right.label(egui::RichText::new(label).font(theme::caption()).color(t.text_2));
     }
-    // Left: the tools, in the room the zoom leaves; a narrow timeline
-    // scrolls them sideways.
+    // Left: the controls in four groups, in the room the zoom leaves; a
+    // narrow timeline scrolls them sideways.
     let left = Rect::from_min_max(inner.min, egui::pos2((right.min_rect().left() - 8.0).max(inner.left()), inner.bottom()));
     let mut outer = ui.new_child(egui::UiBuilder::new().max_rect(left).layout(egui::Layout::left_to_right(egui::Align::Center)));
     outer.set_clip_rect(left.intersect(ui.clip_rect()));
     kit::scroll_strip(&mut outer, "timeline-tools", |bar| {
         bar.spacing_mut().item_spacing.x = 4.0;
+        // Tools.
         for (tool, icon, name, id) in [(Tool::Select, Icon::Cursor, "Select (drag empty space to box-select)", "select"), (Tool::Blade, Icon::Scissors, "Blade", "blade"), (Tool::Slip, Icon::ArrowsHorizontal, "Slip", "slip"), (Tool::Range, Icon::BracketsSquare, "Range", "range")] {
             if IconButton::new(icon, name).shortcut(k(id)).active(app.editor.tool == tool).show(bar).clicked() {
                 app.editor.tool = tool;
                 app.editor.cutting.mode = super::cutting::TrimMode::Off;
             }
         }
-        super::cutting::toolbar(app, bar);
         divider(bar);
-        bar.add_enabled_ui(app.doc.can_undo(), |ui| {
-            if IconButton::new(Icon::ArrowUUpLeft, "Undo").shortcut(k("undo")).show(ui).clicked() {
-                action = Some(Action::Undo);
-            }
-        });
-        bar.add_enabled_ui(app.doc.can_redo(), |ui| {
-            if IconButton::new(Icon::ArrowUUpRight, "Redo").shortcut(k("redo")).show(ui).clicked() {
-                action = Some(Action::Redo);
-            }
-        });
+        // Trim: one control that also shows the mode.
+        super::cutting::trim_menu(app, bar);
         divider(bar);
-        if IconButton::new(Icon::Scissors, "Split at playhead").shortcut(k("split")).show(bar).clicked() {
-            action = Some(Action::Split);
-        }
-        bar.add_enabled_ui(!app.editor.selection.is_empty(), |ui| {
-            if IconButton::new(Icon::Trash, "Delete selection").shortcut(k("delete")).show(ui).clicked() {
-                action = Some(Action::Delete);
-            }
-        });
-        if IconButton::new(Icon::Flag, "Add marker").shortcut(k("marker")).show(bar).clicked() {
-            action = Some(Action::Marker);
-        }
-        divider(bar);
+        // Toggles.
         if IconButton::new(Icon::Magnet, if app.prefs.snapping { "Snapping on" } else { "Snapping off" }).shortcut(k("snap")).active(app.prefs.snapping).show(bar).clicked() {
             app.prefs.snapping = !app.prefs.snapping;
         }
-        if IconButton::new(Icon::MagnetStraight, if app.prefs.magnetic { "Magnetic main lane on" } else { "Magnetic main lane off" }).shortcut(k("magnetic")).active(app.prefs.magnetic).show(bar).clicked() {
+        if IconButton::new(Icon::MagnetStraight, if app.prefs.magnetic { "Magnetic main track on" } else { "Magnetic main track off" }).shortcut(k("magnetic")).active(app.prefs.magnetic).show(bar).clicked() {
             app.prefs.magnetic = !app.prefs.magnetic;
         }
         if !ctx.egui_wants_keyboard_input() && crate::keymap::hit(&ctx, &app.prefs, "magnetic") {
             app.prefs.magnetic = !app.prefs.magnetic;
         }
+        super::cutting::linked_toggle(app, bar);
         divider(bar);
-        // Physics: the 3D scene from the playhead, baked into keys.
-        if super::body3d::scene_has_bodies(app) && IconButton::new(Icon::ArrowsOutCardinal, "Simulate physics from the playhead: moving bodies, joints, breaks and knocked characters baked into keys").show(bar).clicked() {
-            super::body3d::bake_scene(app, &ctx);
+        // What the timeline shows: the clips, their curves or their nodes.
+        let mut view = if super::comp::is_on(&ctx) { 2 } else if super::graph::is_on(&ctx) { 1 } else { 0 };
+        let was = view;
+        let opts = [Segment::text("Clips"), Segment::text("Curves"), Segment::text("Nodes")];
+        kit::segmented(bar, "timeline-view", &mut view, &opts, None, None).on_hover_text("Clips, the selected clip's animation curves (⇧G), or its compositor nodes (⇧C)");
+        let shortcut = |key| !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, key)));
+        if shortcut(egui::Key::G) {
+            view = if was == 1 { 0 } else { 1 };
         }
-        let graph = super::graph::is_on(&ctx);
-        if IconButton::new(Icon::Path, if graph { "Back to the clips" } else { "Graph editor: the selected clip's animation as curves" }).shortcut("⇧G").active(graph).show(bar).clicked()
-            || (!ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::G))))
-        {
-            super::graph::toggle(&ctx);
+        if shortcut(egui::Key::C) {
+            view = if was == 2 { 0 } else { 2 };
         }
-        let comp = super::comp::is_on(&ctx);
-        if IconButton::new(Icon::Intersect, if comp { "Back to the clips" } else { "Compositor: the selected clip's node graph (keys, cleanup, set extension, depth of field)" }).shortcut("⇧C").active(comp).show(bar).clicked()
-            || (!ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::C))))
-        {
-            super::comp::toggle(&ctx);
+        if view != was {
+            super::graph::set_on(&ctx, view == 1);
+            super::comp::set_on(&ctx, view == 2);
         }
-        if IconButton::new(Icon::Faders, "Sound: mixer, loudness and stems, dialogue and ADR, subtitles and dubs").shortcut("⇧X").show(bar).clicked()
-            || (!ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::X))))
-        {
+        divider(bar);
+        more_menu(app, bar, &ctx);
+        if !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::X))) {
             super::mixer::toggle(&ctx);
         }
     });
     if let Some(a) = action {
         run(app, &ctx, a);
+    }
+}
+
+/// The rest of the toolbar's commands, named: Editorial, the source
+/// monitor, physics and the sound desk.
+fn more_menu(app: &mut StudioApp, bar: &mut egui::Ui, ctx: &egui::Context) {
+    let id = bar.scope_id().with("timeline-more");
+    let resp = IconButton::new(Icon::DotsThree, "More").active(kit::is_open(ctx, id)).show(bar);
+    if resp.clicked() {
+        kit::toggle_open(ctx, id);
+    }
+    enum Pick {
+        Editorial,
+        Source,
+        Physics,
+        Sound,
+    }
+    let mut pick = None;
+    let (editorial, source, bodies) = (app.editor.cutting.panel.open, app.editor.cutting.show_source, super::body3d::scene_has_bodies(app));
+    kit::popover(ctx, id, resp.rect, kit::Side::Below, 248.0, |ui| {
+        if MenuItem::new("Editorial").icon(Icon::List).shortcut("⌥E").checked(editorial).show(ui).clicked() {
+            pick = Some(Pick::Editorial);
+        }
+        if MenuItem::new(if source { "Back to the program" } else { "Source monitor" }).icon(Icon::FilmSlate).shortcut(if source { "⇧4" } else { "⇧2" }).show(ui).clicked() {
+            pick = Some(Pick::Source);
+        }
+        if bodies && MenuItem::new("Simulate physics from the playhead").icon(Icon::ArrowsOutCardinal).show(ui).clicked() {
+            pick = Some(Pick::Physics);
+        }
+        if MenuItem::new("Sound").icon(Icon::Faders).shortcut("⇧X").show(ui).clicked() {
+            pick = Some(Pick::Sound);
+        }
+    });
+    if let Some(p) = pick {
+        kit::set_open(ctx, id, false);
+        match p {
+            Pick::Editorial => super::cutting::toggle_editorial(app),
+            Pick::Source => super::cutting::toggle_source(app),
+            Pick::Physics => super::body3d::bake_scene(app, ctx),
+            Pick::Sound => super::mixer::toggle(ctx),
+        }
     }
 }
 
@@ -318,6 +349,22 @@ fn scroll_and_zoom(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, view: &Vi
     let content_w = (dur as f64 / SEC as f64) as f32 * view.pps + area.width() * 0.5;
     ed.tl_scroll.x = (ed.tl_scroll.x - dx).clamp(0.0, (content_w - area.width()).max(0.0));
     ed.tl_scroll.y = (ed.tl_scroll.y - dy).clamp(0.0, max_scroll_y);
+}
+
+/// Tracks that hold only 3D cameras and lights: scene objects, not timed
+/// media, so they are drawn as slim rows grouped together (D13).
+fn scene_lanes(app: &StudioApp) -> std::collections::HashSet<u32> {
+    let model = app.doc.model.active();
+    let proj = &app.doc.project;
+    proj.lanes
+        .iter()
+        .filter(|l| l.kind == LaneKind::Visual)
+        .filter(|l| {
+            let mut mine = proj.clips.iter().filter(|c| c.lane == l.id).peekable();
+            mine.peek().is_some() && mine.all(|c| model.clip(m::ClipId(c.id as u64)).is_some_and(|mc| mc.is_camera_or_light()))
+        })
+        .map(|l| l.id)
+        .collect()
 }
 
 fn lanes_bg(app: &StudioApp, p: &Painter, lanes: &[(u32, Rect)], track: Rect, t: &theme::Tokens) {
@@ -511,13 +558,13 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
                     let tt = view.t(pos.x);
                     let snapped = snap(app, &[tt], &[], view.pps).map_or(tt, |s| s.1);
                     let x = view.x(snapped);
-                    p.vline(x, r.y_range(), Stroke::new(1.0, Color32::WHITE));
+                    p.vline(x, r.y_range(), Stroke::new(1.0, PLAYHEAD));
                 }
             }
         }
         if lane.locked {
             if resp.clicked() {
-                kit::push(&ctx, format!("{} lane is locked", lane.name), None, Some(Icon::LockSimple));
+                kit::push(&ctx, format!("{} track is locked", lane.name), None, Some(Icon::LockSimple));
             }
             continue;
         }
@@ -565,7 +612,12 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
                         app.editor.tl_drag = Some(TlDrag::Trim { id: c.id, left, origin_start: c.start, origin_dur: c.dur, origin_in: c.src_in, applied: 0 });
                     } else if !super::cutting::start_slide(app, c.id, pos.x) {
                         if !app.editor.selection.contains(&c.id) {
-                            app.editor.selection = vec![c.id];
+                            // Shift or Cmd keeps what was selected.
+                            if ctx.input(|i| i.modifiers.shift || i.modifiers.command) {
+                                app.editor.selection.push(c.id);
+                            } else {
+                                app.editor.selection = vec![c.id];
+                            }
                         }
                         let ids: Vec<u32> = app.editor.selection.iter().copied().filter(|id| proj.clip(*id).and_then(|c| proj.lane(c.lane)).is_some_and(|l| !l.locked)).collect();
                         let origin = ids.iter().filter_map(|id| proj.clip(*id)).map(|c| (c.id, c.start, c.lane)).collect();
@@ -615,6 +667,14 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
         }
     }
 
+    // Right-click on empty space: the timeline menu.
+    if bg.secondary_clicked() && !handled {
+        if let Some(pos) = pointer {
+            app.editor.selection.clear();
+            app.editor.selected_cut = None;
+            open_menu(&ctx, TlMenu::Empty(view.t(pos.x).max(0), lane_at(lanes, pos.y)), pos);
+        }
+    }
     // Background: clear selection, scrub, range.
     if bg.clicked() && !handled {
         app.editor.selection.clear();
@@ -986,7 +1046,7 @@ fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c
     }
     // Keyframe marks are drawn (and handled) by `keys`.
     if selected {
-        p.rect_stroke(r, cr, Stroke::new(1.5, Color32::WHITE), egui::StrokeKind::Inside);
+        p.rect_stroke(r, cr, Stroke::new(1.5, PLAYHEAD), egui::StrokeKind::Inside);
     } else {
         let _ = t;
     }
@@ -1004,26 +1064,55 @@ fn headers(app: &mut StudioApp, ui: &mut egui::Ui, lanes: &[(u32, Rect)], area: 
             continue;
         }
         let p = hui.painter().clone();
-        // Four small icons, centred: lane type, lock, visibility, sound.
-        let kind_icon = match lane.kind {
-            LaneKind::Audio => Icon::MusicNotes,
-            LaneKind::Spine => Icon::FilmStrip,
-            LaneKind::Visual => Icon::Stack,
-        };
         let cy = hr.center().y;
-        let x0 = hr.center().x - 1.5 * 22.0;
-        let icon_r = |k: f32| Rect::from_center_size(egui::pos2(x0 + k * 22.0, cy), Vec2::splat(20.0));
-        icons::paint(&p, icon_r(0.0).shrink(3.0), kind_icon, 13.0, t.text_2);
-        let lane_name = lane.name.clone();
-        hui.interact(icon_r(0.0), egui::Id::unique(("lane-kind", lane.id)), Sense::hover()).on_hover_text(lane_name);
+        // Target and sync lock sit at the edges (`cutting::lane_toggles`);
+        // between them the name, then lock, visibility and sound.
+        let name_r = Rect::from_min_max(egui::pos2(hr.left() + 20.0, hr.top()), egui::pos2(hr.left() + 82.0, hr.bottom()));
+        let icon_r = |k: f32| Rect::from_center_size(egui::pos2(hr.left() + 92.0 + k * 20.0, cy), Vec2::splat(20.0));
+        // Right-click anywhere on the header: the track menu. Added first,
+        // so the buttons above it take their own clicks.
+        let hresp = hui.interact(hr, egui::Id::unique(("lane-header", lane.id)), Sense::click());
+        if hresp.secondary_clicked() {
+            let at = hresp.interact_pointer_pos().unwrap_or(hr.center());
+            open_menu(&ctx, TlMenu::Track(lane.id), at);
+        }
+        let renaming = ctx.data(|d| d.get_temp::<(u32, String)>(rename_id())).filter(|r| r.0 == lane.id);
+        if let Some((rid, mut text)) = renaming {
+            let edit = egui::TextEdit::singleline(&mut text).font(theme::caption()).desired_width(name_r.width());
+            let er = hui.put(Rect::from_center_size(name_r.center(), Vec2::new(name_r.width(), 20.0)), edit);
+            if !er.has_focus() && !er.lost_focus() {
+                er.request_focus();
+            }
+            let cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+            if er.lost_focus() || cancel {
+                ctx.data_mut(|d| d.remove::<(u32, String)>(rename_id()));
+                let name = text.trim().to_owned();
+                if !cancel && !name.is_empty() && name != lane.name {
+                    app.doc.edit("Rename track", |p| {
+                        if let Some(l) = p.lane_mut(rid) {
+                            l.name = name.clone();
+                        }
+                    });
+                }
+            } else {
+                ctx.data_mut(|d| d.insert_temp(rename_id(), (rid, text)));
+            }
+        } else {
+            let col = if lane.hidden || lane.muted { t.text_2 } else { t.text };
+            kit::paint_text_clipped(&p, egui::pos2(name_r.left(), cy), Align2::LEFT_CENTER, &lane.name, theme::caption(), col, name_r.width());
+            let nresp = hui.interact(name_r, egui::Id::unique(("lane-name", lane.id)), Sense::click()).on_hover_text(format!("{} (double-click to rename)", lane.name));
+            if nresp.double_clicked() {
+                ctx.data_mut(|d| d.insert_temp(rename_id(), (lane.id, lane.name.clone())));
+            }
+        }
         let sound_on = lane.kind == LaneKind::Audio || lane.kind == LaneKind::Spine;
-        let toggles: [(Icon, &str, bool, u8, bool); 3] = [
-            (if lane.locked { Icon::LockSimple } else { Icon::LockSimpleOpen }, if lane.locked { "Unlock lane" } else { "Lock lane" }, lane.locked, 0, true),
-            (if lane.hidden { Icon::EyeSlash } else { Icon::Eye }, if lane.hidden { "Show lane" } else { "Hide lane" }, lane.hidden, 1, lane.kind != LaneKind::Audio),
-            (if lane.muted { Icon::SpeakerSlash } else { Icon::SpeakerHigh }, if lane.muted { "Unmute lane" } else { "Mute lane" }, lane.muted, 2, sound_on),
+        let toggles: [(Icon, &str, bool, LaneToggle, bool); 3] = [
+            (if lane.locked { Icon::LockSimple } else { Icon::LockSimpleOpen }, if lane.locked { "Unlock track" } else { "Lock track" }, lane.locked, LaneToggle::Lock, true),
+            (if lane.hidden { Icon::EyeSlash } else { Icon::Eye }, if lane.hidden { "Show track" } else { "Hide track" }, lane.hidden, LaneToggle::Hide, lane.kind != LaneKind::Audio),
+            (if lane.muted { Icon::SpeakerSlash } else { Icon::SpeakerHigh }, if lane.muted { "Unmute track" } else { "Mute track" }, lane.muted, LaneToggle::Mute, sound_on),
         ];
         for (k, (icon, name, on, which, enabled)) in toggles.into_iter().enumerate() {
-            let br = icon_r(k as f32 + 1.0);
+            let br = icon_r(k as f32);
             if !enabled {
                 continue;
             }
@@ -1032,17 +1121,7 @@ fn headers(app: &mut StudioApp, ui: &mut egui::Ui, lanes: &[(u32, Rect)], area: 
                 b = b.tint(t.warn);
             }
             if b.show_at(&mut hui, br).clicked() {
-                let lid = lane.id;
-                let label = name.to_owned();
-                app.doc.edit(&label, |p| {
-                    if let Some(l) = p.lane_mut(lid) {
-                        match which {
-                            0 => l.locked = !l.locked,
-                            1 => l.hidden = !l.hidden,
-                            _ => l.muted = !l.muted,
-                        }
-                    }
-                });
+                toggle_lane(app, lane.id, which);
             }
         }
 
@@ -1065,31 +1144,62 @@ fn corner(app: &StudioApp, ui: &egui::Ui, r: Rect, t: &theme::Tokens) {
     let _ = (app, ui, r, t);
 }
 
-fn ruler_ui(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, view: &View, t: &theme::Tokens) {
-    let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
-    // Tick spacing: the smallest "nice" step at least 72 px apart.
-    let steps = [0.1f32, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0];
-    let step = steps.iter().copied().find(|s| s * view.pps >= 72.0).unwrap_or(600.0);
-    let minor = step / 5.0;
-    let t0 = (view.t(r.left()) as f64 / SEC as f64).max(0.0) as f32;
-    let t1 = view.t(r.right()) as f64 / SEC as f64;
-    let mut k = (t0 / minor).floor() as i64;
-    loop {
-        let ts = k as f32 * minor;
-        if ts as f64 > t1 {
+/// One ruler tick: its frame number, whether it is labelled, and the label.
+#[derive(Debug, PartialEq)]
+struct RulerTick {
+    frame: i64,
+    major: bool,
+    label: Option<String>,
+}
+
+/// Timecode for a whole frame count, `MM:SS:FF` (hours join in once
+/// there are any). Counts frames, so labels never run backwards.
+fn ruler_label(frame: i64, fps: f32) -> String {
+    let fps_i = fps.round().max(1.0) as i64;
+    let s = frame / fps_i;
+    let f = frame % fps_i;
+    if s >= 3600 { format!("{:02}:{:02}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60, f) } else { format!("{:02}:{:02}:{:02}", s / 60, s % 60, f) }
+}
+
+/// Ticks between `t0` and `t1` seconds: a major step of whole frames (1, 2,
+/// 5, 10) or whole seconds, at least 72 px apart, with minor ticks between.
+fn ruler_ticks(pps: f32, fps: f32, t0: f64, t1: f64) -> Vec<RulerTick> {
+    let fps = fps.max(1.0);
+    let fpsi = fps.round().max(1.0) as i64;
+    let mut steps: Vec<i64> = vec![1, 2, 5, 10];
+    steps.extend([1i64, 2, 5, 10, 15, 30, 60, 120, 300, 600].iter().map(|s| s * fpsi));
+    let px_per_frame = pps / fps;
+    let step = steps.iter().copied().find(|s| *s as f32 * px_per_frame >= 72.0).unwrap_or(600 * fpsi);
+    let subs = if step >= 5 { 5 } else { step };
+    let f0 = (t0 * fps as f64).floor().max(0.0) as i64;
+    let f1 = (t1 * fps as f64).ceil() as i64;
+    let mut out = Vec::new();
+    let mut k = f0 * subs / step;
+    while out.len() < 2000 {
+        let frame = (k * step + subs / 2) / subs;
+        if frame > f1 {
             break;
         }
-        let x = kit::snap(ui.ctx(), view.x((ts as f64 * SEC as f64) as Time)) + 0.5;
-        let major = (k % 5) == 0;
-        let h = if major { 8.0 } else { 4.0 };
-        p.vline(x, (r.bottom() - h)..=r.bottom(), Stroke::new(1.0, if major { t.text_2 } else { t.line }));
-        if major {
-            let s = ts.round() as i64;
-            let label = if step < 1.0 { format!("{:02}:{:02}.{}", s / 60, s % 60, ((ts.fract() * 10.0).round() as i64) % 10) } else { format!("{:02}:{:02}", s / 60, s % 60) };
+        let major = k % subs == 0;
+        out.push(RulerTick { frame, major, label: major.then(|| ruler_label(frame, fps)) });
+        k += 1;
+    }
+    out
+}
+
+fn ruler_ui(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, view: &View, t: &theme::Tokens) {
+    let p = ui.painter().with_clip_rect(r.intersect(ui.clip_rect()));
+    let fps = app.doc.project.fps;
+    let t0 = (view.t(r.left()) as f64 / SEC as f64).max(0.0);
+    let t1 = view.t(r.right()) as f64 / SEC as f64;
+    for tick in ruler_ticks(view.pps, fps, t0, t1) {
+        let x = kit::snap(ui.ctx(), view.x((tick.frame as f64 / fps.max(1.0) as f64 * SEC as f64).round() as Time)) + 0.5;
+        let h = if tick.major { 8.0 } else { 4.0 };
+        p.vline(x, (r.bottom() - h)..=r.bottom(), Stroke::new(1.0, if tick.major { t.text_2 } else { t.line }));
+        if let Some(label) = tick.label {
             p.vline(x, r.top() + 4.0..=r.bottom(), Stroke::new(1.0, t.text_2));
             p.text(egui::pos2(x + 4.0, r.top() + 11.0), Align2::LEFT_CENTER, label, theme::caption(), t.text_2);
         }
-        k += 1;
     }
     kit::hline(ui, r.left()..=r.right(), r.bottom());
 
@@ -1122,6 +1232,13 @@ fn ruler_ui(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, view: &View, t: &th
     // (A click counts on release, after the timeline has already ended
     // drags for this frame: starting a scrub on it left the playhead stuck
     // to the pointer until the next click.)
+    if resp.secondary_clicked() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let on_marker = app.doc.project.markers.iter().find(|m| (view.x(m.time) - pos.x).abs() <= 6.0 && pos.y > r.top() + 10.0).map(|m| m.id);
+            let what = on_marker.map_or(TlMenu::Ruler(view.t(pos.x).max(0)), TlMenu::Marker);
+            open_menu(ui.ctx(), what, pos);
+        }
+    }
     if resp.drag_started() {
         app.editor.tl_drag = Some(TlDrag::Scrub);
     }
@@ -1203,6 +1320,247 @@ fn drop_target(app: &mut StudioApp, ui: &mut egui::Ui, track: Rect, view: &View,
     }
 }
 
+// ---- Context menus: tracks, track headers, the empty timeline, the ruler.
+
+fn rename_id() -> egui::Id {
+    egui::Id::unique("tl-rename-track")
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum LaneToggle {
+    Lock,
+    Hide,
+    Mute,
+    Solo,
+}
+
+fn toggle_lane(app: &mut StudioApp, lid: u32, which: LaneToggle) {
+    let label = match which {
+        LaneToggle::Lock => "Lock track",
+        LaneToggle::Hide => "Hide track",
+        LaneToggle::Mute => "Mute track",
+        LaneToggle::Solo => "Solo track",
+    };
+    app.doc.edit(label, |p| {
+        if let Some(l) = p.lane_mut(lid) {
+            match which {
+                LaneToggle::Lock => l.locked = !l.locked,
+                LaneToggle::Hide => l.hidden = !l.hidden,
+                LaneToggle::Mute => l.muted = !l.muted,
+                LaneToggle::Solo => l.solo = !l.solo,
+            }
+        }
+    });
+}
+
+/// What a timeline context menu was opened on.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum TlMenu {
+    /// A track header (or a track's own background).
+    Track(u32),
+    /// Empty timeline at a time, over a track or below them all.
+    Empty(Time, Option<u32>),
+    /// The ruler at a time.
+    Ruler(Time),
+    /// A marker, by id.
+    Marker(u64),
+}
+
+fn menu_id() -> egui::Id {
+    egui::Id::unique("tl-context-menu")
+}
+
+fn open_menu(ctx: &egui::Context, what: TlMenu, at: Pos2) {
+    ctx.data_mut(|d| d.insert_temp(menu_id().with("what"), (what, at)));
+    kit::set_open(ctx, menu_id(), true);
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Do {
+    Rename(u32),
+    AddTrack(u32, bool),
+    DeleteTrack(u32),
+    Height(u32, f32),
+    Toggle(u32, LaneToggle),
+    Target(u32, bool),
+    Paste(Time),
+    Marker(Time),
+    DeleteMarker(u64),
+    In(Time),
+    Out(Time),
+    ClearRange,
+    SelectAfter(Time),
+}
+
+struct Row {
+    label: &'static str,
+    icon: Icon,
+    enabled: bool,
+    checked: Option<bool>,
+    danger: bool,
+    act: Do,
+    /// A thin line above the row.
+    gap: bool,
+}
+
+fn row(label: &'static str, icon: Icon, act: Do) -> Row {
+    Row { label, icon, enabled: true, checked: None, danger: false, act, gap: false }
+}
+
+const HEIGHTS: [(&str, f32); 3] = [("Small track", 40.0), ("Medium track", 64.0), ("Large track", 104.0)];
+
+fn track_rows(v: &mut Vec<Row>, id: u32, l: &Lane, targeted: bool) {
+    v.push(row("Rename", Icon::TextT, Do::Rename(id)));
+    v.push(Row { gap: true, ..row("Add track above", Icon::Stack, Do::AddTrack(id, true)) });
+    v.push(row("Add track below", Icon::Stack, Do::AddTrack(id, false)));
+    v.push(Row { enabled: l.kind != LaneKind::Spine, danger: true, ..row("Delete track", Icon::Trash, Do::DeleteTrack(id)) });
+    for (i, (label, h)) in HEIGHTS.iter().enumerate() {
+        v.push(Row { gap: i == 0, checked: Some((l.height - h).abs() < 6.0), ..row(label, Icon::ArrowsOutCardinal, Do::Height(id, *h)) });
+    }
+    v.push(Row { gap: true, checked: Some(l.locked), ..row("Lock track", Icon::LockSimple, Do::Toggle(id, LaneToggle::Lock)) });
+    if l.kind != LaneKind::Audio {
+        v.push(Row { checked: Some(l.hidden), ..row("Hide track", Icon::EyeSlash, Do::Toggle(id, LaneToggle::Hide)) });
+    }
+    if l.kind != LaneKind::Visual {
+        v.push(Row { checked: Some(l.muted), ..row("Mute track", Icon::SpeakerSlash, Do::Toggle(id, LaneToggle::Mute)) });
+    }
+    if l.kind == LaneKind::Audio {
+        v.push(Row { checked: Some(l.solo), ..row("Solo track", Icon::SpeakerHigh, Do::Toggle(id, LaneToggle::Solo)) });
+    }
+    v.push(Row { checked: Some(targeted), ..row("Target track", Icon::Circle, Do::Target(id, !targeted)) });
+}
+
+/// The rows of a menu, with the same verbs as the Edit, Clip and View menus
+/// and the clip menu ("Add marker", "Set in point", "Paste at playhead"…).
+fn menu_rows(what: TlMenu, lane: Option<&Lane>, can_paste: bool, has_range: bool, targeted: bool) -> Vec<Row> {
+    let mut v = Vec::new();
+    match what {
+        TlMenu::Track(id) => {
+            let Some(l) = lane else { return v };
+            track_rows(&mut v, id, l, targeted);
+        }
+        TlMenu::Empty(t, over) => {
+            v.push(Row { enabled: can_paste, ..row("Paste at playhead", Icon::DownloadSimple, Do::Paste(t)) });
+            v.push(row("Add marker", Icon::Flag, Do::Marker(t)));
+            v.push(Row { gap: true, ..row("Select clips after here", Icon::Cursor, Do::SelectAfter(t)) });
+            if let (Some(id), Some(l)) = (over, lane) {
+                let first = v.len();
+                track_rows(&mut v, id, l, targeted);
+                v[first].gap = true;
+            }
+        }
+        TlMenu::Ruler(t) => {
+            v.push(row("Add marker", Icon::Flag, Do::Marker(t)));
+            v.push(Row { gap: true, ..row("Set in point", Icon::BracketsSquare, Do::In(t)) });
+            v.push(row("Set out point", Icon::BracketsSquare, Do::Out(t)));
+            v.push(Row { enabled: has_range, ..row("Clear range", Icon::X, Do::ClearRange) });
+        }
+        TlMenu::Marker(id) => {
+            v.push(Row { danger: true, ..row("Delete marker", Icon::Trash, Do::DeleteMarker(id)) });
+        }
+    }
+    v
+}
+
+/// Draws the open timeline menu. Call once a frame.
+fn context_menu(app: &mut StudioApp, ctx: &egui::Context) {
+    if !kit::is_open(ctx, menu_id()) {
+        return;
+    }
+    let Some((what, at)) = ctx.data(|d| d.get_temp::<(TlMenu, Pos2)>(menu_id().with("what"))) else { return };
+    let over = match what {
+        TlMenu::Track(id) | TlMenu::Empty(_, Some(id)) => Some(id),
+        _ => None,
+    };
+    let lane = over.and_then(|id| app.doc.project.lane(id).cloned());
+    let targeted = over.is_some_and(|id| super::cutting::is_targeted(app, id));
+    let rows = menu_rows(what, lane.as_ref(), super::clip_menu::can_paste(ctx), app.doc.project.range.is_some(), targeted);
+    if rows.is_empty() {
+        kit::set_open(ctx, menu_id(), false);
+        return;
+    }
+    let mut pick = None;
+    kit::popover(ctx, menu_id(), Rect::from_min_size(at, Vec2::splat(1.0)), kit::Side::Below, 200.0, |ui| {
+        for r in &rows {
+            if r.gap {
+                kit::menu_separator(ui);
+            }
+            let mut item = MenuItem::new(r.label).icon(r.icon).enabled(r.enabled);
+            if let Some(c) = r.checked {
+                item = item.checked(c);
+            }
+            if r.danger {
+                item = item.danger();
+            }
+            if item.show(ui).clicked() {
+                pick = Some(r.act);
+            }
+        }
+    });
+    let Some(act) = pick else { return };
+    kit::set_open(ctx, menu_id(), false);
+    run_menu(app, ctx, act);
+}
+
+fn run_menu(app: &mut StudioApp, ctx: &egui::Context, act: Do) {
+    let seq = app.doc.seq();
+    match act {
+        Do::Rename(id) => {
+            let name = app.doc.project.lane(id).map(|l| l.name.clone()).unwrap_or_default();
+            ctx.data_mut(|d| d.insert_temp(rename_id(), (id, name)));
+        }
+        Do::AddTrack(id, above) => {
+            let lanes = &app.doc.project.lanes;
+            let Some(i) = lanes.iter().position(|l| l.id == id) else { return };
+            let kind = if lanes[i].kind == LaneKind::Audio { m::LaneKind::Audio } else { m::LaneKind::Visual };
+            let name = if kind == m::LaneKind::Audio { "Audio" } else { "Video" };
+            let new = m::LaneId(app.doc.alloc_id());
+            app.doc.apply("Add track", m::Edit::AddLane { seq, lane: m::Lane::new(new, kind, name), index: Some(if above { i } else { i + 1 }) });
+        }
+        Do::DeleteTrack(id) => {
+            app.doc.apply("Delete track", m::Edit::RemoveLane { seq, lane: m::LaneId(id as u64) });
+        }
+        Do::Height(id, h) => {
+            app.doc.edit("Track height", |p| {
+                if let Some(l) = p.lane_mut(id) {
+                    l.height = h;
+                }
+            });
+        }
+        Do::Toggle(id, which) => toggle_lane(app, id, which),
+        Do::Target(id, on) => super::cutting::set_target(app, id, on),
+        Do::Paste(t) => super::clip_menu::paste_at(app, ctx, t),
+        Do::Marker(t) => {
+            app.doc.edit("Add marker", |p| {
+                let id = p.alloc_id() as u64;
+                p.markers.push(view::Marker { id, time: t, note: "Marker".into() });
+            });
+        }
+        Do::DeleteMarker(id) => {
+            app.doc.edit("Delete marker", |p| p.markers.retain(|m| m.id != id));
+        }
+        Do::In(t) => {
+            app.doc.edit("Set in point", |p| {
+                let out = p.range.map_or(p.duration(), |r| r.1).max(t + SEC / 10);
+                p.range = Some((t, out));
+            });
+        }
+        Do::Out(t) => {
+            app.doc.edit("Set out point", |p| {
+                let inn = p.range.map_or(0, |r| r.0).min(t - SEC / 10).max(0);
+                p.range = Some((inn, t));
+            });
+        }
+        Do::ClearRange => {
+            app.doc.edit("Clear range", |p| p.range = None);
+        }
+        Do::SelectAfter(t) => {
+            app.editor.selection = app.doc.project.clips.iter().filter(|c| c.end() > t && app.doc.project.lane(c.lane).is_some_and(|l| !l.locked)).map(|c| c.id).collect();
+            app.editor.selected_cut = None;
+        }
+    }
+}
+
 fn t_accent(ui: &egui::Ui) -> Color32 {
     theme::tokens(ui.ctx()).accent
 }
@@ -1217,5 +1575,109 @@ mod tests {
         assert_eq!(hover_scrub(true, false, true, Some(5)), None, "playing: the viewer follows the playhead");
         assert_eq!(hover_scrub(true, true, false, Some(5)), None);
         assert_eq!(hover_scrub(false, false, false, Some(5)), None);
+    }
+
+    /// Shift-click and Cmd-click add to the selection; a plain click replaces it.
+    #[test]
+    fn modifier_clicks_add_to_the_selection() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Select", 640, 360, 30.0));
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#ffcc00", "at": 0, "duration": 3, "width": 200, "height": 100}), serde_json::json!({"op": "card", "colour": "#00ccff", "at": 4, "duration": 3, "width": 200, "height": 100})], "cards", false).unwrap();
+        let ids: Vec<u32> = s.doc.project.clips.iter().map(|c| c.id).collect();
+        assert!(ids.len() >= 2);
+        app.doc = s.doc;
+        let mut frame = eframe::Frame::_new_kittest();
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, 1000.0));
+        let mut clock = 0.0;
+        let mut run = |app: &mut StudioApp, events: Vec<egui::Event>| {
+            clock += 1.0 / 60.0;
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(clock), events, ..Default::default() };
+            crate::editor::test_frame(&ctx, input, |ui| eframe::App::ui(app, ui, &mut frame));
+        };
+        for _ in 0..3 {
+            run(&mut app, vec![]);
+        }
+        let centre = |id: u32| ctx.read_response(egui::Id::unique(("clip", id))).expect("the clip was drawn").rect.center();
+        let click = |app: &mut StudioApp, run: &mut dyn FnMut(&mut StudioApp, Vec<egui::Event>), at: egui::Pos2, mods: egui::Modifiers| {
+            let b = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: mods };
+            run(app, vec![egui::Event::ModifiersChanged(mods), egui::Event::PointerMoved(at)]);
+            run(app, vec![b(true)]);
+            run(app, vec![b(false)]);
+            run(app, vec![]);
+            run(app, vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        };
+        click(&mut app, &mut run, centre(ids[0]), egui::Modifiers::NONE);
+        assert_eq!(app.editor.selection, vec![ids[0]]);
+        click(&mut app, &mut run, centre(ids[1]), egui::Modifiers::SHIFT);
+        assert_eq!(app.editor.selection, vec![ids[0], ids[1]], "Shift-click adds");
+        click(&mut app, &mut run, centre(ids[1]), egui::Modifiers::COMMAND);
+        assert_eq!(app.editor.selection, vec![ids[0]], "Cmd-click on a selected clip takes it out");
+        click(&mut app, &mut run, centre(ids[1]), egui::Modifiers::COMMAND);
+        assert_eq!(app.editor.selection, vec![ids[0], ids[1]], "Cmd-click adds");
+        click(&mut app, &mut run, centre(ids[1]), egui::Modifiers::NONE);
+        assert_eq!(app.editor.selection, vec![ids[1]], "a plain click replaces");
+    }
+
+    fn lane(kind: LaneKind) -> Lane {
+        Lane { id: 7, name: "Titles".into(), kind, locked: false, hidden: false, muted: false, solo: false, height: 64.0, colour: Color32::GRAY }
+    }
+
+    #[test]
+    fn track_menu_offers_what_the_track_can_do() {
+        let labels = |kind| menu_rows(TlMenu::Track(7), Some(&lane(kind)), false, false, false).iter().map(|r| r.label).collect::<Vec<_>>();
+        let video = labels(LaneKind::Visual);
+        assert!(video.contains(&"Rename") && video.contains(&"Add track above") && video.contains(&"Add track below") && video.contains(&"Delete track"));
+        assert!(video.contains(&"Lock track") && video.contains(&"Hide track") && !video.contains(&"Mute track") && !video.contains(&"Solo track"));
+        let audio = labels(LaneKind::Audio);
+        assert!(audio.contains(&"Mute track") && audio.contains(&"Solo track") && !audio.contains(&"Hide track"));
+        assert!(video.contains(&"Small track") && video.contains(&"Medium track") && video.contains(&"Large track"));
+        let spine = menu_rows(TlMenu::Track(7), Some(&lane(LaneKind::Spine)), false, false, false);
+        assert!(!spine.iter().find(|r| r.label == "Delete track").unwrap().enabled, "the main track stays");
+    }
+
+    #[test]
+    fn empty_timeline_and_ruler_menus_use_the_menu_verbs() {
+        let empty = menu_rows(TlMenu::Empty(5, None), None, true, false, false);
+        let names: Vec<&str> = empty.iter().map(|r| r.label).collect();
+        assert_eq!(names, ["Paste at playhead", "Add marker", "Select clips after here"]);
+        assert!(empty[0].enabled, "paste is on once something was copied");
+        assert!(!menu_rows(TlMenu::Empty(5, None), None, false, false, false)[0].enabled);
+        let ruler = menu_rows(TlMenu::Ruler(5), None, false, true, false);
+        let names: Vec<&str> = ruler.iter().map(|r| r.label).collect();
+        assert_eq!(names, ["Add marker", "Set in point", "Set out point", "Clear range"]);
+        assert!(!menu_rows(TlMenu::Ruler(5), None, false, false, false)[3].enabled, "nothing to clear");
+        // Over a track the track rows follow.
+        let over = menu_rows(TlMenu::Empty(5, Some(7)), Some(&lane(LaneKind::Visual)), false, false, false);
+        assert!(over.iter().any(|r| r.label == "Rename") && over.iter().any(|r| r.label == "Add marker"));
+    }
+
+    #[test]
+    fn ruler_labels_never_run_backwards() {
+        for fps in [24.0f32, 25.0, 30.0, 60.0] {
+            for pps in [2.0f32, 10.0, 60.0, 200.0, 600.0] {
+                let ticks = ruler_ticks(pps, fps, 0.0, 6.0);
+                assert!(ticks.len() < 2000, "bounded output");
+                assert!(ticks.windows(2).all(|w| w[0].frame < w[1].frame), "frames increase at {fps} fps, {pps} px/s");
+                let labelled: Vec<&RulerTick> = ticks.iter().filter(|t| t.label.is_some()).collect();
+                assert!(labelled.windows(2).all(|w| w[0].label < w[1].label), "labels increase at {fps} fps, {pps} px/s");
+            }
+        }
+    }
+
+    #[test]
+    fn ruler_is_frame_accurate_when_zoomed_in() {
+        // 24 fps at 600 px/s: 25 px a frame. Every frame ticks, every fifth
+        // is labelled, and the labels count frames.
+        let ticks = ruler_ticks(600.0, 24.0, 1.0, 2.0);
+        assert!(ticks.len() >= 24, "a tick per frame: {}", ticks.len());
+        let labels: Vec<&str> = ticks.iter().filter_map(|t| t.label.as_deref()).collect();
+        assert_eq!(labels[..3], ["00:01:01", "00:01:06", "00:01:11"]);
+        // The old rounding printed 00:01.5 for half a second.
+        assert_eq!(ruler_label(12, 24.0), "00:00:12");
+        assert_eq!(ruler_label(36, 24.0), "00:01:12");
+        assert_eq!(ruler_label(3600 * 24 + 5, 24.0), "01:00:00:05");
     }
 }

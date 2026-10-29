@@ -7,21 +7,22 @@
 //! another panel (left, right, above, below, or into it as a tab) or onto
 //! the window's edge. A drop overlay shows where the panel will land; Esc
 //! cancels. The same moves are in each panel's "Move panel to…" menu
-//! (right-click a header or tab, ⇧F10 on a focused region, or Layout ▸
-//! Move panel), so docking works from the keyboard and a screen reader.
+//! (right-click a header or tab, or ⇧F10 on a focused region), so docking
+//! works from the keyboard and a screen reader. Double-click a header, or
+//! ⌘\, to maximise a panel; again to restore.
 //!
-//! Panels that also float (Review, Record) keep their own open flag; while
-//! one is docked the flag follows the tree, and turning it on or off (its
-//! button or shortcut) opens or closes the docked panel. The Sound panel
-//! and the Scopes work the same way: undocked, the Sound panel takes the
-//! Timeline's place and the scopes sit over the picture, as before.
+//! Review, Record, Editorial, Scopes and Sound keep their own open flag; the
+//! flag follows the tree, and turning it on or off (its button or shortcut)
+//! opens or closes the docked panel. A panel never opens over the editor:
+//! it docks as a tab or beside its zone (Sound beside the Timeline, Scopes
+//! beside the Viewer). Only "Float in a window" makes one float.
 
 use super::{GAP, TOPBAR_H};
 use crate::a11y::Region;
 use crate::app::StudioApp;
 use crate::dock::{Axis, Layout, Metrics, Panel, Tile, Tree, Zone};
 use crate::icons::{self, Icon};
-use crate::kit::{self, MenuItem};
+use crate::kit::{self, IconButton, MenuItem};
 use crate::theme;
 use eframe::egui::{self, Align2, CornerRadius, Id, Pos2, Rect, Sense, Stroke, Vec2};
 
@@ -166,6 +167,13 @@ fn sync_flags(app: &mut StudioApp, ctx: &egui::Context) {
             if last == Some(true) && now {
                 // Docked last frame and closed out of the dock since.
                 set_flag(app, ctx, p, false);
+            } else if now && !floated(ctx, p) {
+                // Turned on by its own button, shortcut or tool: it opens
+                // docked as a tab or beside its zone, not over the editor.
+                ed.dock.open(p, &lay);
+                ed.dock_flags[slot] = Some(true);
+            } else if !now {
+                set_floated(ctx, p, false);
             }
         }
         // Docked or in a window of its own: its floating window stays away.
@@ -175,8 +183,7 @@ fn sync_flags(app: &mut StudioApp, ctx: &egui::Context) {
 }
 
 /// Opens a panel wherever it goes: docked (where it was or its default
-/// place), the Inspector's sheet in a narrow window, or its own window
-/// for a floating panel that is not docked.
+/// place), or the Inspector's sheet in a narrow window.
 pub fn open_panel(app: &mut StudioApp, ctx: &egui::Context, p: Panel, narrow: bool) {
     if narrow && p == Panel::Inspector {
         app.editor.sheet_open = true;
@@ -185,10 +192,6 @@ pub fn open_panel(app: &mut StudioApp, ctx: &egui::Context, p: Panel, narrow: bo
     if app.editor.dock.is_popped(p) {
         // In its own window: bring that window forward.
         ctx.send_viewport_cmd_to(viewport_id(p), egui::ViewportCommand::Focus);
-        return;
-    }
-    if p.floats() && !app.editor.dock.contains(p) && !app.editor.dock.parked.iter().any(|(q, _)| *q == p) {
-        set_flag(app, ctx, p, true);
         return;
     }
     let lay = app.editor.last_layout();
@@ -242,8 +245,22 @@ pub fn reset(app: &mut StudioApp, ctx: &egui::Context) {
     crate::a11y::announce(ctx, crate::i18n::t("Layout reset").into_owned());
 }
 
+fn floated_id(p: Panel) -> Id {
+    Id::unique(("dock-floated", p.key()))
+}
+
+/// Whether the person floated `p` ("Float in a window") and it is still open.
+fn floated(ctx: &egui::Context, p: Panel) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(floated_id(p))).unwrap_or(false)
+}
+
+fn set_floated(ctx: &egui::Context, p: Panel, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(floated_id(p), on));
+}
+
 /// Takes `p` out of the dock into its own window.
 fn float(app: &mut StudioApp, ctx: &egui::Context, p: Panel) {
+    set_floated(ctx, p, true);
     app.editor.dock.remove(p);
     app.editor.dock.popped.retain(|w| w.panel != p);
     app.editor.dock.parked.retain(|(q, _)| *q != p);
@@ -269,8 +286,105 @@ pub fn open_menu(ctx: &egui::Context, p: Panel, anchor: Rect, focus: bool) {
     kit::set_open(ctx, menu_id(p), true);
 }
 
-/// Keys: Esc cancels a drag; ⇧F10 opens the focused region's Move menu.
+/// Where the keyboard is: the editor (timeline and viewer), a docked panel or
+/// a window floating over the editor. It follows the last click, so the keys
+/// act on the panel the person is working in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum KeyScope {
+    Editor,
+    Panel(Panel),
+    Floating(egui::LayerId),
+}
+
+fn scope_id() -> Id {
+    Id::unique("dock-key-scope")
+}
+
+fn rects_id() -> Id {
+    Id::unique("dock-panel-rects")
+}
+
+/// The panels whose keys are their own: they work on a selection of their
+/// own (media, parameters, mixer strips, notes) and never on the timeline's.
+/// The Timeline and Viewer keep the editor's shortcuts, and the Scopes have no keys.
+fn keeps_own_keys(p: Panel) -> bool {
+    !matches!(p, Panel::Timeline | Panel::Viewer | Panel::Scopes)
+}
+
+/// Follows clicks to find the keyboard's owner, and tells the key dispatcher
+/// (`crate::keymap::claim`) when it is not the editor.
+fn track_key_scope(ctx: &egui::Context) {
+    let press = ctx.input(|i| if i.pointer.primary_pressed() { i.pointer.interact_pos() } else { None });
+    if let Some(pos) = press {
+        let rects: Vec<(Panel, Rect)> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
+        let scope = match ctx.layer_id_at(pos) {
+            Some(layer) if layer.order == egui::Order::Middle => KeyScope::Floating(layer),
+            _ => rects.iter().find(|(_, r)| r.contains(pos)).map_or(KeyScope::Editor, |(p, _)| KeyScope::Panel(*p)),
+        };
+        ctx.data_mut(|d| d.insert_temp(scope_id(), scope));
+    }
+    let scope = ctx.data(|d| d.get_temp::<KeyScope>(scope_id())).unwrap_or(KeyScope::Editor);
+    use crate::keymap::{KeyOwner, claim};
+    match scope {
+        // A window that is still open: what is typed there is its own.
+        KeyScope::Floating(layer) if ctx.memory(|m| m.areas().is_visible(&layer)) => claim(ctx, KeyOwner::Text),
+        KeyScope::Panel(p) if keeps_own_keys(p) => claim(ctx, KeyOwner::Panel),
+        // The node and curve editors replace the timeline's lanes: Delete,
+        // ⌘A and the letters are theirs while they show.
+        KeyScope::Panel(Panel::Timeline) if super::graph::is_on(ctx) || super::comp::is_on(ctx) => claim(ctx, KeyOwner::Panel),
+        _ => {}
+    }
+    // Keyboard focus in a panel (F6, Tab) counts the same as a click there.
+    if let Some(p) = crate::a11y::focused_region(ctx).and_then(|r| Panel::ALL.into_iter().find(|p| region(*p) == r))
+        && keeps_own_keys(p)
+    {
+        claim(ctx, KeyOwner::Panel);
+    }
+}
+
+/// The panel the person last clicked in, if it is docked.
+fn focused_panel(ctx: &egui::Context) -> Option<Panel> {
+    match ctx.data(|d| d.get_temp::<KeyScope>(scope_id())) {
+        Some(KeyScope::Panel(p)) => Some(p),
+        _ => None,
+    }
+}
+
+/// View ▸ Maximise panel: the panel being worked in (the Timeline when none
+/// is) fills the whole dock; again, and the layout is back.
+pub fn toggle_maximised(app: &mut StudioApp, ctx: &egui::Context) {
+    toggle_maximised_panel(app, ctx, focused_panel(ctx).unwrap_or(Panel::Timeline));
+}
+
+fn toggle_maximised_panel(app: &mut StudioApp, ctx: &egui::Context, p: Panel) {
+    let ed = &mut app.editor;
+    if ed.maximised.is_some() {
+        ed.maximised = None;
+    } else if ed.dock.is_open(p) {
+        ed.dock.activate(p);
+        ed.maximised = Some(p);
+    }
+    let said = if ed.maximised.is_some() { "Panel maximised" } else { "Panel restored" };
+    crate::a11y::announce(ctx, crate::i18n::t(said).into_owned());
+}
+
+/// The layout with only `p`'s stack, filling the body.
+fn maximised_layout(lay: &Layout, p: Panel) -> Option<Layout> {
+    let tile = lay.tile_of(p)?;
+    let mut tile = tile.clone();
+    tile.rect = lay.body;
+    tile.active = p;
+    Some(Layout { tiles: vec![tile], splitters: Vec::new(), rects: Vec::new(), body: lay.body, metrics: lay.metrics })
+}
+
+/// Keys: Esc cancels a drag; ⇧F10 opens the focused region's Move menu;
+/// ⌘\ maximises the panel being worked in.
 pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
+    track_key_scope(ctx);
+    let maximise = egui::KeyboardShortcut::new(egui::Modifiers { command: true, mac_cmd: cfg!(target_os = "macos"), ctrl: !cfg!(target_os = "macos"), ..egui::Modifiers::NONE }, egui::Key::Backslash);
+    if app.overlay == crate::app::Overlay::None && ctx.input_mut(|i| i.consume_shortcut(&maximise)) {
+        toggle_maximised(app, ctx);
+    }
     if app.editor.dock_drag.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.editor.dock_drag = None;
         ctx.data_mut(|d| d.insert_temp(Id::unique("dock-drag-cancelled"), true));
@@ -292,12 +406,21 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect, narrow: bool, rt
     sync_flags(app, &ctx);
     let hide = hidden(narrow);
     let lay = app.editor.dock.layout(body, metrics(), &hide);
+    // A maximised panel that has gone (closed, or moved out) is not.
+    if app.editor.maximised.is_some_and(|p| lay.tile_of(p).is_none()) {
+        app.editor.maximised = None;
+    }
+    let shown = app.editor.maximised.and_then(|p| maximised_layout(&lay, p));
+    let draw = shown.as_ref().unwrap_or(&lay);
     // The tree reads left to right; a right-to-left window shows it mirrored.
     let scr = |r: Rect| if rtl { crate::i18n::mirror(r, body) } else { r };
     let mut actions: Vec<Action> = Vec::new();
 
     let sound_in_timeline = super::mixer::is_on(&ctx) && !app.editor.dock.contains(Panel::Sound);
-    for tile in &lay.tiles {
+    // Where each panel is on screen, for the next click to find its keyboard owner.
+    let rects: Vec<(Panel, Rect)> = draw.tiles.iter().map(|t| (t.active, scr(t.rect))).collect();
+    ctx.data_mut(|d| d.insert_temp(rects_id(), rects));
+    for tile in &draw.tiles {
         let r = scr(tile.rect);
         crate::a11y::landmark(ui, region(tile.active), r);
         super::panel(ui, r);
@@ -318,8 +441,14 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect, narrow: bool, rt
         if grip.secondary_clicked() {
             actions.push(Action::Menu(tile.active, head));
         }
+        if grip.double_clicked() {
+            actions.push(Action::Maximise(tile.active));
+        }
         let shown = if tile.active == Panel::Timeline && sound_in_timeline { Panel::Sound } else { tile.active };
         draw_panel(app, ui, shown, content);
+        if app.editor.maximised == Some(tile.active) && IconButton::new(Icon::CornersIn, "Restore panel").size(24.0, 14.0).show_at(ui, Rect::from_min_size(egui::pos2(r.right() - 30.0, r.top() + 3.0), Vec2::splat(24.0))).clicked() {
+            actions.push(Action::Maximise(tile.active));
+        }
     }
     if !lay.tiles.iter().any(|t| t.active == Panel::Viewer) {
         // The Viewer is a tab behind another: toasts and the viewport's keys
@@ -331,7 +460,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect, narrow: bool, rt
 
     // Splitters, over the tiles.
     let mut changed = false;
-    for s in &lay.splitters {
+    for s in &draw.splitters {
         let line = scr(s.rect);
         let vertical = s.axis == Axis::Row;
         let (d, dbl, _) = super::splitter(ui, Id::unique(("dock-splitter", &s.path, s.before, s.after)), line, vertical);
@@ -345,16 +474,19 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect, narrow: bool, rt
     let _ = changed;
 
     // A drag in progress: the overlay, and the drop on release.
-    if app.editor.dock_drag.is_some() {
+    if app.editor.dock_drag.is_some() && app.editor.maximised.is_none() {
         drag_overlay(app, ui, &lay, body, rtl, &hide);
     }
     for a in actions {
         match a {
+            // Nowhere to drop while one panel fills the dock.
+            Action::Drag(_) if app.editor.maximised.is_some() => {}
             Action::Drag(p) => {
                 ctx.data_mut(|d| d.remove::<bool>(Id::unique("dock-drag-cancelled")));
                 app.editor.dock_drag = Some(DockDrag { panel: p });
             }
             Action::Menu(p, anchor) => open_menu(&ctx, p, anchor, false),
+            Action::Maximise(p) => toggle_maximised_panel(app, &ctx, p),
             Action::Activate(p) => {
                 app.editor.dock.activate(p);
             }
@@ -377,6 +509,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect, narrow: bool, rt
 }
 
 enum Action {
+    Maximise(Panel),
     Drag(Panel),
     Menu(Panel, Rect),
     Activate(Panel),
@@ -458,6 +591,9 @@ fn tab_cells(ui: &mut egui::Ui, tile: &Tile, strip: Rect, rtl: bool, t: &theme::
         }
         if resp.clicked() {
             actions.push(Action::Activate(p));
+        }
+        if resp.double_clicked() {
+            actions.push(Action::Maximise(p));
         }
         if resp.middle_clicked() && p.closable() {
             actions.push(Action::Close(p));
@@ -707,6 +843,8 @@ fn move_menu(app: &mut StudioApp, ctx: &egui::Context, p: Panel, lay: &Layout, r
     let mut close_it = false;
     let mut pop = false;
     let mut back = false;
+    let mut maximise = false;
+    let maximised = app.editor.maximised == Some(p);
     let popped = app.editor.dock.is_popped(p);
     let t = theme::tokens(ctx);
     kit::popover(ctx, id, anchor, kit::Side::Below, 272.0, |ui| {
@@ -757,6 +895,9 @@ fn move_menu(app: &mut StudioApp, ctx: &egui::Context, p: Panel, lay: &Layout, r
         if p.floats() && app.editor.dock.contains(p) && MenuItem::new("Float in a window").icon(Icon::ArrowSquareOut).show(ui).clicked() {
             float_it = true;
         }
+        if !popped && MenuItem::new("Maximise panel").checked(maximised).shortcut("⌘\\").icon(Icon::CornersOut).show(ui).clicked() {
+            maximise = true;
+        }
         if p.closable() && MenuItem::new("Close panel").icon(Icon::X).show(ui).clicked() {
             close_it = true;
         }
@@ -770,6 +911,9 @@ fn move_menu(app: &mut StudioApp, ctx: &egui::Context, p: Panel, lay: &Layout, r
     } else if back {
         kit::set_open(ctx, id, false);
         app.editor.dock.dock_back(p, lay);
+    } else if maximise {
+        kit::set_open(ctx, id, false);
+        toggle_maximised_panel(app, ctx, p);
     } else if float_it {
         kit::set_open(ctx, id, false);
         float(app, ctx, p);
@@ -903,21 +1047,6 @@ pub fn float_grip(app: &mut StudioApp, ui: &mut egui::Ui, p: Panel) {
 /// right-to-left window).
 fn on_screen(lay: &Layout, r: Rect) -> Rect {
     if crate::i18n::is_rtl() { crate::i18n::mirror(r, lay.body) } else { r }
-}
-
-/// Layout ▸ Move panel: the open panels, each opening its Move menu.
-pub fn move_panel_items(app: &StudioApp, ui: &mut egui::Ui) -> Option<(Panel, Rect)> {
-    let lay = app.editor.dock_layout.as_ref()?;
-    let mut out = None;
-    for tile in &lay.tiles {
-        for p in &tile.panels {
-            if MenuItem::new(p.name()).reserve_icon().show(ui).clicked() {
-                let r = on_screen(lay, tile.rect);
-                out = Some((*p, Rect::from_min_size(r.min, Vec2::new(r.width(), header_h(*p).min(r.height())))));
-            }
-        }
-    }
-    out
 }
 
 /// The AI's `layout` tool, run by the window (see `agent::live`).
