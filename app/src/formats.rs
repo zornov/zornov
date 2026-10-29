@@ -39,7 +39,7 @@ pub enum Format {
     DnxHr,
     /// DNxHR 444 (10-bit 4:4:4) in QuickTime.
     DnxHr444,
-    /// AV1 in MP4 from Studio's own encoder (early: key frames only).
+    /// AV1 in MP4 from Studio's own encoder (early: constant quality, no rate control).
     Av1,
 }
 
@@ -91,7 +91,7 @@ impl Format {
     /// A short honest note shown under the format, when it needs one.
     pub fn note(self) -> Option<&'static str> {
         match self {
-            Format::Av1 => Some("Early encoder: larger files, key frames only."),
+            Format::Av1 => Some("Early encoder: slower than H.264, no rate control yet."),
             _ => None,
         }
     }

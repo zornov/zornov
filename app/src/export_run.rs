@@ -234,6 +234,8 @@ fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistr
                 _ if req.format == Format::Av1 => {
                     let mut acfg = studio_av1_enc::Config::new(w, h);
                     acfg.fps = (fps_num, fps_den);
+                    // A key frame every two seconds: a place to seek to, as in the other MP4 formats.
+                    acfg.keyint = (cfg.gop * 2).max(1);
                     acfg.rate = studio_av1_enc::RateMode::Cqp(Format::av1_base_q_idx(req.quality));
                     let enc = studio_av1_enc::Encoder::new(acfg).map_err(|e| format!("AV1 encoder: {e:?}"))?;
                     // BT.709 limited range, as the encoder's colour conversion writes it.
@@ -683,7 +685,9 @@ mod tests {
         assert_eq!(v.samples.len(), 96, "4 s at 24 fps");
         let secs = v.samples.iter().map(|s| s.duration as f64).sum::<f64>() / v.timescale as f64;
         assert!((secs - 4.0).abs() < 0.05, "video lasts {secs:.3} s");
-        assert!(v.samples.iter().all(|s| s.sync), "key frames only");
+        assert!(v.samples[0].sync, "the first picture is a key frame");
+        let keys = v.samples.iter().filter(|s| s.sync).count();
+        assert!((2..96).contains(&keys), "a key frame every 2 s, P frames between ({keys} of 96)");
         assert!(movie.audio().is_some(), "the sound is muxed like the other MP4 formats");
 
         // Decode every sample with studio-av1.

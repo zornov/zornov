@@ -93,7 +93,7 @@ fn bitrate_mbps(s: &ExportState, w: u32, h: u32, fps: f32) -> f32 {
         Format::Gif => 0.25,
         Format::H264 => 0.1,
         Format::Hevc10 => 0.07,
-        // Key frames only, so far: several times H.264's size.
+        // Constant quantiser, no rate control: a rough guide only.
         Format::Av1 => 0.45,
         Format::M4a => 0.0,
         Format::ProRes422Hq | Format::DnxHr | Format::DnxHrHq => 1.1,
@@ -398,7 +398,7 @@ mod tests {
         h.frames(4);
         let labels = h.labels();
         assert!(labels.iter().any(|l| l.contains("AV1 (MP4)")), "the format menu shows AV1: {labels:?}");
-        assert!(labels.iter().any(|l| l.contains("Early encoder: larger files, key frames only.")), "the note is shown: {labels:?}");
+        assert!(labels.iter().any(|l| l.contains("Early encoder: slower than H.264, no rate control yet.")), "the note is shown: {labels:?}");
         assert!(labels.iter().any(|l| l.contains("Quality")), "AV1 has a quality control");
     }
 }
