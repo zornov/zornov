@@ -1050,81 +1050,24 @@ pub fn add(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, a
         return;
     }
     let t = at.unwrap_or(app.editor.playhead);
-    let p = &app.doc.project;
-    let lane_of = |kind: LaneKind, prefer_last: bool| {
-        let mut ls = p.lanes.iter().filter(|l| l.kind == kind);
-        if prefer_last { ls.last().map(|l| l.id) } else { ls.next().map(|l| l.id) }
-    };
-    let mut clip = match rail {
-        RailItem::Media => {
-            let mi = p.media[i].clone();
-            let kind = if mi.kind == MediaKind::Audio { ClipKind::Audio } else { ClipKind::Video };
-            let lane = lane.or_else(|| if kind == ClipKind::Audio { lane_of(LaneKind::Audio, false) } else { p.spine() });
-            new_clip(lane, t, media_clip_len(mi.kind, mi.dur), kind, mi.name.rsplit_once('.').map_or(mi.name.as_str(), |(a, _)| a), Some(mi.id))
-        }
-        RailItem::Text => {
-            let preset = &studio_text::styles::catalogue()[i];
-            let mut c = new_clip(lane.or_else(|| lane_of(LaneKind::Visual, false)), t, 4 * SEC, ClipKind::Title, &preset.name, None);
-            c.text = if preset.sample.chars().count() <= 24 { preset.sample.clone() } else { "Your title".into() };
-            c.text_style = Some(preset.id.clone());
-            c.extra.text_size = preset.style.size.clamp(5.0, 300.0);
-            c
-        }
-        RailItem::Assets => {
-            let mut c = new_clip(lane.or_else(|| lane_of(LaneKind::Visual, true)), t, 3 * SEC, ClipKind::Title, view::ASSETS[i], None);
-            c.transform.scale = 30.0;
-            c
-        }
-        RailItem::Audio => {
-            let d = (view::SOUNDS[i].1 as f64 * SEC as f64) as Time;
-            // Sounds are generated; until the content library ships audio,
-            // they use the sample music item if the project has one.
-            let media = p.media.iter().find(|m| m.kind == MediaKind::Audio).map(|m| m.id);
-            let Some(media) = media else {
-                kit::push(ctx, "Import an audio file first", None, Some(Icon::Info));
-                return;
-            };
-            new_clip(lane.or_else(|| lane_of(LaneKind::Audio, true)), t, d.min(30 * SEC), ClipKind::Audio, view::SOUNDS[i].0, Some(media))
-        }
-        RailItem::Effects | RailItem::Looks => {
-            let item = if rail == RailItem::Effects { catalogue::effects()[i] } else { catalogue::looks()[i] };
-            let mut c = new_clip(lane.or_else(|| lane_of(LaneKind::Visual, true)), t, 4 * SEC, ClipKind::Fx, item.name, None);
-            if rail == RailItem::Effects {
-                c.effects = vec![view::Effect::new(item.id)];
-            } else {
-                c.look = Some(item.id.into());
-            }
-            c
-        }
+    match rail {
         RailItem::Story => return,
         RailItem::Motions | RailItem::Cuts | RailItem::Ai => {
             apply(app, ctx, rail, i, None);
             return;
         }
-    };
-    let Some(lane) = clip.lane_opt() else { return };
-    clip.lane = lane;
-    let name = clip.name.clone();
-    let spine = p.spine() == Some(lane);
-    // On the spine, insert at the nearest cut; later clips move along.
-    let cut = p.clips.iter().filter(|c| c.lane == lane).flat_map(|c| [c.start, c.end()]).min_by_key(|x| (x - t).abs()).unwrap_or(0);
-    let new_id = app.doc.alloc_id() as u32;
-    clip.id = new_id;
-    let ok = if spine {
-        clip.start = cut;
-        let mc = crate::bridge::new_clip(&app.doc.model, &clip);
-        let seq = app.doc.seq();
-        app.doc.apply("Add clip", m::Edit::Insert { seq, lane: Some(m::LaneId(lane as u64)), at: cut, clip: Box::new(mc) })
-    } else {
-        app.doc.edit("Add clip", |p| {
-            p.clips.push(clip);
-            // Free lanes do not overlap: find room, adding a lane if needed.
-            p.resolve_overlap(new_id);
-        })
-    };
-    if ok {
-        app.editor.selection = vec![new_id];
-        app.editor.undo_toast = Some(kit::push(ctx, crate::i18n::tf(format!("Added {name}")), Some("Undo"), Some(Icon::Plus)));
+        _ => {}
+    }
+    // One implementation of "add this item to the timeline", shared with the agent.
+    let panel = crate::services::library::Panel::ALL[rail.index()];
+    match crate::services::library::add(&mut app.doc, panel, i, t, lane) {
+        Ok(out) => {
+            app.editor.selection = out.select;
+            app.editor.undo_toast = Some(kit::push(ctx, out.message, Some("Undo"), Some(Icon::Plus)));
+        }
+        Err(r) => {
+            kit::push(ctx, r.0, None, Some(Icon::Info));
+        }
     }
 }
 
