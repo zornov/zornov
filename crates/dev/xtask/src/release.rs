@@ -14,7 +14,7 @@ use std::process::Command;
 use studio_update::feed::{self, Entry, Feed};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DOCS: &str = "docs/releasing.md";
+pub const DOCS: &str = "docs/releasing.md";
 
 pub fn release_dir() -> PathBuf {
     crate::root().join("dist/release")
@@ -270,7 +270,7 @@ fn keychain_identities() -> Vec<(String, String)> {
 }
 
 /// Runs a tool, hiding its arguments from the output (they can name keys).
-fn run(what: &str, cmd: &mut Command) -> Result<std::process::Output, String> {
+pub fn run(what: &str, cmd: &mut Command) -> Result<std::process::Output, String> {
     let out = cmd.output().map_err(|e| format!("{what}: cannot run: {e}"))?;
     if out.status.success() {
         Ok(out)
@@ -382,6 +382,9 @@ pub fn release_mac(args: &[String]) -> Result<String, String> {
         notarize(n, &zip)?;
         let _ = std::fs::remove_file(&zip);
         staple(&app)?;
+    }
+    if cfg.identity != "-" {
+        crate::check_release::check_release(&[app.display().to_string()].into_iter().chain((!do_notarize).then(|| "--no-notarize".to_owned())).collect::<Vec<_>>())?;
     }
 
     // The update archive comes from the finished (stapled) app.

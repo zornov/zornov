@@ -72,6 +72,13 @@ the signed update archive. Options: `--no-notarize` (signed DMG, no Apple
 round trip), `--identity ID`, `--exe PATH` (use a binary you already built).
 Without credentials it fails with the list of what is missing.
 
+`release-mac` ends its signing with `cargo xtask check-release` on the stapled
+app (host paths, stripped symbols, entitlements, Developer ID signature,
+linked libraries, update key and version), so a failing app never reaches the
+DMG. Run `cargo xtask check-release [APP] [--no-notarize]` on any
+`Zornov.app` (default `dist/release/macos/Zornov.app`); it lists every failure
+with its fix. An ad hoc build (`--identity -`) skips it.
+
 The entitlements file asks for only the microphone (voice-overs). Zornov loads
 no third-party libraries and generates no code at run time, so it needs
 neither library-validation nor JIT exceptions; add one there only if a new
