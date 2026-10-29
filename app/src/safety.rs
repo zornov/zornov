@@ -274,20 +274,24 @@ pub fn alive(pid: u32) -> bool {
     pid != 0 && (unsafe { libc::kill(pid as i32, 0) } == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
 }
 
-/// Writes this window's state (cheap; call when it changes).
-pub fn save_session(root: &Path, s: &Session) {
+/// Writes this window's state (cheap; call when it changes). The error says
+/// why crash protection is off, so the caller can tell the person.
+pub fn save_session(root: &Path, s: &Session) -> Result<(), String> {
     let dir = sessions_dir(root);
-    let _ = std::fs::create_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not prepare crash protection: {e}"))?;
     let mut s = s.clone();
     s.saved_ms = now_ms();
-    if let Ok(b) = serde_json::to_vec(&s) {
-        let _ = m::file::write_atomic(&dir.join(format!("{}.json", s.pid)), &b);
-    }
+    let bytes = serde_json::to_vec(&s).map_err(|e| e.to_string())?;
+    m::file::write_atomic(&dir.join(format!("{}.json", s.pid)), &bytes).map_err(|e| format!("Could not write the crash note: {e}"))
 }
 
-/// A clean quit: nothing to recover.
-pub fn end_session(root: &Path, pid: u32) {
-    let _ = std::fs::remove_file(sessions_dir(root).join(format!("{pid}.json")));
+/// A clean quit: nothing to recover. A note that is already gone is fine;
+/// any other failure is returned (a stale note would offer a false recovery).
+pub fn end_session(root: &Path, pid: u32) -> Result<(), String> {
+    match std::fs::remove_file(sessions_dir(root).join(format!("{pid}.json"))) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("Could not clear the crash note: {e}")),
+        _ => Ok(()),
+    }
 }
 
 /// Sessions whose window is gone without a clean quit, newest first.
@@ -304,8 +308,8 @@ pub fn crashed(root: &Path) -> Vec<Session> {
 }
 
 /// Forgets a crashed session once it has been dealt with.
-pub fn dismiss(root: &Path, pid: u32) {
-    end_session(root, pid);
+pub fn dismiss(root: &Path, pid: u32) -> Result<(), String> {
+    end_session(root, pid)
 }
 
 /// What the newest autosave holds that the project file does not (an
@@ -1145,7 +1149,7 @@ mod tests {
         let (root, _) = project_with_media(&d, &[]);
         let home = d.join("studio-home");
         // A window that is still running is not a crash.
-        save_session(&home, &Session { pid: std::process::id(), project: root.clone(), playhead: 5_000_000, selection: vec![3], ..Default::default() });
+        save_session(&home, &Session { pid: std::process::id(), project: root.clone(), playhead: 5_000_000, selection: vec![3], ..Default::default() }).unwrap();
         assert!(crashed(&home).is_empty());
         // One whose process is gone is; it remembers where the person was.
         let dead = {
@@ -1153,14 +1157,41 @@ mod tests {
             c.wait().unwrap();
             c.id()
         };
-        save_session(&home, &Session { pid: dead, project: root.clone(), playhead: 7_250_000, selection: vec![1, 2], sequence: 4, ..Default::default() });
+        save_session(&home, &Session { pid: dead, project: root.clone(), playhead: 7_250_000, selection: vec![1, 2], sequence: 4, ..Default::default() }).unwrap();
         let found = crashed(&home);
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].playhead, found[0].selection.clone(), found[0].sequence), (7_250_000, vec![1, 2], 4));
-        dismiss(&home, dead);
+        dismiss(&home, dead).unwrap();
         assert!(crashed(&home).is_empty());
-        end_session(&home, std::process::id());
+        end_session(&home, std::process::id()).unwrap();
+        end_session(&home, std::process::id()).expect("an absent note is not an error");
         assert!(!sessions_dir(&home).join(format!("{}.json", std::process::id())).exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_crash_note_that_cannot_be_written_says_so() {
+        let d = scratch("sess-fail");
+        std::fs::create_dir_all(&d).unwrap();
+        // The "home" is a file, so the notes folder cannot exist under it.
+        let home = d.join("not-a-folder");
+        std::fs::write(&home, b"x").unwrap();
+        let err = save_session(&home, &Session { pid: 1, ..Default::default() }).unwrap_err();
+        assert!(err.contains("crash"), "{err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn work_after_the_last_save_is_found_in_the_newest_autosave() {
+        let d = scratch("newer");
+        let (root, _) = project_with_media(&d, &[]);
+        assert!(newer_autosave(&root).is_none(), "nothing newer than the save");
+        let pf = ProjectFolder::new(&root);
+        let later = now_ms() + 60_000;
+        std::fs::create_dir_all(pf.versions_dir()).unwrap();
+        std::fs::copy(pf.project_file(), pf.versions_dir().join(format!("autosave-{later:016}.json"))).unwrap();
+        let found = newer_autosave(&root).expect("an autosave from after the save");
+        assert_eq!(found.kind, "autosave");
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -54,28 +54,29 @@ impl StudioApp {
     /// At start: if the last window ended without a clean quit, reopen its
     /// project where it was. Returns whether something was recovered.
     pub fn recover_after_crash(&mut self, ctx: &egui::Context) -> bool {
-        if self.cli.shot.is_some() || self.cli.fresh || self.cli.open.is_some() {
+        // A project the command line (or Finder) already opened is what the
+        // person asked for: recovery does not replace it.
+        if self.cli.shot.is_some() || self.cli.fresh || self.cli.open.is_some() || self.doc.folder.is_some() {
             return false;
         }
         let root = studio_paths::studio();
         let found = safety::crashed(&root);
-        // Only the newest matters; the rest are forgotten so they do not come back.
+        // The newest comes back now; the others stay noted and come back the
+        // next time Zornov starts, so none is dropped unseen.
         let Some(session) = found.first().cloned() else { return false };
-        for s in &found {
-            safety::dismiss(&root, s.pid);
-        }
+        let more = found.len() - 1;
+        forget(ctx, &root, session.pid);
         // Work saved after the last full save (an autosave newer than the project file) wins.
         let newer = safety::newer_autosave(&session.project);
         self.open_folder(ctx, Some(session.project.clone()));
         if self.doc.folder.is_none() {
             return false;
         }
+        crate::files::clear_offer(ctx);
         if let Some(snap) = &newer {
-            if let Ok(file) = std::fs::read_to_string(&snap.path).map_err(|e| e.to_string()).and_then(|t| studio_model::file::from_json(&t).map_err(|e| e.to_string())) {
-                let folder = self.doc.folder.clone();
-                self.open_model(file.project);
-                self.doc.folder = folder;
-            }
+            // As an edit on top of the saved file: the project is unsaved
+            // again (quit asks, autosave writes it) and one undo undoes it.
+            self.restore_autosave(ctx, &snap.path);
         }
         let e = &mut self.editor;
         e.playhead = session.playhead.clamp(0, self.doc.project.duration().max(0));
@@ -91,9 +92,19 @@ impl StudioApp {
             e.library_query = q.to_owned();
         }
         let name = self.doc.project.name.clone();
-        kit::push(ctx, format!("Zornov closed unexpectedly. {name} is back where you were{}.", if newer.is_some() { ", with your last unsaved changes" } else { "" }), None, Some(Icon::CheckCircle));
+        let tail = match more {
+            0 => String::new(),
+            1 => "; 1 more project to recover next time".into(),
+            n => format!("; {n} more projects to recover next time"),
+        };
+        kit::push(ctx, crate::i18n::tf(format!("Zornov closed unexpectedly; {name} is back where you were{}{tail}", if newer.is_some() { ", with your last unsaved changes" } else { "" })), None, Some(Icon::CheckCircle));
         true
     }
+}
+
+/// A crashed session dealt with: its note goes.
+pub fn forget(_ctx: &egui::Context, root: &std::path::Path, pid: u32) {
+    safety::dismiss(root, pid);
 }
 
 /// A clean quit: there is nothing to recover.
@@ -131,5 +142,22 @@ mod tests {
         assert!(!too_soon(None));
         assert!(too_soon(Some(Instant::now())));
         assert!(!too_soon(Instant::now().checked_sub(Duration::from_secs(1))));
+    }
+
+    /// PR-8: work recovered from an autosave comes back as an edit, so the
+    /// project reads unsaved (quit asks, autosave writes it) and one undo
+    /// undoes it.
+    #[test]
+    fn recovered_changes_are_an_unsaved_undoable_edit() {
+        let mut doc = crate::services::project::new_custom("R", 640, 360, 30.0);
+        let mut other = crate::services::project::new_custom("R", 640, 360, 30.0);
+        other.edit("Rename", |p| p.name = "R recovered".into());
+        let backup = other.model.clone();
+        assert!(!doc.dirty());
+        doc.take_in("Recovered changes", &backup).unwrap();
+        assert!(doc.dirty());
+        assert_eq!(doc.project.name, "R recovered");
+        doc.undo();
+        assert_eq!(doc.project.name, "R");
     }
 }
