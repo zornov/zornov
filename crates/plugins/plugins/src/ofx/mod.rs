@@ -27,6 +27,7 @@ pub mod bundle;
 pub mod host;
 pub mod worker;
 
+use std::ffi::OsString;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -118,11 +119,50 @@ impl Settings {
     }
 }
 
-/// How to start a worker: `STUDIO_OFX_WORKER`, a `studio-ofx-worker` next
-/// to this program, or this program itself with `ofx-worker`.
-fn worker_command(bundle: &Path) -> Command {
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("zornov"));
-    let program = std::env::var_os("STUDIO_OFX_WORKER").map(PathBuf::from).or_else(|| Some(exe.with_file_name("studio-ofx-worker")).filter(|p| p.is_file())).unwrap_or(exe);
+/// A bundled worker program that may be launched: a regular file (not a
+/// symlink) in the same folder as this program, and on unix not writable by
+/// group or others. Returns its canonical path.
+fn verified_sibling(candidate: &Path, exe_dir: &Path) -> Option<PathBuf> {
+    if !std::fs::symlink_metadata(candidate).ok()?.file_type().is_file() {
+        return None;
+    }
+    let canon = candidate.canonicalize().ok()?;
+    if canon.parent()? != exe_dir {
+        return None;
+    }
+    let meta = std::fs::metadata(&canon).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o022 != 0 {
+            return None;
+        }
+    }
+    Some(canon)
+}
+
+/// Which program runs a worker: `env` (`STUDIO_OFX_WORKER`) only when
+/// `allow_env` (debug and test builds); otherwise a verified
+/// `studio-ofx-worker` next to `exe`, else `exe` itself. Never a `PATH`
+/// lookup: an `exe` that cannot be resolved is an error.
+fn worker_program(env: Option<OsString>, exe: &Path, allow_env: bool) -> Result<PathBuf, String> {
+    if allow_env {
+        if let Some(p) = env {
+            return Ok(PathBuf::from(p));
+        }
+    }
+    let exe = exe.canonicalize().map_err(|e| format!("could not locate the OFX worker: {e}"))?;
+    let dir = exe.parent().ok_or("could not locate the OFX worker")?;
+    Ok(verified_sibling(&dir.join("studio-ofx-worker"), dir).unwrap_or(exe))
+}
+
+/// How to start a worker (see `worker_program`).
+fn worker_command(bundle: &Path) -> Result<Command, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("could not locate the OFX worker: {e}"))?;
+    let program = worker_program(std::env::var_os("STUDIO_OFX_WORKER"), &exe, cfg!(debug_assertions) || cfg!(test))?;
     let mut c = Command::new(program);
     c.arg("ofx-worker").arg(bundle);
     // `studio-ofx-worker` is a console program; the window must not get one.
@@ -132,7 +172,7 @@ fn worker_command(bundle: &Path) -> Command {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         c.creation_flags(CREATE_NO_WINDOW);
     }
-    c
+    Ok(c)
 }
 
 struct Worker {
@@ -143,7 +183,7 @@ struct Worker {
 
 impl Worker {
     fn start(bundle: &Path) -> Result<(Worker, Value), String> {
-        let mut child = worker_command(bundle).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| format!("could not start the OFX worker: {e}"))?;
+        let mut child = worker_command(bundle)?.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| format!("could not start the OFX worker: {e}"))?;
         let stdin = BufWriter::new(child.stdin.take().ok_or("no stdin")?);
         let mut stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
         let (tx, rx) = channel();
@@ -636,5 +676,101 @@ pub fn worker_if_asked() {
         && let Some(b) = args.next()
     {
         worker::main(Path::new(&b));
+    }
+}
+
+#[cfg(test)]
+mod worker_program_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("zornov-ofx-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn touch(p: &Path) {
+        std::fs::write(p, b"x").unwrap();
+    }
+
+    #[cfg(unix)]
+    fn chmod(p: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn env_honoured_when_allowed() {
+        let d = tmp("env-on");
+        let exe = d.join("zornov");
+        touch(&exe);
+        let got = worker_program(Some("/opt/custom-worker".into()), &exe, true).unwrap();
+        assert_eq!(got, PathBuf::from("/opt/custom-worker"));
+    }
+
+    #[test]
+    fn env_ignored_when_not_allowed() {
+        let d = tmp("env-off");
+        let exe = d.join("zornov");
+        let evil = d.join("evil");
+        touch(&exe);
+        touch(&evil);
+        let got = worker_program(Some(evil.clone().into_os_string()), &exe, false).unwrap();
+        assert_ne!(got, evil);
+        assert_eq!(got, exe);
+    }
+
+    #[test]
+    fn sibling_chosen_when_valid() {
+        let d = tmp("sibling");
+        let exe = d.join("zornov");
+        let sib = d.join("studio-ofx-worker");
+        touch(&exe);
+        touch(&sib);
+        #[cfg(unix)]
+        chmod(&sib, 0o755);
+        assert_eq!(worker_program(None, &exe, false).unwrap(), sib);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_sibling_rejected() {
+        let d = tmp("symlink");
+        let exe = d.join("zornov");
+        let target = d.join("elsewhere");
+        touch(&exe);
+        touch(&target);
+        std::os::unix::fs::symlink(&target, d.join("studio-ofx-worker")).unwrap();
+        assert_eq!(worker_program(None, &exe, false).unwrap(), exe);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn world_writable_sibling_rejected() {
+        let d = tmp("writable");
+        let exe = d.join("zornov");
+        let sib = d.join("studio-ofx-worker");
+        touch(&exe);
+        touch(&sib);
+        chmod(&sib, 0o757);
+        assert_eq!(worker_program(None, &exe, false).unwrap(), exe);
+        chmod(&sib, 0o775);
+        assert_eq!(worker_program(None, &exe, false).unwrap(), exe);
+    }
+
+    #[test]
+    fn falls_back_to_exe() {
+        let d = tmp("fallback");
+        let exe = d.join("zornov");
+        touch(&exe);
+        assert_eq!(worker_program(None, &exe, false).unwrap(), exe);
+    }
+
+    #[test]
+    fn unresolvable_exe_is_an_error_not_a_path_lookup() {
+        let d = tmp("noexe");
+        assert!(worker_program(None, &d.join("missing"), false).is_err());
+        assert!(worker_program(None, Path::new("zornov"), false).is_err());
     }
 }
