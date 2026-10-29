@@ -47,7 +47,10 @@ impl StudioApp {
         if last.as_ref().is_some_and(|(_, s)| *s == now) {
             return;
         }
-        safety::save_session(&studio_paths::studio(), &now);
+        match safety::save_session(&studio_paths::studio(), &now) {
+            Ok(()) => PROTECTION.lock().unwrap_or_else(|e| e.into_inner()).ok(),
+            Err(e) => PROTECTION.lock().unwrap_or_else(|e| e.into_inner()).failed(e),
+        }
         *last = Some((Instant::now(), now));
     }
 
@@ -103,13 +106,49 @@ impl StudioApp {
 }
 
 /// A crashed session dealt with: its note goes.
-pub fn forget(_ctx: &egui::Context, root: &std::path::Path, pid: u32) {
-    safety::dismiss(root, pid);
+pub fn forget(ctx: &egui::Context, root: &std::path::Path, pid: u32) {
+    if let Err(e) = safety::dismiss(root, pid) {
+        crate::files::say_error(ctx, crate::i18n::tf(e));
+    }
+}
+
+/// Whether the crash note can be written: the person hears once when it
+/// cannot, not at every attempt (twice a second).
+#[derive(Default)]
+pub struct Protection {
+    warned: bool,
+    message: Option<String>,
+}
+
+impl Protection {
+    pub fn failed(&mut self, why: String) {
+        if !self.warned {
+            self.warned = true;
+            self.message = Some(why);
+        }
+    }
+    pub fn ok(&mut self) {
+        self.warned = false;
+    }
+    pub fn take(&mut self) -> Option<String> {
+        self.message.take()
+    }
+}
+
+static PROTECTION: Mutex<Protection> = Mutex::new(Protection { warned: false, message: None });
+
+/// "Crash protection is off", once per run of failures.
+pub fn take_protection_notice() -> Option<String> {
+    PROTECTION.lock().unwrap_or_else(|e| e.into_inner()).take().map(|why| format!("Crash protection is off: {why}"))
 }
 
 /// A clean quit: there is nothing to recover.
 pub fn clean_quit() {
-    safety::end_session(&studio_paths::studio(), std::process::id());
+    // Quitting: there is no window left to tell; a note left behind only
+    // offers a recovery that was not needed.
+    if let Err(e) = safety::end_session(&studio_paths::studio(), std::process::id()) {
+        eprintln!("zornov: {e}");
+    }
 }
 
 static LIBRARY: Mutex<Option<(Instant, std::path::PathBuf, u64)>> = Mutex::new(None);
@@ -142,6 +181,21 @@ mod tests {
         assert!(!too_soon(None));
         assert!(too_soon(Some(Instant::now())));
         assert!(!too_soon(Instant::now().checked_sub(Duration::from_secs(1))));
+    }
+
+    /// The crash note failing is told once, not every half second.
+    #[test]
+    fn crash_protection_off_is_told_once_per_run_of_failures() {
+        let mut p = Protection::default();
+        p.failed("disk full".into());
+        assert_eq!(p.take().as_deref(), Some("disk full"));
+        for _ in 0..10 {
+            p.failed("disk full".into());
+        }
+        assert!(p.take().is_none(), "no repeat while it keeps failing");
+        p.ok();
+        p.failed("read-only".into());
+        assert_eq!(p.take().as_deref(), Some("read-only"), "told again after it worked in between");
     }
 
     /// PR-8: work recovered from an autosave comes back as an edit, so the
