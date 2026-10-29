@@ -236,6 +236,8 @@ pub struct Runtime {
     pub owner: Option<std::path::PathBuf>,
     pub loaded: bool,
     pub dirty: bool,
+    /// When the file was last written (navigating changes it every frame).
+    pub saved_at: Option<std::time::Instant>,
     pub glide: Option<Glide>,
     /// Navigation ended at this time (seconds): the picture refines to
     /// full quality a moment after.
@@ -420,6 +422,12 @@ pub fn follow(doc: &Doc) {
             return;
         }
         let (cw, ch) = (doc.project.width.max(1) as f64, doc.project.height.max(1) as f64);
+        // A change still waiting for the next write goes to the project it was made in.
+        if w.rt.dirty {
+            if let (Some(old), Ok(t)) = (w.rt.owner.as_ref(), serde_json::to_string_pretty(&*w)) {
+                let _ = std::fs::write(old.join(FILE), t);
+            }
+        }
         let read = owner.as_ref().and_then(|o| std::fs::read_to_string(o.join(FILE)).ok()).and_then(|s| serde_json::from_str::<Workspace>(&s).ok());
         *w = read.unwrap_or_else(|| Workspace::for_canvas(cw, ch));
         w.rt.owner = owner;
@@ -427,14 +435,30 @@ pub fn follow(doc: &Doc) {
     });
 }
 
-/// Writes the workspace beside the project when it changed.
+/// The least time between two writes of the workspace file.
+const SAVE_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Whether a write may happen now, `last` being the one before.
+fn save_due(last: Option<std::time::Instant>) -> bool {
+    last.is_none_or(|t| t.elapsed() >= SAVE_EVERY)
+}
+
+/// Whether a change is waiting for [`save`] to be due (the window asks for
+/// another frame then, so the last change of a drag is not left behind).
+pub fn save_waiting() -> bool {
+    with(|w| w.rt.dirty && w.rt.owner.is_some())
+}
+
+/// Writes the workspace beside the project when it changed, at most twice a
+/// second.
 pub fn save(doc: &Doc) {
     let Some(owner) = owner_of(doc) else { return };
     let text = with(|w| {
-        if !w.rt.dirty || w.rt.owner.as_ref() != Some(&owner) {
+        if !w.rt.dirty || w.rt.owner.as_ref() != Some(&owner) || !save_due(w.rt.saved_at) {
             return None;
         }
         w.rt.dirty = false;
+        w.rt.saved_at = Some(std::time::Instant::now());
         serde_json::to_string_pretty(w).ok()
     });
     if let Some(t) = text {
@@ -1066,6 +1090,13 @@ pub fn change(doc: &mut Doc, ids: &[u64], t: Time, c: &Change, pivot: Option<[f6
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_workspace_file_is_written_at_most_twice_a_second() {
+        assert!(save_due(None));
+        assert!(!save_due(Some(std::time::Instant::now())));
+        assert!(save_due(std::time::Instant::now().checked_sub(SAVE_EVERY * 2)));
+    }
 
     #[test]
     fn the_workspace_round_trips_through_its_file() {

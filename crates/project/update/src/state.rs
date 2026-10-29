@@ -14,7 +14,7 @@ use crate::feed;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -63,6 +63,7 @@ pub fn settings() -> Settings {
 }
 
 fn save(s: &Settings) {
+    forget_disk();
     let _ = std::fs::create_dir_all(apply::updates_dir());
     if let Ok(b) = serde_json::to_vec_pretty(s) {
         let _ = std::fs::write(settings_file(), b);
@@ -95,6 +96,38 @@ static STATE: Mutex<Inner> = Mutex::new(Inner { status: Status::Idle, notes: Str
 
 fn set(status: Status) {
     STATE.lock().unwrap().status = status;
+    forget_disk();
+}
+
+/// What [`snapshot`] reads from disk: the settings and the version of an
+/// update waiting for a restart.
+type Disk = (Settings, Option<String>);
+
+/// How long the notice may go on with what it read; the frame loop asks
+/// every frame.
+const DISK_TTL: Duration = Duration::from_secs(1);
+
+static DISK: Mutex<Option<(Instant, Disk)>> = Mutex::new(None);
+
+fn read_disk() -> Disk {
+    (settings(), apply::pending().map(|p| p.version))
+}
+
+/// Drops the kept copy, after this process changed what it was read from.
+fn forget_disk() {
+    *DISK.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// `slot` while it is younger than `ttl`, else `read()` (kept in `slot`).
+fn kept<T: Clone>(slot: &mut Option<(Instant, T)>, ttl: Duration, read: impl FnOnce() -> T) -> T {
+    match slot {
+        Some((at, v)) if at.elapsed() < ttl => v.clone(),
+        _ => {
+            let v = read();
+            *slot = Some((Instant::now(), v.clone()));
+            v
+        }
+    }
 }
 
 /// Records a failure the person should hear about (an install at restart
@@ -103,6 +136,8 @@ pub fn fail(why: String) {
     let mut g = STATE.lock().unwrap();
     g.status = Status::Failed(why);
     g.asked = true;
+    drop(g);
+    forget_disk();
 }
 
 /// What Settings shows.
@@ -134,12 +169,12 @@ impl Snapshot {
 }
 
 pub fn snapshot() -> Snapshot {
-    let s = settings();
+    let (s, pending) = kept(&mut DISK.lock().unwrap_or_else(|e| e.into_inner()), DISK_TTL, read_disk);
     let g = STATE.lock().unwrap();
     let mut status = g.status.clone();
     if status == Status::Idle {
-        if let Some(p) = apply::pending() {
-            status = Status::Ready(p.version);
+        if let Some(version) = pending {
+            status = Status::Ready(version);
         }
     }
     Snapshot { status, notes: g.notes.clone(), current: crate::CURRENT_VERSION, auto_check: s.auto_check, last_check: s.last_check, asked: g.asked, snoozed: now() < s.snoozed_until }
@@ -360,6 +395,36 @@ mod tests {
 
     fn cfg(public_key: &str) -> Config {
         Config { feed_url: "https://u.test/feed.json".into(), public_key: public_key.into(), crash_endpoint: String::new() }
+    }
+
+    #[test]
+    fn the_snapshot_reads_the_disk_once_a_second_not_once_a_frame() {
+        let reads = std::cell::Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            reads.get()
+        };
+        let mut slot = None;
+        for _ in 0..1000 {
+            kept(&mut slot, Duration::from_secs(60), read);
+        }
+        assert_eq!(reads.get(), 1);
+        slot = None;
+        assert_eq!(kept(&mut slot, Duration::from_secs(60), read), 2, "a dropped copy is read again");
+        assert_eq!(kept(&mut slot, Duration::ZERO, read), 3, "an old copy is read again");
+    }
+
+    #[test]
+    fn the_snapshot_serves_the_kept_copy_until_it_is_forgotten() {
+        // Only the in-memory side is exercised; the disk side is `kept` above.
+        *DISK.lock().unwrap() = Some((Instant::now(), (Settings { auto_check: true, ..Settings::default() }, None)));
+        assert!(snapshot().auto_check);
+        *DISK.lock().unwrap() = Some((Instant::now(), (Settings { auto_check: false, ..Settings::default() }, Some("9.9.9".into()))));
+        let s = snapshot();
+        assert!(!s.auto_check, "served from the kept copy");
+        assert_eq!(s.status, Status::Ready("9.9.9".into()), "a waiting update shows while idle");
+        forget_disk();
+        assert!(DISK.lock().unwrap().is_none());
     }
 
     fn snap(status: Status, asked: bool, snoozed: bool) -> Snapshot {
