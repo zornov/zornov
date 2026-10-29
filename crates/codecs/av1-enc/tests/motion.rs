@@ -21,10 +21,10 @@ use studio_av1_enc::motion::mvpred::{find_stack, frame_info, predicted_mv};
 use studio_av1_enc::obu::{ObuType, obu, write_frame_header};
 use studio_av1_enc::recon::{FrameBuf, QuantInfo, RefStore};
 use studio_av1_enc::syntax::TileWriter;
-use studio_av1_enc::syntax::coef::{inter_tx_set, plane_tx_type, TxbParams};
+use studio_av1_enc::syntax::coef::{inter_tx_set, intra_tx_set, plane_tx_type, TxbParams};
 use studio_av1_enc::syntax::ctx::{block_size_of, find_tx_size, ContextState};
 use studio_av1_enc::transform::quant::scan_for;
-use studio_av1_enc::types::{BlockMode, CoefBlock, Frame, FrameParams, FrameType, InterDecision, InterSbDecision, SbPos, SeqParams};
+use studio_av1_enc::types::{BlockDecision, BlockMode, CoefBlock, Frame, FrameParams, FrameType, InterDecision, InterSbDecision, SbPos, SeqParams};
 use studio_av1_enc::{Config, Encoder, RateMode};
 
 struct Rng(u64);
@@ -207,9 +207,12 @@ struct Stats {
     big_diffs: usize,
     skips: usize,
     blocks: usize,
+    intra: usize,
 }
 
 struct Gen {
+    /// Out of 10, how many blocks are intra.
+    intra_in_10: u32,
     rng: Rng,
     /// Mirror of the mode info the writer keeps, for the candidate stacks.
     ctx: ContextState,
@@ -219,6 +222,41 @@ struct Gen {
 }
 
 impl Gen {
+    /// A random block: inter, or intra with probability `intra_in_10 / 10`.
+    fn any_block(&mut self, shape: Shape) -> BlockMode {
+        if self.rng.below(10) < self.intra_in_10 {
+            BlockMode::Intra(self.intra_block(shape))
+        } else {
+            BlockMode::Inter(self.block(shape))
+        }
+    }
+
+    fn intra_block(&mut self, (r, c, w4, h4): Shape) -> BlockDecision {
+        let ms = block_size_of(w4, h4).unwrap();
+        let y_mode = self.rng.below(13) as usize;
+        let uv_mode = self.rng.below(13) as usize;
+        let skip = self.rng.below(4) == 0;
+        let tx_luma = MAX_TX_SIZE_RECT[ms] as usize;
+        let (cw, ch) = ((w4 * 4) / 2, (h4 * 4) / 2);
+        let tx_chroma = find_tx_size(cw.min(32), ch.min(32));
+        let mut coefs = Vec::new();
+        if !skip {
+            let set = intra_tx_set(tx_luma);
+            let allowed: Vec<usize> = (0..16).filter(|&t| if set == 0 { t == DCT_DCT } else { TX_TYPE_IN_SET_INTRA[set][t] == 1 }).collect();
+            let luma_type = allowed[self.rng.below(allowed.len() as u32) as usize];
+            coefs.push(random_coefs(&mut self.rng, tx_luma, 0, luma_type));
+            let p = TxbParams { plane: 1, x4: 0, y4: 0, mi_size: ms, y_mode, uv_mode, lossless: false, qidx_nonzero: self.q > 0, is_inter: false, luma_tx_type: DCT_DCT };
+            let chroma_type = plane_tx_type(&p, tx_chroma, DCT_DCT);
+            for plane in 1..3 {
+                coefs.push(random_coefs(&mut self.rng, tx_chroma, plane, chroma_type));
+            }
+        }
+        self.ctx.store_block(r, c, ms, y_mode, skip, tx_luma);
+        self.stats.intra += 1;
+        self.stats.blocks += 1;
+        BlockDecision { mi_row: r as u32, mi_col: c as u32, w4: w4 as u32, h4: h4 as u32, y_mode, uv_mode, tx_size: tx_luma, skip, coefs }
+    }
+
     fn block(&mut self, (r, c, w4, h4): Shape) -> InterDecision {
         let ms = block_size_of(w4, h4).unwrap();
         // mostly LAST, so that neighbours match and the stacks fill up
@@ -287,7 +325,7 @@ impl Gen {
 
 /// Encodes a key frame with the facade and a second, inter frame with random decisions, decodes
 /// both, and checks the second picture against the reconstruction. Returns the stats.
-fn round_trip(w: usize, h: usize, q: u8, seed: u64, split_in_4: u32) -> Stats {
+fn round_trip(w: usize, h: usize, q: u8, seed: u64, split_in_4: u32, intra_in_10: u32) -> Stats {
     let key_src = picture(w, h, seed);
     let mut enc = Encoder::new(Config { rate: RateMode::Cqp(q), speed: 9, ..Config::new(w as u32, h as u32) }).unwrap();
     let key_pkt = enc.push_frame(&key_src, 0).unwrap().remove(0);
@@ -295,22 +333,27 @@ fn round_trip(w: usize, h: usize, q: u8, seed: u64, split_in_4: u32) -> Stats {
 
     let s = seq(w as u32, h as u32);
     let (mi_cols, mi_rows) = (2 * ((w + 7) >> 3), 2 * ((h + 7) >> 3));
-    let mut g = Gen { rng: Rng(seed ^ 0x5eed), ctx: ContextState::new(mi_cols, mi_rows), mv_frame: frame_info(mi_rows, mi_cols), q, stats: Stats::default() };
+    let mut g = Gen { intra_in_10, rng: Rng(seed ^ 0x5eed), ctx: ContextState::new(mi_cols, mi_rows), mv_frame: frame_info(mi_rows, mi_cols), q, stats: Stats::default() };
     let mut refs = RefStore::default();
     refs.refresh(1, Arc::new(to_framebuf(&key_recon)));
     let ref_idx = [0u8; 7];
     let mut recon = FrameBuf::new(w as u32, h as u32, 8);
     recon.quant = QuantInfo { base_q_idx: q, ..Default::default() };
+    recon.enable_intra_edge_filter = false;
     let mut tw = TileWriter::new(&s, q, mi_cols as u32, mi_rows as u32);
     for sr in 0..mi_rows.div_ceil(16) {
         for sc in 0..mi_cols.div_ceil(16) {
             let mut shapes = Vec::new();
             partition(&mut g.rng, split_in_4, sr * 16, sc * 16, BLOCK_64X64, (mi_rows, mi_cols), &mut shapes);
             let mut sb = InterSbDecision::default();
+            recon.begin_sb(SbPos { col: sc as u32, row: sr as u32 });
             for shape in shapes {
-                let d = g.block(shape);
-                recon.reconstruct_inter_block(&refs, &ref_idx, &d);
-                sb.blocks.push(BlockMode::Inter(d));
+                let b = g.any_block(shape);
+                match &b {
+                    BlockMode::Inter(d) => recon.reconstruct_inter_block(&refs, &ref_idx, d),
+                    BlockMode::Intra(d) => recon.reconstruct_block(d),
+                }
+                sb.blocks.push(b);
             }
             tw.write_inter_sb(SbPos { col: sc as u32, row: sr as u32 }, &sb);
         }
@@ -358,7 +401,7 @@ fn inter_frames_decode_bit_exactly() {
     let mut total = Stats::default();
     for (i, &(w, h)) in [(64usize, 64usize), (66, 66), (130, 70), (200, 120), (34, 130), (16, 16)].iter().enumerate() {
         for (j, &q) in [20u8, 100, 220].iter().enumerate() {
-            let s = round_trip(w, h, q, 1000 + (i * 10 + j) as u64, 1 + (i + j) as u32 % 3);
+            let s = round_trip(w, h, q, 1000 + (i * 10 + j) as u64, 1 + (i + j) as u32 % 3, 0);
             for k in 0..4 {
                 total.modes[k] += s.modes[k];
                 total.drl[k] += s.drl[k];
@@ -384,7 +427,7 @@ fn fine_partitions_fill_the_candidate_stacks() {
     // many small blocks with mostly one reference give stacks of up to four candidates
     let mut drl = [0usize; 4];
     for seed in 0..10u64 {
-        let s = round_trip(128, 96, 60, 9000 + seed, 3);
+        let s = round_trip(128, 96, 60, 9000 + seed, 3, 0);
         for k in 0..4 {
             drl[k] += s.drl[k];
         }
@@ -397,8 +440,24 @@ fn fine_partitions_fill_the_candidate_stacks() {
 fn many_seeds_small_frames() {
     for seed in 0..30u64 {
         let (w, h) = (8 + 8 * (seed as usize % 9), 8 + 8 * (seed as usize % 7));
-        round_trip(w, h, [1u8, 40, 130, 255][seed as usize % 4], 5000 + seed, 1 + seed as u32 % 3);
+        round_trip(w, h, [1u8, 40, 130, 255][seed as usize % 4], 5000 + seed, 1 + seed as u32 % 3, 0);
     }
+}
+
+/// Intra blocks among inter blocks: the intra mode info of inter frames, intra prediction from
+/// inter neighbours (availability of above-right and below-left), and the stacks that skip intra
+/// neighbours.
+#[test]
+fn intra_blocks_inside_inter_frames_decode_bit_exactly() {
+    let mut intra = 0;
+    for (i, &(w, h)) in [(64usize, 64usize), (66, 66), (130, 70), (200, 120), (24, 40)].iter().enumerate() {
+        for (j, &q) in [20u8, 100, 230].iter().enumerate() {
+            let s = round_trip(w, h, q, 7000 + (i * 10 + j) as u64, 1 + (i + j) as u32 % 3, [2, 5, 8][(i + j) % 3]);
+            intra += s.intra;
+        }
+    }
+    eprintln!("{intra} intra blocks among the inter blocks");
+    assert!(intra > 100);
 }
 
 #[test]
