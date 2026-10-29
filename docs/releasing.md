@@ -40,6 +40,26 @@ with no standard text there fails the build, so add the text when
 `deny.toml` allows a new licence. Identical texts are given once. The file
 depends only on the lock file, so it is the same on every machine.
 
+## The project document type (macOS)
+
+A Zornov project is a `.zornov` package: one item in Finder that Zornov opens.
+The `Info.plist` that `cargo xtask bundle` writes declares the type
+(`com.zornov.project`, conforming to `com.apple.package` and
+`public.composite-content`) and Zornov as its editor, with `ProjectIcon.icns`
+as the icon. Until `packaging/brand/zornov-project.icns` exists the app icon is
+used for it. After a bundle, check that the system knows the type, with a
+package made by the app (not a project of yours):
+
+```
+mdls -name kMDItemContentType -name kMDItemContentTypeTree Name.zornov
+```
+
+It should name `com.zornov.project`, then `com.apple.package`. If it shows a
+`dyn.` type instead, register the app once with
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f dist/Zornov.app`.
+Double-clicking the package should open it in Zornov; this cannot be tested
+without the window.
+
 ## One-time setup: macOS signing and notarization
 
 You need an Apple Developer Program membership.

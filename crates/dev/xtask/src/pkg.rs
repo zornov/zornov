@@ -481,11 +481,19 @@ mod tests {
             "<key>CFBundleExecutable</key><string>zornov</string>",
             "<string>Zornov records voice-overs",
             "<string>Zornov records from your camera",
+            // A project is one package in Finder, opened by Zornov.
+            "<key>UTTypeIdentifier</key><string>com.zornov.project</string>",
+            "<string>com.apple.package</string>",
+            "<string>public.composite-content</string>",
+            "<key>public.filename-extension</key><array><string>zornov</string></array>",
+            "<key>CFBundleTypeRole</key><string>Editor</string>",
+            "<key>LSTypeIsPackage</key><true/>",
         ] {
             assert!(plist.contains(want), "{want} missing from the Info.plist");
         }
         assert!(!plist.contains("Studio") && !plist.contains("org.studio"), "{plist}");
         assert!(app.join("Contents/MacOS/zornov").is_file());
+        assert!(app.join("Contents/Resources/ProjectIcon.icns").is_file(), "the document type names an icon that ships");
 
         // Linux: the desktop entry and the .deb control file.
         let desktop = String::from_utf8(desktop_file().unwrap()).unwrap();

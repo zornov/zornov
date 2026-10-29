@@ -206,6 +206,10 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
     std::fs::copy(exe, macos.join("zornov")).map_err(|e| format!("cannot copy the binary: {e}"))?;
     write_notices(notices, &app.join("Contents/Resources/Licenses"))?;
     std::fs::copy(root().join("packaging/brand/zornov.icns"), app.join("Contents/Resources/AppIcon.icns")).map_err(|e| format!("cannot copy the app icon: {e}"))?;
+    // The icon of a project package: a document icon of its own when
+    // packaging/brand has one, the app icon until then.
+    let project_icon = ["zornov-project.icns", "zornov.icns"].iter().map(|n| root().join("packaging/brand").join(n)).find(|p| p.is_file()).expect("zornov.icns exists");
+    std::fs::copy(project_icon, app.join("Contents/Resources/ProjectIcon.icns")).map_err(|e| format!("cannot copy the project icon: {e}"))?;
     if let Some(core) = content {
         copy_dir(core, &app.join("Contents/content-build/core"))?;
     }
@@ -227,6 +231,34 @@ fn assemble_app(exe: &Path, content: Option<&Path>, notices: &[(String, Vec<u8>)
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Zornov records voice-overs and sound from your microphone when you press Record.</string>
   <key>NSCameraUsageDescription</key><string>Zornov records from your camera when you press Record.</string>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>com.zornov.project</string>
+      <key>UTTypeDescription</key><string>Zornov Project</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>com.apple.package</string>
+        <string>public.composite-content</string>
+      </array>
+      <key>UTTypeIconFiles</key><array><string>ProjectIcon</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key><array><string>zornov</string></array>
+      </dict>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Zornov Project</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSItemContentTypes</key><array><string>com.zornov.project</string></array>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSTypeIsPackage</key><true/>
+      <key>CFBundleTypeIconFile</key><string>ProjectIcon</string>
+    </dict>
+  </array>
 </dict></plist>
 "#,
         short = release::VERSION
