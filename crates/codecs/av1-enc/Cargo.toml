@@ -12,3 +12,9 @@ threads = ["dep:rayon"]
 [dependencies]
 studio-av1 = { path = "../av1" }
 rayon = { version = "1", optional = true }
+
+[dev-dependencies]
+# The phase (a) gate writes an MP4 with the muxer and decodes it on the video hardware.
+studio-encode = { path = "../../media/encode" }
+studio-hw = { path = "../../media/hw" }
+studio-mp4 = { path = "../../media/mp4" }

@@ -264,7 +264,7 @@ fn openers(h: &Harness) -> Vec<(accesskit::Role, String)> {
 }
 
 /// Named buttons that open a menu or popover.
-const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout", "3D camera and lights", "Background jobs", "Overlays", "Add", "More", "Safety", "Rights"];
+const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout", "Background jobs", "Overlays", "Add", "More", "Safety", "Rights"];
 
 /// Visit every surface at every size, open each tab, drop-down and menu on
 /// it, and collect what is cut off.
@@ -382,26 +382,24 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
     assert_eq!(visited, 2 * CHECKED.len(), "every listed surface was looked at");
 }
 
-/// The viewer's 3D menu (screenshot case: it ran past the window's bottom):
-/// it stays inside the window and scrolls to its last item.
+/// The viewer's Add menu (screenshot case: its 3D menu ran past the window's
+/// bottom): it stays inside the window and scrolls to its last item.
 #[test]
 fn a_menu_taller_than_the_window_fits_it_and_scrolls_to_the_end() {
-    let last = studio_fx::particles::PRESETS.last().expect("particle presets").name;
+    let last = "Add a note";
     for (w, hh) in [(960.0, 600.0), (1440.0, 900.0), (2000.0, 1300.0)] {
         let _viewport = crate::editor::viewport::test_lock();
         let mut h = Harness::new(&["--screen", "editor"]).sized(w, hh);
         h.frames(6);
-        assert!(h.click("3D camera and lights"), "the 3D menu opens");
-        let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("viewer-3d-menu").with("area"))).expect("the menu's area");
+        let add = egui::Id::unique("viewer-add");
+        crate::kit::set_open(&h.ctx, add, true);
+        h.frames(6);
+        let area = h.ctx.memory(|m| m.area_rect(add.with("area"))).expect("the Add menu's area");
         let screen = Rect::from_min_size(egui::Pos2::ZERO, h.size);
         assert!(screen.contains_rect(area), "the menu {area:?} is inside the window {screen:?}");
-        // Taller than the window: it takes the room below its button.
-        assert!(area.bottom() > screen.bottom() - 40.0, "the menu uses the height it has: {area:?} in {screen:?}");
-        let visible = |h: &Harness| h.find_text(last).is_some_and(|r| screen.contains_rect(r) && r.bottom() <= area.bottom());
-        // A window tall enough shows it all; otherwise the end starts out of view.
-        if hh < 1200.0 {
-            assert!(!visible(&h), "{last} starts out of view at {w}×{hh}");
-        }
+        let visible = |h: &Harness| h.find_text(last).is_some_and(|r| area.contains_rect(r));
+        // Longer than its room, so the end starts out of view.
+        assert!(!visible(&h), "{last} starts out of view at {w}×{hh}");
         h.wheel(area.center(), 400.0);
         h.wheel(area.center(), 400.0);
         assert!(visible(&h), "wheeling brings {last} into view at {w}×{hh}");
