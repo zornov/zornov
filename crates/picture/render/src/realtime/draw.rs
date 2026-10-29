@@ -6,6 +6,7 @@
 //! accumulation, bloom, tone mapping and encoding, then reading it back.
 
 use super::*;
+use super::readback::Latest;
 
 fn clear(c: [f32; 4]) -> wgpu::LoadOp<wgpu::Color> {
     wgpu::LoadOp::Clear(wgpu::Color { r: c[0] as f64, g: c[1] as f64, b: c[2] as f64, a: c[3] as f64 })
@@ -18,13 +19,30 @@ fn colour_attachment(view: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>) 
 impl Renderer {
     /// A finished 8-bit sRGB picture of the world.
     pub fn render_srgb(&mut self, w: &World, v: &View, o: &Options) -> Result<(Image, Stats), String> {
-        let (bytes, stats) = self.run(w, v, o, false)?;
+        let (bytes, stats, _) = self.run(w, v, o, false, None)?;
         Ok((Image { width: o.width.max(16), height: o.height.max(16), rgba: bytes }, stats))
+    }
+
+    /// A finished 8-bit sRGB picture without stalling on the GPU: the frame
+    /// recorded now is copied into a ring of staging buffers and `out` gets
+    /// the newest one that has already finished, normally the frame before
+    /// (`Latest::lag` is 1). Only the first frame after a size change waits,
+    /// and then `lag` is 0; if no frame has finished `out` is left as it was.
+    /// For previews: exact frames (export, stills) use `render_srgb`.
+    pub fn render_srgb_pipelined(&mut self, w: &World, v: &View, o: &Options, out: &mut Vec<u8>) -> Result<(Latest, Stats), String> {
+        let (_, stats, latest) = self.run(w, v, o, false, Some(out))?;
+        Ok((latest.expect("ring read"), stats))
+    }
+
+    /// Readback counters, for tests and benchmarks.
+    #[doc(hidden)]
+    pub fn readback_stats(&self) -> readback::ReadbackStats {
+        self.rb.stats()
     }
 
     /// The picture as display-linear light, for compositing in a project.
     pub fn render_linear(&mut self, w: &World, v: &View, o: &Options) -> Result<(Frame, Stats), String> {
-        let (bytes, stats) = self.run(w, v, o, true)?;
+        let (bytes, stats, _) = self.run(w, v, o, true, None)?;
         let (width, height) = (o.width.max(16), o.height.max(16));
         let pixels = bytes.chunks_exact(8).map(|c| [f16_to_f32(u16::from_le_bytes([c[0], c[1]])), f16_to_f32(u16::from_le_bytes([c[2], c[3]])), f16_to_f32(u16::from_le_bytes([c[4], c[5]])), 1.0]).collect();
         Ok((Frame { width, height, pixels }, stats))
@@ -35,7 +53,7 @@ impl Renderer {
         self.ctx.queue.write_buffer(buf, 0, bytemuck::cast_slice(&v));
     }
 
-    fn run(&mut self, w: &World, view: &View, o: &Options, linear: bool) -> Result<(Vec<u8>, Stats), String> {
+    fn run(&mut self, w: &World, view: &View, o: &Options, linear: bool, ring: Option<&mut Vec<u8>>) -> Result<(Vec<u8>, Stats, Option<Latest>), String> {
         let t0 = std::time::Instant::now();
         let mut prep = self.prepare(w, view, o)?;
         self.ensure_water(prep.water_visible.len());
@@ -188,19 +206,24 @@ impl Renderer {
         }
         let (tex, bpp) = if linear { (&t.ldr_lin.tex, 8u32) } else { (&t.ldr8.tex, 4u32) };
         let (width, height) = (t.w, t.h);
-        let (buffer, padded) = self.rb.sync_target(&self.ctx.device, width, height, bpp);
-        enc.copy_texture_to_buffer(
-            tex.as_image_copy(),
-            wgpu::TexelCopyBufferInfo { buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) } },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        );
-        self.ctx.queue.submit([enc.finish()]);
+        let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let mut out = Vec::new();
-        self.rb.read_sync(&self.ctx.device, &mut out)?;
+        let mut latest = None;
+        if let Some(ring_out) = ring {
+            let (buffer, padded) = self.rb.ring_target(&self.ctx.device, width, height, bpp)?;
+            enc.copy_texture_to_buffer(tex.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) } }, extent);
+            self.ctx.queue.submit([enc.finish()]);
+            latest = Some(self.rb.ring_latest(&self.ctx.device, ring_out)?);
+        } else {
+            let (buffer, padded) = self.rb.sync_target(&self.ctx.device, width, height, bpp);
+            enc.copy_texture_to_buffer(tex.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) } }, extent);
+            self.ctx.queue.submit([enc.finish()]);
+            self.rb.read_sync(&self.ctx.device, &mut out)?;
+        }
         self.accum_cur = 1 - self.accum_cur;
         prep.stats.draw_calls = calls;
         prep.stats.ms = t0.elapsed().as_secs_f32() * 1000.0;
-        Ok((out, prep.stats))
+        Ok((out, prep.stats, latest))
     }
 
     /// Draws the terrain chunks, then the models, of list `idx`. Returns
