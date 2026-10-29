@@ -57,6 +57,12 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     // Header.
     let header = Rect::from_min_size(r.min + Vec2::splat(pad), Vec2::new(r.width() - pad * 2.0, 28.0));
     let cut = app.editor.selected_cut.and_then(|id| app.doc.project.transitions.iter().find(|t| t.id == id)).cloned();
+    // A cut that no longer exists (undone, deleted) is not a selection: the
+    // header and the body both fall back to the Project.
+    if cut.is_none() {
+        app.editor.selected_cut = None;
+    }
+    let live_cut = cut.as_ref().map(|c| c.id);
     let (title, sub) = match (&first, sel.len()) {
         (None, _) if cut.is_some() => {
             let c = cut.as_ref().unwrap();
@@ -98,7 +104,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     egui::ScrollArea::vertical().id_salt("insp-scroll").auto_shrink([false, false]).show_v(&mut bui, |ui| {
         egui::Frame::new().inner_margin(egui::Margin { left: pad as i8, right: pad as i8, top: 0, bottom: 12 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = theme::space::SECTION_GAP;
-            match (first, app.editor.selected_cut) {
+            match (first, live_cut) {
                 (None, Some(cut)) => cut_section(app, ui, cut),
                 (None, None) => sequence(app, ui),
                 (Some(c), _) => clip_sections(app, ui, &sel, &c),
@@ -287,7 +293,11 @@ fn prop(
     let mut keyed = key_here.is_some();
     // Only properties the model can animate get a keyframe diamond.
     let keyable = path.starts_with("transform.") || path.starts_with("grade.") || matches!(path, "audio.volume_db" | "audio.pan");
-    let mut row = FieldRow::new(label, &mut v, range.clone())
+    // Several clips with different values: the row shows the first one's and
+    // says so; a change sets them all.
+    let mixed = is_mixed(ids.iter().filter_map(|id| app.doc.project.clip(*id)).map(get));
+    let shown = if mixed { format!("{label} (mixed)") } else { label.to_owned() };
+    let mut row = FieldRow::new(&shown, &mut v, range.clone())
         .default(default)
         .unit(unit)
         .decimals(decimals)
@@ -420,6 +430,29 @@ fn effect_bool(e: &m::Effect, pd: &studio_fx::ParamDef) -> bool {
     }
 }
 
+/// The tabs every list has, each with the sections all of them show there.
+fn shared_tabs(lists: &[Vec<(&'static str, Vec<&'static str>)>]) -> Vec<(&'static str, Vec<&'static str>)> {
+    let Some((first, rest)) = lists.split_first() else { return Vec::new() };
+    first
+        .iter()
+        .filter_map(|(name, sections)| {
+            let mut keep = sections.clone();
+            for other in rest {
+                let theirs = other.iter().find(|t| t.0 == *name)?;
+                keep.retain(|s| theirs.1.contains(s));
+            }
+            (!keep.is_empty()).then_some((*name, keep))
+        })
+        .collect()
+}
+
+/// Whether the values differ (so a multi-selection row can say "mixed").
+fn is_mixed(values: impl Iterator<Item = f32>) -> bool {
+    let mut it = values;
+    let Some(first) = it.next() else { return false };
+    it.any(|v| (v - first).abs() > 1e-4)
+}
+
 fn edit_all(app: &mut StudioApp, ids: &[u32], label: &str, f: impl Fn(&mut Clip)) {
     let ids = ids.to_vec();
     app.doc.edit(label, |p| {
@@ -531,7 +564,25 @@ fn clip_sections(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &Clip) 
         m::ClipSource::Generator(g) => Some(g.kind),
         _ => None,
     });
-    let tabs = rig.unwrap_or_else(|| clip_tabs(c.kind, gk, is_still(app, c)));
+    let tabs = rig.unwrap_or_else(|| {
+        if ids.len() < 2 {
+            return clip_tabs(c.kind, gk, is_still(app, c));
+        }
+        // Several clips: what every one of them has.
+        let lists: Vec<Vec<(&'static str, Vec<&'static str>)>> = ids
+            .iter()
+            .filter_map(|id| app.doc.project.clip(*id))
+            .map(|o| {
+                let gk = app.doc.model.active().clip(m::ClipId(o.id as u64)).and_then(|mc| match &mc.source {
+                    m::ClipSource::Generator(g) => Some(g.kind),
+                    _ => None,
+                });
+                clip_tabs(o.kind, gk, is_still(app, o))
+            })
+            .collect();
+        let shared = shared_tabs(&lists);
+        if shared.is_empty() { clip_tabs(c.kind, gk, is_still(app, c)) } else { shared }
+    });
     let mut cur = ui.data(|d| d.get_temp::<usize>(key)).unwrap_or(0).min(tabs.len() - 1);
     // A workspace can ask for a tab (Colour opens on Adjust, Audio on Audio).
     if let Some(want) = crate::workspaces::take_tab(ui.ctx()) {
@@ -1013,6 +1064,24 @@ pub fn percent_to_db(p: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn several_clips_show_only_the_tabs_and_sections_they_share() {
+        let video = clip_tabs(ClipKind::Video, None, false);
+        let audio = clip_tabs(ClipKind::Audio, None, false);
+        let both = shared_tabs(&[video.clone(), audio.clone()]);
+        let names: Vec<&str> = both.iter().map(|t| t.0).collect();
+        assert!(names.contains(&"Audio") && !names.contains(&"Video"), "{names:?}");
+        assert_eq!(shared_tabs(&[video.clone(), video.clone()]), video);
+        assert!(shared_tabs(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_row_is_mixed_only_when_the_selected_clips_differ() {
+        assert!(!is_mixed([].into_iter()));
+        assert!(!is_mixed([1.0, 1.0].into_iter()));
+        assert!(is_mixed([1.0, 0.5, 1.0].into_iter()));
+    }
 
     fn names(t: &[(&'static str, Vec<&'static str>)]) -> Vec<&'static str> {
         t.iter().map(|t| t.0).collect()
