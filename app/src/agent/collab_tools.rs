@@ -481,7 +481,7 @@ mod tests {
         let csv = call(&mut s, "comments", json!({"action": "export", "format": "csv", "status": "all"}));
         assert!(csv["text"].as_str().unwrap().contains("hold longer"));
         // Notes are files beside the project, not edits.
-        assert!(proj.join("review/comments.json").exists());
+        assert!(crate::collab::comments::file(&proj).exists());
         let err = s.run("comments", &json!({"action": "resolve", "id": "nope"})).err().unwrap();
         assert!(err.contains("director-2"), "names the notes there are: {err}");
     }

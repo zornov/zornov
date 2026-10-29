@@ -430,6 +430,8 @@ pub enum Action {
     Open,
     Save,
     SaveAs,
+    /// File ▸ Convert to package.
+    ConvertProject,
     ImportMedia,
     SampleMedia,
     ImportTimeline,
@@ -453,12 +455,13 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
         Action::Open if dialogs => return app.open_folder(ctx, None),
         Action::Save if dialogs => return app.save(ctx, false),
         Action::SaveAs if dialogs => return app.save(ctx, true),
+        Action::ConvertProject if dialogs => return app.convert_project(ctx),
         Action::ImportMedia if dialogs => return app.import_media_files(ctx),
         Action::ImportTimeline if dialogs => return app.import_timeline(ctx),
         Action::ImportScript if dialogs => return story::import_dialog(app, ctx),
         Action::ExportOtio if dialogs => return crate::files::export_otio(app, ctx),
         Action::SampleMedia | Action::ImportMedia => return library::import_sample_media(app, ctx),
-        Action::Open | Action::Save | Action::SaveAs | Action::ImportTimeline | Action::ImportScript | Action::ExportOtio => return,
+        Action::Open | Action::Save | Action::SaveAs | Action::ConvertProject | Action::ImportTimeline | Action::ImportScript | Action::ExportOtio => return,
         _ => {}
     }
     let ed = &mut app.editor;
