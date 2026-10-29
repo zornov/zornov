@@ -188,29 +188,15 @@ impl Renderer {
         }
         let (tex, bpp) = if linear { (&t.ldr_lin.tex, 8u32) } else { (&t.ldr8.tex, 4u32) };
         let (width, height) = (t.w, t.h);
-        let padded = (width * bpp).div_ceil(256) * 256;
-        let buffer = self.ctx.device.create_buffer(&wgpu::BufferDescriptor { label: Some("rt readback"), size: padded as u64 * height as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let (buffer, padded) = self.rb.sync_target(&self.ctx.device, width, height, bpp);
         enc.copy_texture_to_buffer(
             tex.as_image_copy(),
-            wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) } },
+            wgpu::TexelCopyBufferInfo { buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) } },
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
         self.ctx.queue.submit([enc.finish()]);
-        let slice = buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = self.ctx.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("reading the frame back: {e:?}"))?;
-        let data = slice.get_mapped_range().map_err(|e| format!("reading the frame back: {e:?}"))?;
-        let row = (width * bpp) as usize;
-        let mut out = Vec::with_capacity(row * height as usize);
-        for y in 0..height as usize {
-            out.extend_from_slice(&data[y * padded as usize..y * padded as usize + row]);
-        }
-        drop(data);
-        buffer.unmap();
+        let mut out = Vec::new();
+        self.rb.read_sync(&self.ctx.device, &mut out)?;
         self.accum_cur = 1 - self.accum_cur;
         prep.stats.draw_calls = calls;
         prep.stats.ms = t0.elapsed().as_secs_f32() * 1000.0;
