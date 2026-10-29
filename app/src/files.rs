@@ -6,12 +6,15 @@
 
 use crate::app::StudioApp;
 use crate::bridge;
+use crate::doc::Doc;
 use crate::icons::Icon;
 use crate::kit;
 use crate::media_io;
+use crate::theme;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use crate::view;
 use studio_model as m;
 
 /// A project on the Start screen.
@@ -99,8 +102,11 @@ pub fn note_project(dir: &Path) {
     lines.push(me);
     let keep = lines.len().saturating_sub(60);
     let text = lines[keep..].join("\n") + "\n";
-    let _ = std::fs::create_dir_all(studio_paths::studio());
-    let _ = m::file::write_atomic(&path, text.as_bytes());
+    // The shared list only feeds the Start screen; a failure costs a tile,
+    // not work, so it is logged rather than put in front of the person.
+    if let Err(e) = std::fs::create_dir_all(studio_paths::studio()).and_then(|()| m::file::write_atomic(&path, text.as_bytes())) {
+        eprintln!("zornov: could not update the list of projects: {e}");
+    }
 }
 
 /// A folder under the system's temporary places.
@@ -179,18 +185,43 @@ impl StudioApp {
 
     /// A new project gets its own folder at once (in Studio's Projects
     /// folder) and is saved there, so it is on the Start screen straight
-    /// away and autosave keeps it.
+    /// away and autosave keeps it. A failure is left in `doc.error`; the
+    /// window's own paths use [`StudioApp::give_folder_or_say`].
     pub fn give_folder(&mut self) {
+        if let Err(e) = self.try_give_folder() {
+            self.doc.error = Some(e);
+        }
+    }
+
+    /// [`StudioApp::give_folder`] that tells the person when it fails.
+    pub fn give_folder_or_say(&mut self, ctx: &egui::Context) {
+        if let Err(e) = self.try_give_folder() {
+            kit::push(ctx, crate::i18n::tf(format!("{e}; the project is open but not saved yet")), None, Some(Icon::Warning));
+        }
+    }
+
+    fn try_give_folder(&mut self) -> Result<(), String> {
         if self.doc.folder.is_some() {
-            return;
+            return Ok(());
         }
         let dir = free_project_dir(&self.doc.project.name);
-        let Ok(folder) = crate::services::project::new_package(&dir) else { return };
-        if folder.save(&self.doc.model).is_ok() {
-            self.doc.history.mark_saved();
-            self.doc.folder = Some(folder);
-            self.remember(&dir);
-        }
+        self.give_folder_at(&dir)
+    }
+
+    /// Saves the open project as a new package at `dir`.
+    pub(crate) fn give_folder_at(&mut self, dir: &Path) -> Result<(), String> {
+        let root = crate::services::project::save(&mut self.doc, Some(dir))?;
+        self.remember(&root);
+        autosave_health().ok();
+        Ok(())
+    }
+
+    /// The open project replaced by `doc`, in a fresh editor.
+    fn adopt(&mut self, doc: Doc) {
+        self.doc = doc;
+        self.editor = crate::editor::EditorState::new(&self.prefs);
+        self.editor.playhead = 0;
+        self.screen = crate::cli::Screen::Editor;
     }
 
     /// Save to the project's folder, asking for one the first time.
@@ -200,6 +231,15 @@ impl StudioApp {
             _ => {
                 let Some(dir) = rfd::FileDialog::new().set_title("Save project").set_file_name(format!("{}.{}", self.doc.project.name, m::file::PACKAGE_EXT)).add_filter("Zornov project", &[m::file::PACKAGE_EXT]).save_file() else { return };
                 let dir = package_path(dir);
+                // The dialog asked about "Name", not "Name.zornov": an existing
+                // project of that name is replaced only if the person says so.
+                if save_target(&dir, self.doc.folder.as_ref().map(|f| f.root())) == SaveTarget::Replaces && !self.cli.shot.is_some() {
+                    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let yes = rfd::MessageDialog::new().set_level(rfd::MessageLevel::Warning).set_title("Replace project?").set_description(format!("{name} already exists here. Saving over it replaces its edit.")).set_buttons(rfd::MessageButtons::YesNo).show();
+                    if yes != rfd::MessageDialogResult::Yes {
+                        return;
+                    }
+                }
                 let made = if m::file::ProjectFolder::is_project(&dir) { Ok(m::file::ProjectFolder::new(&dir)) } else { crate::services::project::new_package(&dir) };
                 match made {
                     Ok(f) => f,
@@ -216,6 +256,7 @@ impl StudioApp {
         match crate::services::project::save(&mut self.doc, target.as_deref()) {
             Ok(root) => {
                 self.remember(&root);
+                autosave_health().ok();
                 kit::push(ctx, crate::i18n::tf(format!("Saved {}", self.doc.project.name)), None, Some(Icon::CheckCircle));
             }
             Err(e) => {
@@ -224,33 +265,184 @@ impl StudioApp {
         }
     }
 
-    /// Open a project folder (ask when `path` is None).
+    /// Open a project folder (ask when `path` is None). Unsaved work in
+    /// the open project is settled first (see [`StudioApp::replace`]).
     pub fn open_folder(&mut self, ctx: &egui::Context, path: Option<PathBuf>) {
         let Some(dir) = path.or_else(|| rfd::FileDialog::new().set_title("Open project").pick_folder()) else { return };
-        // A conversion a crash interrupted is settled before anything is read.
-        m::file::convert::recover(&dir);
-        let folder = m::file::ProjectFolder::new(&dir);
-        match folder.load_stamped() {
-            Ok((file, stamp)) => {
-                let mut project = file.project;
-                folder.resolve_media(&mut project);
-                let base = std::sync::Arc::new(project.clone());
-                self.open_model(project);
-                // What the file held: a later save that finds it changed
-                // (an agent saved meanwhile) takes that work in first.
-                self.doc.synced = Some(crate::doc::Synced { stamp, base });
-                self.doc.folder = Some(folder);
+        self.replace(ctx, Replace::Open(dir));
+    }
+
+    /// Opens `dir` through the project service, so the undo history, the
+    /// hold on the folder, the team's rules and the 3D links come with it.
+    fn open_dir(&mut self, ctx: &egui::Context, dir: PathBuf) {
+        match crate::services::project::open(&dir) {
+            Ok(doc) => {
+                self.adopt(doc);
                 self.remember(&dir);
             }
             Err(e) => {
                 self.prefs.recents.retain(|r| r.path != dir);
-                kit::push(ctx, crate::i18n::tf(format!("Could not open {}: {e:?}", dir.display())), None, Some(Icon::Warning));
+                kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
             }
+        }
+    }
+
+    /// Whether the open project has changes nothing has saved.
+    pub fn has_unsaved(&self) -> bool {
+        self.doc.dirty()
+    }
+
+    /// Gets the open project's changes safe before something replaces or
+    /// closes it: a project with a folder is saved on the spot; one without
+    /// (a sample, the demo) has to be asked about.
+    fn settle(&mut self, ctx: &egui::Context) -> Settled {
+        if !self.doc.dirty() {
+            return Settled::Clean;
+        }
+        if self.doc.folder.is_none() {
+            return Settled::Ask;
+        }
+        match crate::services::project::save(&mut self.doc, None) {
+            Ok(root) => {
+                self.remember(&root);
+                autosave_health().ok();
+                Settled::Clean
+            }
+            Err(e) => {
+                kit::push(ctx, crate::i18n::tf(format!("{e}; {} is still open", self.doc.project.name)), None, Some(Icon::Warning));
+                Settled::Failed
+            }
+        }
+    }
+
+    /// Does `what` once the open project's changes are safe: saved here,
+    /// or after the person chose in the "Save changes?" dialog.
+    pub fn replace(&mut self, ctx: &egui::Context, what: Replace) {
+        match self.settle(ctx) {
+            Settled::Clean => self.perform(ctx, what),
+            Settled::Failed => {}
+            Settled::Ask => set_pending(ctx, Some(what)),
+        }
+    }
+
+    /// Back to the Start screen; the project is saved first.
+    pub fn go_home(&mut self, ctx: &egui::Context) {
+        self.replace(ctx, Replace::Home);
+    }
+
+    fn perform(&mut self, ctx: &egui::Context, what: Replace) {
+        match what {
+            Replace::Quit => {
+                ctx.data_mut(|d| d.insert_temp(egui::Id::new("files-quit-ok"), true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Replace::Home => self.screen = crate::cli::Screen::Start,
+            Replace::Open(dir) => self.open_dir(ctx, dir),
+            Replace::ImportTimeline => self.import_timeline_now(ctx),
+            Replace::New(p) => {
+                self.open_project(p);
+                self.give_folder_or_say(ctx);
+            }
+            Replace::Sample(p) => {
+                self.open_project(p);
+                kit::push(ctx, "Sample project: changes are not kept until you use Save As", None, Some(Icon::Info));
+            }
+        }
+    }
+
+    /// Every frame (one line in `app.rs`): the close button, Cmd+Q and the
+    /// "Save changes?" dialog, and what the save machinery wants to say.
+    pub fn files_frame(&mut self, ctx: &egui::Context) {
+        // The Start screen calls this too; once per pass is enough.
+        let pass = ctx.cumulative_pass_nr();
+        let ran = egui::Id::new("files-frame-pass");
+        if ctx.data(|d| d.get_temp::<u64>(ran)) == Some(pass) {
+            return;
+        }
+        ctx.data_mut(|d| d.insert_temp(ran, pass));
+        if let Some(note) = crate::prefs::take_notice() {
+            kit::push(ctx, crate::i18n::tf(note), None, Some(Icon::Warning));
+        }
+        if let Some(e) = autosave_health().take_warning() {
+            kit::push(ctx, crate::i18n::tf(format!("Autosave failed: {e}. It retries; Cmd+S saves now")), None, Some(Icon::Warning));
+        }
+        let quitting = ctx.input(|i| i.viewport().close_requested()) && self.cli.shot.is_none() && !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("files-quit-ok"))).unwrap_or(false);
+        if quitting {
+            match self.settle(ctx) {
+                Settled::Clean => {}
+                Settled::Failed => ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose),
+                Settled::Ask => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    set_pending(ctx, Some(Replace::Quit));
+                }
+            }
+        }
+        self.unsaved_dialog(ctx);
+    }
+
+    /// "Save changes to X?" for a project that has no folder yet.
+    fn unsaved_dialog(&mut self, ctx: &egui::Context) {
+        let Some(what) = pending(ctx) else { return };
+        let id = egui::Id::new("files-unsaved");
+        let name = self.doc.project.name.clone();
+        let mut answer = None;
+        let out = kit::modal(ctx, id, egui::vec2(440.0, 190.0), &crate::i18n::tf(format!("Save changes to {name}?")), |ui| {
+            ui.add_space(theme::space::MD);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                ui.label(crate::i18n::shown("It is not saved anywhere yet. Without saving, your changes are lost."));
+            });
+            ui.add_space(theme::space::LG);
+            ui.horizontal(|ui| {
+                ui.add_space(20.0);
+                if kit::Button::primary("Save").show(ui).clicked() {
+                    answer = Some(Unsaved::Save);
+                }
+                if kit::Button::secondary("Don't save").show(ui).clicked() {
+                    answer = Some(Unsaved::Discard);
+                }
+                if kit::Button::ghost("Cancel").show(ui).clicked() {
+                    answer = Some(Unsaved::Cancel);
+                }
+            });
+        });
+        if out.close {
+            answer = Some(Unsaved::Cancel);
+        }
+        if let Some(a) = answer {
+            self.answer_unsaved(ctx, what, a);
+        }
+    }
+
+    /// The person's answer to the "Save changes?" dialog.
+    pub(crate) fn answer_unsaved(&mut self, ctx: &egui::Context, what: Replace, answer: Unsaved) {
+        match answer {
+            Unsaved::Cancel => set_pending(ctx, None),
+            Unsaved::Discard => {
+                set_pending(ctx, None);
+                self.perform(ctx, what);
+            }
+            Unsaved::Save => match self.try_give_folder() {
+                Ok(()) => {
+                    set_pending(ctx, None);
+                    let name = self.doc.project.name.clone();
+                    kit::push(ctx, crate::i18n::tf(format!("Saved {name} to Projects")), None, Some(Icon::CheckCircle));
+                    self.perform(ctx, what);
+                }
+                // Stay in the dialog: nothing was lost, and Cancel is there.
+                Err(e) => {
+                    kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
+                }
+            },
         }
     }
 
     /// Import OpenTimelineIO or FCPXML as a new project.
     pub fn import_timeline(&mut self, ctx: &egui::Context) {
+        self.replace(ctx, Replace::ImportTimeline);
+    }
+
+    fn import_timeline_now(&mut self, ctx: &egui::Context) {
         let Some(path) = rfd::FileDialog::new().set_title("Import timeline").add_filter("Timeline", &["otio", "fcpxml", "xml"]).pick_file() else { return };
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
@@ -272,7 +464,7 @@ impl StudioApp {
                     project.active_sequence = project.sequences[seq].id;
                 }
                 self.open_model(project);
-                self.give_folder();
+                self.give_folder_or_say(ctx);
                 let n = imp.report.issues.len();
                 if n > 0 {
                     let first = &imp.report.issues[0];
@@ -374,6 +566,7 @@ impl StudioApp {
                     self.autosaving = None;
                     match done {
                         Autosaved::Saved(synced) => {
+                            autosave_health().ok();
                             self.doc.synced = Some(synced);
                             self.doc.history.mark_saved_at(saved_rev);
                             if let Some(root) = self.doc.folder.as_ref().map(|f| f.root().to_path_buf()) {
@@ -383,12 +576,11 @@ impl StudioApp {
                         // Someone else (an agent's session) saved the
                         // project meanwhile: take their work in and save
                         // the whole, here, rather than write over it.
-                        Autosaved::Changed => {
-                            if crate::services::project::save(&mut self.doc, None).is_ok() {
-                                self.doc.history.mark_saved();
-                            }
-                        }
-                        Autosaved::Failed => {}
+                        Autosaved::Changed => match crate::services::project::save(&mut self.doc, None) {
+                            Ok(_) => autosave_health().ok(),
+                            Err(e) => self.autosave_failed(e),
+                        },
+                        Autosaved::Failed(e) => self.autosave_failed(e),
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
@@ -402,20 +594,38 @@ impl StudioApp {
             if self.autosave.due(now) {
                 self.autosave.mark_done();
                 let (folder, model, rev, keep) = (folder.clone(), self.doc.model.clone(), rev, self.autosave.keep);
+                let history = self.doc.history.snapshot();
                 let expected = self.doc.synced.as_ref().map(|s| s.stamp);
                 let (tx, rx) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
-                    let backed_up = studio_model::file::autosave::write_backup(&folder, &model, std::time::SystemTime::now(), keep).is_ok();
-                    let done = match backed_up.then(|| folder.save_if(&model, &Default::default(), expected)) {
-                        Some(Ok(stamp)) => Autosaved::Saved(crate::doc::Synced { stamp, base: std::sync::Arc::new(model) }),
-                        Some(Err(m::file::FileError::Changed { .. })) => Autosaved::Changed,
-                        _ => Autosaved::Failed,
+                    // The backup is a second copy: its failure does not hold
+                    // back the save itself, and the save's does show.
+                    if let Err(e) = studio_model::file::autosave::write_backup(&folder, &model, std::time::SystemTime::now(), keep) {
+                        eprintln!("zornov: autosave backup failed: {e}");
+                    }
+                    let done = match folder.save_if(&model, &Default::default(), expected) {
+                        Ok(stamp) => {
+                            // The undo history goes with the saved file, so a reopen after an autosave still undoes.
+                            if let Err(e) = crate::services::project::keep_history_of(&folder, &history) {
+                                eprintln!("zornov: autosave could not keep the undo history: {e}");
+                            }
+                            Autosaved::Saved(crate::doc::Synced { stamp, base: std::sync::Arc::new(model) })
+                        }
+                        Err(m::file::FileError::Changed { .. }) => Autosaved::Changed,
+                        Err(e) => Autosaved::Failed(e.to_string()),
                     };
                     let _ = tx.send(done);
                 });
                 self.autosaving = Some((rev, rx));
             }
         }
+    }
+
+    /// An autosave did not write: say so once, and try again after the
+    /// next idle time rather than give the work up.
+    fn autosave_failed(&mut self, e: String) {
+        autosave_health().failed(e);
+        self.autosave.changed(std::time::Instant::now());
     }
 
     /// Every frame: when the window's project moved to another folder
@@ -488,8 +698,112 @@ pub enum Autosaved {
     Saved(crate::doc::Synced),
     /// Someone else saved the project since; nothing was written.
     Changed,
-    /// The backup or the save failed.
+    /// The save failed, and why.
+    Failed(String),
+}
+
+/// What is about to take the open project's place (or close it).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Replace {
+    Quit,
+    Home,
+    Open(PathBuf),
+    ImportTimeline,
+    /// A new project with its own folder.
+    New(view::Project),
+    /// A sample or the demo: scratch, never saved unless the person says.
+    Sample(view::Project),
+}
+
+/// The answers to "Save changes?".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Unsaved {
+    Save,
+    Discard,
+    Cancel,
+}
+
+enum Settled {
+    Clean,
     Failed,
+    Ask,
+}
+
+const PENDING: &str = "files-pending";
+
+fn pending(ctx: &egui::Context) -> Option<Replace> {
+    ctx.data(|d| d.get_temp::<Option<Replace>>(egui::Id::new(PENDING))).flatten()
+}
+
+fn set_pending(ctx: &egui::Context, what: Option<Replace>) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(PENDING), what));
+}
+
+/// Where Save As would write, against the project that is open.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SaveTarget {
+    /// Nothing there yet.
+    Fresh,
+    /// The open project's own folder.
+    Current,
+    /// Another project is there and would be written over.
+    Replaces,
+}
+
+pub fn save_target(dir: &Path, current: Option<&Path>) -> SaveTarget {
+    if !m::file::ProjectFolder::is_project(dir) {
+        return SaveTarget::Fresh;
+    }
+    let same = |a: &Path, b: &Path| a == b || std::fs::canonicalize(a).ok().is_some_and(|a| std::fs::canonicalize(b).ok() == Some(a));
+    if current.is_some_and(|c| same(c, dir)) { SaveTarget::Current } else { SaveTarget::Replaces }
+}
+
+/// Whether autosave is working: the last failure, and whether the person
+/// has been told about it yet.
+#[derive(Default)]
+pub struct SaveHealth {
+    failure: Option<String>,
+    warned: bool,
+}
+
+impl SaveHealth {
+    pub fn failed(&mut self, why: String) {
+        self.failure = Some(why);
+    }
+    pub fn ok(&mut self) {
+        *self = Self::default();
+    }
+    /// The failure, once per run of failures.
+    pub fn take_warning(&mut self) -> Option<String> {
+        let e = self.failure.clone().filter(|_| !self.warned)?;
+        self.warned = true;
+        Some(e)
+    }
+}
+
+static HEALTH: std::sync::Mutex<SaveHealth> = std::sync::Mutex::new(SaveHealth { failure: None, warned: false });
+
+struct HealthGuard(std::sync::MutexGuard<'static, SaveHealth>);
+
+impl std::ops::Deref for HealthGuard {
+    type Target = SaveHealth;
+    fn deref(&self) -> &SaveHealth {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for HealthGuard {
+    fn deref_mut(&mut self) -> &mut SaveHealth {
+        &mut self.0
+    }
+}
+
+fn autosave_health() -> HealthGuard {
+    HealthGuard(HEALTH.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Why the last autosave failed, while it is still failing (for the top bar).
+pub fn autosave_failure() -> Option<String> {
+    autosave_health().failure.clone()
 }
 
 #[cfg(test)]
@@ -577,6 +891,163 @@ mod tests {
         let mut doc = crate::agent::Session::new(crate::services::project::new_custom("Import", 640, 360, 30.0)).doc;
         let r = crate::services::project::import_media(&mut doc, &paths);
         assert_eq!(r.ids.len(), 3, "failed: {:?}", r.failed);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn app_in(name: &str) -> (StudioApp, egui::Context, PathBuf) {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        let dir = std::env::temp_dir().join(format!("zornov-flow-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        (app, ctx, dir)
+    }
+
+    fn saved_project(dir: &Path, name: &str) -> PathBuf {
+        let mut doc = crate::services::project::new_custom(name, 640, 360, 30.0);
+        let root = dir.join(format!("{name}.zornov"));
+        crate::services::project::save(&mut doc, Some(&root)).unwrap();
+        root
+    }
+
+    /// PR-2: opening another project saves the open one first, so its edits
+    /// are on disk (and still undoable) when it is opened again.
+    #[test]
+    fn opening_another_project_saves_the_open_one_first() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx, dir) = app_in("open-saves");
+        let a = saved_project(&dir, "A");
+        let b = saved_project(&dir, "B");
+        app.open_folder(&ctx, Some(a.clone()));
+        assert_eq!(app.doc.project.name, "A");
+        app.doc.edit("Rename", |p| p.name = "A edited".into());
+        assert!(app.has_unsaved());
+        app.open_folder(&ctx, Some(b));
+        assert_eq!(app.doc.project.name, "B", "the other project opened");
+        assert!(pending(&ctx).is_none(), "a project with a folder is saved, not asked about");
+        app.open_folder(&ctx, Some(a));
+        assert_eq!(app.doc.project.name, "A edited", "the edit was saved before B replaced it");
+        assert!(!app.has_unsaved());
+        assert!(app.doc.history.can_undo(), "the undo history came back with the project (opened through the service)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-1 / PR-2: unsaved work without a folder is asked about; Cancel
+    /// keeps it, Don't save replaces it, and nothing is replaced meanwhile.
+    #[test]
+    fn unsaved_work_without_a_folder_is_asked_about() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx, dir) = app_in("ask");
+        let a = saved_project(&dir, "A");
+        app.doc = crate::services::project::new_custom("Scratch", 640, 360, 30.0);
+        app.doc.edit("Rename", |p| p.name = "Scratch 2".into());
+        app.open_folder(&ctx, Some(a.clone()));
+        assert_eq!(pending(&ctx), Some(Replace::Open(a.clone())), "asked, not replaced");
+        assert_eq!(app.doc.project.name, "Scratch 2");
+        app.answer_unsaved(&ctx, Replace::Open(a.clone()), Unsaved::Cancel);
+        assert!(pending(&ctx).is_none());
+        assert_eq!(app.doc.project.name, "Scratch 2", "Cancel keeps the work");
+        app.open_folder(&ctx, Some(a.clone()));
+        app.answer_unsaved(&ctx, Replace::Open(a), Unsaved::Discard);
+        assert_eq!(app.doc.project.name, "A", "Don't save lets it go");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-1: a save that fails does not close or replace anything.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_save_keeps_the_project_open() {
+        use std::os::unix::fs::PermissionsExt;
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx, dir) = app_in("fail");
+        let a = saved_project(&dir, "A");
+        let b = saved_project(&dir, "B");
+        app.open_folder(&ctx, Some(a.clone()));
+        app.doc.edit("Rename", |p| p.name = "A edited".into());
+        let mode = std::fs::metadata(&a).unwrap().permissions();
+        std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(a.join("probe")).is_ok() {
+            // Running with rights that ignore the mode: nothing to prove here.
+            std::fs::set_permissions(&a, mode).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        app.open_folder(&ctx, Some(b));
+        std::fs::set_permissions(&a, mode).unwrap();
+        assert_eq!(app.doc.project.name, "A edited", "still open");
+        assert!(app.has_unsaved(), "and still unsaved");
+        assert!(pending(&ctx).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-3: a project without a folder gets one; a failure is returned.
+    #[test]
+    fn a_new_project_is_given_a_folder_or_the_failure() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, _ctx, dir) = app_in("folder");
+        app.doc = crate::services::project::new_custom("Custom", 800, 600, 30.0);
+        app.give_folder_at(&dir.join("Custom.zornov")).unwrap();
+        assert!(app.doc.folder.is_some() && !app.has_unsaved());
+        assert!(dir.join("Custom.zornov").join(m::file::PROJECT_FILE).is_file());
+        // A file in the way: the error comes back, the project stays unsaved.
+        app.doc = crate::services::project::new_custom("Blocked", 800, 600, 30.0);
+        std::fs::write(dir.join("Blocked.zornov"), b"x").unwrap();
+        assert!(app.give_folder_at(&dir.join("Blocked.zornov")).is_err());
+        assert!(app.doc.folder.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-4: a failed autosave is reported once per run of failures, and
+    /// stays visible until one works.
+    #[test]
+    fn autosave_failures_are_told_once_and_clear_on_success() {
+        let mut h = SaveHealth::default();
+        assert!(h.take_warning().is_none());
+        h.failed("disk full".into());
+        assert_eq!(h.take_warning().as_deref(), Some("disk full"));
+        h.failed("disk full".into());
+        assert!(h.take_warning().is_none(), "once");
+        h.ok();
+        h.failed("read-only".into());
+        assert_eq!(h.take_warning().as_deref(), Some("read-only"), "a new run of failures is told again");
+    }
+
+    /// PR-5: an autosave keeps the undo history, so a reopen still undoes.
+    #[test]
+    fn the_undo_history_survives_an_autosave() {
+        let dir = std::env::temp_dir().join(format!("zornov-flow-history-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.join("H.zornov");
+        let mut doc = crate::services::project::new_custom("H", 640, 360, 30.0);
+        crate::services::project::save(&mut doc, Some(&root)).unwrap();
+        doc.edit("Rename", |p| p.name = "H2".into());
+        // What the autosave thread does.
+        let folder = doc.folder.clone().unwrap();
+        folder.save_if(&doc.model, &Default::default(), doc.synced.as_ref().map(|s| s.stamp)).unwrap();
+        crate::services::project::keep_history_of(&folder, &doc.history.snapshot()).unwrap();
+        let mut again = crate::services::project::open(&root).unwrap();
+        assert_eq!(again.project.name, "H2");
+        assert!(again.history.can_undo(), "the rename is still undoable after reopening");
+        assert!(again.undo().is_some());
+        assert_eq!(again.project.name, "H");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-9: Save As tells a fresh place from the open project from another
+    /// project it would write over.
+    #[test]
+    fn save_as_knows_when_it_would_replace_a_project() {
+        let dir = std::env::temp_dir().join(format!("zornov-flow-target-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = saved_project(&dir, "A");
+        let b = saved_project(&dir, "B");
+        assert_eq!(save_target(&dir.join("New.zornov"), Some(&a)), SaveTarget::Fresh);
+        assert_eq!(save_target(&a, Some(&a)), SaveTarget::Current);
+        assert_eq!(save_target(&b, Some(&a)), SaveTarget::Replaces);
+        assert_eq!(save_target(&b, None), SaveTarget::Replaces);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

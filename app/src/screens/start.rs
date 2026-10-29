@@ -49,11 +49,23 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let full = ui.max_rect();
     window_drag_area(ui, Rect::from_min_size(full.min, Vec2::new(full.width(), TITLE_BAR_H)));
     let dialogs = app.cli.shot.is_none();
+    app.files_frame(&ui.ctx().clone());
 
     // Shortcuts.
     let cmd = egui::Modifiers::COMMAND;
+    if dialogs && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::S))) {
+        // Save works here as it does in the editor: the project left open
+        // behind this screen, if it has anything to save.
+        let ctx = ui.ctx().clone();
+        if app.doc.dirty() {
+            app.save(&ctx, false);
+        } else {
+            kit::push(&ctx, "Nothing to save", None, Some(Icon::Info));
+        }
+        return;
+    }
     if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::N))) {
-        new_project(app, &PRESETS[0]);
+        new_project(app, ui.ctx(), &PRESETS[0]);
         return;
     }
     if dialogs && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(cmd, egui::Key::O))) {
@@ -100,7 +112,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         if let Some(pr) = PRESETS.get(i) {
             let size = format!("{}×{}", pr.w, pr.h);
             if preset_card(ui, r, pr.name, pr.ratio, &size, "", Some((pr.w, pr.h))).on_hover_text(pr.hint).clicked() {
-                new_project(app, pr);
+                new_project(app, ui.ctx(), pr);
                 return;
             }
         } else {
@@ -135,7 +147,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
     match go {
         Some(Side::Demo) => {
-            app.open_project(view::demo());
+            let ctx = ui.ctx().clone();
+            app.replace(&ctx, files::Replace::Sample(view::demo()));
             return;
         }
         Some(Side::Open) if dialogs => {
@@ -182,7 +195,10 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         p.width = w;
         p.height = h;
         p.fps = fps;
-        app.open_project(p);
+        // Like a preset: its own folder at once, so it is saved and autosaved.
+        p.name = crate::i18n::tf("Untitled custom".to_string());
+        let ctx = ui.ctx().clone();
+        app.replace(&ctx, files::Replace::New(p));
         return;
     }
 
@@ -215,7 +231,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         let mut eui = gui.new_child(egui::UiBuilder::new().max_rect(r));
         if kit::empty_state(&mut eui, Icon::FilmSlate, sentence, action) {
             if q.is_empty() {
-                new_project(app, &PRESETS[0]);
+                new_project(app, ui.ctx(), &PRESETS[0]);
             } else {
                 app.start.search.clear();
             }
@@ -318,7 +334,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         });
     });
     if let Some(p) = new_from {
-        crate::templates::open(app, p);
+        crate::templates::open(app, ui.ctx(), p);
         return;
     }
     if let Some(path) = open {
@@ -335,7 +351,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
             p.width = 1080;
             p.height = (1080.0 * ah as f32 / aw as f32) as u32 / 2 * 2;
         }
-        app.open_project(p);
+        let ctx = ui.ctx().clone();
+        app.replace(&ctx, files::Replace::Sample(p));
     }
 }
 
@@ -384,13 +401,12 @@ fn letterboxed(p: &egui::Painter, thumbs: &mut crate::thumbs::Thumbs, r: Rect, a
     }
 }
 
-fn new_project(app: &mut StudioApp, p: &Preset) {
+fn new_project(app: &mut StudioApp, ctx: &egui::Context, p: &Preset) {
     let mut proj = view::empty();
     proj.width = p.w;
     proj.height = p.h;
     proj.name = crate::i18n::tf(format!("Untitled {}", p.name.to_lowercase()));
-    app.open_project(proj);
-    app.give_folder();
+    app.replace(ctx, files::Replace::New(proj));
 }
 
 /// The Zornov wordmark: an accent glyph and the name.
