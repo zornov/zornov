@@ -21,7 +21,7 @@ use crate::app::StudioApp;
 use crate::kit::{self, ShowNoted};
 use crate::theme;
 use crate::view::{SEC, Time};
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use studio_model as m;
@@ -109,18 +109,14 @@ pub fn docked(app: &mut StudioApp, ui: &mut egui::Ui, r: egui::Rect) {
 /// The tabs and their lists (`grip`: the dock handle before the tabs, in
 /// the floating window).
 fn body(app: &mut StudioApp, ui: &mut egui::Ui, grip: bool) {
-    crate::kit::scroll_strip(ui, "editorial-tabs", |ui| {
-        if grip {
-            super::super::dock_ui::float_grip(app, ui, crate::dock::Panel::Editorial);
-        }
-        for (t, name) in [(Tab::Index, "Index"), (Tab::Checks, "Checks"), (Tab::Takes, "Takes"), (Tab::Sequences, "Sequences"), (Tab::Script, "Script")] {
-            let on = app.editor.cutting.panel.tab == t;
-            if ui.selectable_label(on, name).clicked() {
-                app.editor.cutting.panel.tab = t;
-            }
-        }
-    });
-    ui.separator();
+    if grip {
+        ui.horizontal(|ui| super::super::dock_ui::float_grip(app, ui, crate::dock::Panel::Editorial));
+    }
+    let tabs = [Tab::Index, Tab::Checks, Tab::Takes, Tab::Sequences, Tab::Script];
+    let mut at = tabs.iter().position(|t| *t == app.editor.cutting.panel.tab).unwrap_or(0);
+    if crate::kit::tab_bar(ui, "editorial-tabs", &mut at, &["Index", "Checks", "Takes", "Sequences", "Script"]) {
+        app.editor.cutting.panel.tab = tabs[at];
+    }
     egui::ScrollArea::vertical().id_salt("editorial-lists").auto_shrink([false, false]).show_v(ui, |ui| match app.editor.cutting.panel.tab {
         Tab::Index => index(app, ui),
         Tab::Checks => checks(app, ui),
@@ -178,7 +174,7 @@ fn checks(app: &mut StudioApp, ui: &mut egui::Ui) {
             if ui.link(format!("{lane} {}–{} s", secs(g.start), secs(g.end))).clicked() {
                 go = Some((g.start, None));
             }
-            if ui.small_button("Close").on_hover_text("Extract the gap: everything after moves up").clicked() {
+            if crate::kit::Button::ghost("Close").compact().show(ui).on_hover_text("Extract the gap: everything after moves up").clicked() {
                 close = Some((g.lane, g.start, g.end));
             }
         });
@@ -213,7 +209,7 @@ fn checks(app: &mut StudioApp, ui: &mut egui::Ui) {
 fn takes(app: &mut StudioApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     ui.horizontal_wrapped(|ui| {
-        if ui.button("Read scene and take from names").clicked() {
+        if crate::kit::Button::secondary("Read scene and take from names").compact().show(ui).clicked() {
             let mut edits = Vec::new();
             for mi in &app.doc.model.media {
                 if let Some((scene, take, camera)) = ed::parse_take(&mi.name).filter(|_| !mi.extra.contains_key("scene")) {
@@ -260,7 +256,7 @@ fn takes(app: &mut StudioApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 for k in 1..=5u8 {
                     let on = r >= k;
-                    if ui.small_button(RichText::new(if on { "●" } else { "○" }).color(if on { Color32::from_rgb(240, 196, 70) } else { Color32::GRAY })).clicked() {
+                    if ui.small_button(RichText::new(if on { "●" } else { "○" }).color({ let t = theme::tokens(ui.ctx()); if on { t.warn } else { t.text_2 } })).clicked() {
                         r = if r == k { 0 } else { k };
                         change = Some((mi.id, ed::TakeInfo { rating: r, ..info.clone() }));
                     }
@@ -336,16 +332,16 @@ fn sequences(app: &mut StudioApp, ui: &mut egui::Ui) {
                 act = Some(("switch", *id));
             }
             ui.label(RichText::new(format!("{n} clips · {} s", secs(*dur))).font(theme::caption()));
-            if ui.small_button("Duplicate").clicked() {
+            if crate::kit::Button::ghost("Duplicate").compact().show(ui).clicked() {
                 act = Some(("duplicate", *id));
             }
-            if ui.add_enabled(!on, egui::Button::new("Delete").small()).clicked() {
+            if ui.add_enabled_ui(!on, |ui| crate::kit::Button::ghost("Delete").compact().show(ui)).inner.clicked() {
                 act = Some(("delete", *id));
             }
             ui.end_row();
         }
     }));
-    if ui.button("New sequence").clicked() {
+    if crate::kit::Button::secondary("New sequence").compact().show(ui).clicked() {
         let n = format!("Sequence {}", list.len() + 1);
         let (e, id) = ed::new_sequence(&mut app.doc.model, &n);
         if app.doc.apply("New sequence", e) {
@@ -380,7 +376,7 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mut find = false;
     ui.horizontal_wrapped(|ui| {
         let r = ui.add(egui::TextEdit::singleline(&mut app.editor.cutting.panel.line).hint_text("a line of the script").desired_width(300.0));
-        find = (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) | ui.button("Find takes").clicked();
+        find = (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) | crate::kit::Button::secondary("Find takes").compact().show(ui).clicked();
     });
     if find && app.editor.cutting.panel.finding.is_none() {
         let line = app.editor.cutting.panel.line.clone();
@@ -397,7 +393,7 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mut pick = None;
     match &app.editor.cutting.panel.hits {
         Some(Ok(hits)) if hits.is_empty() => {
-            ui.label("No take says that line.");
+            ui.label("No take says that line");
         }
         Some(Ok(hits)) => {
             for h in hits {
@@ -408,7 +404,7 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui) {
             }
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(e).color(Color32::LIGHT_RED));
+            ui.label(RichText::new(e).color(theme::tokens(ui.ctx()).danger));
         }
         None => {}
     }
@@ -423,7 +419,7 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui) {
     let seq = app.doc.model.active();
     let clip = app.editor.selection.first().and_then(|id| seq.clip(m::ClipId(*id as u64))).or_else(|| seq.clip_at(seq.spine_id(), app.editor.playhead)).filter(|c| c.media_id().is_some()).cloned();
     let Some(clip) = clip else {
-        ui.label("Put the playhead on a clip with speech to edit it by its words.");
+        ui.label("Put the playhead on a clip with speech to edit it by its words");
         return;
     };
     let p = &mut app.editor.cutting.panel;
@@ -446,7 +442,7 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui) {
             ui.label("Listening…");
         }
         Some(Err(e)) => {
-            ui.label(RichText::new(e).color(Color32::LIGHT_RED));
+            ui.label(RichText::new(e).color(theme::tokens(ui.ctx()).danger));
         }
         Some(Ok(lines)) => {
             for (li, l) in lines.iter().enumerate() {
@@ -459,7 +455,7 @@ fn script(app: &mut StudioApp, ui: &mut egui::Ui) {
                         }
                         let text = raw.get(wi).copied().unwrap_or(&w.norm);
                         let marked = p.marked.contains(&(li, wi));
-                        let rt = if marked { RichText::new(text).strikethrough().color(Color32::LIGHT_RED) } else { RichText::new(text) };
+                        let rt = if marked { RichText::new(text).strikethrough().color(theme::tokens(ui.ctx()).danger) } else { RichText::new(text) };
                         if ui.add(egui::Label::new(rt).sense(egui::Sense::click())).clicked() {
                             toggle = Some((li, wi));
                         }

@@ -826,12 +826,12 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                 ui.label(egui::RichText::new(&c.status).font(theme::caption()).color(t.text_2));
                 ui.horizontal_wrapped(|ui| {
                     let recording = is_recording();
-                    if ui.add_enabled(!recording, egui::Button::new("● Record")).on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked() {
+                    if ui.add_enabled_ui(!recording, |ui| Button::secondary("Record").icon(Icon::Microphone).compact().show(ui)).inner.on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked() {
                         if let Err(e) = start_recording(app, c) {
                             s.message = Some(e);
                         }
                     }
-                    if ui.button("Take…").on_hover_text(crate::i18n::shown("Bring in a recorded take: synced, matched, on the ADR lane")).clicked()
+                    if Button::secondary("Take…").compact().show(ui).on_hover_text(crate::i18n::shown("Bring in a recorded take: synced, matched, on the ADR lane")).clicked()
                         && let Some(p) = rfd::FileDialog::new().add_filter("Sound", &["wav", "aif", "aiff", "m4a", "mp3", "flac"]).pick_file()
                     {
                         let home = home(app);
