@@ -119,6 +119,14 @@ fn build(repro: bool) -> Result<PathBuf, String> {
         if let Some(home) = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(|h| PathBuf::from(h).join(".cargo"))) {
             flags += &format!(" --remap-path-prefix={}=/cargo", home.display());
         }
+        // (rustc takes the last matching remap, so the narrower one goes last.) The toolchain's own sources (std, core, alloc: panic locations) live under the sysroot in the user's home.
+        let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+        if let Ok(out) = Command::new(rustc).current_dir(root()).args(["--print", "sysroot"]).output() {
+            let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if out.status.success() && !sysroot.is_empty() {
+                flags += &format!(" --remap-path-prefix={sysroot}=/rustup --remap-path-prefix={sysroot}/lib/rustlib/src/rust=/rust");
+            }
+        }
         c.env("RUSTFLAGS", flags.trim()).env("SOURCE_DATE_EPOCH", repro::epoch().to_string()).arg("--locked");
     }
     let ok = c.status().map_err(|e| format!("cannot run cargo: {e}"))?.success();
