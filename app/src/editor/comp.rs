@@ -26,9 +26,8 @@ pub(super) fn is_on(ctx: &egui::Context) -> bool {
     ctx.data_mut(|d| *d.get_persisted_mut_or_default::<bool>(on_id()))
 }
 
-pub(super) fn toggle(ctx: &egui::Context) {
-    let on = is_on(ctx);
-    ctx.data_mut(|d| d.insert_persisted(on_id(), !on));
+pub(super) fn set_on(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_persisted(on_id(), on));
 }
 
 /// View state of one clip's graph.
@@ -55,6 +54,7 @@ const NODE_W: f32 = 132.0;
 const NODE_H: f32 = 34.0;
 const PORT: f32 = 5.0;
 
+// TODO(kit): node category colours as theme tokens.
 fn colour_of(c: NodeCategory) -> Color32 {
     match c {
         NodeCategory::Input => Color32::from_rgb(110, 160, 110),
@@ -73,6 +73,15 @@ fn colour_of(c: NodeCategory) -> Color32 {
 impl State {
     fn scale(&self) -> f32 {
         if self.zoom <= 0.0 { 1.0 } else { self.zoom }
+    }
+
+    /// Scale by `k`, keeping the graph point under `at` where it is.
+    fn zoom_at(&mut self, area: Rect, at: Pos2, k: f32) {
+        let old = self.scale();
+        let new = (old * k).clamp(0.3, 2.5);
+        let rel = at - area.center() - self.pan;
+        self.pan += rel - rel * (new / old);
+        self.zoom = new;
     }
 
     fn to_screen(&self, area: Rect, p: [f32; 2]) -> Pos2 {
@@ -109,10 +118,12 @@ pub fn graph_ui(ui: &mut egui::Ui, area: Rect, g: &mut Graph, st: &mut State) ->
     if bg.clicked() {
         st.selected = None;
     }
-    if bg.hovered() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll.abs() > 0.0 {
-            st.zoom = (st.scale() * (1.0 + scroll * 0.002)).clamp(0.3, 2.5);
+    // The wheel (or a pinch) zooms the graph about the pointer, wherever
+    // it is over the graph, not only over empty space.
+    if let Some(q) = ui.input(|i| i.pointer.hover_pos()).filter(|q| area.contains(*q)) {
+        let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+        if scroll.abs() > 0.0 || pinch != 1.0 {
+            st.zoom_at(area, q, (scroll * 0.002).exp() * pinch);
         }
     }
     // Grid dots.
@@ -236,15 +247,50 @@ pub fn graph_ui(ui: &mut egui::Ui, area: Rect, g: &mut Graph, st: &mut State) ->
             st.wiring = None;
         }
     }
-    // Delete the selected node.
-    if let Some(sel) = st.selected {
-        if !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) && g.node(sel).is_some_and(|n| n.kind != "input") {
-            g.remove(sel);
-            st.selected = None;
-            change = Change::Edit("Delete node");
-        }
+    // Delete the selected node (normally already claimed by `claim_delete`,
+    // before the timeline's own keys hear it).
+    if !ui.ctx().egui_wants_keyboard_input() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)) && delete_selected(g, st) {
+        change = Change::Edit("Delete node");
     }
     change
+}
+
+/// Remove the selected node, except the input. True if one went.
+fn delete_selected(g: &mut Graph, st: &mut State) -> bool {
+    let Some(sel) = st.selected else { return false };
+    if g.node(sel).is_none_or(|n| n.kind == "input") {
+        return false;
+    }
+    g.remove(sel);
+    st.selected = None;
+    true
+}
+
+/// With the compositor open and a node selected, Delete and Backspace
+/// belong to the node: this takes them before the timeline's keys can
+/// delete the clip. Called ahead of the shortcut dispatcher.
+pub(super) fn claim_delete(app: &mut StudioApp, ctx: &egui::Context) {
+    if !is_on(ctx) {
+        return;
+    }
+    let Some(&id) = app.editor.selection.first() else { return };
+    let sid = egui::Id::unique(("comp-state", id));
+    let Some(mut st) = ctx.data(|d| d.get_temp::<State>(sid)) else { return };
+    if st.selected.is_none() {
+        return;
+    }
+    let pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) | i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace));
+    if !pressed {
+        return;
+    }
+    let Some(mc) = app.doc.model.active().clip(m::ClipId(id as u64)).cloned() else { return };
+    let Some((_, mut g)) = crate::services::vfx::graph_of(&mc) else { return };
+    if delete_selected(&mut g, &mut st) {
+        if let Err(e) = crate::services::vfx::store_graph(&mut app.doc, id, &g, "Delete node") {
+            app.doc.error = Some(e);
+        }
+        ctx.data_mut(|d| d.insert_temp(sid, st));
+    }
 }
 
 fn wire(p: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
@@ -495,6 +541,45 @@ mod tests {
         assert_eq!(st.selected, Some(b));
         assert!(g.node(b).unwrap().pos[0] > 30.0, "{:?}", g.node(b).unwrap().pos);
         assert_eq!(c, Change::Edit("Move node"));
+    }
+
+    #[test]
+    fn zoom_keeps_the_point_under_the_pointer() {
+        let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 500.0));
+        let mut st = State::default();
+        let at = Pos2::new(600.0, 100.0);
+        let before = (at - area.center() - st.pan) / st.scale();
+        st.zoom_at(area, at, 1.5);
+        assert!((st.scale() - 1.5).abs() < 1e-4);
+        let after = (at - area.center() - st.pan) / st.scale();
+        assert!((before - after).length() < 1e-3);
+        st.zoom_at(area, at, 100.0);
+        assert!(st.scale() <= 2.5);
+    }
+
+    #[test]
+    fn delete_removes_the_node_not_the_input() {
+        let mut g = Graph::passthrough();
+        let b = g.add("blur", &[Some(1)]);
+        let mut st = State { selected: Some(b), ..Default::default() };
+        assert!(delete_selected(&mut g, &mut st));
+        assert!(g.node(b).is_none());
+        assert_eq!(st.selected, None);
+        let mut st = State { selected: Some(1), ..Default::default() };
+        assert!(!delete_selected(&mut g, &mut st), "the input stays");
+        assert!(g.node(1).is_some());
+    }
+
+    #[test]
+    fn delete_key_is_consumed_by_the_graph() {
+        let mut g = Graph::passthrough();
+        let b = g.add("blur", &[Some(1)]);
+        let mut st = State { selected: Some(b), ..Default::default() };
+        let ctx = egui::Context::default();
+        let key = egui::Event::Key { key: egui::Key::Delete, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+        let c = run(&ctx, &mut g, &mut st, vec![key]);
+        assert_eq!(c, Change::Edit("Delete node"));
+        assert!(g.node(b).is_none());
     }
 
     #[test]

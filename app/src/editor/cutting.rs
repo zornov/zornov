@@ -31,6 +31,9 @@ use studio_model::editorial as ed;
 
 pub(super) mod panel;
 
+// TODO(kit): a theme token for the monitor surround.
+const MONITOR_BG: Color32 = Color32::from_rgb(12, 12, 14);
+
 /// How edge and body drags in the timeline behave.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TrimMode {
@@ -490,6 +493,8 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if ctx.text_edit_focused() || app.overlay != crate::app::Overlay::None || crate::onboarding::tour_running(app) {
         return;
     }
+    // A selected compositor node owns Delete, not the clip under it.
+    super::comp::claim_delete(app, ctx);
     let prefs = app.prefs.clone();
     if hit(ctx, &prefs, "source-monitor") {
         if app.editor.cutting.source.is_none() {
@@ -666,7 +671,7 @@ fn dual_up(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, (a, b, la, lb): (
     // The canvas underneath takes no clicks or drags meanwhile.
     let _ = ui.interact(area, egui::Id::unique("cut-dual-up"), Sense::click_and_drag());
     let p = ui.painter().with_clip_rect(area);
-    p.rect_filled(area, 0, Color32::from_rgb(12, 12, 14));
+    p.rect_filled(area, 0, MONITOR_BG);
     let half = |k: f32| Rect::from_min_size(egui::pos2(area.left() + k * area.width() / 2.0, area.top()), Vec2::new(area.width() / 2.0, area.height()));
     let (w, h) = (app.doc.project.width as f32, app.doc.project.height as f32);
     let fps = app.doc.project.fps;
@@ -708,7 +713,7 @@ fn source_monitor(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
     let pic_area = Rect::from_min_max(area.min, egui::pos2(area.right(), area.bottom() - bar_h));
     let _ = ui.interact(area, egui::Id::unique("cut-source-area"), Sense::click_and_drag());
     let p = ui.painter().with_clip_rect(area);
-    p.rect_filled(area, 0, Color32::from_rgb(10, 10, 12));
+    p.rect_filled(area, 0, MONITOR_BG);
     let slot = fit(pic_area.shrink(8.0), w, h);
     p.rect_filled(slot, 0, Color32::BLACK);
     let Some(s) = &mut app.editor.cutting.source else { return };
@@ -798,12 +803,25 @@ fn source_monitor(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
 // ------------------------------------------------------------ lanes
 
 /// Target and sync-lock toggles at the edges of a lane header.
+/// Whether track `lane` is the target of marks, lift and extract.
+pub fn is_targeted(app: &StudioApp, lane: u32) -> bool {
+    app.doc.model.active().lane(m::LaneId(lane as u64)).is_some_and(ed::targeted)
+}
+
+/// Target or untarget a track.
+pub fn set_target(app: &mut StudioApp, lane: u32, on: bool) {
+    let seq = app.doc.seq();
+    if let Ok(e) = ed::set_targeted(&app.doc.model, seq, m::LaneId(lane as u64), on) {
+        app.doc.apply("Target track", e);
+    }
+}
+
 pub fn lane_toggles(app: &mut StudioApp, ui: &mut egui::Ui, hr: Rect, lane: u32) {
     let seq = app.doc.seq();
     let Some(l) = app.doc.model.active().lane(m::LaneId(lane as u64)).cloned() else { return };
     let t = theme::tokens(ui.ctx());
     let cy = hr.center().y;
-    for (k, (icon, on, tip)) in [(Icon::Circle, ed::targeted(&l), if ed::targeted(&l) { "Targeted: marks, lift and extract use this lane (click to untarget)" } else { "Not targeted (click to target)" }), (Icon::LinkSimple, ed::sync_locked(&l), if ed::sync_locked(&l) { "Sync lock on: follows ripples on other lanes" } else { "Sync lock off (click to keep this lane in sync with ripples)" })].into_iter().enumerate() {
+    for (k, (icon, on, tip)) in [(Icon::Circle, ed::targeted(&l), if ed::targeted(&l) { "Targeted: marks, lift and extract use this track (click to untarget)" } else { "Not targeted (click to target)" }), (Icon::LinkSimple, ed::sync_locked(&l), if ed::sync_locked(&l) { "Sync lock on: follows ripples on other tracks" } else { "Sync lock off (click to keep this track in sync with ripples)" })].into_iter().enumerate() {
         let x = if k == 0 { hr.left() + 9.0 } else { hr.right() - 9.0 };
         let r = Rect::from_center_size(egui::pos2(x, cy), Vec2::splat(14.0));
         let resp = ui.interact(r, egui::Id::unique(("lane-cut-toggle", lane, k)), Sense::click()).on_hover_text(tip);
@@ -812,40 +830,58 @@ pub fn lane_toggles(app: &mut StudioApp, ui: &mut egui::Ui, hr: Rect, lane: u32)
         if resp.clicked() {
             let e = if k == 0 { ed::set_targeted(&app.doc.model, seq, l.id, !on) } else { ed::set_sync_lock(&app.doc.model, seq, l.id, !on) };
             if let Ok(e) = e {
-                app.doc.apply(if k == 0 { "Target lane" } else { "Sync lock" }, e);
+                app.doc.apply(if k == 0 { "Target track" } else { "Sync lock" }, e);
             }
         }
     }
 }
 
-/// Trim mode buttons for the timeline toolbar.
-pub fn toolbar(app: &mut StudioApp, bar: &mut egui::Ui) {
-    for (mode, icon, name, key) in [(TrimMode::Ripple, Icon::ArrowsOutLineHorizontal, "Ripple trim: edges move later clips", "T"), (TrimMode::Roll, Icon::SquareSplitHorizontal, "Roll trim: edges move the cut", "T T"), (TrimMode::Slide, Icon::ArrowsHorizontal, "Slide: drag a clip between its neighbours", "U")] {
-        let on = app.editor.cutting.mode == mode;
-        if kit::IconButton::new(icon, name).shortcut(key).active(on).show(bar).clicked() {
-            app.editor.cutting.mode = if on { TrimMode::Off } else { mode };
+/// The trim modes in the order the toolbar's Trim menu lists them.
+const TRIM_MODES: [(TrimMode, &str); 4] = [(TrimMode::Off, "Normal trim"), (TrimMode::Ripple, "Ripple trim"), (TrimMode::Roll, "Roll trim"), (TrimMode::Slide, "Slide")];
+
+/// The Trim control for the timeline toolbar: one menu button that shows
+/// the current mode and lists Normal, Ripple, Roll and Slide.
+pub fn trim_menu(app: &mut StudioApp, bar: &mut egui::Ui) {
+    let selected = TRIM_MODES.iter().position(|m| m.0 == app.editor.cutting.mode).unwrap_or(0);
+    let names: Vec<&str> = TRIM_MODES.iter().map(|m| m.1).collect();
+    let at = bar.next_widget_position();
+    let chosen = kit::menu_button(bar, "timeline-trim", selected, &names, 112.0, None);
+    if app.editor.cutting.mode != TrimMode::Off {
+        // A trim mode other than normal is lit under the control.
+        let r = Rect::from_min_size(at, Vec2::new(112.0, crate::theme::space::CONTROL_H));
+        bar.painter().hline(r.x_range(), r.bottom() + 1.0, egui::Stroke::new(2.0, crate::theme::tokens(bar.ctx()).accent));
+    }
+    if let Some(i) = chosen {
+        app.editor.cutting.mode = TRIM_MODES[i].0;
+        if TRIM_MODES[i].0 != TrimMode::Off {
             app.editor.tool = super::Tool::Select;
         }
     }
-    let open = app.editor.cutting.panel.open;
-    if kit::IconButton::new(Icon::List, "Editorial: timeline index, gaps and duplicates, takes, sequences, find takes for a script line, edit by words (⌥E)").active(open).show(bar).clicked() {
-        app.editor.cutting.panel.open = !open;
-    }
+}
+
+/// Linked selection, a toggle in the toolbar.
+pub fn linked_toggle(app: &mut StudioApp, bar: &mut egui::Ui) {
     let linked = !app.editor.cutting.unlinked;
     if kit::IconButton::new(Icon::LinkSimple, if linked { "Linked selection on: picture and its sound move together (click to move them apart)" } else { "Linked selection off: clips move without their linked sound" }).active(linked).show(bar).clicked() {
         app.editor.cutting.unlinked = linked;
     }
-    let src = app.editor.cutting.show_source;
-    if kit::IconButton::new(Icon::FilmSlate, if src { "Back to the program (⇧4)" } else { "Source monitor (⇧2): mark in/out, then , insert or . overwrite" }).active(src).show(bar).clicked() {
-        if src {
-            app.editor.cutting.show_source = false;
-        } else if app.editor.cutting.source.is_some() {
-            app.editor.cutting.show_source = true;
-        } else {
-            let seq = app.doc.seq();
-            if let Some(hit) = ed::match_frame(&app.doc.model, seq, app.editor.playhead, None) {
-                open_source(app, hit.source, hit.source_time, false);
-            }
+}
+
+/// Editorial panel, from the toolbar's More menu.
+pub fn toggle_editorial(app: &mut StudioApp) {
+    app.editor.cutting.panel.open = !app.editor.cutting.panel.open;
+}
+
+/// Source monitor / back to the program, from the toolbar's More menu.
+pub fn toggle_source(app: &mut StudioApp) {
+    if app.editor.cutting.show_source {
+        app.editor.cutting.show_source = false;
+    } else if app.editor.cutting.source.is_some() {
+        app.editor.cutting.show_source = true;
+    } else {
+        let seq = app.doc.seq();
+        if let Some(hit) = ed::match_frame(&app.doc.model, seq, app.editor.playhead, None) {
+            open_source(app, hit.source, hit.source_time, false);
         }
     }
 }
