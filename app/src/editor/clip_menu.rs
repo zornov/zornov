@@ -76,88 +76,46 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     let h = held(ctx);
     let mut act: Option<Act> = None;
     let key = |id: &str| crate::keymap::hint(&app.prefs, id);
-    let (split_k, dup_k, marker_k, delete_k) = (key("split"), key("duplicate"), key("marker"), key("delete"));
+    let hints = [("split", key("split")), ("duplicate", key("duplicate")), ("marker", key("marker")), ("delete", key("delete"))];
+    let facts = Facts { inside, grouped, linked, many, picture_with_sound, media_clip, all_on, visual_one, can_paste: h.clips.is_some(), can_paste_look: h.look.is_some(), one: ids.len() == 1 };
+    let entries = entries(&facts);
     kit::popover(ctx, open_id(), anchor, kit::Side::Below, 232.0, |ui| {
-        let item = |ui: &mut egui::Ui, label: &str, shortcut: &str, icon: Icon, enabled: bool| {
-            let mut m = MenuItem::new(label).icon(icon).enabled(enabled);
-            if !shortcut.is_empty() {
-                m = m.shortcut(shortcut);
+        let hint = |k: &str| hints.iter().find(|h| h.0 == k).map_or("", |h| h.1.as_str()).to_owned();
+        let draw = |ui: &mut egui::Ui, e: &Entry, act: &mut Option<Act>| {
+            let shortcut = e.hint.map(&hint).unwrap_or_default();
+            let mut m = MenuItem::new(e.label).icon(e.icon).enabled(e.enabled).shortcut(&shortcut);
+            if e.danger {
+                m = m.danger();
             }
-            m.show(ui).clicked()
+            if m.show(ui).clicked() {
+                *act = Some(e.act);
+            }
         };
-        if item(ui, "Split at playhead", &split_k, Icon::Scissors, inside) {
-            act = Some(Act::Do(Action::Split));
-        }
-        if item(ui, "Duplicate", &dup_k, Icon::Copy, true) {
-            act = Some(Act::Do(Action::Duplicate));
-        }
-        if item(ui, "Copy", "", Icon::Copy, true) {
-            act = Some(Act::Copy);
-        }
-        if item(ui, "Cut", "", Icon::Scissors, true) {
-            act = Some(Act::Cut);
-        }
-        if item(ui, "Paste at playhead", "", Icon::DownloadSimple, h.clips.is_some()) {
-            act = Some(Act::Paste);
-        }
-        kit::menu_separator(ui);
-        if item(ui, if all_on { "Disable" } else { "Enable" }, "", Icon::Eye, true) {
-            act = Some(Act::Enabled(!all_on));
-        }
-        if item(ui, "Group", "", Icon::Stack, many) {
-            act = Some(Act::Group);
-        }
-        if item(ui, "Ungroup", "", Icon::Stack, grouped) {
-            act = Some(Act::Ungroup);
-        }
-        if item(ui, "Link", "", Icon::LinkSimple, many) {
-            act = Some(Act::Link);
-        }
-        if item(ui, "Unlink", "", Icon::LinkSimple, linked) {
-            act = Some(Act::Unlink);
-        }
-        if item(ui, "Nest into a sequence", "", Icon::Stack, many) {
-            act = Some(Act::Nest);
-        }
-        kit::menu_separator(ui);
-        if item(ui, "Bring to front", "", Icon::Stack, visual_one) {
-            act = Some(Act::Restack(Stack::Top));
-        }
-        if item(ui, "Bring forward", "", Icon::Stack, visual_one) {
-            act = Some(Act::Restack(Stack::Forward));
-        }
-        if item(ui, "Send backward", "", Icon::Stack, visual_one) {
-            act = Some(Act::Restack(Stack::Backward));
-        }
-        if item(ui, "Send to back", "", Icon::Stack, visual_one) {
-            act = Some(Act::Restack(Stack::Bottom));
-        }
-        kit::menu_separator(ui);
-        if item(ui, "Detach sound", "", Icon::SpeakerHigh, picture_with_sound) {
-            act = Some(Act::Detach);
-        }
-        if item(ui, "Freeze frame at playhead", "", Icon::Pause, media_clip && inside) {
-            act = Some(Act::Freeze);
-        }
-        if item(ui, "Reverse", "", Icon::Repeat, media_clip) {
-            act = Some(Act::Reverse);
-        }
-        kit::menu_separator(ui);
-        if item(ui, "Copy look", "", Icon::Palette, ids.len() == 1) {
-            act = Some(Act::CopyLook);
-        }
-        if item(ui, "Paste look", "", Icon::Palette, h.look.is_some()) {
-            act = Some(Act::PasteLook);
-        }
-        if item(ui, "Add marker at playhead", &marker_k, Icon::Flag, true) {
-            act = Some(Act::Do(Action::Marker));
-        }
-        if item(ui, "Show in Inspector", "", Icon::Faders, true) {
-            act = Some(Act::Inspector);
-        }
-        kit::menu_separator(ui);
-        if MenuItem::new("Delete").icon(Icon::Trash).shortcut(&delete_k).danger().show(ui).clicked() {
-            act = Some(Act::Do(Action::Delete));
+        let mut last: Option<&str> = None;
+        for section in SECTIONS {
+            let group: Vec<&Entry> = entries.iter().filter(|e| e.section == *section).collect();
+            if group.is_empty() {
+                continue;
+            }
+            if last.is_some() {
+                kit::menu_separator(ui);
+            }
+            last = Some(section.name());
+            match section.name() {
+                // Plain rows.
+                "" => group.iter().for_each(|e| draw(ui, e, &mut act)),
+                // A heading that opens its rows in place.
+                name => {
+                    let gid = egui::Id::unique(("clip-menu-group", name));
+                    let open = ui.ctx().data(|d| d.get_temp::<bool>(gid)).unwrap_or(false);
+                    if MenuItem::new(name).icon(section.icon()).shortcut(if open { "▾" } else { "▸" }).show(ui).clicked() {
+                        ui.ctx().data_mut(|d| d.insert_temp(gid, !open));
+                    }
+                    if open {
+                        ui.indent(gid, |ui| group.iter().for_each(|e| draw(ui, e, &mut act)));
+                    }
+                }
+            }
         }
     });
     let Some(act) = act else { return };
@@ -165,8 +123,138 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     run(app, ctx, &ids, playhead, act);
 }
 
+/// What is true of the selection, for which rows the menu shows.
+struct Facts {
+    inside: bool,
+    grouped: bool,
+    linked: bool,
+    many: bool,
+    one: bool,
+    picture_with_sound: bool,
+    media_clip: bool,
+    all_on: bool,
+    visual_one: bool,
+    can_paste: bool,
+    can_paste_look: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Section {
+    Edit,
+    Arrange,
+    Link,
+    Audio,
+    Time,
+    Look,
+    Clip,
+    Delete,
+}
+
+const SECTIONS: &[Section] = &[Section::Edit, Section::Arrange, Section::Link, Section::Audio, Section::Time, Section::Look, Section::Clip, Section::Delete];
+
+impl Section {
+    /// The heading a section folds under; empty for plain rows.
+    fn name(self) -> &'static str {
+        match self {
+            Section::Arrange => "Arrange",
+            Section::Link => "Group and link",
+            Section::Audio => "Audio",
+            Section::Time => "Speed and time",
+            Section::Look => "Look",
+            _ => "",
+        }
+    }
+    fn icon(self) -> Icon {
+        match self {
+            Section::Arrange => Icon::Stack,
+            Section::Link => Icon::LinkSimple,
+            Section::Audio => Icon::SpeakerHigh,
+            Section::Time => Icon::Repeat,
+            _ => Icon::Palette,
+        }
+    }
+}
+
+struct Entry {
+    section: Section,
+    label: &'static str,
+    icon: Icon,
+    /// A keymap id whose key is shown beside the row.
+    hint: Option<&'static str>,
+    enabled: bool,
+    danger: bool,
+    act: Act,
+}
+
+/// The rows for a selection: what cannot apply to it is left out, what is
+/// only unavailable for now (nothing to paste, playhead outside the clip)
+/// is shown dimmed.
+fn entries(f: &Facts) -> Vec<Entry> {
+    let e = |section, label, icon, hint, enabled, act| Entry { section, label, icon, hint, enabled, danger: false, act };
+    let mut v = vec![
+        e(Section::Edit, "Split at playhead", Icon::Scissors, Some("split"), f.inside, Act::Split),
+        e(Section::Edit, "Duplicate", Icon::Copy, Some("duplicate"), true, Act::Duplicate),
+        e(Section::Edit, "Copy", Icon::Copy, None, true, Act::Copy),
+        e(Section::Edit, "Cut", Icon::Scissors, None, true, Act::Cut),
+        e(Section::Edit, "Paste at playhead", Icon::DownloadSimple, None, f.can_paste, Act::Paste),
+    ];
+    if f.visual_one {
+        v.push(e(Section::Arrange, "Bring to front", Icon::Stack, None, true, Act::Restack(Stack::Top)));
+        v.push(e(Section::Arrange, "Bring forward", Icon::Stack, None, true, Act::Restack(Stack::Forward)));
+        v.push(e(Section::Arrange, "Send backward", Icon::Stack, None, true, Act::Restack(Stack::Backward)));
+        v.push(e(Section::Arrange, "Send to back", Icon::Stack, None, true, Act::Restack(Stack::Bottom)));
+    }
+    if f.many {
+        v.push(e(Section::Link, "Group", Icon::Stack, None, true, Act::Group));
+        v.push(e(Section::Link, "Link", Icon::LinkSimple, None, true, Act::Link));
+        v.push(e(Section::Link, "Nest into a sequence", Icon::Stack, None, true, Act::Nest));
+    }
+    if f.grouped {
+        v.push(e(Section::Link, "Ungroup", Icon::Stack, None, true, Act::Ungroup));
+    }
+    if f.linked {
+        v.push(e(Section::Link, "Unlink", Icon::LinkSimple, None, true, Act::Unlink));
+    }
+    if f.picture_with_sound {
+        v.push(e(Section::Audio, "Detach sound", Icon::SpeakerHigh, None, true, Act::Detach));
+    }
+    if f.media_clip {
+        v.push(e(Section::Time, "Freeze frame at playhead", Icon::Pause, None, f.inside, Act::Freeze));
+        v.push(e(Section::Time, "Reverse", Icon::Repeat, None, true, Act::Reverse));
+    }
+    if f.one {
+        v.push(e(Section::Look, "Copy look", Icon::Palette, None, true, Act::CopyLook));
+        v.push(e(Section::Look, "Paste look", Icon::Palette, None, f.can_paste_look, Act::PasteLook));
+    }
+    v.push(e(Section::Clip, if f.all_on { "Disable" } else { "Enable" }, Icon::Eye, None, true, Act::Enabled(!f.all_on)));
+    v.push(e(Section::Clip, "Add marker", Icon::Flag, Some("marker"), true, Act::Marker));
+    v.push(e(Section::Clip, "Show in Inspector", Icon::Faders, None, true, Act::Inspector));
+    v.push(Entry { section: Section::Delete, label: "Delete", icon: Icon::Trash, hint: Some("delete"), enabled: true, danger: true, act: Act::Delete });
+    v
+}
+
+/// Whether the menu has copied clips to paste.
+pub fn can_paste(ctx: &egui::Context) -> bool {
+    held(ctx).clips.is_some()
+}
+
+/// Paste the clips the menu copied at `at`; the new clips become the selection.
+pub fn paste_at(app: &mut StudioApp, ctx: &egui::Context, at: Time) {
+    let seq = app.doc.seq();
+    if let Some(cb) = held(ctx).clips {
+        let old: Vec<u32> = app.doc.project.clips.iter().map(|c| c.id).collect();
+        if app.doc.apply("Paste", m::Edit::Paste { seq, at, clipboard: Box::new(cb), mode: m::PasteMode::Insert }) {
+            app.editor.selection = app.doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 enum Act {
-    Do(Action),
+    Split,
+    Duplicate,
+    Marker,
+    Delete,
     Copy,
     Cut,
     Paste,
@@ -220,7 +308,10 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
     let seq = app.doc.seq();
     let clips: Vec<m::ClipId> = ids.iter().map(|id| m::ClipId(*id as u64)).collect();
     match act {
-        Act::Do(a) => super::run(app, ctx, a),
+        Act::Split => super::run(app, ctx, Action::Split),
+        Act::Duplicate => super::run(app, ctx, Action::Duplicate),
+        Act::Marker => super::run(app, ctx, Action::Marker),
+        Act::Delete => super::run(app, ctx, Action::Delete),
         Act::Copy | Act::Cut => {
             if let Ok(cb) = m::Clipboard::copy(&app.doc.model, seq, &clips) {
                 let mut h = held(ctx);
@@ -232,14 +323,7 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
                 }
             }
         }
-        Act::Paste => {
-            if let Some(cb) = held(ctx).clips {
-                let old: Vec<u32> = app.doc.project.clips.iter().map(|c| c.id).collect();
-                if app.doc.apply("Paste", m::Edit::Paste { seq, at: playhead, clipboard: Box::new(cb), mode: m::PasteMode::Insert }) {
-                    app.editor.selection = app.doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
-                }
-            }
-        }
+        Act::Paste => paste_at(app, ctx, playhead),
         Act::Enabled(on) => {
             let edits: Vec<m::Edit> = clips
                 .iter()
@@ -319,6 +403,37 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn menu_rows(f: &Facts) -> Vec<&'static str> {
+        entries(f).iter().map(|e| e.label).collect()
+    }
+
+    fn facts() -> Facts {
+        Facts { inside: true, grouped: false, linked: false, many: false, one: true, picture_with_sound: false, media_clip: false, all_on: true, visual_one: true, can_paste: false, can_paste_look: false }
+    }
+
+    #[test]
+    fn rows_that_cannot_apply_are_left_out() {
+        let one = menu_rows(&facts());
+        for gone in ["Group", "Ungroup", "Link", "Unlink", "Nest into a sequence", "Detach sound", "Reverse"] {
+            assert!(!one.contains(&gone), "{gone} is hidden for one plain clip");
+        }
+        let many = menu_rows(&Facts { many: true, one: false, visual_one: false, ..facts() });
+        assert!(many.contains(&"Group") && many.contains(&"Link") && many.contains(&"Nest into a sequence"));
+        assert!(!many.contains(&"Bring to front"), "stacking needs one clip");
+        // Only unavailable for now: shown, dimmed.
+        let paste = entries(&facts()).into_iter().find(|e| e.label == "Paste at playhead").unwrap();
+        assert!(!paste.enabled);
+    }
+
+    #[test]
+    fn each_verb_appears_once_and_uses_the_menu_wording() {
+        let all = menu_rows(&Facts { many: true, grouped: true, linked: true, picture_with_sound: true, media_clip: true, can_paste: true, can_paste_look: true, ..facts() });
+        let mut seen = std::collections::HashSet::new();
+        assert!(all.iter().all(|l| seen.insert(*l)), "no verb twice: {all:?}");
+        assert!(all.contains(&"Add marker") && all.contains(&"Delete") && all.contains(&"Split at playhead"));
+        assert!(!all.contains(&"Add marker at playhead"), "one wording for the verb");
+    }
 
     #[test]
     fn restack_moves_a_layer_through_the_stack() {
