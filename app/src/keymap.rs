@@ -68,6 +68,8 @@ pub const EXTRA: &[(&str, &str, &str)] = &[
     ("second-fwd", "Forward one second", "⇧→"),
     ("to-start", "Go to start", "Home"),
     ("to-end", "Go to end", "End"),
+    ("delete-fwd", "Delete (forward delete key)", "⌦"),
+    ("zoom-in-plus", "Zoom in (plus key)", "⌘+"),
     ("group", "Group clips", "⌘G"),
     ("ungroup", "Ungroup clips", "⇧⌘G"),
     ("link", "Link clips", "⇧⌘L"),

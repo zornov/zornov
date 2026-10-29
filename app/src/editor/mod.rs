@@ -677,7 +677,7 @@ const EDITOR_KEYS: &[&str] = &[
     "redo", "undo", "duplicate", "select-all", "export", "zoom-in", "zoom-out", "fit", "clear-range", "play", "stop", "shuttle-fwd", "shuttle-back", "frame-back", "frame-fwd", "select", "blade", "slip", "range", "snap", "fullscreen", "in", "out", "split", "marker", "delete",
     "macro-record", "macro-run", "workspace-edit", "workspace-colour", "workspace-audio", "workspace-vfx", "workspace-motion", "workspace-production",
     "panel-library", "panel-inspector", "panel-timeline", "agent", "overlays", "all-projects",
-    "second-back", "second-fwd", "to-start", "to-end", "group", "ungroup", "link", "unlink", "freeze", "reverse", "copy-look", "paste-look",
+    "second-back", "second-fwd", "to-start", "to-end", "delete-fwd", "zoom-in-plus", "group", "ungroup", "link", "unlink", "freeze", "reverse", "copy-look", "paste-look",
 ];
 
 fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
@@ -690,12 +690,8 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let widget_focus = ctx.memory(|m| m.focused()).is_some() && crate::a11y::focused_region(ctx).is_none() && !crate::a11y::clip_has_focus(ctx);
     let pressed = |m: M, k: Key| ctx.input_mut(|i| i.consume_shortcut(&S::new(m, k)));
-    // Keys not in the shortcut table: ⌘+ for zoom, a second key for
-    // delete, a second's step.
     // None of the plain keys while a panel or editor owns the keyboard.
     let free = crate::keymap::owner(ctx).is_none();
-    let extra_zoom = pressed(M::COMMAND, Key::Plus);
-    let extra_delete = free && pressed(M::NONE, Key::Delete);
     // ⌘C / ⌘X / ⌘V arrive as clipboard events, not key presses.
     if free {
         let (copy, cut, paste) = ctx.input(|i| (i.events.iter().any(|e| matches!(e, egui::Event::Copy)), i.events.iter().any(|e| matches!(e, egui::Event::Cut)), i.events.iter().any(|e| matches!(e, egui::Event::Paste(_)))));
@@ -713,12 +709,6 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     // A focused button takes Space (it presses the button); the timeline does not.
     if widget_focus {
         hits.retain(|h| *h != "play");
-    }
-    if extra_zoom {
-        hits.push("zoom-in");
-    }
-    if extra_delete {
-        hits.push("delete");
     }
     // In table order, so in and out come before split, as they always did.
     hits.sort_by_key(|h| EDITOR_KEYS.iter().position(|k| k == h));
@@ -765,7 +755,8 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
             "out" => run(app, ctx, Action::RangeOut),
             "split" => run(app, ctx, Action::Split),
             "marker" => run(app, ctx, Action::Marker),
-            "delete" => run(app, ctx, Action::Delete),
+            "delete" | "delete-fwd" => run(app, ctx, Action::Delete),
+            "zoom-in-plus" => run(app, ctx, Action::ZoomIn),
             "second-back" => app.editor.playhead = (app.editor.playhead - SEC).max(0),
             "second-fwd" => app.editor.playhead = (app.editor.playhead + SEC).min(crate::services::transport::duration(&app.doc)),
             "to-start" => app.editor.playhead = 0,
