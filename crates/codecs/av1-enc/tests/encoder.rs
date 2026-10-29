@@ -81,9 +81,10 @@ fn av1c_matches_the_sequence_header() {
 }
 
 #[test]
-fn packets_hold_a_sequence_header_and_a_frame_and_decode_to_the_reconstruction() {
+fn key_frames_hold_a_sequence_header_and_a_frame_and_decode_to_the_reconstruction() {
     for speed in [6u8, 9] {
-        let mut e = Encoder::new(Config { speed, ..cfg(130, 70, 90) }).unwrap();
+        // keyint 1: every frame is a key frame
+        let mut e = Encoder::new(Config { speed, keyint: 1, ..cfg(130, 70, 90) }).unwrap();
         let mut dec = Decoder::new();
         for i in 0..3u32 {
             let src = picture(130, 70, i);
@@ -102,6 +103,27 @@ fn packets_hold_a_sequence_header_and_a_frame_and_decode_to_the_reconstruction()
             assert_eq!(pics[0].planes, want.planes, "speed {speed} frame {i}");
         }
         assert!(e.flush().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn inter_frames_follow_the_key_frame_every_keyint_frames() {
+    for speed in [3u8, 6, 9] {
+        let mut e = Encoder::new(Config { speed, keyint: 4, ..cfg(130, 70, 90) }).unwrap();
+        let mut dec = Decoder::new();
+        for i in 0..9u32 {
+            // a pan: each frame is the picture shifted by a few samples
+            let src = picture(130, 70, 3 * i);
+            let p = e.push_frame(&src, i as i64).unwrap().remove(0);
+            let key = i % 4 == 0;
+            assert_eq!(p.keyframe, key, "frame {i}");
+            let types: Vec<u8> = obus(&p.data).iter().map(|o| o.0).collect();
+            assert_eq!(types, if key { vec![1, 6] } else { vec![6] }, "frame {i}: only key frames carry the sequence header");
+            let mut pics = dec.decode_pts(&p.data, p.pts).unwrap();
+            pics.extend(dec.flush());
+            assert_eq!(pics.len(), 1, "frame {i}");
+            assert_eq!(pics[0].planes, e.reconstruction().unwrap().planes, "speed {speed} frame {i}");
+        }
     }
 }
 
