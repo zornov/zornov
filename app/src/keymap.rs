@@ -60,29 +60,9 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, key))
 }
 
-/// Editing keys that have an id (so they can be rebound, and show in
-/// menus) but no row in Settings ▸ Shortcuts yet: (id, name, default).
-// TODO(settings): move these rows into `SHORTCUTS` and delete this table.
-pub const EXTRA: &[(&str, &str, &str)] = &[
-    ("second-back", "Back one second", "⇧←"),
-    ("second-fwd", "Forward one second", "⇧→"),
-    ("to-start", "Go to start", "Home"),
-    ("to-end", "Go to end", "End"),
-    ("delete-fwd", "Delete (forward delete key)", "⌦"),
-    ("zoom-in-plus", "Zoom in (plus key)", "⌘+"),
-    ("group", "Group clips", "⌘G"),
-    ("ungroup", "Ungroup clips", "⇧⌘G"),
-    ("link", "Link clips", "⇧⌘L"),
-    ("unlink", "Unlink clips", "⌥⇧⌘L"),
-    ("freeze", "Freeze frame at playhead", "⌥F"),
-    ("reverse", "Reverse clip", "⌃R"),
-    ("copy-look", "Copy look", "⌥⌘C"),
-    ("paste-look", "Paste look", "⌥⌘V"),
-];
-
-/// Every action with keys: the Settings table, then [`EXTRA`].
+/// Every action with keys: the Settings table.
 fn table() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
-    SHORTCUTS.iter().chain(EXTRA.iter())
+    SHORTCUTS.iter()
 }
 
 /// The keys of an action: the person's, or the default.
@@ -252,12 +232,13 @@ mod tests {
     #[test]
     fn extra_keys_parse_and_clash_with_nothing() {
         let prefs = Prefs::default();
-        for (id, _, d) in EXTRA {
+        let ids = ["second-back", "second-fwd", "to-start", "to-end", "delete-fwd", "zoom-in-plus", "group", "ungroup", "link", "unlink", "freeze", "reverse", "copy-look", "paste-look"];
+        for id in ids {
+            let (_, _, d) = SHORTCUTS.iter().find(|(o, _, _)| *o == id).unwrap_or_else(|| panic!("{id} has no row"));
             assert!(parse(d).is_some(), "{id}: {d}");
-            assert!(SHORTCUTS.iter().all(|(o, _, _)| o != id), "{id} is listed twice");
             assert_eq!(keys(&prefs, id), Some(*d));
         }
-        let clash: Vec<_> = conflicts(&prefs).into_iter().filter(|(_, ids)| ids.iter().any(|i| EXTRA.iter().any(|e| e.0 == *i))).collect();
+        let clash: Vec<_> = conflicts(&prefs).into_iter().filter(|(_, ids2)| ids.iter().any(|e| ids2.iter().any(|i| i == e))).collect();
         assert!(clash.is_empty(), "{clash:?}");
         assert_eq!(name("group"), "Group clips");
     }
