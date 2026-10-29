@@ -269,8 +269,66 @@ pub fn open_menu(ctx: &egui::Context, p: Panel, anchor: Rect, focus: bool) {
     kit::set_open(ctx, menu_id(p), true);
 }
 
+/// Where the keyboard is: the editor (timeline and viewer), a docked panel or
+/// a window floating over the editor. It follows the last click, so the keys
+/// act on the panel the person is working in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum KeyScope {
+    Editor,
+    Panel(Panel),
+    Floating(egui::LayerId),
+}
+
+fn scope_id() -> Id {
+    Id::unique("dock-key-scope")
+}
+
+fn rects_id() -> Id {
+    Id::unique("dock-panel-rects")
+}
+
+/// The panels whose keys are their own: they work on a selection of their
+/// own (media, parameters, mixer strips, notes) and never on the timeline's.
+/// The Timeline and Viewer keep the editor's shortcuts, and the Scopes have no keys.
+fn keeps_own_keys(p: Panel) -> bool {
+    !matches!(p, Panel::Timeline | Panel::Viewer | Panel::Scopes)
+}
+
+/// Follows clicks to find the keyboard's owner, and tells the key dispatcher
+/// (`crate::keymap::claim`) when it is not the editor.
+fn track_key_scope(app: &StudioApp, ctx: &egui::Context) {
+    let press = ctx.input(|i| if i.pointer.primary_pressed() { i.pointer.interact_pos() } else { None });
+    if let Some(pos) = press {
+        let rects: Vec<(Panel, Rect)> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
+        let scope = match ctx.layer_id_at(pos) {
+            Some(layer) if layer.order == egui::Order::Middle => KeyScope::Floating(layer),
+            _ => rects.iter().find(|(_, r)| r.contains(pos)).map_or(KeyScope::Editor, |(p, _)| KeyScope::Panel(*p)),
+        };
+        ctx.data_mut(|d| d.insert_temp(scope_id(), scope));
+    }
+    let scope = ctx.data(|d| d.get_temp::<KeyScope>(scope_id())).unwrap_or(KeyScope::Editor);
+    use crate::keymap::{KeyOwner, claim};
+    match scope {
+        // A window that is still open: what is typed there is its own.
+        KeyScope::Floating(layer) if ctx.memory(|m| m.areas().is_visible(&layer)) => claim(ctx, KeyOwner::Text),
+        KeyScope::Panel(p) if keeps_own_keys(p) => claim(ctx, KeyOwner::Panel),
+        // The node and curve editors replace the timeline's lanes: Delete,
+        // ⌘A and the letters are theirs while they show.
+        KeyScope::Panel(Panel::Timeline) if super::graph::is_on(ctx) || super::comp::is_on(ctx) => claim(ctx, KeyOwner::Panel),
+        _ => {}
+    }
+    // Keyboard focus in a panel (F6, Tab) counts the same as a click there.
+    if let Some(p) = crate::a11y::focused_region(ctx).and_then(|r| Panel::ALL.into_iter().find(|p| region(*p) == r))
+        && keeps_own_keys(p)
+    {
+        claim(ctx, KeyOwner::Panel);
+    }
+    let _ = app;
+}
+
 /// Keys: Esc cancels a drag; ⇧F10 opens the focused region's Move menu.
 pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
+    track_key_scope(app, ctx);
     if app.editor.dock_drag.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.editor.dock_drag = None;
         ctx.data_mut(|d| d.insert_temp(Id::unique("dock-drag-cancelled"), true));
@@ -297,6 +355,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect, narrow: bool, rt
     let mut actions: Vec<Action> = Vec::new();
 
     let sound_in_timeline = super::mixer::is_on(&ctx) && !app.editor.dock.contains(Panel::Sound);
+    // Where each panel is on screen, for the next click to find its keyboard owner.
+    let rects: Vec<(Panel, Rect)> = lay.tiles.iter().map(|t| (t.active, scr(t.rect))).collect();
+    ctx.data_mut(|d| d.insert_temp(rects_id(), rects));
     for tile in &lay.tiles {
         let r = scr(tile.rect);
         crate::a11y::landmark(ui, region(tile.active), r);

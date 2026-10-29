@@ -615,3 +615,99 @@ fn ui_strings_have_glyphs_and_no_private_use_characters() {
     assert!(private.is_empty(), "private-use characters in UI source: {private:?}");
     assert!(missing.is_empty(), "characters no UI font can draw (would show as boxes): {missing:?}");
 }
+
+// --- keyboard focus ---------------------------------------------------------------
+
+/// An editor with its first clip selected, and what the timeline holds.
+fn keyed_editor() -> (Harness, Vec<u32>, i64) {
+    let mut h = Harness::new(&["--screen", "editor"]);
+    h.frames(4);
+    let first = h.app.doc.project.clips.first().expect("a sample clip").id;
+    h.app.editor.selection = vec![first];
+    h.frames(2);
+    let clips = h.app.doc.project.clips.iter().map(|c| c.id).collect();
+    let playhead = h.app.editor.playhead;
+    (h, clips, playhead)
+}
+
+/// ⌘ as the window system reports it (the shortcut table reads both flags).
+fn cmd() -> Modifiers {
+    Modifiers { command: true, mac_cmd: cfg!(target_os = "macos"), ctrl: !cfg!(target_os = "macos"), ..Modifiers::NONE }
+}
+
+/// Everything the keyboard can do to a timeline: type, Delete, ⌘A, split,
+/// duplicate, trim, shuttle. `owner` claims the keyboard before every key, as a
+/// panel does each frame it is focused.
+fn hammer_keys(h: &mut Harness, owner: Option<crate::keymap::KeyOwner>) {
+    let claim = |h: &Harness| owner.iter().for_each(|o| crate::keymap::claim(&h.ctx, *o));
+    claim(h);
+    h.with_events(vec![Event::Text("hello world".into())]);
+    for key in [Key::H, Key::E, Key::L, Key::O, Key::S, Key::B, Key::M, Key::I, Key::Q, Key::W, Key::Delete, Key::Backspace, Key::ArrowLeft, Key::Home] {
+        claim(h);
+        h.key(key, Modifiers::NONE);
+    }
+    for key in [Key::A, Key::D] {
+        claim(h);
+        h.key(key, cmd());
+    }
+}
+
+fn click(h: &mut Harness, pos: egui::Pos2) {
+    use egui::PointerButton::Primary;
+    h.with_events(vec![Event::PointerMoved(pos)]);
+    h.with_events(vec![Event::PointerButton { pos, button: Primary, pressed: true, modifiers: Modifiers::NONE }]);
+    h.with_events(vec![Event::PointerButton { pos, button: Primary, pressed: false, modifiers: Modifiers::NONE }]);
+}
+
+/// The control: with the timeline in charge, the same keys do edit it.
+#[test]
+fn the_same_keys_edit_the_timeline_when_it_has_the_keyboard() {
+    let (mut h, clips, _) = keyed_editor();
+    h.key(Key::A, cmd());
+    assert!(h.app.editor.selection.len() > 1 || clips.len() == 1, "⌘A selects the clips");
+    h.app.editor.selection = vec![clips[0]];
+    h.key(Key::Delete, Modifiers::NONE);
+    h.frames(2);
+    assert!(h.app.doc.project.clips.len() < clips.len(), "Delete removes the selected clip");
+}
+
+/// A click in a panel hands it the keyboard: typing, Delete and ⌘A leave the timeline alone.
+#[test]
+fn keys_in_a_focused_panel_do_not_reach_the_timeline() {
+    for panel in [crate::dock::Panel::Library, crate::dock::Panel::Inspector] {
+        let (mut h, clips, playhead) = keyed_editor();
+        let before = h.app.editor.selection.clone();
+        let steps = h.app.doc.history_len();
+        let tile = h.app.editor.last_layout().tile_of(panel).unwrap_or_else(|| panic!("{panel:?} is docked")).rect;
+        // The header strip: a click there is in the panel, on no text field.
+        click(&mut h, tile.left_top() + egui::vec2(6.0, 4.0));
+        h.frames(2);
+        assert!(!h.ctx.text_edit_focused(), "{panel:?}: the click is not in a text field");
+        assert!(crate::keymap::owner(&h.ctx).is_some(), "{panel:?} has claimed the keyboard");
+        hammer_keys(&mut h, None);
+        h.frames(2);
+        let after: Vec<u32> = h.app.doc.project.clips.iter().map(|c| c.id).collect();
+        assert_eq!(after, clips, "{panel:?}: the clips are unchanged");
+        assert_eq!(h.app.editor.selection, before, "{panel:?}: the selection is unchanged");
+        assert_eq!(h.app.editor.playhead, playhead, "{panel:?}: the playhead is unchanged");
+        assert_eq!(h.app.doc.history_len(), steps, "{panel:?}: nothing was edited");
+    }
+}
+
+/// An editor that claims the keyboard (the node graph, the vector tool) keeps
+/// its typing; the claim lapses when it stops asking.
+#[test]
+fn a_claim_keeps_typing_away_from_the_timeline() {
+    use crate::keymap::KeyOwner;
+    let (mut h, clips, playhead) = keyed_editor();
+    let steps = h.app.doc.history_len();
+    for owner in [KeyOwner::Panel, KeyOwner::PanelUndo, KeyOwner::Text] {
+        hammer_keys(&mut h, Some(owner));
+        let after: Vec<u32> = h.app.doc.project.clips.iter().map(|c| c.id).collect();
+        assert_eq!(after, clips, "{owner:?}: the clips are unchanged");
+        assert_eq!(h.app.editor.playhead, playhead, "{owner:?}: the playhead is unchanged");
+        assert_eq!(h.app.doc.history_len(), steps, "{owner:?}: nothing was edited");
+    }
+    h.frames(3);
+    assert_eq!(crate::keymap::owner(&h.ctx), None, "the claim lapsed");
+}

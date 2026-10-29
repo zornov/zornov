@@ -92,6 +92,63 @@ pub fn hit(ctx: &egui::Context, prefs: &Prefs, id: &str) -> bool {
     !pressed(ctx, prefs, &[id]).is_empty()
 }
 
+/// Who has the keyboard. The editor's own shortcuts (split, delete, select
+/// all, shuttle…) belong to the timeline and the viewer; any other panel or
+/// editor that works on keys of its own says so with [`claim`], and the
+/// dispatcher then leaves those keys alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KeyOwner {
+    /// A panel with a selection of its own (the node graph, the curve
+    /// editor, shapes): Delete, ⌘A, letters and arrows are its. Space still
+    /// plays and ⌘Z still undoes the project.
+    Panel,
+    /// As `Panel`, for an editor with its own undo history: ⌘Z is its too.
+    PanelUndo,
+    /// Typing: every key without ⌘, ⌃ or ⌥ is text, Space and Delete included.
+    Text,
+}
+
+fn claim_id() -> egui::Id {
+    egui::Id::unique("key-owner")
+}
+
+/// Says that the caller owns the keyboard this frame. Call it every frame the
+/// panel is focused (or hovered, for one that takes keys under the pointer);
+/// the dispatcher runs before the panels draw and reads the last frame's claim.
+pub fn claim(ctx: &egui::Context, owner: KeyOwner) {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        let kept = d.get_temp::<(u64, KeyOwner)>(claim_id()).filter(|(at, _)| *at == now).map(|(_, o)| o);
+        d.insert_temp(claim_id(), (now, kept.map_or(owner, |k| k.max(owner))));
+    });
+}
+
+/// Who claimed the keyboard this frame or the one before, if anyone did.
+pub fn owner(ctx: &egui::Context) -> Option<KeyOwner> {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<(u64, KeyOwner)>(claim_id())).filter(|(at, _)| now.saturating_sub(*at) <= 1).map(|(_, o)| o)
+}
+
+/// Whether the editor's action `id` may run while `owner` has the keyboard:
+/// the app-wide ones (export, the assistant, workspaces and panels, which all
+/// use ⌘ or ⌥), Space to play and, unless the owner has its own history, undo.
+pub fn allowed_under(owner: Option<KeyOwner>, prefs: &Prefs, id: &str) -> bool {
+    let Some(owner) = owner else { return true };
+    let chord = keys(prefs, id).and_then(parse).is_some_and(|k| k.modifiers.command || k.modifiers.mac_cmd || k.modifiers.ctrl || k.modifiers.alt);
+    match id {
+        "export" | "agent" | "all-projects" => chord,
+        "undo" | "redo" => owner == KeyOwner::Panel,
+        "play" => owner != KeyOwner::Text,
+        _ => (id.starts_with("workspace-") || id.starts_with("panel-")) && chord,
+    }
+}
+
+/// The actions of `ids` that may run now (see [`allowed_under`]).
+pub fn scoped<'a>(ctx: &egui::Context, prefs: &Prefs, ids: &[&'a str]) -> Vec<&'a str> {
+    let o = owner(ctx);
+    ids.iter().copied().filter(|id| allowed_under(o, prefs, id)).collect()
+}
+
 /// Actions sharing a shortcut: (keys, actions) for every clash.
 pub fn conflicts(prefs: &Prefs) -> Vec<(String, Vec<&'static str>)> {
     let mut by: Vec<(KeyboardShortcut, String, Vec<&'static str>)> = Vec::new();
@@ -291,5 +348,21 @@ mod tests {
         p.shortcuts.push(("split".into(), "B".into()));
         assert_eq!(clashes_with(&p, "split"), vec!["blade"]);
         assert_eq!(keys(&p, "split"), Some("B"));
+    }
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+
+    #[test]
+    fn a_claim_lets_through_only_the_app_wide_keys() {
+        let p = Prefs::default();
+        let all = |o| ["undo", "redo", "play", "split", "delete", "select-all", "export", "workspace-edit", "panel-library", "marker", "in", "frame-fwd", "shuttle-fwd", "duplicate"].map(|id| (id, allowed_under(o, &p, id)));
+        assert!(all(None).iter().all(|(_, ok)| *ok), "nobody owns the keyboard: everything runs");
+        let allowed = |o| all(o).into_iter().filter(|(_, ok)| *ok).map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(allowed(Some(KeyOwner::Panel)), ["undo", "redo", "play", "export", "workspace-edit", "panel-library"]);
+        assert_eq!(allowed(Some(KeyOwner::PanelUndo)), ["play", "export", "workspace-edit", "panel-library"]);
+        assert_eq!(allowed(Some(KeyOwner::Text)), ["export", "workspace-edit", "panel-library"]);
     }
 }

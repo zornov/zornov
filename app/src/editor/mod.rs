@@ -288,13 +288,24 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     crate::a11y::begin_frame(&ctx);
     // Esc cancels a panel drag before anything else hears it.
     dock_ui::keys(app, &ctx);
-    // Film editing keys before the accessibility keys: `,` `.` `[` `]`
-    // edit when there is a source or an edit point, and step otherwise.
-    cutting::shortcuts(app, &ctx);
-    // Alt combinations first: a plain shortcut also matches them.
-    crate::a11y::keys(app, &ctx);
-    #[cfg(feature = "render")]
-    viewport::ui::keys(app, &ctx);
+    // The editor's keys are for the timeline and the viewer. A panel or
+    // editor that has the keyboard (`keymap::claim`) keeps its letters,
+    // Delete, ⌘A and arrows; only F6 and the app-wide shortcuts get through.
+    if crate::keymap::owner(&ctx).is_none() {
+        // Film editing keys before the accessibility keys: `,` `.` `[` `]`
+        // edit when there is a source or an edit point, and step otherwise.
+        cutting::shortcuts(app, &ctx);
+        // Alt combinations first: a plain shortcut also matches them.
+        crate::a11y::keys(app, &ctx);
+        #[cfg(feature = "render")]
+        viewport::ui::keys(app, &ctx);
+    } else if app.overlay == Overlay::None && !crate::onboarding::tour_running(app) {
+        // F6 is the way out of a panel, even a text field.
+        let sf6 = ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::F6));
+        if sf6 || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F6)) {
+            crate::a11y::cycle_region(&ctx, sf6);
+        }
+    }
     shortcuts(app, &ctx);
     playback(app, &ctx);
     if app.cli.shot.is_none() {
@@ -597,21 +608,24 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     let frame = app.editor.frame_dur(fps);
     // Keys not in the shortcut table: ⌘+ for zoom, a second key for
     // delete, a second's step.
+    // None of the plain keys while a panel or editor owns the keyboard.
+    let free = crate::keymap::owner(ctx).is_none();
     let extra_zoom = pressed(M::COMMAND, Key::Plus);
-    let extra_delete = pressed(M::NONE, Key::Delete);
-    if pressed(M::SHIFT, Key::ArrowLeft) {
+    let extra_delete = free && pressed(M::NONE, Key::Delete);
+    if free && pressed(M::SHIFT, Key::ArrowLeft) {
         app.editor.playhead = (app.editor.playhead - SEC).max(0);
     }
-    if pressed(M::SHIFT, Key::ArrowRight) {
+    if free && pressed(M::SHIFT, Key::ArrowRight) {
         app.editor.playhead += SEC;
     }
-    if pressed(M::NONE, Key::Home) {
+    if free && pressed(M::NONE, Key::Home) {
         app.editor.playhead = 0;
     }
-    if pressed(M::NONE, Key::End) {
+    if free && pressed(M::NONE, Key::End) {
         app.editor.playhead = app.doc.project.duration();
     }
-    let mut hits = crate::keymap::pressed(ctx, &app.prefs, EDITOR_KEYS);
+    let ids = crate::keymap::scoped(ctx, &app.prefs, EDITOR_KEYS);
+    let mut hits = crate::keymap::pressed(ctx, &app.prefs, &ids);
     // A focused button takes Space (it presses the button); the timeline does not.
     if widget_focus {
         hits.retain(|h| *h != "play");
