@@ -9,8 +9,9 @@ license = "AGPL-3.0-or-later"
 
 [profile.release]
 opt-level = 3
-lto = "thin"
-codegen-units = 4
+lto = "fat"
+codegen-units = 1
+strip = true
 
 # CI's tests: optimised like a release, without the link-time optimisation
 # and with more codegen units, which roughly halve the build. Releases are

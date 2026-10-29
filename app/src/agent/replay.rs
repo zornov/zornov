@@ -269,9 +269,22 @@ pub fn replay(s: &mut Session, trace: &Trace, from: usize, to: usize, confine: &
 
 // ------------------------------------------------------------ fixtures
 
-/// Where `--emit-test` writes.
+/// Where `--emit-test` writes. Debug builds use the crate folder; optimised
+/// builds (release, ci) look up from the working folder instead, so a
+/// release binary carries no path from the machine that built it.
 pub fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("agent_replays")
+    #[cfg(debug_assertions)]
+    {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("agent_replays")
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        cwd.ancestors()
+            .flat_map(|d| [d.join("tests").join("agent_replays"), d.join("app").join("tests").join("agent_replays")])
+            .find(|c| c.is_dir())
+            .unwrap_or_else(|| cwd.join("app").join("tests").join("agent_replays"))
+    }
 }
 
 /// A fixture for call `n` (1-based) of `trace`: the calls before it that
