@@ -111,6 +111,12 @@ fn kind_of(path: &Path) -> Kind {
 /// `path` itself when Studio can play it, else a playable copy (made now,
 /// or found from an earlier conversion).
 pub fn ensure_playable(path: &Path) -> Result<PathBuf, String> {
+    ensure_playable_with(path, &mut |_| true)
+}
+
+/// [`ensure_playable`] reporting progress (0..1); `progress` returning false
+/// cancels the conversion (the error is [`crate::transcode::CANCELLED`]).
+pub fn ensure_playable_with(path: &Path, progress: &mut dyn FnMut(f32) -> bool) -> Result<PathBuf, String> {
     if playable(path) {
         return Ok(path.to_path_buf());
     }
@@ -131,7 +137,7 @@ pub fn ensure_playable(path: &Path) -> Result<PathBuf, String> {
         return crate::psd_import::flatten(path, &out).map(|()| out.clone()).map_err(|e| format!("Could not open {}: {e}", path.display()));
     }
     if kind == Kind::Video && crate::transcode::handles(path) {
-        return crate::transcode::to_mp4(path, &out).map(|()| out.clone()).map_err(|e| format!("Could not convert {}: {e}", path.display()));
+        return crate::transcode::to_mp4_with(path, &out, progress).map(|()| out.clone()).map_err(|e| format!("Could not convert {}: {e}", path.display()));
     }
     Err(format!("{} is in a format Zornov cannot play or convert yet.", path.display()))
 }

@@ -150,7 +150,7 @@ enum Act {
 fn issue_help(code: &str) -> (Option<&'static str>, Option<(Act, &'static str)>) {
     match code {
         "unreadable" => (Some("Restore the newest good snapshot from the history below."), None),
-        "missing-media" => (Some("Relink the files from the media browser."), None),
+        "missing-media" => (Some("Open the Library Media tab and choose Find in folder, or right-click a file and choose Relink file."), None),
         "media-outside" => (Some("Collecting puts every file in one folder you can move."), Some((Act::Collect, "Collect project to…"))),
         "no-snapshots" => (Some("Keep one now, and make sure Autosave is on in Settings."), Some((Act::Snapshot, "Keep a snapshot"))),
         "old-snapshots" => (Some("If you edited since, Autosave may be off."), None),

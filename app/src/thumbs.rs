@@ -336,13 +336,31 @@ impl Thumbs {
 
 // --- generators ----------------------------------------------------------
 
+/// Files whose picture could not be made, with the reason: the Library
+/// says so on their tile instead of showing a silent grey one.
+fn failures() -> std::sync::MutexGuard<'static, HashMap<std::path::PathBuf, String>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<HashMap<std::path::PathBuf, String>>> = std::sync::OnceLock::new();
+    MAP.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Why the picture of `path` could not be made, if it could not.
+pub fn read_failure(path: &std::path::Path) -> Option<String> {
+    failures().get(path).cloned()
+}
+
 fn footage(seed: u32, t: u32, w: usize, h: usize, files: &Files, keyframe_only: bool) -> ColorImage {
     if seed & FILE_BIT != 0 {
         let file = files.lock().unwrap_or_else(|e| e.into_inner()).get((seed & !FILE_BIT) as usize).cloned();
         if let Some((path, _)) = file {
             match crate::media_io::frame(&path, t as f64 / 1000.0, w, h, keyframe_only) {
-                Ok(img) => return img,
-                Err(e) => eprintln!("decode {}: {e}", path.display()),
+                Ok(img) => {
+                    failures().remove(&path);
+                    return img;
+                }
+                Err(e) => {
+                    eprintln!("decode {}: {e}", path.display());
+                    failures().insert(path.clone(), e.to_string());
+                }
             }
         }
         // Unreadable file: a neutral picture rather than nothing.

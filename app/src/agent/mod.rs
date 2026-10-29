@@ -2654,25 +2654,38 @@ impl Session {
                 let to_timeline = a.get("to_timeline").and_then(Value::as_bool).unwrap_or(false);
                 // Formats Studio cannot decode are converted first.
                 let mut converted = Vec::new();
+                let mut convert_failed: Vec<String> = Vec::new();
                 let paths: Vec<PathBuf> = paths
                     .into_iter()
-                    .map(|p| match crate::convert::ensure_playable(&p) {
+                    .filter_map(|p| match crate::convert::ensure_playable(&p) {
                         Ok(q) => {
                             if q != p {
                                 converted.push(json!({"from": p.display().to_string(), "to": q.display().to_string()}));
                             }
-                            q
+                            Some(q)
                         }
-                        Err(_) => p,
+                        Err(e) => {
+                            convert_failed.push(format!("{}: {e}", p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into_owned())));
+                            None
+                        }
                     })
                     .collect();
+                // Nothing could be converted: the call failed, with the reason.
+                if paths.is_empty() && !convert_failed.is_empty() {
+                    return Err(convert_failed.join("; "));
+                }
                 let before: BTreeMap<u32, Value> = self.doc.project.clips.iter().map(|c| (c.id, self.clip_line(c))).collect();
                 let (report, clips) = if to_timeline {
                     services::project::import_to_timeline(&mut self.doc, &paths)?
                 } else {
                     (services::project::import_media(&mut self.doc, &paths), Vec::new())
                 };
-                text(json!({"media": report.ids, "failed": report.failed, "converted": converted, "clips": clips, "changed": self.changes(&before), "revision": self.doc.history.revision()}))
+                let mut failed = convert_failed;
+                failed.extend(report.failed.iter().cloned());
+                if report.ids.is_empty() && !failed.is_empty() {
+                    return Err(failed.join("; "));
+                }
+                text(json!({"media": report.ids, "failed": failed, "converted": converted, "clips": clips, "changed": self.changes(&before), "revision": self.doc.history.revision()}))
             }
             "make_playable" => {
                 // Media already in the project in a format Studio cannot
