@@ -89,6 +89,13 @@ fn busy() -> Vec<String> {
     jobs().lock().unwrap_or_else(|e| e.into_inner()).iter().map(|j| j.label.clone()).collect()
 }
 
+/// The tabs of the Sound panel, in order. Every export (loudness, stems, the ADR
+/// cue sheet, subtitle files) lives under `DELIVER`; the other tabs link to it.
+const MIXER: usize = 0;
+const DIALOGUE: usize = 1;
+const CAPTIONS: usize = 2;
+const DELIVER: usize = 3;
+
 /// Panel state kept between frames.
 #[derive(Clone, Default)]
 struct PanelState {
@@ -234,8 +241,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
     kit::scroll_strip(&mut top, "sound-top", |top| {
         top.spacing_mut().item_spacing.x = 6.0;
         top.label(egui::RichText::new(crate::i18n::shown("Sound")).font(theme::body_medium()).color(t.text));
-        let tabs = [Segment::icon_text(Icon::Faders, "Mixer"), Segment::icon_text(Icon::Gauge, "Delivery"), Segment::icon_text(Icon::Microphone, "Dialogue & ADR"), Segment::icon_text(Icon::Subtitles, "Subtitles & dubs")];
-        kit::segmented(top, "sound-tabs", &mut s.tab, &tabs, None, None);
+        kit::tab_bar(top, "sound-tabs", &mut s.tab, &["Mixer", "Dialogue", "Captions", "Deliver"]);
         let jobs_now = busy();
         if !jobs_now.is_empty() {
             top.add(egui::Spinner::new());
@@ -247,10 +253,10 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
     // The mixer's strips scroll sideways; the other tabs scroll down when
     // the panel is shorter than they are.
     match s.tab {
-        0 => mixer_tab(app, &mut b, &d, &t),
-        1 => kit::scroll_panel(&mut b, "sound-delivery", |b| delivery_tab(app, b, &d, &mut s, &t)),
-        2 => kit::scroll_panel(&mut b, "sound-dialogue", |b| dialogue_tab(app, b, &d, &mut s, &t)),
-        _ => kit::scroll_panel(&mut b, "sound-subtitles", |b| subtitles_tab(app, b, &d, &mut s, &t)),
+        MIXER => mixer_tab(app, &mut b, &d, &t),
+        DIALOGUE => kit::scroll_panel(&mut b, "sound-dialogue", |b| dialogue_tab(app, b, &d, &mut s, &t)),
+        CAPTIONS => kit::scroll_panel(&mut b, "sound-captions", |b| subtitles_tab(app, b, &d, &mut s, &t)),
+        _ => kit::scroll_panel(&mut b, "sound-delivery", |b| delivery_tab(app, b, &d, &mut s, &t)),
     }
     save(&ctx, s);
     if !busy().is_empty() || app.editor.playing {
@@ -382,9 +388,9 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
     } else if mix.adr {
         extra = " · ADR".into();
     }
-    if c.add(egui::Button::new(egui::RichText::new(format!("{tag}{extra}")).font(theme::caption())).small()).on_hover_text(crate::i18n::shown("Role: click for the next (dialogue, music, effects, ambience)")).clicked() {
+    if kit::chip(&mut c, &format!("{tag}{extra}"), false, None).on_hover_text(crate::i18n::shown("Role: click for the next (dialogue, music, effects, ambience)")).clicked() {
         let next = roles[(roles.iter().position(|r| *r == rid).unwrap_or(0) + 1) % roles.len()];
-        let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Lane role", |mix, _| {
+        let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Track role", |mix, _| {
             mix.role = Some(next.into());
             Ok(String::new())
         });
@@ -395,7 +401,7 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
         egui::ComboBox::from_id_salt(("lane-bus", lane.id.0)).selected_text(egui::RichText::new(current).font(theme::caption())).width(STRIP_W - 14.0).show_ui(&mut c, |ui| {
             crate::kit::note_list(ui);
             if ui.selectable_label(mix.bus.is_none(), "By role").clicked() {
-                let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Lane bus", |mix, _| {
+                let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Track bus", |mix, _| {
                     mix.bus = None;
                     Ok(String::new())
                 });
@@ -403,7 +409,7 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
             for b in d.buses.iter().filter(|b| b.kind() != BusKind::Aux) {
                 if ui.selectable_label(mix.bus == Some(b.id), &b.name).clicked() {
                     let id = b.id;
-                    let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Lane bus", |mix, _| {
+                    let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Track bus", |mix, _| {
                         mix.bus = Some(id);
                         Ok(String::new())
                     });
@@ -467,16 +473,16 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
     c.horizontal(|ui| {
         let mut mute = lane.muted;
         let mut solo = lane.solo;
-        if ui.add(egui::Button::new(egui::RichText::new(crate::i18n::shown("M")).font(theme::caption())).selected(mute).small()).on_hover_text(crate::i18n::shown("Mute")).clicked() {
+        if kit::chip(ui, "M", mute, None).on_hover_text(crate::i18n::shown("Mute")).clicked() {
             mute = !mute;
-            let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Mute lane", |_, l| {
+            let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Mute track", |_, l| {
                 l.muted = mute;
                 Ok(String::new())
             });
         }
-        if ui.add(egui::Button::new(egui::RichText::new(crate::i18n::shown("S")).font(theme::caption())).selected(solo).small()).on_hover_text(crate::i18n::shown("Solo")).clicked() {
+        if kit::chip(ui, "S", solo, None).on_hover_text(crate::i18n::shown("Solo")).clicked() {
             solo = !solo;
-            let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Solo lane", |_, l| {
+            let _ = desk::edit_lane(&mut app.doc, lane.id.0, "Solo track", |_, l| {
                 l.solo = solo;
                 Ok(String::new())
             });
@@ -506,7 +512,7 @@ fn bus_strip(app: &mut StudioApp, ui: &mut egui::Ui, b: &desk::Bus, peak: f32, t
     c.label(egui::RichText::new(format!("{} bus{}", b.kind().stem(), if b.effects.is_empty() { String::new() } else { format!(" · {}", b.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>().join(", ")) })).font(theme::caption()).color(t.text_2));
     let id = b.id;
     c.horizontal(|ui| {
-        if ui.add(egui::Button::new(egui::RichText::new(crate::i18n::shown("M")).font(theme::caption())).selected(b.muted).small()).clicked() {
+        if kit::chip(ui, "M", b.muted, None).on_hover_text(crate::i18n::shown("Mute")).clicked() {
             let v = !b.muted;
             let _ = desk::edit_desk(&mut app.doc, "Mute bus", |d| {
                 if let Some(x) = d.buses.iter_mut().find(|x| x.id == id) {
@@ -515,7 +521,7 @@ fn bus_strip(app: &mut StudioApp, ui: &mut egui::Ui, b: &desk::Bus, peak: f32, t
                 Ok(String::new())
             });
         }
-        if ui.add(egui::Button::new(egui::RichText::new(crate::i18n::shown("S")).font(theme::caption())).selected(b.solo).small()).clicked() {
+        if kit::chip(ui, "S", b.solo, None).on_hover_text(crate::i18n::shown("Solo")).clicked() {
             let v = !b.solo;
             let _ = desk::edit_desk(&mut app.doc, "Solo bus", |d| {
                 if let Some(x) = d.buses.iter_mut().find(|x| x.id == id) {
@@ -644,6 +650,31 @@ fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
             }
         }
     });
+    ui.separator();
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("ADR cue sheet ({} cues)", d.adr.len()))).font(theme::caption()).color(t.text_2));
+        if Button::secondary("Export cue sheet…").icon(Icon::Export).compact().show(ui).clicked()
+            && let Some(p) = rfd::FileDialog::new().set_file_name("ADR cue sheet.csv").save_file()
+        {
+            let _ = std::fs::write(&p, desk::adr::cue_sheet(d, app.doc.project.fps, &app.doc.project.name));
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        let selected = s.selected_track.clone().or_else(|| d.subtitles.first().map(|t| t.lang.clone()));
+        let track = selected.as_deref().and_then(|l| d.subtitles_of(l)).cloned();
+        let name = track.as_ref().map(|t| t.name.clone()).unwrap_or_else(|| crate::i18n::shown("no subtitles yet").into_owned());
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("Subtitles: {name}"))).font(theme::caption()).color(t.text_2));
+        let enabled = track.is_some();
+        ui.add_enabled_ui(enabled, |ui| {
+            if Button::secondary("Export subtitles…").icon(Icon::Export).compact().show(ui).on_hover_text(crate::i18n::shown("Writes the track chosen in Captions as SRT or VTT")).clicked()
+                && let Some(tr) = &track
+                && let Some(p) = rfd::FileDialog::new().add_filter("SubRip", &["srt"]).add_filter("WebVTT", &["vtt"]).set_file_name(format!("{}.srt", tr.lang)).save_file()
+            {
+                let vtt = p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("vtt"));
+                let _ = std::fs::write(&p, desk::subs::write(tr, vtt));
+            }
+        });
+    });
     if let Some(m) = &s.message {
         ui.label(egui::RichText::new(m).font(theme::caption()).color(t.text_2));
     }
@@ -768,10 +799,8 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                 Ok(String::new())
             });
         }
-        if Button::secondary("Cue sheet…").icon(Icon::Export).compact().show(ui).clicked()
-            && let Some(p) = rfd::FileDialog::new().set_file_name("ADR cue sheet.csv").save_file()
-        {
-            let _ = std::fs::write(&p, desk::adr::cue_sheet(d, app.doc.project.fps, &app.doc.project.name));
+        if Button::ghost("Export cue sheet…").compact().show(ui).on_hover_text(crate::i18n::shown("Cue sheets are exported from Deliver")).clicked() {
+            s.tab = DELIVER;
         }
     });
     let fps = app.doc.project.fps;
@@ -797,12 +826,12 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                 ui.label(egui::RichText::new(&c.status).font(theme::caption()).color(t.text_2));
                 ui.horizontal_wrapped(|ui| {
                     let recording = is_recording();
-                    if ui.add_enabled(!recording, egui::Button::new("● Record")).on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked() {
+                    if ui.add_enabled_ui(!recording, |ui| Button::secondary("Record").icon(Icon::Microphone).compact().show(ui)).inner.on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked() {
                         if let Err(e) = start_recording(app, c) {
                             s.message = Some(e);
                         }
                     }
-                    if ui.button("Take…").on_hover_text(crate::i18n::shown("Bring in a recorded take: synced, matched, on the ADR lane")).clicked()
+                    if Button::secondary("Take…").compact().show(ui).on_hover_text(crate::i18n::shown("Bring in a recorded take: synced, matched, on the ADR lane")).clicked()
                         && let Some(p) = rfd::FileDialog::new().add_filter("Sound", &["wav", "aif", "aiff", "m4a", "mp3", "flac"]).pick_file()
                     {
                         let home = home(app);
@@ -899,11 +928,8 @@ fn subtitles_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut Panel
                 Ok(String::new())
             });
         }
-        if Button::secondary("Export…").icon(Icon::Export).compact().show(ui).clicked()
-            && let Some(p) = rfd::FileDialog::new().add_filter("SubRip", &["srt"]).add_filter("WebVTT", &["vtt"]).set_file_name(format!("{}.srt", tr.lang)).save_file()
-        {
-            let vtt = p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("vtt"));
-            let _ = std::fs::write(&p, desk::subs::write(&tr, vtt));
+        if Button::ghost("Export subtitles…").compact().show(ui).on_hover_text(crate::i18n::shown("Subtitle files are exported from Deliver")).clicked() {
+            s.tab = DELIVER;
         }
         if Button::secondary("Burn in").compact().show(ui).on_hover_text(crate::i18n::shown("Styled caption clips in the picture")).clicked() {
             s.message = Some(match desk::subs::burn_in(&mut app.doc, &tr, None) {
