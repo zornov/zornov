@@ -527,6 +527,15 @@ impl eframe::App for StudioApp {
             Overlay::Help => crate::help::show(self, &ctx),
             Overlay::None => {}
         }
+        // Toasts on the screens with no viewer; the editor draws its own
+        // (above the transport), never both.
+        if !matches!(self.screen, Screen::Editor | Screen::Export | Screen::Settings) {
+            if let Some(id) = kit::show_overlay(&ctx) {
+                if let Some((_, path)) = self.reveal.take().filter(|(rid, _)| *rid == id) {
+                    let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
+                }
+            }
+        }
         crate::release::notice(self, &ctx);
         if self.bench.is_some() {
             crate::bench::Bench::frame(self, &ctx, started.elapsed().as_secs_f64() * 1000.0);
