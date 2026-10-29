@@ -497,6 +497,10 @@ impl eframe::App for StudioApp {
         let t = theme::tokens(&ctx);
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0, t.ground);
+        // Packages Finder asked to open (a double-click, a drop on the Dock icon).
+        for path in crate::open_files::take() {
+            self.open_folder(&ctx, Some(path));
+        }
         match self.screen {
             Screen::Start => screens::start::show(self, ui),
             Screen::Editor | Screen::Export | Screen::Settings => editor::show(self, ui),
