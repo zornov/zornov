@@ -9,6 +9,7 @@
 use super::{Session, secs};
 use crate::view::{self, ClipKind, LaneKind, MediaKind, SEC};
 use serde_json::{Value, json};
+use studio_model as m;
 
 /// Peak and loudness of the mix.
 pub struct Loudness {
@@ -102,7 +103,7 @@ impl Session {
     }
 
     fn memo_file(&self) -> Option<std::path::PathBuf> {
-        self.home.as_ref().map(|h| h.join("cache").join("check.json"))
+        self.home.as_ref().map(|h| m::file::ProjectFolder::new(h).cache_dir().join("check.json"))
     }
 
     fn memo(&mut self) -> &mut std::collections::HashMap<String, Value> {

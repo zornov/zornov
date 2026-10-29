@@ -682,7 +682,7 @@ impl Session {
     pub(super) fn input_file(&mut self, given: &str) -> Result<std::path::PathBuf, String> {
         let home = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()));
         if download::is_url(given) {
-            let dir = download::folder_for(home.as_deref());
+            let dir = download::folder_for_kind(home.as_deref(), m::file::MediaKind::Models3d);
             return download::fetch_pick(given, &dir, None, &download::Pick::default()).map(|f| f.file).map_err(|e| format!("could not download {given}: {e}"));
         }
         download::resolve_local(home.as_deref(), given)

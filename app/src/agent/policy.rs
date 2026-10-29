@@ -19,9 +19,7 @@
 use serde_json::{Value, json};
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
-
-/// The file the rules are kept in, in the project folder.
-pub const FILE: &str = "agent-policy.json";
+use studio_model as m;
 
 thread_local! {
     /// The rule for a project with no folder (per thread: tests run side by side).
@@ -29,7 +27,7 @@ thread_local! {
 }
 
 fn file(home: Option<&Path>) -> Option<PathBuf> {
-    home.map(|h| h.join(FILE))
+    home.map(|h| m::file::ProjectFolder::new(h).state(m::file::State::AgentPolicy))
 }
 
 /// Whether AI generation is off for this project.

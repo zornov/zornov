@@ -14,10 +14,11 @@
 use super::Session;
 use serde_json::{Value, json};
 use std::path::PathBuf;
+use studio_model as m;
 
 impl Session {
     fn accept_file(&self) -> Option<PathBuf> {
-        self.doc.folder.as_ref().map(|f| f.root().to_path_buf()).or_else(|| self.home.clone()).map(|h| h.join("accepted.json"))
+        self.doc.folder.as_ref().map(|f| f.root().to_path_buf()).or_else(|| self.home.clone()).map(|h| m::file::ProjectFolder::new(h).state(m::file::State::Accepted))
     }
 
     /// Every acceptance: {kind, clip?, why?}.
