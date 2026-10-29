@@ -479,9 +479,12 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let (overlays_keys, before_after_keys) = (crate::keymap::hint(&app.prefs, "overlays"), crate::keymap::hint(&app.prefs, "before-after"));
     let proj = &app.doc.project;
     let info = format!("{} × {} · {} fps", proj.width, proj.height, proj.fps);
-    let info_w = kit::text_width(&bui, &info, theme::caption()) + 8.0;
-    let add_w = 72.0;
-    let strip_w = (bui.available_width() - info_w - add_w - 16.0).max(120.0);
+    // In a narrow viewer the picture's size and rate go (the project settings
+    // hold them) and the tools scroll sideways beside the always-visible Add.
+    let show_info = bui.available_width() >= 600.0;
+    let info_w = if show_info { kit::text_width(&bui, &info, theme::caption()) + 8.0 } else { 0.0 };
+    let add_w = 76.0;
+    let strip_w = (bui.available_width() - info_w - add_w - 16.0).max(48.0);
     egui::ScrollArea::horizontal().id_salt("viewer-tools").max_width(strip_w).auto_shrink([true, true]).show_h(&mut bui, |ui| {
         ui.horizontal(|bui| {
             let ed = &mut app.editor;
@@ -571,7 +574,9 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     });
     bui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.add_space(4.0);
-        kit::label_trunc(ui, egui::RichText::new(info).font(theme::caption()).color(t.text_2));
+        if show_info {
+            kit::label_trunc(ui, egui::RichText::new(info).font(theme::caption()).color(t.text_2));
+        }
         add_menu(app, ui);
     });
     super::three_d::poll_asked(ui.ctx());
