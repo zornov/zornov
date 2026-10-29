@@ -166,6 +166,30 @@ impl FrameBuf {
         }
     }
 
+    /// Records an inter block of an inter frame for the intra blocks coded after it: its mode info
+    /// counts as a non-smooth `DC_PRED` neighbour, and its transform blocks (one per plane, 8x8
+    /// blocks and larger) are marked as decoded for the above-right / below-left availability of
+    /// intra prediction. Call it once the block's samples are in the buffer.
+    pub(crate) fn mark_inter_block(&mut self, mi_row: usize, mi_col: usize, bw4: usize, bh4: usize) {
+        let st = &mut self.intra;
+        for r in mi_row..(mi_row + bh4).min(st.mi_rows) {
+            for c in mi_col..(mi_col + bw4).min(st.mi_cols) {
+                st.y_mode[r * st.mi_cols + c] = DC_PRED as u8;
+                st.uv_mode[r * st.mi_cols + c] = DC_PRED as u8;
+            }
+        }
+        for plane in 0..3 {
+            let sub = (plane > 0) as usize;
+            let (w, h) = ((bw4 >> sub).max(1), (bh4 >> sub).max(1));
+            let (sbr, sbc) = ((mi_row & (SB4 - 1)) >> sub, (mi_col & (SB4 - 1)) >> sub);
+            for i in 0..h {
+                for j in 0..w {
+                    st.set_bd(plane, sbr + i, sbc + j);
+                }
+            }
+        }
+    }
+
     /// Reconstructs one intra block with default [`IntraExtra`].
     pub fn reconstruct_block(&mut self, b: &BlockDecision) {
         self.reconstruct_block_ex(b, IntraExtra::default());

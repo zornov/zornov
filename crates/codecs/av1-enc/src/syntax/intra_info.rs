@@ -78,6 +78,34 @@ pub fn write_intra_frame_mode_info(enc: &mut SymbolEncoder, cdfs: &mut Cdfs, ctx
     write_tx_size(enc, cdfs, ctx, b, f);
 }
 
+/// `inter_frame_mode_info()` of an intra block in an inter frame: skip, `is_inter = 0`, the y mode
+/// (coded by block size group, not by the neighbours), the uv mode, the angle deltas, and the
+/// transform size.
+pub fn write_intra_block_in_inter_frame(enc: &mut SymbolEncoder, cdfs: &mut Cdfs, ctx: &mut ContextState, b: &BlockInfo, f: FrameSyntax) {
+    let (r, c, ms) = (b.mi_row, b.mi_col, b.mi_size);
+    let sctx = ctx.skip_ctx(r, c);
+    enc.write_symbol(&mut cdfs.skip[sctx], b.skip as usize);
+    let ictx = ctx.is_inter_ctx(r, c);
+    enc.write_symbol(&mut cdfs.is_inter[ictx], 0);
+
+    assert!(b.y_mode <= PAETH_PRED, "y mode {} is not an intra mode", b.y_mode);
+    enc.write_symbol(&mut cdfs.y_mode[SIZE_GROUP[ms] as usize], b.y_mode);
+    write_angle_delta(enc, cdfs, ms, b.y_mode, b.extra.angle_delta_y);
+    if b.has_chroma {
+        assert!(b.uv_mode <= PAETH_PRED, "uv mode {} is not supported (chroma-from-luma needs its alphas)", b.uv_mode);
+        let cfl_allowed = if f.lossless && plane_residual_size(ms, 1) == BLOCK_4X4 { true } else { !f.lossless && block_width(ms).max(block_height(ms)) <= 32 };
+        if cfl_allowed {
+            enc.write_symbol(&mut cdfs.uv_mode_cfl_allowed[b.y_mode], b.uv_mode);
+        } else {
+            enc.write_symbol(&mut cdfs.uv_mode_cfl_not_allowed[b.y_mode], b.uv_mode);
+        }
+        write_angle_delta(enc, cdfs, ms, b.uv_mode, b.extra.angle_delta_uv);
+    } else {
+        assert_eq!(b.extra.angle_delta_uv, 0);
+    }
+    write_tx_size(enc, cdfs, ctx, b, f);
+}
+
 /// `read_tx_size()` for an intra block.
 fn write_tx_size(enc: &mut SymbolEncoder, cdfs: &mut Cdfs, ctx: &ContextState, b: &BlockInfo, f: FrameSyntax) {
     if f.lossless {

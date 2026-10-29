@@ -3,17 +3,20 @@
 
 //! Facade: the public encoder. Owns the module pipeline.
 //!
-//! Constant quantiser (`RateMode::Cqp`), 8-bit 4:2:0, one tile, 64x64 superblocks, no loop
-//! filter, CDEF or restoration. A key frame starts the stream and then comes every `keyint`
-//! frames; the frames between are inter frames predicted from the previous frame (phase (b)).
-//! A key frame's packet carries a sequence header and is a sync sample; an inter frame's does
-//! not.
+//! 8-bit 4:2:0, one tile, 64x64 superblocks, no loop filter, CDEF or restoration. The rate is a
+//! constant quantiser (`RateMode::Cqp`), constant quality (`Crf`) or an average bitrate
+//! (`Bitrate`), see [`crate::rc`]. A key frame starts the stream and then comes every `keyint`
+//! frames and at scene cuts; the frames between are inter frames predicted from the previous
+//! frame. A key frame's packet carries a sequence header and is a sync sample; an inter frame's
+//! does not.
 
 use std::sync::Arc;
 
 use crate::bits::BitWriter;
 use crate::error::{Error, Result};
 use crate::mode::{FixedDecider, ModeDecider, SearchDecider};
+use crate::rc::gop::GopPlanner;
+use crate::rc::{MAX_RETRIES, RateControl};
 use crate::obu::{ObuType, av1c, obu, write_frame_header, write_sequence_header};
 use crate::motion::InterFrameCoder;
 use crate::recon::{FrameBuf, QuantInfo, RefStore};
@@ -42,13 +45,18 @@ fn level_for(width: u32, height: u32) -> u8 {
 pub struct Encoder {
     cfg: Config,
     seq: SeqParams,
-    q: u8,
-    decider: Box<dyn ModeDecider + Send>,
+    gop: GopPlanner,
+    rc: RateControl,
     frames: u32,
-    /// Frames since the last key frame (0 right after one was coded; `None` before the first).
-    since_key: Option<u32>,
     refs: RefStore,
     recon: Option<Frame>,
+}
+
+/// One coded frame, before it becomes the encoder's state.
+struct Coded {
+    data: Vec<u8>,
+    recon: FrameBuf,
+    refresh: u8,
 }
 
 impl Encoder {
@@ -71,11 +79,12 @@ impl Encoder {
         if cfg.tiles != (0, 0) {
             return Err(Error::Unsupported("tiles"));
         }
-        let q = match cfg.rate {
+        match cfg.rate {
             RateMode::Cqp(0) => return Err(Error::Unsupported("lossless (base_q_idx 0)")),
-            RateMode::Cqp(q) => q,
-            RateMode::Crf(_) | RateMode::Bitrate(_) => return Err(Error::Unsupported("rate control: use RateMode::Cqp")),
-        };
+            RateMode::Crf(c) if c > 63 => return Err(Error::Invalid("CRF is 0 to 63")),
+            RateMode::Bitrate(0) => return Err(Error::Invalid("bitrate must be positive")),
+            _ => {}
+        }
         let seq = SeqParams {
             width: cfg.width,
             height: cfg.height,
@@ -93,8 +102,7 @@ impl Encoder {
             matrix_coefficients: 1,
             full_range: false,
         };
-        let decider: Box<dyn ModeDecider + Send> = if cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(SearchDecider { base_q_idx: q }) };
-        Ok(Encoder { cfg, seq, q, decider, frames: 0, since_key: None, refs: RefStore::default(), recon: None })
+        Ok(Encoder { gop: GopPlanner::new(cfg.keyint), rc: RateControl::new(&cfg), cfg, seq, frames: 0, refs: RefStore::default(), recon: None })
     }
 
     /// The `av1C` record for the MP4 track.
@@ -107,36 +115,21 @@ impl Encoder {
         self.recon.as_ref()
     }
 
-    /// Encodes one frame; the packet comes back at once. The first frame and every `keyint`-th
-    /// one after it is a key frame, the others are inter frames.
-    pub fn push_frame(&mut self, frame: &Frame, pts: i64) -> Result<Vec<Packet>> {
-        if (frame.width, frame.height) != (self.cfg.width, self.cfg.height) {
-            return Err(Error::Invalid("frame size differs from the configuration"));
-        }
-        if frame.bit_depth != self.cfg.bit_depth {
-            return Err(Error::Invalid("frame bit depth differs from the configuration"));
-        }
-        let (cw, ch) = ((frame.width as usize).div_ceil(2), (frame.height as usize).div_ceil(2));
-        let want = [frame.width as usize * frame.height as usize, cw * ch, cw * ch];
-        if frame.stride != [frame.width as usize, cw, cw] || (0..3).any(|p| frame.planes[p].len() != want[p]) {
-            return Err(Error::Invalid("frame planes must be tightly packed 4:2:0"));
-        }
-        let key = match self.since_key {
-            None => true,
-            Some(n) => self.cfg.keyint != 0 && n + 1 >= self.cfg.keyint,
-        };
+    /// Codes `frame` at quantiser `q` without touching the encoder's state.
+    fn code_frame(&self, frame: &Frame, key: bool, q: u8) -> Coded {
         let (mi_cols, mi_rows) = (2 * ((frame.width + 7) >> 3), 2 * ((frame.height + 7) >> 3));
         let mut buf = FrameBuf::new(frame.width, frame.height, frame.bit_depth);
-        buf.quant = QuantInfo { base_q_idx: self.q, ..Default::default() };
+        buf.quant = QuantInfo { base_q_idx: q, ..Default::default() };
         // the sequence header written here turns the intra edge filter off
         buf.enable_intra_edge_filter = false;
-        let mut tw = TileWriter::new(&self.seq, self.q, mi_cols, mi_rows);
+        let mut tw = TileWriter::new(&self.seq, q, mi_cols, mi_rows);
         let ref_idx = [0u8; 7];
         if key {
+            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(SearchDecider { base_q_idx: q }) };
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
                     let pos = SbPos { col, row };
-                    let sb = self.decider.decide_sb(frame, &mut buf, pos);
+                    let sb = decider.decide_sb(frame, &mut buf, pos);
                     tw.write_sb(pos, &sb);
                 }
             }
@@ -144,7 +137,7 @@ impl Encoder {
             let fast = self.cfg.speed >= FIXED_FROM_SPEED;
             // fast: one block size by quantiser (coarser ones leave less to gain from small blocks,
             // and their mode info costs more); otherwise the size is chosen for every superblock
-            let fixed_size = if self.q >= 160 { 16 } else { 8 };
+            let fixed_size = if q >= 160 { 16 } else { 8 };
             let mut coder = InterFrameCoder::new(frame, &self.refs, ref_idx, if fast { fixed_size } else { 0 }, self.cfg.speed <= 6);
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
@@ -159,7 +152,7 @@ impl Encoder {
         let fp = FrameParams {
             frame_type: if key { FrameType::Key } else { FrameType::Inter },
             show_frame: true,
-            base_q_idx: self.q,
+            base_q_idx: q,
             disable_cdf_update: false,
             refresh_frame_flags: if key { 0xFF } else { 0x01 },
             order_hint: self.frames & 0x7F,
@@ -175,11 +168,51 @@ impl Encoder {
         w.put_bytes(&tile);
         let mut data = if key { obu(ObuType::SequenceHeader, &write_sequence_header(&self.seq)) } else { Vec::new() };
         data.extend(obu(ObuType::Frame, &w.finish()));
+        Coded { data, recon: buf, refresh: fp.refresh_frame_flags }
+    }
+
+    /// Encodes one frame; the packet comes back at once. The first frame, every `keyint`-th one
+    /// after it and every scene cut is a key frame, the others are inter frames.
+    pub fn push_frame(&mut self, frame: &Frame, pts: i64) -> Result<Vec<Packet>> {
+        if (frame.width, frame.height) != (self.cfg.width, self.cfg.height) {
+            return Err(Error::Invalid("frame size differs from the configuration"));
+        }
+        if frame.bit_depth != self.cfg.bit_depth {
+            return Err(Error::Invalid("frame bit depth differs from the configuration"));
+        }
+        let (cw, ch) = ((frame.width as usize).div_ceil(2), (frame.height as usize).div_ceil(2));
+        let want = [frame.width as usize * frame.height as usize, cw * ch, cw * ch];
+        if frame.stride != [frame.width as usize, cw, cw] || (0..3).any(|p| frame.planes[p].len() != want[p]) {
+            return Err(Error::Invalid("frame planes must be tightly packed 4:2:0"));
+        }
+        let ftype = self.gop.next_type(frame);
+        let key = ftype == FrameType::Key;
+        let mut q = self.rc.frame_qidx(ftype);
+        let mut coded = self.code_frame(frame, key, q);
+        // a frame far off its target is coded again; the attempt nearest the target is kept
+        let (mut best_q, mut best_miss) = (q, self.rc.miss(coded.data.len()));
+        for _ in 0..MAX_RETRIES {
+            match self.rc.retry_qidx(ftype, q, coded.data.len()) {
+                Some(nq) => {
+                    q = nq;
+                    let attempt = self.code_frame(frame, key, q);
+                    let miss = self.rc.miss(attempt.data.len());
+                    if miss < best_miss {
+                        (best_q, best_miss) = (q, miss);
+                        coded = attempt;
+                    } else {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+        let q = best_q;
+        self.rc.update(ftype, q, coded.data.len());
         self.frames += 1;
-        self.since_key = Some(if key { 0 } else { self.since_key.unwrap_or(0) + 1 });
-        self.recon = Some(buf.to_frame());
-        self.refs.refresh(fp.refresh_frame_flags, Arc::new(buf));
-        Ok(vec![Packet { data, keyframe: key, pts }])
+        self.recon = Some(coded.recon.to_frame());
+        self.refs.refresh(coded.refresh, Arc::new(coded.recon));
+        Ok(vec![Packet { data: coded.data, keyframe: key, pts }])
     }
 
     /// Nothing is held back: every frame leaves in its own packet.
