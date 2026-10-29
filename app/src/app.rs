@@ -452,6 +452,7 @@ impl eframe::App for StudioApp {
         self.thumbs.pump(&ctx);
         self.apply_prefs(&ctx);
         self.autosave_tick();
+        self.files_frame(&ctx);
         self.keep_session();
         self.library_tick();
         self.recents_tick();
