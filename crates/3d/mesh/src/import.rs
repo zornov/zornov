@@ -42,6 +42,9 @@ pub fn load(path: &Path, fit: f32) -> Result<Imported, String> {
             Imported { mesh, notes }
         }
         "smesh" => Imported { mesh: crate::io::from_bytes(&bytes)?, notes: Vec::new() },
+        // The editable source is read by studio-modeling (which builds on this
+        // crate), so a plain load says where to go instead of "not a model".
+        "smodel" => return Err(format!("{}: .smodel is Zornov's editable model source; open it with the model loader (mesh_store::read_model), which builds it from its parts", path.display())),
         other => {
             return Err(match crate::foreign::unsupported(other) {
                 Some(way) => format!("{}: {way}", path.display()),

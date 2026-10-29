@@ -122,7 +122,9 @@ fn unit(v: [f64; 3]) -> [f64; 3] {
 }
 
 /// Draws `s` with a turtle: `F` and `G` step and draw, `f` steps without,
-/// `+ -` turn left and right, `& ^` pitch down and up, `\ /` roll,
+/// `+ -` turn left and right, `& ^` pitch down and up, `\ /` roll (`\`
+/// by +angle about the heading, `/` by -angle: the reverse of the usual
+/// turtle's `/`, which rolls the other way),
 /// `|` turns round, `[ ]` branch and come back, `!` thins, `L` (or `*`)
 /// puts a leaf; other symbols do nothing.
 pub fn turtle(s: &str, how: &Turtle) -> Grown {

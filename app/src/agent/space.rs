@@ -587,7 +587,7 @@ impl Session {
         for i in 0..=steps {
             let u = i as f64 / steps as f64;
             let t = from + (dur as f64 * u).round() as m::Micros;
-            let (rig, e) = if inner || steps > 1 { (state(eased(u)), "smooth") } else { (state(u), ease.as_str()) };
+            let (rig, e) = if inner || steps > 1 { (state(eased(u)), "spline") } else { (state(u), ease.as_str()) };
             for p in &paths {
                 key(mc, p, t, rig_value(&rig, p), e)?;
             }

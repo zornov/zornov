@@ -1183,10 +1183,15 @@ impl Tx<'_> {
                 // Keep animation attached to the same content.
                 let k = d as f64 / old.duration as f64;
                 for tr in n.keyframes.values_mut() {
+                    // Speeding up can round two close keys onto one
+                    // microsecond; the later one moves on a tick rather
+                    // than being dropped with its value.
+                    let mut prev: Option<Micros> = None;
                     for key in &mut tr.keys {
-                        key.time = (key.time as f64 * k).round() as Micros;
+                        let t = (key.time as f64 * k).round() as Micros;
+                        key.time = prev.map_or(t, |p| t.max(p + 1));
+                        prev = Some(key.time);
                     }
-                    tr.keys.dedup_by_key(|key| key.time);
                 }
                 for m in &mut n.markers {
                     m.time = (m.time as f64 * k).round() as Micros;

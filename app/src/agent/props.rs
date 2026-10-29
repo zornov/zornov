@@ -398,6 +398,8 @@ fn interp_name(i: m::Interp) -> &'static str {
         m::Interp::Ease => "ease",
         m::Interp::Auto => "smooth",
         m::Interp::Curve => "curve",
+        m::Interp::Spline => "spline",
+        m::Interp::Through => "through",
     }
 }
 
@@ -407,6 +409,8 @@ pub fn interp_of(s: &str) -> Option<m::Interp> {
         "hold" | "step" => m::Interp::Hold,
         "ease" | "ease_in_out" | "bezier" => m::Interp::Ease,
         "smooth" | "auto" => m::Interp::Auto,
+        "spline" => m::Interp::Spline,
+        "through" => m::Interp::Through,
         _ => return None,
     })
 }

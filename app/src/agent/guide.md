@@ -233,6 +233,17 @@ control of an animator:
   whip (slow then fast: into a cut). `keys` sets exact bezier handles on
   any key (`"out": [0.1, 0.9]`, fractions of the move's time and change;
   past 1 overshoots).
+- **Motion through keys**: `smooth` (the default) stops the value at
+  the first and last key and at every turning key, so dense motion looks
+  mechanical. Use `spline` for a path that must flow: one C2 curve
+  (velocity and acceleration continuous) through every key of a run, no
+  stops at the keys; camera and dolly moves use it. Use `through` for a
+  C1 curve that passes every key without stopping at interior ones, and
+  shape it with `"tcb": [tension, continuity, bias]` (each -1 to 1; 0 is
+  plain; tension 1 tightens to a stop, continuity 1 makes a corner, bias
+  favours the segment before (-1) or after (+1)), on the op for all keys
+  or on one key (`{"t": 1, "v": 50, "ease": "through", "tcb": [0.5, 0, 0]}`);
+  `keys` `curve` entries take `tcb` too.
 - **The GSAP curves**, as real keyframe curves (GSAP spellings work):
   elastic (rings around the target and settles: `"elastic.out(1.2,
   0.4)"`, amplitude and period), spring (a softer elastic), bounce
@@ -471,14 +482,14 @@ Each op is `{"op": "<name>", …fields}`.
 |---|---|---|
 | `set` | `clip` (or `clips`: many at once), any properties, `fit`, `speed`, `duration`, `start`, `backing`, `anchor`, `at` | changes clips. `anchor`: where scale and rotation turn, by name (`top_left`, `centre`, `bottom_right`…) or `[x, y]` pixels from the layer's centre; the picture stays where it is. `at` (seconds): an animated property gets a key at that moment instead of being outvoted by its keys |
 | `repeat` | `times` (or `for`: a list of items), `do`: the ops, optional `let` (lists or numbers every turn shares), `as` | writes ops out many times inside the edit: no script needed. In `do`, `"{expr}"` is worked out: `i` (0, 1, 2…), `n`, each item's fields, lists as `h[i]`, `+ - * / %` and brackets; a whole-string `"{i*0.5}"` stays a number, `"bar {i+1}"` becomes text. Repeats nest; `$last` counts every clip made |
-| `animate` | `clip` or `clips`, `property`, `keys`, `ease`, `relative`, `path`, `arc`; or `curve` (a path from mathematics: a preset such as lissajous, rose, spirograph, heart, or formulas, or a 3D `attractor`) / `formula` (a formula of t) | keyframes a property (replaces its keys); position moves bend with `path: "smooth"` or `arc`; along a curve or by a formula the keys are written for you (skill `3d-assets-scenes`, part `math shapes`) |
+| `animate` | `clip` or `clips`, `property`, `keys`, `ease` (smooth, spline, through, linear, hold, bezier and GSAP curves), `tcb` ([tension, continuity, bias] for `through`), `relative`, `path`, `arc`; or `curve` (a path from mathematics: a preset such as lissajous, rose, spirograph, heart, or formulas, or a 3D `attractor`) / `formula` (a formula of t) | keyframes a property (replaces its keys); position moves bend with `path: "smooth"` or `arc`; along a curve or by a formula the keys are written for you (skill `3d-assets-scenes`, part `math shapes`) |
 | `stagger` | `clips` (in order), `each` or `amount`, `from`, `by`, `origin`, `spread`, `animate` or `use_move` | one move on many clips, each a little after the last (GSAP's stagger), as real keys on every clip |
 | `driver` | `clip`, `property`, `from` (+ `multiply`, `add`, `delay`) or `vars` + `expr`, `remove`, `enabled` | the property follows other properties live (drivers): no keys baked |
 | `expression` | `clip`, `property`, `expr`, `remove` | a formula on a property (wiggle, loop_out, value_at, links with prop…; see Motion graphics) |
 | `time_remap` | `clip`, `keys` (`[clip s, source s]`), `expr`, `remove` | which source second plays when: holds, reversals, ramps by keys or formula |
 | `physics` | `clips`, `at`, `duration`, `bounce`, `friction`, `gravity`, `floor`, `walls`, `ceiling`, `static`, `push`, `spin`, `shape` | rigid-body fall, bounce and stacking, baked into position and rotation keys |
 | `modifier` | `clip`, `property`, `add` (noise, cycles, stepped, limits, expression) or `remove`, and that kind's settings | procedural layers on a property's keys: wobble, loop, hold poses, clamp, a formula; one per kind, kept when keys change |
-| `keys` | `clip`, `property` (or `"all"`: every animated property at once), `remove`, `move`, `curve` | edits keyframes: `move` `[[from, to]]` retimes, `curve` `[{"t", "curve"}]` sets how a key eases into the next (smooth, linear, hold, ease_in_out, ease_in, ease_out, overshoot, anticipate, snap, whip; or `out` / `in` handles) |
+| `keys` | `clip`, `property` (or `"all"`: every animated property at once), `remove`, `move`, `curve` | edits keyframes: `move` `[[from, to]]` retimes, `curve` `[{"t", "curve"}]` sets how a key eases into the next (smooth, spline, through, linear, hold, ease_in_out, ease_in, ease_out, overshoot, anticipate, snap, whip; or `out` / `in` handles; `tcb` shapes `through` keys) |
 | `apply` | `item`, `clips`, `panel`, `params`, `duration` | an effect, look, motion or transition |
 | `effect` | `clip`, `effect` (name or place), `remove`, `enabled`, `params` (each effect's own setting names; `blur` means a blur's `radius`, `strength` its `amount`), `move_to`; or `item` (+ `params`) to add one, as `apply` | one effect in a clip's stack |
 | `copy_look` | `from`, `clips`, `parts` (transform, blend, audio, effects, grade, masks) | copies parts of one clip onto others |

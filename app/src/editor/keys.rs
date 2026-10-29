@@ -117,6 +117,15 @@ pub fn timeline(app: &mut StudioApp, ui: &mut egui::Ui, c: &Clip, r: Rect, track
                 p.add(egui::Shape::convex_polygon(vec![at + Vec2::new(0.0, -s), at + Vec2::new(s, 0.0), at + Vec2::new(0.0, s), at + Vec2::new(-s, 0.0)], fill, edge));
                 p.circle_filled(at, 1.6, Color32::from_black_alpha(160));
             }
+            m::Interp::Spline | m::Interp::Through => {
+                // A circle like Auto, with a dot (spline) or a bar (through).
+                p.circle(at, s, fill, edge);
+                if key.interp == m::Interp::Spline {
+                    p.circle_filled(at, 1.6, Color32::from_black_alpha(160));
+                } else {
+                    p.line_segment([at + Vec2::new(-s * 0.6, 0.0), at + Vec2::new(s * 0.6, 0.0)], Stroke::new(1.5, Color32::from_black_alpha(160)));
+                }
+            }
         }
         if resp.clicked() {
             app.editor.playhead = c.start + kt;

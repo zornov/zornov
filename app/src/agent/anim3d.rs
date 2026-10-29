@@ -41,6 +41,160 @@ pub(super) fn degrees(v: &Value) -> Option<V3> {
     Some([g("x"), g("y"), g("z")])
 }
 
+/// The clip setting that remembers how a model's own numbers became model
+/// px: `{"kind": "formula" | "native", "centre": [x, y, z], "scale": [kx, ky, kz]}`.
+pub(super) const FRAME_PARAM: &str = "model_frame";
+
+/// Which numbers the bones and targets of a `rig` op are written in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Space {
+    /// `None`: model px, as they are.
+    pub frame: Option<Frame>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Frame {
+    pub formula: bool,
+    pub centre: [f64; 3],
+    pub scale: [f32; 3],
+}
+
+impl Frame {
+    pub fn json(&self) -> Value {
+        json!({"kind": if self.formula { "formula" } else { "native" }, "centre": self.centre, "scale": self.scale})
+    }
+
+    pub fn from_json(v: &Value) -> Option<Frame> {
+        let a = |k: &str| -> Option<[f64; 3]> {
+            let l = v.get(k)?;
+            match l {
+                Value::Number(n) => Some([n.as_f64()?; 3]),
+                _ => {
+                    let l = l.as_array().filter(|l| l.len() == 3)?;
+                    Some([l[0].as_f64()?, l[1].as_f64()?, l[2].as_f64()?])
+                }
+            }
+        };
+        Some(Frame { formula: v.get("kind").and_then(Value::as_str) == Some("formula"), centre: a("centre").unwrap_or([0.0; 3]), scale: a("scale")?.map(|x| x as f32) })
+    }
+
+    /// A point of the model's own numbers in model px.
+    pub fn to_model(&self, p: V3) -> V3 {
+        let d = [p[0] as f64 - self.centre[0], p[1] as f64 - self.centre[1], p[2] as f64 - self.centre[2]];
+        let q = if self.formula { studio_mesh::math::to_studio(d) } else { d.map(|x| x as f32) };
+        [q[0] * self.scale[0], q[1] * self.scale[1], q[2] * self.scale[2]]
+    }
+}
+
+impl Space {
+    /// From the op's `space` ("model", "native", "formula") and the frame
+    /// the model was made with (or an explicit `frame`).
+    pub fn of(op: &Value, mc: &m::Clip) -> Result<Space, String> {
+        let want = op.get("space").and_then(Value::as_str).unwrap_or("model").to_lowercase();
+        let kind = match want.as_str() {
+            "model" | "px" | "model_px" => return Ok(Space { frame: None }),
+            "native" | "file" | "source" => false,
+            "formula" | "math" => true,
+            other => return Err(format!("space \"{other}\": model (model px, the default), native (the imported file's own units) or formula (the math shape's own units)")),
+        };
+        let given = op.get("frame").and_then(Frame::from_json);
+        let stored = frame_of(mc);
+        let mut f = given.or(stored).ok_or_else(|| format!("space \"{want}\" needs the model's frame, and this model has none recorded (it was made before frames were kept, or is not a {} model): give \"frame\": {{\"centre\": [x, y, z], \"scale\": k}} (model px = scale * (point - centre)), or write the bones in model px", if kind { "math" } else { "imported" }))?;
+        f.formula = kind;
+        if stored.is_some_and(|s| s.formula != kind) && given.is_none() {
+            return Err(format!("space \"{want}\" does not fit this model: it is a {} model (use space \"{}\")", if stored.is_some_and(|s| s.formula) { "math" } else { "imported" }, if stored.is_some_and(|s| s.formula) { "formula" } else { "native" }));
+        }
+        Ok(Space { frame: Some(f) })
+    }
+
+    pub fn to_model(&self, p: V3) -> V3 {
+        self.frame.map_or(p, |f| f.to_model(p))
+    }
+
+    /// A constraint with its `target` and `pole` points converted.
+    pub fn points(&self, c: &Value) -> Value {
+        let mut c = c.clone();
+        if self.frame.is_some()
+            && let Some(o) = c.as_object_mut()
+        {
+            for k in ["target", "pole"] {
+                if let Some(p) = o.get(k).and_then(v3) {
+                    let q = self.to_model(p);
+                    o.insert(k.into(), json!(q));
+                }
+            }
+        }
+        c
+    }
+}
+
+/// The frame a model clip was made with.
+pub(super) fn frame_of(c: &m::Clip) -> Option<Frame> {
+    match &c.source {
+        m::ClipSource::Generator(g) => match g.params.get(FRAME_PARAM) {
+            Some(m::Value::Text(t)) => serde_json::from_str::<Value>(t).ok().as_ref().and_then(Frame::from_json),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Records a model's frame on its clip.
+pub(super) fn set_frame(c: &mut m::Clip, f: &Frame) {
+    set_param(c, FRAME_PARAM, m::Value::Text(f.json().to_string()));
+}
+
+/// Generalised winding number of the mesh about `p` (about 1 inside a
+/// closed surface, 0 outside).
+fn winding(mesh: &Mesh, p: V3) -> f64 {
+    let mut total = 0.0;
+    for t in 0..mesh.triangles() {
+        let [a, b, c] = mesh.tri(t).map(|v| studio_mesh::sub(mesh.positions[v], p).map(f64::from));
+        let (la, lb, lc) = (norm3(a), norm3(b), norm3(c));
+        let det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+        let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let den = la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb;
+        total += 2.0 * det.atan2(den);
+    }
+    total / (4.0 * std::f64::consts::PI)
+}
+
+fn norm3(a: [f64; 3]) -> f64 {
+    (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt()
+}
+
+/// Bones that sit clear of the model: refused when a head or tail is
+/// outside its bounding box by more than a tenth of its size (almost
+/// always the wrong units), said when most bone middles are outside the
+/// solid by the winding number.
+fn hull_check(mesh: &Mesh, bones: &[Bone], space: &Space) -> Result<Option<String>, String> {
+    if bones.is_empty() || mesh.triangles() == 0 {
+        return Ok(None);
+    }
+    let (lo, hi) = mesh.bounds();
+    let pad = (0..3).map(|i| hi[i] - lo[i]).fold(0.0f32, f32::max) * 0.1;
+    for b in bones {
+        for (what, p) in [("head", b.head), ("tail", b.tail)] {
+            if (0..3).any(|i| p[i] < lo[i] - pad || p[i] > hi[i] + pad) {
+                let units = match space.frame {
+                    Some(f) if f.formula => "formula units",
+                    Some(_) => "native units",
+                    None => "model px",
+                };
+                return Err(format!(
+                    "bone \"{}\" {what} {:?} (model px, from your {units}) is outside the model, which spans {:?} to {:?}: the bones are in other units than the model's. Say which with \"space\": \"model\" (px), \"native\" (the file's units) or \"formula\" (the math shape's units); \"allow_outside\": true keeps them anyway",
+                    b.name,
+                    p.map(|v| v.round()),
+                    lo.map(|v| v.round()),
+                    hi.map(|v| v.round())
+                ));
+            }
+        }
+    }
+    let outside = bones.iter().filter(|b| winding(mesh, studio_mesh::scale(studio_mesh::add(b.head, b.tail), 0.5)).abs() < 0.5).count();
+    Ok((outside * 2 > bones.len()).then(|| format!("{outside} of {} bones lie outside the solid (winding number): check they sit inside the body", bones.len())))
+}
+
 /// The rig of a model in words.
 pub(super) fn describe_rig(r: &Rig) -> Value {
     json!({
@@ -72,17 +226,54 @@ fn shape_names(r: &Rig, name: &str) -> Vec<String> {
 pub(super) fn interp(ease: &str) -> Result<m::Interp, String> {
     Ok(match ease {
         "smooth" | "auto" => m::Interp::Auto,
+        "spline" => m::Interp::Spline,
+        "through" => m::Interp::Through,
         "linear" => m::Interp::Linear,
         "hold" | "step" | "snap" => m::Interp::Hold,
         "ease" | "ease_in_out" => m::Interp::Ease,
-        other => return Err(format!("ease \"{other}\": smooth, linear, ease or hold")),
+        other => return Err(format!("ease \"{other}\": smooth, spline, through, linear, ease or hold")),
     })
+}
+
+thread_local! {
+    /// Every (track, time) `key` was asked to set while a [`KeyLog`] is open.
+    static KEY_LOG: std::cell::RefCell<Option<Vec<(String, i64)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Counts the keys an op writes through [`key`], so its reply can say how
+/// many reached the tracks: two writes to one moment leave one key.
+struct KeyLog;
+
+impl KeyLog {
+    fn open() -> KeyLog {
+        KEY_LOG.with(|l| *l.borrow_mut() = Some(Vec::new()));
+        KeyLog
+    }
+
+    fn tally(&self) -> super::craft::KeyTally {
+        let log = KEY_LOG.with(|l| l.borrow().clone().unwrap_or_default());
+        let distinct: std::collections::HashSet<&(String, i64)> = log.iter().collect();
+        let mut t = super::craft::KeyTally::new(log.len());
+        t.lose(log.len() - distinct.len(), "written to a moment already keyed in this op, so the later one replaced the earlier");
+        t
+    }
+}
+
+impl Drop for KeyLog {
+    fn drop(&mut self) {
+        KEY_LOG.with(|l| *l.borrow_mut() = None);
+    }
 }
 
 /// Sets a key on a clip's track (made if missing). A model setting that
 /// is keyed gets a resting value of the same kind first (zero), as keyed
 /// settings need one.
 pub(super) fn key(c: &mut m::Clip, path: &str, t: i64, v: m::Value, how: m::Interp) {
+    KEY_LOG.with(|l| {
+        if let Some(l) = l.borrow_mut().as_mut() {
+            l.push((path.to_owned(), t));
+        }
+    });
     if let Some(name) = path.strip_prefix("generator.")
         && let m::ClipSource::Generator(g) = &mut c.source
         && !g.params.get(name).is_some_and(|p| p.same_kind(&v))
@@ -143,9 +334,10 @@ impl Session {
     pub(super) fn rig(&mut self, op: &Value) -> Result<String, String> {
         let id = op.get("clip").and_then(Value::as_u64).ok_or("rig needs \"clip\" (a model clip)")? as u32;
         let (mc, mut mesh) = self.model_of(id)?;
+        let space = Space::of(op, &mc)?;
         if op.get("list").and_then(Value::as_bool) == Some(true) || (op.as_object().is_some_and(|o| o.len() <= 2)) {
             return Ok(match &mesh.rig {
-                Some(r) => format!("clip {id} rig: {}", describe_rig(r)),
+                Some(r) => format!("clip {id} rig: {}; bones and targets are model px (x right, y down, z away); model frame: {}", describe_rig(r), frame_of(&mc).map_or("none recorded (made in model px)".to_string(), |f| f.json().to_string())),
                 None => format!("clip {id} has no rig; templates: humanoid, quadruped, chain"),
             });
         }
@@ -166,11 +358,13 @@ impl Session {
                 r.bones.clear();
                 r.constraints.clear();
             }
+            let first_new = r.bones.len();
             for (i, b) in bones.iter().enumerate() {
                 let bad = |w: &str| format!("bone {}: {w}", i + 1);
                 let name = b.get("name").and_then(Value::as_str).ok_or_else(|| bad("needs \"name\""))?.to_string();
-                let head = b.get("head").and_then(v3).ok_or_else(|| bad("needs \"head\": [x, y, z] (model px)"))?;
+                let head = b.get("head").and_then(v3).ok_or_else(|| bad("needs \"head\": [x, y, z] (model px unless \"space\" says otherwise)"))?;
                 let tail = b.get("tail").and_then(v3).ok_or_else(|| bad("needs \"tail\": [x, y, z]"))?;
+                let (head, tail) = (space.to_model(head), space.to_model(tail));
                 let parent = match b.get("parent").and_then(Value::as_str) {
                     Some(p) => Some(r.bone(p).ok_or_else(|| bad(&format!("no bone \"{p}\" to hang from (parents come first)")))?),
                     None => None,
@@ -181,6 +375,15 @@ impl Session {
                 let mut bone = Bone::new(name, parent, head, tail);
                 bone.deform = b.get("deform").and_then(Value::as_bool).unwrap_or(true);
                 r.bones.push(bone);
+            }
+            let first_new = first_new.min(r.bones.len());
+            if op.get("allow_outside").and_then(Value::as_bool) != Some(true) {
+                if let Some(warn) = hull_check(&mesh, &r.bones[first_new..], &space)? {
+                    said.push(warn);
+                }
+            }
+            if space.frame.is_some() {
+                said.push(format!("bones converted from {} units to model px", if space.frame.is_some_and(|f| f.formula) { "formula" } else { "native" }));
             }
             if rigid {
                 let carried = studio_mesh::autorig::bind_rigid(&mesh, &mut r);
@@ -231,17 +434,27 @@ impl Session {
                 None => {}
             }
         }
-        if let Some(c) = op.get("constraint") {
-            let mut r = mesh.rig.as_deref().cloned().ok_or("add bones before constraints")?;
-            // One constraint, or a list of them ("constraints": [...]): a
-            // list lands in this one op, so one undo takes it all off.
-            let list = match c {
+        // One constraint, or lists of them ("constraint" or "constraints"):
+        // all land in this one op, so one undo takes them off.
+        let given: Vec<&Value> = ["constraint", "constraints"]
+            .iter()
+            .filter_map(|k| op.get(*k))
+            .flat_map(|c| match c {
                 Value::Array(list) => list.iter().collect(),
                 one => vec![one],
-            };
-            for (i, one) in list.iter().enumerate() {
-                said.push(add_constraint(&mut r, &mesh, one).map_err(|e| if list.len() > 1 { format!("constraint {}: {e}", i + 1) } else { e })?);
+            })
+            .collect();
+        if !given.is_empty() {
+            let mut r = mesh.rig.as_deref().cloned().ok_or("add bones before constraints")?;
+            for (i, one) in given.iter().enumerate() {
+                let one = space.points(one);
+                said.push(add_constraint(&mut r, &mesh, &one).map_err(|e| if given.len() > 1 { format!("constraint {}: {e}", i + 1) } else { e })?);
             }
+            // The solve runs IK, then copied rotations, then limits, then
+            // look-at, whatever order they were listed in, so a limit
+            // listed before its IK still limits it.
+            r.constraints.sort_by_key(|c| solve_rank(c.kind()));
+            said.push("solve order: IK, copy rotation, limits, look-at".into());
             mesh.rig = Some(Arc::new(r));
         }
         if let Some(k) = op.get("skinning").and_then(Value::as_str) {
@@ -306,6 +519,7 @@ impl Session {
         };
         let default_ease = op.get("ease").and_then(Value::as_str).unwrap_or("smooth");
         let mut n = 0;
+        let log = KeyLog::open();
         let mut said: Vec<String> = Vec::new();
         let legacy_look = studio_mesh::perform::body::Body::of(&rig).head.is_none();
         for (i, k) in keys.iter().enumerate() {
@@ -384,7 +598,9 @@ impl Session {
         let seq = self.doc.seq();
         let ok = self.doc.apply("Pose", m::Edit::SetClip { seq, clip: Box::new(mc) });
         self.check(ok, "")?;
-        Ok(format!("clip {id}: {n} keys set over {} pose{}{}", keys.len(), if keys.len() == 1 { "" } else { "s" }, if said.is_empty() { String::new() } else { format!("; {}", said.join("; ")) }))
+        let tally = log.tally();
+        let counted = if tally.written > 0 { tally.say() } else { format!("{n} keys") };
+        Ok(format!("clip {id}: {counted} set over {} pose{}{}", keys.len(), if keys.len() == 1 { "" } else { "s" }, if said.is_empty() { String::new() } else { format!("; {}", said.join("; ")) }))
     }
 
     /// Where another clip is, in this model's own pixels at clip time `t`.
@@ -582,6 +798,17 @@ const CONSTRAINT_EXAMPLES: &str = "e.g. {\"kind\": \"attach\", \"bone\": \"head\
 /// "pole", "min", "max", "from", "influence"}. An `attach` is not kept as a
 /// rule: it binds the surface chosen by `material` or `region` whole to the
 /// bone, which is what holding a hat on a head means.
+/// Where a constraint kind runs in the solve.
+fn solve_rank(kind: &str) -> u8 {
+    match kind {
+        "ik" => 0,
+        "copy_rotation" => 1,
+        "limit" => 2,
+        "look_at" => 3,
+        _ => 4,
+    }
+}
+
 fn add_constraint(r: &mut Rig, mesh: &Mesh, c: &Value) -> Result<String, String> {
     let kind = c.get("kind").and_then(Value::as_str).ok_or_else(|| format!("constraint needs \"kind\": ik, look_at, limit, copy_rotation or attach, {CONSTRAINT_EXAMPLES}"))?;
     let bone_name = c.get("bone").and_then(Value::as_str).ok_or_else(|| format!("constraint needs \"bone\", the bone it acts on (the bone names are: {}), {CONSTRAINT_EXAMPLES}", r.bones.iter().map(|b| b.name.as_str()).collect::<Vec<_>>().join(", ")))?;
@@ -682,6 +909,47 @@ mod tests {
 
     /// Several constraints in one op, as a list, land together in one
     /// undo step.
+    /// A limit listed before its IK still runs after it; both keys work.
+    #[test]
+    fn constraints_run_ik_then_limits_then_look_at() {
+        let mut s = Session::new(services::project::new_custom("Anim", 640, 360, 30.0));
+        s.edit(&[json!({"op": "model", "shape": "cylinder", "size": [60, 300, 60], "detail": 5})], "add", false).unwrap();
+        let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        s.edit(&[json!({"op": "rig", "clip": id, "template": "chain", "count": 4, "start": "top"})], "rig", false).unwrap();
+        s.edit(&[json!({"op": "rig", "clip": id, "constraints": [
+            {"kind": "look_at", "bone": "bone.1", "target": [0, 0, 100]},
+            {"kind": "limit", "bone": "bone.2", "min": [-30, -30, -30], "max": [30, 30, 30]},
+            {"kind": "ik", "bone": "bone.3", "chain": 3, "target": [80, 100, 0]},
+        ]})], "c", false).unwrap();
+        let (_, mesh) = s.model_of(id).unwrap();
+        let kinds: Vec<&str> = mesh.rig.as_ref().unwrap().constraints.iter().map(|c| c.kind()).collect();
+        assert_eq!(kinds, ["ik", "limit", "look_at"]);
+        let both = s.edit(&[json!({"op": "rig", "clip": id, "constraint": {"kind": "ik", "bone": "bone.2", "target": [1, 2, 3]}, "constraints": [{"kind": "limit", "bone": "bone.1"}]})], "c", false);
+        assert!(both.is_ok(), "{both:?}");
+    }
+
+    /// Bones in the model's own units are converted; ones that miss the
+    /// model are refused with the way out.
+    #[test]
+    fn rig_converts_spaces_and_refuses_bones_far_outside() {
+        let mut s = Session::new(services::project::new_custom("Anim", 640, 360, 30.0));
+        s.edit(&[json!({"op": "model", "math": {"implicit": "x^2 + y^2 + z^2 - 1", "bounds": 1.5}, "size": 300})], "add", false).unwrap();
+        let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        let f = frame_of(&s.model_clip(id).unwrap()).expect("a math model keeps its frame");
+        assert!(f.formula && (f.scale[0] - 100.0).abs() < 1.0, "{f:?}");
+        // Formula units: a spine up the z axis (up is -y in model px).
+        let r = s.edit(&[json!({"op": "rig", "clip": id, "space": "formula", "bones": [{"name": "spine", "head": [0, 0, -0.5], "tail": [0, 0, 0.5]}]})], "rig", false).unwrap();
+        assert!(r.to_string().contains("converted from formula units"), "{r}");
+        let (_, mesh) = s.model_of(id).unwrap();
+        let b = &mesh.rig.as_ref().unwrap().bones[0];
+        assert!((b.head[1] - 50.0).abs() < 1.0 && (b.tail[1] + 50.0).abs() < 1.0, "{:?} {:?}", b.head, b.tail);
+        // The same numbers as model px sit inside; a 10x error does not.
+        let bad = s.edit(&[json!({"op": "rig", "clip": id, "bones": [{"name": "far", "head": [0, 0, 0], "tail": [0, 5000, 0]}], "replace": true})], "rig", false);
+        assert!(bad.as_ref().is_err_and(|e| e.contains("outside the model") && e.contains("space")), "{bad:?}");
+        let wrong = s.edit(&[json!({"op": "rig", "clip": id, "space": "native", "bones": [{"name": "x", "head": [0, 0, 0], "tail": [0, 1, 0]}]})], "rig", false);
+        assert!(wrong.is_err_and(|e| e.contains("does not fit")));
+    }
+
     #[test]
     fn several_constraints_in_one_op() {
         let mut s = Session::new(services::project::new_custom("Anim", 640, 360, 30.0));
