@@ -1112,7 +1112,7 @@ fn apply(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, tar
     };
     let panel = crate::services::library::Panel::ALL[rail.index()];
     match crate::services::library::apply(&mut app.doc, panel, i, &targets) {
-        Ok(out) => app.editor.undo_toast = Some(kit::push(ctx, out.message, Some("Undo"), Some(Icon::Check))),
+        Ok(out) => super::toast_undo(&mut app.editor, ctx, out.message, Icon::Check),
         Err(r) => {
             kit::push(ctx, r.0, None, Some(Icon::Info));
         }
@@ -1146,7 +1146,7 @@ pub fn add(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, a
     match crate::services::library::add(&mut app.doc, panel, i, t, lane) {
         Ok(out) => {
             app.editor.selection = out.select;
-            app.editor.undo_toast = Some(kit::push(ctx, out.message, Some("Undo"), Some(Icon::Plus)));
+            super::toast_undo(&mut app.editor, ctx, out.message, Icon::Plus);
         }
         Err(r) => {
             kit::push(ctx, r.0, None, Some(Icon::Info));
@@ -1246,7 +1246,7 @@ pub fn add_adjustment(app: &mut StudioApp, ctx: &egui::Context, d: LibDrag, star
         p.resolve_overlap(id);
     }) {
         app.editor.selection = vec![id];
-        app.editor.undo_toast = Some(kit::push(ctx, format!("{} added as an adjustment clip", item.name), Some("Undo"), Some(Icon::MagicWand)));
+        super::toast_undo(&mut app.editor, ctx, format!("{} added as an adjustment clip", item.name), Icon::MagicWand);
     }
 }
 
