@@ -153,6 +153,12 @@ pub fn production_script(h: &mut Harness) {
     h.app.overlay = Overlay::Production;
 }
 
+/// The Review workspace (its tab in the top bar, or View > Workspaces).
+fn open_review(h: &mut Harness) {
+    let w = crate::workspaces::find("Review").expect("the Review workspace");
+    crate::workspaces::apply(&mut h.app, &w);
+}
+
 /// Paint with a picture open and every side section unfolded.
 pub fn paint_picture(h: &mut Harness) {
     let _ = crate::paint::apply(&[serde_json::json!({"op": "new", "name": "Overflow", "width": 683, "height": 1024, "background": "white"})]);
@@ -188,8 +194,11 @@ pub fn surfaces() -> Vec<Surface> {
         s("insp-audio-speed", ED, |h| select(h, ClipKind::Audio), &["Speed"]),
         s("insp-fx", ED, |h| select(h, ClipKind::Fx), &[]),
         s("sound", ED, nothing, &["More", "Sound"]),
-        s("review", ED, nothing, &["Review"]),
-        s("review-saved", ED, saved_project, &["Review"]),
+        s("review", ED, open_review, &[]),
+        s("review-saved", ED, |h| {
+            saved_project(h);
+            open_review(h);
+        }, &[]),
         s("compositor", ED, select_first_clip, &["Nodes"]),
         s("graph", ED, select_first_clip, &["Curves"]),
         s("vector", ED, nothing, &["Vector art: draw logos, icons, illustrations and infographics"]),
