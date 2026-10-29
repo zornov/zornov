@@ -54,17 +54,26 @@ impl Geometry {
     }
 }
 
-/// The residual `source - prediction` of a plane rectangle (samples outside the picture count as
-/// perfectly predicted).
-fn residual(src: &Frame, recon: &FrameBuf, plane: usize, rect: (usize, usize, usize, usize)) -> Vec<i16> {
+/// The residual `source - prediction` of a plane rectangle. With `pad`, samples outside the
+/// picture take the nearest source sample (edge replication, which keeps the block smooth for the
+/// transform); without it they count as perfectly predicted (for measuring errors).
+fn residual(src: &Frame, recon: &FrameBuf, plane: usize, rect: (usize, usize, usize, usize), pad: bool) -> Vec<i16> {
     let (x0, y0, w, h) = rect;
     let (pw, ph) = if plane == 0 { (src.width as usize, src.height as usize) } else { ((src.width as usize + 1) >> 1, (src.height as usize + 1) >> 1) };
     let mut out = vec![0i16; w * h];
-    for y in 0..h.min(ph.saturating_sub(y0)) {
-        let s = &src.planes[plane][(y0 + y) * src.stride[plane] + x0..];
-        let p = recon.planes[plane].row_from(y0 + y, x0);
-        for x in 0..w.min(pw.saturating_sub(x0)) {
-            out[y * w + x] = s[x] as i16 - p[x] as i16;
+    for y in 0..h {
+        let sy = y0 + y;
+        if sy >= ph && !pad {
+            break;
+        }
+        let s = &src.planes[plane][sy.min(ph - 1) * src.stride[plane]..];
+        let p = recon.planes[plane].row_from(sy, x0);
+        for x in 0..w {
+            let sx = x0 + x;
+            if sx >= pw && !pad {
+                break;
+            }
+            out[y * w + x] = s[sx.min(pw - 1)] as i16 - p[x] as i16;
         }
     }
     out
@@ -110,7 +119,7 @@ pub fn code_block(src: &Frame, recon: &mut FrameBuf, shape: Shape, y_mode: usize
     for plane in 0..g.planes() {
         let tx = g.tx[plane];
         let ty = tx_type(plane, tx, uv_mode);
-        let res = residual(src, recon, plane, g.rect[plane]);
+        let res = residual(src, recon, plane, g.rect[plane], true);
         let mut freq = vec![0i32; 64 * 64];
         forward_transform(&res, tx, ty, &mut freq);
         let qp = QuantParams { base_q_idx: recon.quant.base_q_idx, bit_depth: recon.bit_depth, plane: plane as u8 };
@@ -127,13 +136,13 @@ pub fn code_block(src: &Frame, recon: &mut FrameBuf, shape: Shape, y_mode: usize
 /// The cost of predicting plane `plane` of the block with the modes now in `recon`.
 fn plane_cost(src: &Frame, recon: &FrameBuf, g: &Geometry, plane: usize) -> u64 {
     let rect = g.rect[plane];
-    satd(&residual(src, recon, plane, rect), rect.2, rect.3)
+    satd(&residual(src, recon, plane, rect, true), rect.2, rect.3)
 }
 
 /// Squared error of a plane rectangle of the reconstruction (samples inside the picture only).
 fn plane_sse(src: &Frame, recon: &FrameBuf, plane: usize, rect: (usize, usize, usize, usize)) -> f64 {
     // the reconstruction now holds prediction + residual, so `residual` is the coding error
-    residual(src, recon, plane, rect).iter().map(|&e| (e as f64) * (e as f64)).sum()
+    residual(src, recon, plane, rect, false).iter().map(|&e| (e as f64) * (e as f64)).sum()
 }
 
 /// Rate-distortion cost of coding the block with the given modes, over the planes in `planes`
