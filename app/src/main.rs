@@ -25,6 +25,7 @@
 
 mod agent;
 mod convert;
+mod open_files;
 mod transcode;
 mod psd_import;
 mod release;
@@ -194,5 +195,15 @@ fn main() -> eframe::Result {
         persistence_path: cli.fresh.then(|| std::env::temp_dir().join(format!("studio-fresh-{}", std::process::id()))),
         ..Default::default()
     };
+    // On macOS the event loop is made here, so Finder's open request (sent as the
+    // application starts, when a double-click launched it) finds its method.
+    #[cfg(target_os = "macos")]
+    {
+        let event_loop = winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build().map_err(eframe::Error::WinitEventLoop)?;
+        open_files::install();
+        let mut app = eframe::create_native("Zornov", options, Box::new(move |cc| Ok(Box::new(app::StudioApp::new(cc, cli)))), &event_loop);
+        event_loop.run_app(&mut app).map_err(eframe::Error::WinitEventLoop)
+    }
+    #[cfg(not(target_os = "macos"))]
     eframe::run_native("Zornov", options, Box::new(move |cc| Ok(Box::new(app::StudioApp::new(cc, cli)))))
 }

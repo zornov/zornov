@@ -52,6 +52,8 @@ pub fn new_custom(name: &str, width: u32, height: u32, fps: f32) -> Doc {
 
 /// Open a project folder.
 pub fn open(dir: &Path) -> Result<Doc, String> {
+    // A conversion a crash interrupted is settled before anything is read.
+    m::file::convert::recover(dir);
     let folder = m::file::ProjectFolder::new(dir);
     let (file, stamp) = folder.load_stamped().map_err(|e| format!("Could not open {}: {e:?}", dir.display()))?;
     let mut project = file.project;
@@ -135,11 +137,48 @@ fn prune_models(doc: &mut Doc, root: &Path) {
     }
 }
 
+/// Makes a `.zornov` package at `dir` and keeps its cache out of backups and
+/// indexes.
+pub fn new_package(dir: &Path) -> std::io::Result<m::file::ProjectFolder> {
+    let folder = m::file::ProjectFolder::create_package(dir)?;
+    keep_cache_out(&folder.cache_dir());
+    Ok(folder)
+}
+
+/// The cache is rebuilt when needed, so it stays out of Time Machine (the
+/// exclusion `tmutil addexclusion` sets: it moves with the folder), out of
+/// Spotlight, and out of the sync clients that honour an ignore mark. Marks
+/// are best effort: a volume that refuses them just gets none.
+pub fn keep_cache_out(cache: &Path) {
+    let _ = std::fs::write(cache.join(".metadata_never_index"), b"");
+    #[cfg(target_os = "macos")]
+    {
+        // A binary property list holding the string "com.apple.backupd".
+        const BACKUPD: [u8; 57] = [
+            0x62, 0x70, 0x6c, 0x69, 0x73, 0x74, 0x30, 0x30, 0x5f, 0x10, 0x11, 0x63, 0x6f, 0x6d, 0x2e, 0x61, 0x70, 0x70, 0x6c, 0x65, 0x2e, 0x62, 0x61, 0x63, 0x6b, 0x75, 0x70, 0x64, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c,
+        ];
+        set_xattr(cache, "com.apple.metadata:com_apple_backup_excludeItem", &BACKUPD);
+        // Names taken from the clients' documentation, not yet tried against them.
+        set_xattr(cache, "com.apple.fileprovider.ignore#P", b"1");
+        set_xattr(cache, "com.dropbox.ignored", b"1");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn set_xattr(path: &Path, name: &str, value: &[u8]) {
+    use std::os::unix::ffi::OsStrExt;
+    let (Ok(p), Ok(n)) = (std::ffi::CString::new(path.as_os_str().as_bytes()), std::ffi::CString::new(name)) else { return };
+    // SAFETY: both names are NUL-terminated and live through the call; the value is a valid slice.
+    unsafe { libc::setxattr(p.as_ptr(), n.as_ptr(), value.as_ptr().cast(), value.len(), 0, 0) };
+}
+
 /// Save to the document's folder, or create `dir` as its folder first.
 /// Returns the folder.
 pub fn save(doc: &mut Doc, dir: Option<&Path>) -> Result<PathBuf, String> {
     let folder = match (dir, &doc.folder) {
-        (Some(d), _) => m::file::ProjectFolder::create(d).map_err(|e| format!("Could not create the folder: {e}"))?,
+        (Some(d), _) if m::file::ProjectFolder::is_project(d) => m::file::ProjectFolder::new(d),
+        (Some(d), _) => new_package(d).map_err(|e| format!("Could not create the folder: {e}"))?,
         (None, Some(f)) => f.clone(),
         (None, None) => return Err("Choose where to save the project first".into()),
     };
@@ -281,6 +320,32 @@ pub fn export_otio(doc: &Doc, path: &Path) -> Result<Vec<String>, String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_project_is_a_package_with_its_history_and_cache_apart() {
+        let dir = std::env::temp_dir().join(format!("studio-package-{}.zornov", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut doc = new_custom("P", 1920, 1080, 30.0);
+        doc.edit("Rename", |p| p.name = "Renamed".into());
+        save(&mut doc, Some(&dir)).unwrap();
+        assert_eq!(doc.folder.as_ref().map(|f| f.layout()), Some(m::file::Layout::Package));
+        assert!(dir.join(".zornov/history.jsonl").is_file(), "the undo history is app state, not cache");
+        assert!(!dir.join("Cache/history.jsonl").exists());
+        assert!(dir.join("Cache/.metadata_never_index").is_file());
+        #[cfg(target_os = "macos")]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let p = std::ffi::CString::new(dir.join("Cache").as_os_str().as_bytes()).unwrap();
+            let n = std::ffi::CString::new("com.apple.metadata:com_apple_backup_excludeItem").unwrap();
+            let mut buf = [0u8; 128];
+            // SAFETY: valid NUL-terminated names and a buffer of the length given.
+            let len = unsafe { libc::getxattr(p.as_ptr(), n.as_ptr(), buf.as_mut_ptr().cast(), buf.len(), 0, 0) };
+            assert!(len > 0 && buf[..len as usize].windows(17).any(|w| w == b"com.apple.backupd"), "Time Machine skips the cache");
+        }
+        let back = open(&dir).unwrap();
+        assert_eq!(back.project.name, "Renamed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn undo_survives_closing_and_reopening() {

@@ -409,6 +409,11 @@ pub fn snapshot() -> Workspace {
     with(|w| w.clone())
 }
 
+/// The workspace file of the project at `root` (in `.zornov` for a package).
+fn file_in(root: &std::path::Path) -> std::path::PathBuf {
+    m::file::ProjectFolder::new(root).state(m::file::State::Workspace3d)
+}
+
 fn owner_of(doc: &Doc) -> Option<std::path::PathBuf> {
     doc.folder.as_ref().map(|f| f.root().to_path_buf())
 }
@@ -425,10 +430,10 @@ pub fn follow(doc: &Doc) {
         // A change still waiting for the next write goes to the project it was made in.
         if w.rt.dirty {
             if let (Some(old), Ok(t)) = (w.rt.owner.as_ref(), serde_json::to_string_pretty(&*w)) {
-                let _ = std::fs::write(old.join(FILE), t);
+                let _ = std::fs::write(file_in(old), t);
             }
         }
-        let read = owner.as_ref().and_then(|o| std::fs::read_to_string(o.join(FILE)).ok()).and_then(|s| serde_json::from_str::<Workspace>(&s).ok());
+        let read = owner.as_ref().and_then(|o| std::fs::read_to_string(file_in(o)).ok()).and_then(|s| serde_json::from_str::<Workspace>(&s).ok());
         *w = read.unwrap_or_else(|| Workspace::for_canvas(cw, ch));
         w.rt.owner = owner;
         w.rt.loaded = true;
@@ -462,7 +467,7 @@ pub fn save(doc: &Doc) {
         serde_json::to_string_pretty(w).ok()
     });
     if let Some(t) = text {
-        let _ = std::fs::write(owner.join(FILE), t);
+        let _ = std::fs::write(file_in(&owner), t);
     }
 }
 

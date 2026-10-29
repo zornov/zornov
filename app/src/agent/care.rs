@@ -617,7 +617,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let root = dir.join("Old project");
+        // An older folder, as earlier versions made them.
+        m::file::ProjectFolder::create(&root).unwrap().save(&services::project::new_custom("Old project", 640, 360, 30.0).model).unwrap();
         let mut s = Session::at(&root).unwrap();
+        assert_eq!(s.doc.folder.as_ref().map(|f| f.layout()), Some(m::file::Layout::Legacy));
         std::fs::create_dir_all(root.join("music")).unwrap();
         std::fs::write(root.join("music/theme.wav"), b"RIFF").unwrap();
         let plan = call(&mut s, "project_care", json!({"action": "convert"}));

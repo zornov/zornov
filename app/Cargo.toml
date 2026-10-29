@@ -98,6 +98,16 @@ studio-commerce = { path = "../crates/business/commerce", optional = true }
 studio-entitlements = { path = "../crates/business/entitlements", optional = true }
 studio-plugins = { path = "../crates/plugins/plugins" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Finder opens a project package by an Apple event, which only an application
+# delegate hears (the window library registers none): see `open_files`.
+objc2 = "0.5"
+# The event loop is made here, not inside eframe, so the open-document method is
+# in place before the application starts (a double-click launch sends it first).
+winit = "0.30"
+objc2-app-kit = { version = "0.2", default-features = false, features = ["NSApplication", "NSResponder"] }
+objc2-foundation = { version = "0.2", default-features = false, features = ["NSArray", "NSObject", "NSString", "NSURL"] }
+
 [target.'cfg(windows)'.dependencies]
 # Windows ships no SQLite, so the library index builds its own there
 # (with FTS5); macOS and Linux use the system's.

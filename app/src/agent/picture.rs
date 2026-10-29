@@ -386,7 +386,8 @@ mod tests {
         let v = text(&parts);
         assert_eq!(v["picture"]["picture"], "Sunset", "{v}");
         assert!(matches!(parts.get(1), Some(Content::Jpeg(j)) if j.len() > 500), "a look comes back");
-        assert!(dir.join("Pictures/Sunset.pcraft").exists() && dir.join("Pictures/Sunset.png").exists(), "kept in the project");
+        let pictures = crate::paint::pictures_dir(Some(&dir));
+        assert!(pictures.join("Sunset.pcraft").exists() && pictures.join("Sunset.png").exists(), "kept in the project");
         let v = text(&s.call("picture", &json!({"ops": [{"op": "to_timeline", "at": 1.0, "duration": 3.0}]})).unwrap());
         assert!(v["results"][0]["changed"].is_array() || v["results"][0]["added"].is_array() || !v["results"][0].is_null(), "{v}");
         assert_eq!(s.doc.project.clips.len(), 1, "one clip on the timeline");
@@ -422,7 +423,7 @@ mod tests {
         .unwrap();
         let v = text(&s.call("picture", &json!({"ops": [{"op": "to_timeline", "at": 0.0}], "look": 128})).unwrap());
         assert_eq!(v["picture"]["flipbook"]["drawings"], 3, "{v}");
-        assert!(dir.join("Pictures/Ball.frames/0003.png").exists());
+        assert!(crate::paint::pictures_dir(Some(&dir)).join("Ball.frames/0003.png").exists());
         // Three drawings on twos at 12 fps: half a second, merged into one clip.
         let clips = &s.doc.project.clips;
         assert_eq!(clips.len(), 1, "merged into one clip");

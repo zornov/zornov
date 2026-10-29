@@ -695,7 +695,7 @@ fn free_package_path(parent: &Path, base: &str) -> PathBuf {
 /// module documentation for the steps and what happens on failure.
 pub fn convert(root: &Path, opts: Options, hooks: &Hooks) -> Result<Report, ConvertError> {
     let mut plan = plan(root)?;
-    if busy(root) {
+    if !opts.copy && busy(root) {
         return Err(ConvertError::Busy);
     }
     let parent = root.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();

@@ -55,17 +55,27 @@ pub fn projects_dir() -> PathBuf {
     studio_paths::studio().join("Projects")
 }
 
-/// A folder for a new project called `name` that does not exist yet:
-/// "Name", then "Name 2", …
+/// A package for a new project called `name` that does not exist yet:
+/// "Name.zornov", then "Name 2.zornov", …
 pub fn free_project_dir(name: &str) -> PathBuf {
     let clean: String = name.chars().map(|c| if matches!(c, '/' | ':' | '\\') { '-' } else { c }).collect();
     let clean = clean.trim().trim_start_matches('.');
     let base = if clean.is_empty() { "Untitled" } else { clean };
     let dir = projects_dir();
     (1..)
-        .map(|n| if n == 1 { dir.join(base) } else { dir.join(format!("{base} {n}")) })
+        .map(|n| if n == 1 { dir.join(format!("{base}.{}", m::file::PACKAGE_EXT)) } else { dir.join(format!("{base} {n}.{}", m::file::PACKAGE_EXT)) })
         .find(|p| !p.exists())
         .expect("a free name")
+}
+
+/// `path` with `.zornov` on the end unless it has it.
+pub fn package_path(path: PathBuf) -> PathBuf {
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(m::file::PACKAGE_EXT)) {
+        return path;
+    }
+    let mut name = path.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(format!(".{}", m::file::PACKAGE_EXT));
+    path.with_file_name(name)
 }
 
 /// Every project folder any Zornov opened or made (this window, `zornov`
@@ -175,7 +185,7 @@ impl StudioApp {
             return;
         }
         let dir = free_project_dir(&self.doc.project.name);
-        let Ok(folder) = m::file::ProjectFolder::create(&dir) else { return };
+        let Ok(folder) = crate::services::project::new_package(&dir) else { return };
         if folder.save(&self.doc.model).is_ok() {
             self.doc.history.mark_saved();
             self.doc.folder = Some(folder);
@@ -188,8 +198,10 @@ impl StudioApp {
         let folder = match (&self.doc.folder, save_as) {
             (Some(f), false) => f.clone(),
             _ => {
-                let Some(dir) = rfd::FileDialog::new().set_title("Save project").set_file_name(&self.doc.project.name).save_file() else { return };
-                match m::file::ProjectFolder::create(&dir) {
+                let Some(dir) = rfd::FileDialog::new().set_title("Save project").set_file_name(format!("{}.{}", self.doc.project.name, m::file::PACKAGE_EXT)).add_filter("Zornov project", &[m::file::PACKAGE_EXT]).save_file() else { return };
+                let dir = package_path(dir);
+                let made = if m::file::ProjectFolder::is_project(&dir) { Ok(m::file::ProjectFolder::new(&dir)) } else { crate::services::project::new_package(&dir) };
+                match made {
                     Ok(f) => f,
                     Err(e) => {
                         kit::push(ctx, crate::i18n::tf(format!("Could not create the folder: {e}")), None, Some(Icon::Warning));
@@ -215,6 +227,8 @@ impl StudioApp {
     /// Open a project folder (ask when `path` is None).
     pub fn open_folder(&mut self, ctx: &egui::Context, path: Option<PathBuf>) {
         let Some(dir) = path.or_else(|| rfd::FileDialog::new().set_title("Open project").pick_folder()) else { return };
+        // A conversion a crash interrupted is settled before anything is read.
+        m::file::convert::recover(&dir);
         let folder = m::file::ProjectFolder::new(&dir);
         match folder.load_stamped() {
             Ok((file, stamp)) => {
@@ -564,5 +578,15 @@ mod tests {
         let r = crate::services::project::import_media(&mut doc, &paths);
         assert_eq!(r.ids.len(), 3, "failed: {:?}", r.failed);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_projects_are_named_as_packages() {
+        assert_eq!(package_path(PathBuf::from("/a/My film")), PathBuf::from("/a/My film.zornov"));
+        assert_eq!(package_path(PathBuf::from("/a/My film.zornov")), PathBuf::from("/a/My film.zornov"));
+        assert_eq!(package_path(PathBuf::from("/a/My film.ZORNOV")), PathBuf::from("/a/My film.ZORNOV"));
+        assert_eq!(package_path(PathBuf::from("/a/v1.2")), PathBuf::from("/a/v1.2.zornov"), "an unrelated dot is not the extension");
+        let name = free_project_dir("My: film/2");
+        assert_eq!(name.file_name().unwrap().to_string_lossy(), "My- film-2.zornov");
     }
 }
