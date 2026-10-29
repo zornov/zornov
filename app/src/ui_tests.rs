@@ -117,6 +117,22 @@ impl Harness {
         crate::ui_shot::overlaps(&self.ctx, &names, 0.2).into_iter().filter(|o| !by_design(&o.a, &o.b)).collect()
     }
 
+    /// A frame in which the window's close button was pressed; the commands
+    /// the app sent back (`CancelClose` when it wants to ask first).
+    pub fn close_requested(&mut self) -> Vec<egui::ViewportCommand> {
+        self.time += 1.0 / 60.0;
+        let rect = Rect::from_min_size(egui::pos2(0.0, 0.0), self.size);
+        let mut raw = RawInput { screen_rect: Some(rect), time: Some(self.time), ..Default::default() };
+        raw.viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+        let (app, frame) = (&mut self.app, &mut self.frame);
+        let mut out = self.ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, frame));
+        self.textures.apply(&out.textures_delta);
+        out.textures_delta.clear();
+        let cmds = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
+        self.last = Some(out);
+        cmds
+    }
+
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
             self.with_events(vec![]);
@@ -1031,5 +1047,60 @@ mod scripted {
         assert!(seen.len() > 24, "the viewer area holds a rendered picture: {} colours", seen.len());
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&out);
+    }
+}
+
+// --- app.rs hooks: quit guard, toasts off the editor, export failures ------
+
+mod hooks {
+    use super::*;
+
+    fn painted(h: &Harness, text: &str) -> usize {
+        fn walk(shape: &egui::epaint::Shape, text: &str) -> usize {
+            match shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == text => 1,
+                egui::epaint::Shape::Vec(v) => v.iter().map(|s| walk(s, text)).sum(),
+                _ => 0,
+            }
+        }
+        h.last.as_ref().map_or(0, |o| o.shapes.iter().map(|cs| walk(&cs.shape, text)).sum())
+    }
+
+    #[test]
+    fn closing_the_window_with_unsaved_changes_asks_first() {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+        h.frames(4);
+        assert!(h.close_requested().is_empty() || !h.app.doc.dirty(), "a clean project closes without asking");
+        h.app.doc.edit("Rename", |p| p.name = "Changed".into());
+        assert!(h.app.doc.dirty());
+        let cmds = h.close_requested();
+        assert!(cmds.iter().any(|c| matches!(c, egui::ViewportCommand::CancelClose)), "closing is held back: {cmds:?}");
+        h.frames(3);
+        assert!(h.labels().iter().any(|l| l == "Don't save"), "the Save changes? dialog is up: {:?}", h.labels());
+    }
+
+    #[test]
+    fn a_toast_shows_on_the_start_screen() {
+        let mut h = Harness::new(&[]).sized(1440.0, 900.0);
+        h.frames(3);
+        assert_eq!(h.app.screen, crate::cli::Screen::Start);
+        crate::kit::push(&h.ctx, "Toast on start", None, Some(crate::icons::Icon::Info));
+        h.frames(3);
+        assert_eq!(painted(&h, "Toast on start"), 1);
+    }
+
+    #[test]
+    fn the_editor_draws_a_toast_once() {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+        h.frames(4);
+        crate::kit::push(&h.ctx, "Toast in editor", None, Some(crate::icons::Icon::Info));
+        h.frames(3);
+        assert_eq!(painted(&h, "Toast in editor"), 1, "one toast, not two");
+    }
+
+    #[test]
+    fn a_failed_export_is_worded_as_couldnt_export() {
+        let src = include_str!("app.rs");
+        assert!(src.contains("Couldn't export {}: {e}") && !src.contains("\"{} failed: {e}\""));
     }
 }
