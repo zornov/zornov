@@ -23,6 +23,9 @@ enum Dec {
     Hevc(studio_hevc::Decoder),
     /// H.264 on the video hardware.
     Hw(studio_hw::H264Decoder),
+    Av1(studio_av1::Decoder),
+    /// AV1 on the video hardware.
+    HwAv1(studio_hw::Av1Decoder),
 }
 
 /// Decoded planes of one picture, owned so they can cross to a worker.
@@ -93,6 +96,18 @@ impl Reorder {
         self.push(frames);
         self.take(true)
     }
+}
+
+/// AV1 pictures read at eight bits (the top eight of deeper ones).
+fn av1_planes(pics: Vec<studio_av1::Picture>) -> Vec<Planes> {
+    pics.into_iter()
+        .map(|p| {
+            let shift = p.bit_depth.saturating_sub(8) as u32;
+            let to8 = |v: &Vec<u16>| v.iter().map(|&x| (x >> shift).min(255) as u8).collect::<Vec<u8>>();
+            let (cw, ch) = (p.plane_width(1) as usize, p.plane_height(1) as usize);
+            Planes { w: p.width as usize, h: p.height as usize, y: to8(&p.planes[0]), u: to8(&p.planes[1]), v: to8(&p.planes[2]), cw, ch }
+        })
+        .collect()
 }
 
 fn plane8(p: &studio_hevc::PlaneData, shift: u32) -> std::borrow::Cow<'_, [u8]> {
@@ -217,7 +232,7 @@ fn check_file_with(path: &Path, profile: &Profile, extra: &Extra, software_only:
         let software_only = software_only || extra.max_secs.is_some();
         // Hardware first for H.264; any trouble with it and the whole
         // file is read again with Studio's own decoder.
-        let mut tried_hw = software_only || !matches!(&t.codec, studio_mp4::Codec::Avc { .. });
+        let mut tried_hw = software_only || !matches!(&t.codec, studio_mp4::Codec::Avc { .. } | studio_mp4::Codec::Av1 { .. });
         let q = loop {
             let mut dec = match &t.codec {
                 studio_mp4::Codec::Avc { config } => {
@@ -236,7 +251,14 @@ fn check_file_with(path: &Path, profile: &Profile, extra: &Extra, software_only:
                     facts.video_codec = "hevc".into();
                     Dec::Hevc(studio_hevc::Decoder::new(&sets, config.nal_length_size as usize).map_err(|e| format!("{e:?}"))?)
                 }
-                _ => return Err("QC reads H.264 and HEVC pictures".into()),
+                studio_mp4::Codec::Av1 { config } => {
+                    facts.video_codec = "av1".into();
+                    match (!tried_hw).then(|| studio_hw::Av1Decoder::new(&config.raw, t.coded_width, t.coded_height).ok()).flatten() {
+                        Some(hw) => Dec::HwAv1(hw),
+                        None => Dec::Av1(studio_av1::Decoder::new()),
+                    }
+                }
+                _ => return Err("QC reads H.264, HEVC and AV1 pictures".into()),
             };
             tried_hw = true;
             let mut pipe = Pipeline::new(fps, full);
@@ -248,7 +270,15 @@ fn check_file_with(path: &Path, profile: &Profile, extra: &Extra, software_only:
                 let frames = match &mut dec {
                     Dec::Avc(d) => avc_planes(d.decode(&buf).map_err(|e| format!("{e:?}"))?),
                     Dec::Hevc(d) => hevc_planes(d.decode(&buf).map_err(|e| format!("{e:?}"))?),
+                    Dec::Av1(d) => av1_planes(d.decode(&buf).map_err(|e| format!("{e:?}"))?),
                     Dec::Hw(d) => match d.decode(&buf, n as i64) {
+                        Ok(f) => order.push(f),
+                        Err(_) => {
+                            hw_failed = true;
+                            break 'pictures;
+                        }
+                    },
+                    Dec::HwAv1(d) => match d.decode(&buf, n as i64) {
                         Ok(f) => order.push(f),
                         Err(_) => {
                             hw_failed = true;
@@ -267,7 +297,9 @@ fn check_file_with(path: &Path, profile: &Profile, extra: &Extra, software_only:
             match &mut dec {
                 Dec::Avc(d) => pipe.feed(avc_planes(d.flush())),
                 Dec::Hevc(d) => pipe.feed(hevc_planes(d.flush())),
+                Dec::Av1(d) => pipe.feed(av1_planes(d.flush())),
                 Dec::Hw(d) => pipe.feed(order.finish(d.flush())),
+                Dec::HwAv1(d) => pipe.feed(order.finish(d.flush())),
             }
             break pipe.finish()?;
         };
@@ -346,6 +378,41 @@ mod tests {
         let r = check_file(&p, &strict, &Extra::default()).unwrap();
         assert!(!r.passed);
         assert!(r.findings.iter().any(|f| f.check == "audio_missing") && r.findings.iter().any(|f| f.check == "size"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An AV1 MP4 (a key frame, then P frames) is read by the video hardware and by `studio-av1`
+    /// alike, with the same verdict.
+    #[test]
+    fn an_av1_mp4_is_decoded_by_hardware_and_by_studio_av1() {
+        use studio_av1_enc::{Config, Encoder};
+        use studio_encode::mux::{Muxer, Options};
+        let dir = std::env::temp_dir().join(format!("studio-filecheck-av1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.mp4");
+        let (w, h) = (64u32, 48u32);
+        let mut cfg = Config::new(w, h);
+        cfg.keyint = 4;
+        let mut enc = Encoder::new(cfg).unwrap();
+        let mut mux = Muxer::create(&p, Options::mp4_av1()).unwrap();
+        let info = studio_encode::mux::Av1TrackInfo { width: w, height: h, fps_num: 30, fps_den: 1, av1c: enc.av1c(), color: studio_encode::h264::ColorDesc { primaries: 1, transfer: 1, matrix: 1, full_range: false }, bitrate: 500_000 };
+        let track = mux.add_av1_video(info).unwrap();
+        for n in 0..10u32 {
+            let rgba: Vec<u8> = (0..w * h).flat_map(|i| [((i % w) * 4 + n * 6) as u8, ((i / w) * 5) as u8, 90, 255]).collect();
+            let frame = studio_av1_enc::color::from_rgba8(&rgba, w, h, 8, false);
+            for pk in enc.push_frame(&frame, n as i64).unwrap() {
+                mux.write_temporal_unit(track, &pk.data).unwrap();
+            }
+        }
+        mux.finish().unwrap();
+        let soft = check_file_with(&p, &Profile::default(), &Extra::default(), true).unwrap();
+        assert_eq!(soft.measurements["frames"], 10, "{}", soft.to_text());
+        assert_eq!(soft.measurements["size"], serde_json::json!([64, 48]));
+        assert!(soft.passed, "{}", soft.to_text());
+        let auto = check_file_with(&p, &Profile::default(), &Extra::default(), false).unwrap();
+        assert_eq!(auto.measurements["frames"], 10, "{}", auto.to_text());
+        assert!(auto.passed, "{}", auto.to_text());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -5773,6 +5773,8 @@ dependencies = [
  "serde",
  "serde_json",
  "studio-aac",
+ "studio-av1",
+ "studio-av1-enc",
  "studio-encode",
  "studio-h264",
  "studio-hevc",

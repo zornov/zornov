@@ -34,6 +34,8 @@ pub struct Request {
     pub quality: f32,
     /// H.264 bitrate.
     pub bitrate_kbps: u32,
+    /// AV1 only: how hard the encoder searches.
+    pub av1_speed: crate::formats::Av1Speed,
 }
 
 /// Shared state of a running export.
@@ -236,6 +238,8 @@ fn run(scene: Arc<dyn Scene>, registry: Arc<studio_render::source::SourceRegistr
                     acfg.fps = (fps_num, fps_den);
                     // A key frame every two seconds: a place to seek to, as in the other MP4 formats.
                     acfg.keyint = (cfg.gop * 2).max(1);
+                    acfg.speed = req.av1_speed.encoder_speed();
+                    acfg.threads = 0;
                     acfg.rate = studio_av1_enc::RateMode::Cqp(Format::av1_base_q_idx(req.quality));
                     let enc = studio_av1_enc::Encoder::new(acfg).map_err(|e| format!("AV1 encoder: {e:?}"))?;
                     // BT.709 limited range, as the encoder's colour conversion writes it.
@@ -549,7 +553,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let path = root.join("Exports").join("deeper").join("out.mp4");
         assert!(!path.parent().unwrap().exists());
-        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (320, 180), fps: 30.0, range: (0, view::SEC / 4), quality: 60.0, bitrate_kbps: 2000 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (320, 180), fps: 30.0, range: (0, view::SEC / 4), quality: 60.0, bitrate_kbps: 2000, av1_speed: Default::default() });
         wait(&task);
         assert!(path.exists(), "the file is written into the folder that was made");
         let _ = std::fs::remove_dir_all(&root);
@@ -576,7 +580,7 @@ mod tests {
         assert_eq!(plan.clips.len(), 1, "the tone becomes one mixer clip");
 
         let path = dir.join("with_sound.mp4");
-        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (320, 180), fps: 30.0, range: (0, 2 * view::SEC), quality: 60.0, bitrate_kbps: 2000 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (320, 180), fps: 30.0, range: (0, 2 * view::SEC), quality: 60.0, bitrate_kbps: 2000, av1_speed: Default::default() });
         wait(&task);
 
         // Read the exported audio back with our own demuxer + AAC decoder.
@@ -595,7 +599,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("studio-export-cancel-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cancelled.mp4");
-        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (1920, 1080), fps: 30.0, range: (0, 20 * view::SEC), quality: 80.0, bitrate_kbps: 12000 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (1920, 1080), fps: 30.0, range: (0, 20 * view::SEC), quality: 80.0, bitrate_kbps: 12000, av1_speed: Default::default() });
         std::thread::sleep(std::time::Duration::from_millis(400));
         task.progress.cancel();
         let asked = std::time::Instant::now();
@@ -619,7 +623,7 @@ mod tests {
         let mut doc = crate::services::project::new_project(crate::services::project::canvas("Landscape").unwrap());
         crate::services::project::import_to_timeline(&mut doc, &[wav_path]).unwrap();
         let path = dir.join("sound.m4a");
-        let task = start(&doc, Request { path: path.clone(), format: Format::M4a, size: (320, 180), fps: 30.0, range: (0, 2 * view::SEC), quality: 80.0, bitrate_kbps: 0 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::M4a, size: (320, 180), fps: 30.0, range: (0, 2 * view::SEC), quality: 80.0, bitrate_kbps: 0, av1_speed: Default::default() });
         wait(&task);
         let dm = studio_mp4::open(&path).unwrap();
         assert!(dm.movie().tracks.iter().all(|t| t.kind != studio_mp4::demux::TrackKind::Video), "sound only");
@@ -634,7 +638,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("studio-export-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("out.mp4");
-        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (320, 180), fps: 30.0, range: (0, view::SEC / 2), quality: 60.0, bitrate_kbps: 2000 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::H264, size: (320, 180), fps: 30.0, range: (0, view::SEC / 2), quality: 60.0, bitrate_kbps: 2000, av1_speed: Default::default() });
         wait(&task);
         assert!(task.fraction() > 0.99);
         let probe = crate::media_io::probe(&path).unwrap();
@@ -645,7 +649,7 @@ mod tests {
 
         // PNG sequence: one file per frame.
         let seq = dir.join("frames");
-        let task = start(&doc, Request { path: seq.clone(), format: Format::Png, size: (160, 90), fps: 10.0, range: (0, view::SEC / 2), quality: 100.0, bitrate_kbps: 0 });
+        let task = start(&doc, Request { path: seq.clone(), format: Format::Png, size: (160, 90), fps: 10.0, range: (0, view::SEC / 2), quality: 100.0, bitrate_kbps: 0, av1_speed: Default::default() });
         wait(&task);
         assert_eq!(std::fs::read_dir(&seq).unwrap().count(), 5);
         let _ = std::fs::remove_dir_all(&dir);
@@ -673,7 +677,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let doc = picture_and_tone(&dir);
         let path = dir.join("out.mp4");
-        let task = start(&doc, Request { path: path.clone(), format: Format::Av1, size: (320, 180), fps: 24.0, range: (0, 4 * view::SEC), quality: 70.0, bitrate_kbps: 2000 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::Av1, size: (320, 180), fps: 24.0, range: (0, 4 * view::SEC), quality: 70.0, bitrate_kbps: 2000, av1_speed: Default::default() });
         wait(&task);
         assert!(task.fraction() > 0.99);
 
@@ -713,37 +717,80 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Export QC reads H.264 and HEVC only (`studio-deliver` filecheck); this passes
-    /// once it has an AV1 branch. Run with `--ignored`.
+    /// Export QC reads the AV1 file (hardware first, `studio-av1` otherwise).
     #[test]
-    #[ignore = "needs an AV1 branch in studio-deliver's filecheck"]
     fn av1_export_passes_qc() {
         let dir = std::env::temp_dir().join(format!("studio-export-av1-qc-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let doc = picture_and_tone(&dir);
         let path = dir.join("out.mp4");
-        let task = start(&doc, Request { path: path.clone(), format: Format::Av1, size: (320, 180), fps: 24.0, range: (0, 2 * view::SEC), quality: 70.0, bitrate_kbps: 2000 });
+        let task = start(&doc, Request { path: path.clone(), format: Format::Av1, size: (320, 180), fps: 24.0, range: (0, 2 * view::SEC), quality: 70.0, bitrate_kbps: 2000, av1_speed: Default::default() });
         wait(&task);
         let report = studio_deliver::filecheck::check_file(&path, &studio_deliver::qc::Profile::default(), &Default::default()).expect("QC reads the file");
         assert!(report.passed, "{report:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `cargo test --release ... av1_export_timing -- --ignored --nocapture`
+    /// A 1080p30 H.264 clip with motion: a textured field panning 3 px a frame and a box
+    /// crossing it, `secs` long.
+    fn moving_clip(path: &std::path::Path, secs: u32) {
+        let (w, h, fps) = (1920usize, 1080usize, 30u32);
+        let mut mux = studio_encode::mux::Muxer::create(path, studio_encode::mux::Options::mp4()).unwrap();
+        let mut cfg = studio_encode::h264::Config::new(w as u32, h as u32, fps, 1);
+        cfg.bitrate_kbps = 20_000;
+        let mut enc = studio_encode::h264::Encoder::new(cfg).unwrap();
+        let track = mux.add_video(enc.track_info()).unwrap();
+        for n in 0..secs * fps {
+            let shift = n as usize * 3;
+            let mut rgba = vec![255u8; w * h * 4];
+            for y in 0..h {
+                for x in 0..w {
+                    let sx = x + shift;
+                    let tex = ((sx * 2654435761usize) ^ (y * 40503usize)) >> 7 & 31;
+                    let i = (y * w + x) * 4;
+                    rgba[i] = (60 + (sx / 16 % 120) + tex) as u8;
+                    rgba[i + 1] = (50 + y * 140 / h + tex) as u8;
+                    rgba[i + 2] = (110 + tex * 2) as u8;
+                }
+            }
+            let bx = (n as usize * 11) % (w - 300);
+            for y in 400..640 {
+                for x in bx..bx + 300 {
+                    let i = (y * w + x) * 4;
+                    rgba[i..i + 3].copy_from_slice(&[235, 230, 60]);
+                }
+            }
+            let pic = studio_encode::yuv::Yuv420::from_rgba(&rgba, w as u32, h as u32);
+            let out = enc.encode(&pic);
+            mux.write_sample(track, &out.data, out.keyframe).unwrap();
+        }
+        mux.finish().unwrap();
+    }
+
+    /// `cargo test --release -p studio-app --bin zornov av1_export_timing -- --ignored --nocapture`
     #[test]
     #[ignore = "timing report"]
     fn av1_export_timing() {
+        use crate::formats::Av1Speed;
         let dir = std::env::temp_dir().join(format!("studio-export-av1-time-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let doc = picture_and_tone(&dir);
-        for (format, name) in [(Format::Av1, "av1.mp4"), (Format::H264, "h264.mp4")] {
+        moving_clip(&dir.join("motion.mp4"), 5);
+        let mut doc = crate::services::project::new_project(crate::services::project::canvas("Landscape").unwrap());
+        crate::services::project::import_to_timeline(&mut doc, &[dir.join("motion.mp4")]).unwrap();
+        let run = |format: Format, speed: Av1Speed, kbps: u32, name: &str| -> (f64, u64) {
             let path = dir.join(name);
             let t = std::time::Instant::now();
-            let task = start(&doc, Request { path: path.clone(), format, size: (1920, 1080), fps: 30.0, range: (0, 5 * view::SEC), quality: 70.0, bitrate_kbps: 8000 });
+            let task = start(&doc, Request { path: path.clone(), format, size: (1920, 1080), fps: 30.0, range: (0, 5 * view::SEC), quality: 70.0, bitrate_kbps: kbps, av1_speed: speed });
             wait(&task);
-            eprintln!("TIMING {format:?}: 5 s 1080p30 in {:.1} s, {} bytes", t.elapsed().as_secs_f64(), std::fs::metadata(&path).unwrap().len());
+            (t.elapsed().as_secs_f64(), std::fs::metadata(&path).unwrap().len())
+        };
+        for speed in Av1Speed::ALL {
+            let (secs, bytes) = run(Format::Av1, speed, 8000, &format!("av1-{}.mp4", speed.label()));
+            let kbps = ((bytes * 8) as f64 / 5.0 / 1000.0).round() as u32;
+            let (hs, hb) = run(Format::H264, Av1Speed::Fast, kbps, &format!("h264-{}.mp4", speed.label()));
+            eprintln!("TIMING AV1 {}: 5 s 1080p30 in {secs:.1} s, {bytes} bytes ({kbps} kb/s) | H.264 asked {} kb/s (floor 1000): {hs:.1} s, {hb} bytes", speed.label(), kbps.max(1000));
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

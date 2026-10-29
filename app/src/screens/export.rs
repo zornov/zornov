@@ -32,6 +32,7 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "GIF", sub: "Looping · 720p", icon: Icon::Image, res: 3, codec: Some(3), quality: 50.0 },
     Preset { name: "Intermediate", sub: "Zornov codec · CLV", icon: Icon::FilmSlate, res: 4, codec: Some(1), quality: 95.0 },
     Preset { name: "PNG sequence", sub: "Lossless stills", icon: Icon::Stack, res: 4, codec: Some(2), quality: 100.0 },
+    Preset { name: "Web (AV1)", sub: "AV1 · small file, slower", icon: Icon::MonitorPlay, res: 2, codec: Some(18), quality: 70.0 },
     Preset { name: "Audio only", sub: "AAC · M4A", icon: Icon::MusicNote, res: 2, codec: Some(5), quality: 80.0 },
 ];
 
@@ -51,6 +52,8 @@ pub struct ExportState {
     pub range: usize,
     /// H.264 bitrate in Mb/s; `None` follows the resolution table.
     pub bitrate: Option<f32>,
+    /// AV1: how hard the encoder searches.
+    pub av1_speed: crate::formats::Av1Speed,
     pub job: Option<u64>,
     /// What stops the export under the licences, if something does.
     pub rights: Option<String>,
@@ -78,6 +81,7 @@ impl Default for ExportState {
             quality: 70.0,
             range: 0,
             bitrate: None,
+            av1_speed: Default::default(),
             job: None,
             rights: None,
             ignore_rights: false,
@@ -268,6 +272,13 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
             }
             Format::Av1 => {
                 FieldRow::new("Quality", &mut s.quality, 1.0..=100.0).default(70.0).unit("%").show(ui);
+                kit::labeled_row(ui, "Speed", |ui| {
+                    let mut sel = crate::formats::Av1Speed::ALL.iter().position(|v| *v == s.av1_speed).unwrap_or(0);
+                    let segs: Vec<Segment> = crate::formats::Av1Speed::ALL.iter().map(|v| Segment::text(v.label())).collect();
+                    if kit::segmented(ui, "exp-av1-speed", &mut sel, &segs, Some(menu_w), None).changed() {
+                        s.av1_speed = crate::formats::Av1Speed::ALL[sel];
+                    }
+                });
             }
             Format::Png | Format::Gif | Format::M4a => {}
             // Masters are full quality.
@@ -353,7 +364,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                     #[cfg(feature = "render")]
                     if app.cli.shot.is_none() {
                         let kbps = (s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) * 1000.0) as u32;
-                        let req = export_run::Request { path: path.clone(), format, size: (w, h), fps: fps as f64, range: (a, b), quality: s.quality, bitrate_kbps: kbps };
+                        let req = export_run::Request { path: path.clone(), format, size: (w, h), fps: fps as f64, range: (a, b), quality: s.quality, bitrate_kbps: kbps, av1_speed: s.av1_speed };
                         let task = export_run::start(&app.doc, req);
                         let id = app.jobs.start_task(crate::i18n::tf(format!("Export {}", s.name)), format.label(), task, Some(path.clone()));
                         s.job = Some(id);
@@ -392,6 +403,8 @@ mod tests {
     fn av1_is_a_choice_on_the_export_screen_with_an_honest_note() {
         let index = Format::ALL.iter().position(|f| *f == Format::Av1).expect("AV1 is in the format list");
         assert_eq!(Format::ALL[index], Format::Av1);
+        let web = PRESETS.iter().find(|p| p.name == "Web (AV1)").expect("a Web (AV1) preset");
+        assert_eq!(web.codec, Some(index), "the preset points at the AV1 format");
         let mut h = Harness::new(&["--screen", "editor"]);
         h.app.overlay = Overlay::Export;
         h.app.export.codec = index;
@@ -400,5 +413,8 @@ mod tests {
         assert!(labels.iter().any(|l| l.contains("AV1 (MP4)")), "the format menu shows AV1: {labels:?}");
         assert!(labels.iter().any(|l| l.contains("Early encoder: slower than H.264, no rate control yet.")), "the note is shown: {labels:?}");
         assert!(labels.iter().any(|l| l.contains("Quality")), "AV1 has a quality control");
+        assert!(labels.iter().any(|l| l.contains("Balanced")), "AV1 has a speed control: {labels:?}");
+        assert!(h.cut_text().is_empty(), "nothing is cut off: {:?}", h.cut_text());
+        assert!(h.overlaps().is_empty(), "nothing is drawn over: {:?}", h.overlaps());
     }
 }
