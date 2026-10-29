@@ -273,7 +273,7 @@ fn mp4_decodes_on_videotoolbox_bit_exactly() {
         let v = &movie.tracks[0];
         assert_eq!(&v.fourcc, b"av01");
         assert_eq!((v.width, v.height), (w, h));
-        assert!(v.samples.iter().all(|s| s.sync), "every packet is a sync sample");
+        assert_eq!(v.samples.iter().map(|s| s.sync).collect::<Vec<_>>(), [true, false, false], "only the key frame is a sync sample");
         let studio_mp4::Codec::Av1 { config } = &v.codec else { panic!("not AV1: {:?}", v.codec) };
         let mut hw = studio_hw::Av1Decoder::new(&config.raw, w, h).expect("a hardware AV1 decoder");
         let mut got = Vec::new();
@@ -295,4 +295,114 @@ fn mp4_decodes_on_videotoolbox_bit_exactly() {
         eprintln!("{w}x{h}: VideoToolbox decode of the MP4 matches the reconstruction bit for bit: {exact}");
         assert!(exact, "{w}x{h}: VideoToolbox output differs from the encoder's reconstruction");
     }
+}
+
+// ---- inter frames (phase (b) gate) ----
+
+/// A smooth textured canvas, sampled bilinearly so that pans can be fractional.
+fn canvas(x: f64, y: f64) -> f64 {
+    90.0 + 45.0 * (x * 0.045).sin() * (y * 0.035).cos() + 30.0 * ((x + 2.0 * y) * 0.021).sin() + 12.0 * (x * 0.17).sin() * (y * 0.13).sin()
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Motion {
+    /// The whole picture pans by `(dx, dy)` samples a frame (fractions allowed).
+    Pan(f64, f64),
+    /// A bright square crosses a static textured background.
+    Object,
+}
+
+fn moving_sequence(motion: Motion, w: usize, h: usize, n: usize) -> Vec<Frame> {
+    (0..n)
+        .map(|i| {
+            image(w, h, |p, x, y| {
+                let k = if p == 0 { 1.0 } else { 2.0 };
+                let (fx, fy) = (x as f64 * k, y as f64 * k);
+                let v = match motion {
+                    Motion::Pan(dx, dy) => canvas(fx + dx * i as f64, fy + dy * i as f64),
+                    Motion::Object => {
+                        let (ox, oy) = (20.0 + 6.0 * i as f64, 30.0 + 2.0 * i as f64);
+                        if fx >= ox && fx < ox + 40.0 && fy >= oy && fy < oy + 40.0 { 220.0 } else { canvas(fx, fy) }
+                    }
+                };
+                let v = if p == 0 { v } else { 128.0 + (v - 90.0) * 0.3 };
+                v.round().clamp(16.0, 235.0) as u8
+            })
+        })
+        .collect()
+}
+
+/// Encodes the frames (key frame every `keyint`), checks that every decoded picture equals the
+/// encoder's reconstruction, and returns the total bytes and the mean luma PSNR.
+fn code_sequence(frames: &[Frame], q: u8, speed: u8, keyint: u32) -> (usize, f64, usize) {
+    let (w, h) = (frames[0].width, frames[0].height);
+    let mut enc = Encoder::new(Config { rate: RateMode::Cqp(q), speed, keyint, ..Config::new(w, h) }).unwrap();
+    let mut dec = Decoder::new();
+    let (mut bytes, mut psnr_sum, mut keys) = (0, 0.0, 0);
+    for (i, f) in frames.iter().enumerate() {
+        let p = enc.push_frame(f, i as i64).unwrap().remove(0);
+        bytes += p.data.len();
+        keys += p.keyframe as usize;
+        let mut pics = dec.decode(&p.data).unwrap_or_else(|e| panic!("frame {i}: {e:?}"));
+        pics.extend(dec.flush_result().unwrap());
+        assert_eq!(pics.len(), 1);
+        let want = enc.reconstruction().unwrap();
+        for plane in 0..3 {
+            assert!(pics[0].planes[plane] == want.planes[plane], "frame {i} (key {}) plane {plane} differs from the reconstruction", p.keyframe);
+        }
+        psnr_sum += psnr(&pics[0].planes[0], &f.planes[0]);
+    }
+    (bytes, psnr_sum / frames.len() as f64, keys)
+}
+
+/// The bytes the all-intra curve needs to reach `psnr`, by log-linear interpolation between its
+/// operating points; `None` outside the curve.
+fn intra_bytes_at(curve: &[(f64, f64)], psnr: f64) -> Option<f64> {
+    let mut best: Option<f64> = None;
+    for a in curve {
+        for b in curve {
+            if a.1 < psnr && psnr <= b.1 {
+                let t = (psnr - a.1) / (b.1 - a.1);
+                let v = (a.0.ln() + t * (b.0.ln() - a.0.ln())).exp();
+                // the cheapest way the intra curve reaches this quality
+                best = Some(best.map_or(v, |x: f64| x.min(v)));
+            }
+        }
+    }
+    best
+}
+
+/// The phase (b) gate: on moving content, key frame plus P frames spend clearly fewer bytes than
+/// all-intra coding at the same PSNR. Every frame is also checked bit-exact against the decoder.
+#[test]
+fn p_frames_save_bytes_on_moving_content_at_equal_psnr() {
+    let mut ratios = Vec::new();
+    for (name, motion) in [("pan 3,2", Motion::Pan(3.0, 2.0)), ("pan 1.25,0.5", Motion::Pan(1.25, 0.5)), ("pan 0,-4.5", Motion::Pan(0.0, -4.5)), ("object", Motion::Object)] {
+        let frames = moving_sequence(motion, 160, 96, 6);
+        // the all-intra rate-distortion curve over a grid of quantisers
+        let curve: Vec<(f64, f64)> = (10..=250).step_by(40).map(|q| {
+            let (b, p, _) = code_sequence(&frames, q as u8, 6, 1);
+            (b as f64, p)
+        }).collect();
+        for q in [40u8, 100, 180] {
+            let (p_bytes, p_psnr, keys) = code_sequence(&frames, q, 6, 240);
+            assert_eq!(keys, 1);
+            let (same_q_intra, same_q_psnr, _) = code_sequence(&frames, q, 6, 1);
+            let at = intra_bytes_at(&curve, p_psnr);
+            let ratio = at.map(|b| p_bytes as f64 / b);
+            eprintln!(
+                "{name:13} q{q:3}: key+P {p_bytes:6} B {p_psnr:5.2} dB | all-intra at the same q {same_q_intra:6} B {same_q_psnr:5.2} dB | all-intra at {p_psnr:5.2} dB: {} | ratio {}",
+                at.map_or("-".to_string(), |b| format!("{b:.0} B")),
+                ratio.map_or("-".to_string(), |r| format!("{:.1}%", 100.0 * r))
+            );
+            if let Some(r) = ratio {
+                ratios.push(r);
+                assert!(r < 0.8, "{name} q{q}: key+P needs {:.0}% of the all-intra bytes at equal PSNR", 100.0 * r);
+            }
+        }
+    }
+    assert!(ratios.len() >= 8, "too few comparable operating points ({})", ratios.len());
+    let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
+    eprintln!("mean bytes at equal PSNR: {:.1}% of all-intra over {} operating points", 100.0 * mean, ratios.len());
+    assert!(mean < 0.6, "mean ratio {mean:.2}");
 }
