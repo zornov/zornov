@@ -141,6 +141,8 @@ fn sync_flags(app: &mut StudioApp, ctx: &egui::Context) {
     let lay = app.editor.last_layout();
     for p in FLAGGED {
         let Some(now) = flag(app, ctx, p) else { continue };
+        restore_floated(app, ctx, p, now);
+        let now = flag(app, ctx, p).unwrap_or(now);
         let slot = flag_slot(p);
         let last = app.editor.dock_flags[slot];
         let ed = &mut app.editor;
@@ -253,11 +255,30 @@ fn floated_id(p: Panel) -> Id {
 
 /// Whether the person floated `p` ("Float in a window") and it is still open.
 fn floated(ctx: &egui::Context, p: Panel) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(floated_id(p))).unwrap_or(false)
+    ctx.data_mut(|d| d.get_persisted::<bool>(floated_id(p))).unwrap_or(false)
 }
 
+/// Kept with the window's memory, so a panel floated when Zornov was quit
+/// is floated again on the next start.
 fn set_floated(ctx: &egui::Context, p: Panel, on: bool) {
-    ctx.data_mut(|d| d.insert_temp(floated_id(p), on));
+    ctx.data_mut(|d| d.insert_persisted(floated_id(p), on));
+}
+
+fn restored_id(p: Panel) -> Id {
+    Id::unique(("dock-float-restored", p.key()))
+}
+
+/// First frame of a run: a panel that was floated last time and is not on
+/// yet is turned on, so it comes back where it was. Once per panel per run.
+fn restore_floated(app: &mut StudioApp, ctx: &egui::Context, p: Panel, now: bool) {
+    let done = ctx.data(|d| d.get_temp::<bool>(restored_id(p))).unwrap_or(false);
+    if done {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(restored_id(p), true));
+    if !now && floated(ctx, p) {
+        set_flag(app, ctx, p, true);
+    }
 }
 
 /// Takes `p` out of the dock into its own window.

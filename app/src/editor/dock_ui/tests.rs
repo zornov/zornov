@@ -576,3 +576,20 @@ fn a_cut_that_is_gone_leaves_the_inspector_on_the_project() {
     d.frames(3);
     assert_eq!(d.h.app.editor.selected_cut, None);
 }
+
+#[test]
+fn a_panel_floated_last_run_comes_back_floated() {
+    let h = Harness::new(&["--screen", "editor"]);
+    let ctx = h.ctx.clone();
+    let mut d = Drive { h, frame: eframe::Frame::_new_kittest(), t: 0.0, size: big() };
+    // As the memory of the last run: Review was floated, and is off now.
+    set_floated(&ctx, Panel::Review, true);
+    crate::editor::review::set_open(false);
+    d.frames(3);
+    assert!(crate::editor::review::is_open(), "Review is open again");
+    assert!(!d.h.app.editor.dock.contains(Panel::Review), "in its own window, not docked");
+    // Closing it is remembered too.
+    close_panel(&mut d.h.app, &ctx, Panel::Review, false);
+    d.frames(3);
+    assert!(!floated(&ctx, Panel::Review));
+}
