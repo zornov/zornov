@@ -93,6 +93,44 @@ pub fn get(url: &str, headers: &[(&str, &str)], quiet: Duration) -> Result<Reply
     }
 }
 
+/// One GET hop made by [`get_pinned`]: the reply, and where a redirect
+/// (3xx) points (the `Location` header, as sent: maybe relative).
+pub struct Hop {
+    pub reply: Reply,
+    pub location: Option<String>,
+}
+
+/// GETs `url` once, with no redirects followed, connecting only to
+/// `addrs` (addresses the caller has checked) instead of resolving the
+/// name again, so a DNS answer that changes between the check and the
+/// connection cannot reach elsewhere; TLS and `Host` still use the name.
+/// A redirect comes back as a [`Hop`] for the caller to vet and follow.
+/// With a proxy configured (`HTTPS_PROXY`), the proxy makes the
+/// connection and so the addresses cannot be pinned.
+pub fn get_pinned(url: &str, headers: &[(&str, &str)], quiet: Duration, addrs: Vec<std::net::SocketAddr>) -> Result<Hop, String> {
+    get_pinned_with(url, headers, quiet, addrs, true)
+}
+
+fn get_pinned_with(url: &str, headers: &[(&str, &str)], quiet: Duration, addrs: Vec<std::net::SocketAddr>, env_proxy: bool) -> Result<Hop, String> {
+    let mut b = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(20)).timeout_read(quiet).timeout_write(Duration::from_secs(60)).redirects(0);
+    let proxy = env_proxy.then(|| ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"].iter().find_map(|var| std::env::var(var).ok().filter(|v| !v.is_empty()).and_then(|v| ureq::Proxy::new(v).ok()))).flatten();
+    match proxy {
+        Some(p) => b = b.proxy(p),
+        None => b = b.resolver(move |_: &str| Ok(addrs.clone())),
+    }
+    let mut req = b.build().get(url);
+    for (k, v) in headers {
+        req = req.set(k, v);
+    }
+    let (status, r) = match req.call() {
+        Ok(r) => (r.status(), r),
+        Err(ureq::Error::Status(code, r)) => (code, r),
+        Err(ureq::Error::Transport(t)) => return Err(transport(url, &t)),
+    };
+    let location = r.header("Location").map(str::to_owned);
+    Ok(Hop { location, reply: Reply { status, content_type: r.header("Content-Type").map(str::to_owned), url: r.get_url().to_owned(), body: Box::new(r.into_reader()) } })
+}
+
 /// How a download behaves.
 #[derive(Clone, Copy, Debug)]
 pub struct Download {
@@ -315,5 +353,23 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(4));
         assert_eq!(download(&url, &dir.join("b"), opts, &mut |n| n == 0), Err(Failure::Cancelled));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pinned_get_connects_to_the_given_address_and_leaves_redirects() {
+        let url = serve(2, |head, s| {
+            if head.starts_with("GET /go") {
+                write!(s, "HTTP/1.1 302 Found\r\nLocation: /there\r\ncontent-length: 0\r\n\r\n").unwrap();
+            } else {
+                assert!(head.contains("Host: pinned.example"), "{head}");
+                write!(s, "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok").unwrap();
+            }
+        });
+        let addr: std::net::SocketAddr = url.trim_start_matches("http://").parse().unwrap();
+        let h = get_pinned_with(&format!("http://pinned.example:{}/go", addr.port()), &[], Duration::from_secs(5), vec![addr], false).unwrap();
+        assert_eq!((h.reply.status, h.location.as_deref()), (302, Some("/there")));
+        let h = get_pinned_with(&format!("http://pinned.example:{}/there", addr.port()), &[], Duration::from_secs(5), vec![addr], false).unwrap();
+        assert_eq!((h.reply.status, h.location), (200, None));
+        assert_eq!(h.reply.bytes(10).unwrap(), b"ok");
     }
 }
