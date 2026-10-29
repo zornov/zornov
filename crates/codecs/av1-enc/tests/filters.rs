@@ -87,3 +87,41 @@ fn restoration_frames_decode_to_the_encoders_reconstruction_and_beat_cdef_alone(
     }
     assert!(gained, "restoration never ran");
 }
+
+/// Bytes (log-linear in PSNR between the measured points) a curve needs to reach `psnr`.
+fn bytes_at(curve: &[(f64, f64)], psnr: f64) -> Option<f64> {
+    curve.windows(2).find_map(|w| {
+        let ((p0, b0), (p1, b1)) = (w[0], w[1]);
+        (p0.min(p1)..=p0.max(p1)).contains(&psnr).then(|| (b0.ln() + (b1.ln() - b0.ln()) * (psnr - p0) / (p1 - p0)).exp())
+    })
+}
+
+/// The gate: each filter, added in turn, saves bytes at equal PSNR on moving content.
+#[test]
+fn every_filter_saves_bytes_at_equal_psnr() {
+    let samples = (130 * 70 + 2 * 65 * 35) as f64 * 6.0;
+    let qs = [60u8, 100, 140, 180, 220];
+    let curve = |set: FilterSet| -> Vec<(f64, f64)> {
+        let mut c: Vec<(f64, f64)> = qs
+            .iter()
+            .map(|&q| {
+                let (bytes, err) = run(set, q, 6);
+                (10.0 * (255.0f64 * 255.0 * samples / err as f64).log10(), bytes as f64)
+            })
+            .collect();
+        c.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        c
+    };
+    let (off, deblock, both, all) = (curve(OFF), curve(DEBLOCK), curve(BOTH), curve(ALL));
+    println!("off {off:?}\ndeblock {deblock:?}\ndeblock+cdef {both:?}\nall {all:?}");
+    let mean_ratio = |new: &[(f64, f64)], old: &[(f64, f64)]| -> f64 {
+        let r: Vec<f64> = old.iter().filter_map(|&(p, b)| bytes_at(new, p).map(|n| n / b)).collect();
+        assert!(r.len() >= 3, "too few comparable operating points");
+        r.iter().sum::<f64>() / r.len() as f64
+    };
+    let (d, c, l) = (mean_ratio(&deblock, &off), mean_ratio(&both, &deblock), mean_ratio(&all, &both));
+    println!("bytes at equal PSNR: deblock {:.1}% of off, +cdef {:.1}% of deblock, +restoration {:.1}% of deblock+cdef; all {:.1}% of off", d * 100.0, c * 100.0, l * 100.0, mean_ratio(&all, &off) * 100.0);
+    assert!(d < 1.0, "deblocking does not pay: {d}");
+    assert!(c < 1.0, "CDEF does not pay: {c}");
+    assert!(l < 1.0, "restoration does not pay: {l}");
+}
