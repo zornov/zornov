@@ -116,8 +116,8 @@ fn the_tool_list_stays_within_its_budget() {
     eprintln!("tool list: {} tools, {} characters (~{} tokens)", tools.len(), json.len(), json.len() / 4);
     // 98_500: the objects tool (about 1 000 characters) is one tool more, the search_media
     // tool (about 2 200) and the fonts tool (about 1 300) two more. 99_000: the feedback
-    // tool (about 450).
-    assert!(json.len() <= 99_000, "the tool list is {} characters; keep property descriptions short and put the detail in tool_reference.md", json.len());
+    // tool (about 450). 99_150: `convert` in project_care (about 115).
+    assert!(json.len() <= 99_150, "the tool list is {} characters; keep property descriptions short and put the detail in tool_reference.md", json.len());
     let index = guide_answer(&json!({"topic": "tools"})).unwrap();
     eprintln!("tool index: {} characters", index.len());
     assert!(index.len() <= 12_000, "the tool index is {} characters; it replaces dumping the {} raw definitions", index.len(), tools.len());

@@ -11,6 +11,7 @@ use crate::{rights, safety, services};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_model as m;
+use studio_model::file::convert;
 
 pub fn tools() -> Vec<Value> {
     let s = |d: &str| json!({"type": "string", "description": d});
@@ -27,8 +28,8 @@ pub fn tools() -> Vec<Value> {
         ),
         t(
             "project_care",
-            "Keeps the project safe. Fields: action (health, history, snapshot, restore, backup, backups, restore_backup, collect, archive, verify, relocate, clean, recover), which, label, to, from, into, folder, keep, media, apply. `clean` only says what it would remove unless apply is true.",
-            json!({"action": s("what to do"), "which": any("restore: a number, \"latest\", or part of a name"), "label": s("snapshot: a name"), "to": s("backup, backups, collect, archive: the folder"), "from": s("restore_backup: the backup folder"), "project": s("restore_backup: the project folder it was a backup of (default: this one)"), "into": s("restore_backup: a new folder"), "snapshot": s("restore_backup: which snapshot (default newest)"), "folder": s("verify, relocate: the archive folder"), "keep": int("backup: snapshots to keep"), "media": b("backup: include media (default true)"), "only_used": b("collect: leave out media no clip uses"), "with_cache": b("collect: copy caches too"), "apply": b("clean: really remove (default: only say what would go)"), "keep_autosaves": int("clean: newest autosaves to keep (default 10)"), "shared_cache_days": int("clean: shared cache files unused this many days (default 30; 0 skips)")}),
+            "Keeps the project safe. Fields: action (health, history, snapshot, restore, backup, backups, restore_backup, collect, archive, verify, relocate, clean, recover, convert), which, label, to, from, into, folder, keep, media, apply. `clean` and `convert` (older folder to .zornov package) only say what would happen unless apply is true.",
+            json!({"action": s("what to do"), "which": any("restore: a number, \"latest\", or part of a name"), "label": s("snapshot: a name"), "to": s("backup, backups, collect, archive: the folder"), "from": s("restore_backup: the backup folder"), "project": s("restore_backup: the project folder it was a backup of (default: this one)"), "into": s("restore_backup: a new folder"), "snapshot": s("restore_backup: which snapshot (default newest)"), "folder": s("verify, relocate: the archive folder"), "keep": int("backup: snapshots to keep"), "media": b("backup: include media (default true)"), "only_used": b("collect: leave out media no clip uses"), "with_cache": b("collect: copy caches too"), "apply": b("clean, convert: really do it"), "copy": b("convert: keep the original"), "keep_autosaves": int("clean: newest autosaves to keep (default 10)"), "shared_cache_days": int("clean: shared cache files unused this many days (default 30; 0 skips)")}),
         ),
     ]
 }
@@ -489,6 +490,30 @@ impl Session {
                 v["note"] = json!(if action == "archive" { "checked with verify; every file has a SHA-256 in ARCHIVE.json" } else { "the project there points at its own copies; the original is untouched" });
                 Ok(v)
             }
+            "convert" => {
+                let root = self.need_root()?;
+                let plan = convert::plan(&root).map_err(|e| e.to_string())?;
+                if a.get("apply").and_then(Value::as_bool) != Some(true) {
+                    let areas: serde_json::Map<String, Value> = plan.areas().into_iter().map(|(k, (n, bytes))| (k, json!({"files": n, "size": safety::human(bytes)}))).collect();
+                    return Ok(json!({"plan": areas, "unknown_files_kept_in_zornov_legacy": plan.unknown.len(), "note": "nothing was changed; run again with apply: true (or copy: true to keep the original)"}));
+                }
+                let _ = services::project::save(&mut self.doc, None);
+                // This session's own hold on the project would read as another window.
+                self.doc.open_hold = None;
+                let copy = a.get("copy").and_then(Value::as_bool) == Some(true);
+                match convert::convert(&root, convert::Options { copy }, &convert::Hooks::default()) {
+                    Ok(report) => {
+                        let doc = services::project::open(&report.package)?;
+                        *self = Session::new(doc);
+                        self.home = Some(report.package.clone());
+                        Ok(json!({"package": report.package.display().to_string(), "exports": report.exports.map(|p| p.display().to_string()), "moved": report.moved, "relinked": report.relinked.len(), "unresolved": report.unresolved, "kept_in_legacy": report.unknown.len(), "left_behind": report.left_behind.len(), "note": "the undo history starts fresh"}))
+                    }
+                    Err(e) => {
+                        self.doc.open_hold = self.doc.folder.as_ref().and_then(|f| f.hold_open().ok());
+                        Err(e.to_string())
+                    }
+                }
+            }
             "verify" => safety::verify_archive(&to("folder").or_else(|| to("to")).ok_or("verify needs \"folder\": the archive")?),
             "relocate" => {
                 let dir = to("folder").ok_or("relocate needs \"folder\": the moved archive")?;
@@ -582,6 +607,29 @@ mod tests {
             },
             Err(e) => json!({"error": e}),
         }
+    }
+
+    /// An older project folder becomes a package through the AI's entry
+    /// point: the plan changes nothing, the conversion moves the session.
+    #[test]
+    fn the_ai_can_convert_an_older_folder_to_a_package() {
+        let dir = std::env::temp_dir().join(format!("studio-care-convert-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.join("Old project");
+        let mut s = Session::at(&root).unwrap();
+        std::fs::create_dir_all(root.join("music")).unwrap();
+        std::fs::write(root.join("music/theme.wav"), b"RIFF").unwrap();
+        let plan = call(&mut s, "project_care", json!({"action": "convert"}));
+        assert!(plan["plan"]["Generated"]["files"] == 1, "{plan}");
+        assert!(root.join("music/theme.wav").is_file(), "the plan moved nothing");
+        let done = call(&mut s, "project_care", json!({"action": "convert", "apply": true}));
+        let package = dir.join("Old project.zornov");
+        assert_eq!(done["package"], package.display().to_string(), "{done}");
+        assert!(package.join("Generated/Music/theme.wav").is_file() && !root.exists());
+        assert_eq!(s.home.as_deref(), Some(package.as_path()), "the session works in the package now");
+        assert_eq!(s.doc.folder.as_ref().map(|f| f.layout()), Some(m::file::Layout::Package));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The whole library and safety story on scratch copies, through the

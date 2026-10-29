@@ -829,7 +829,7 @@ impl Session {
             "images": images,
             "error": r.as_ref().err().map(|e| e.chars().take(160).collect::<String>()),
         });
-        let path = self.home.clone().map(|h| h.join("agent-usage.jsonl")).unwrap_or_else(|| studio_paths::cache().join("agent-usage.jsonl"));
+        let path = self.home.clone().map(|h| studio_model::file::ProjectFolder::new(h).state(studio_model::file::State::AgentUsage)).unwrap_or_else(|| studio_paths::cache().join("agent-usage.jsonl"));
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             use std::io::Write;
             let _ = writeln!(f, "{line}");
@@ -927,8 +927,9 @@ impl Session {
             // `open` / `new_project` replace the session; stay bound. After
             // `open` the session works in the opened project's folder, so
             // what it writes (vector documents, renders) lands there.
-            let switched = matches!(tool, "open" | "new_project");
-            if tool == "open" && r.is_ok() {
+            let converted = tool == "project_care" && a.get("action").and_then(Value::as_str) == Some("convert");
+            let switched = matches!(tool, "open" | "new_project") || converted;
+            if (tool == "open" || converted) && r.is_ok() {
                 self.home = self.doc.folder.as_ref().map(|f| f.root().to_path_buf());
             } else if !switched || tool == "new_project" {
                 self.home = Some(dir.clone());
@@ -2580,10 +2581,18 @@ impl Session {
                 text(self.summary())
             }
             "open" => {
-                let path = a.get("path").and_then(Value::as_str).ok_or("open needs \"path\" (a project folder)")?;
+                let path = a.get("path").and_then(Value::as_str).ok_or("open needs \"path\" (a .zornov package or a project folder)")?;
                 let doc = services::project::open(std::path::Path::new(path))?;
                 *self = Session::new(doc);
-                text(self.summary())
+                let mut summary = self.summary();
+                if let (Some(o), Some(f)) = (summary.as_object_mut(), self.doc.folder.as_ref()) {
+                    let package = f.layout() == studio_model::file::Layout::Package;
+                    o.insert("layout".into(), json!(if package { "package" } else { "folder" }));
+                    if !package {
+                        o.insert("convert".into(), json!("an older project folder; project_care action \"convert\" makes it a .zornov package"));
+                    }
+                }
+                text(summary)
             }
             "save" => {
                 let path = a.get("path").and_then(Value::as_str).map(PathBuf::from);
@@ -2719,7 +2728,7 @@ impl Session {
                     web::refuse_private(url)?;
                 }
                 let home = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()));
-                let dir = download::folder_for(home.as_deref());
+                let dir = download::folder_for_url(home.as_deref(), url);
                 let pick = download::Pick { quality: a.get("quality").and_then(Value::as_str).map(str::to_owned), language: a.get("language").and_then(Value::as_str).map(str::to_owned) };
                 let fetched = download::fetch_pick(url, &dir, a.get("name").and_then(Value::as_str), &pick)?;
                 let file = fetched.file.clone();

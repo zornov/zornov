@@ -540,6 +540,7 @@ fn care_ask(args: &Value) -> Option<String> {
         "restore" => Some("Restore an earlier version of the project (the current one is kept as a restore point)".into()),
         "restore_backup" => Some(format!("Restore the backup {}", args.get("from").and_then(Value::as_str).unwrap_or(""))),
         "clean" if args.get("apply").and_then(Value::as_bool) == Some(true) => Some("Delete the files project care found unused".into()),
+        "convert" if args.get("apply").and_then(Value::as_bool) == Some(true) => Some(if args.get("copy").and_then(Value::as_bool) == Some(true) { "Make a .zornov package copy of this project (the original stays as it is)".into() } else { "Convert this project folder into a .zornov package (its files are moved; a journal puts them back if anything fails)".into() }),
         "relocate" => Some(format!("Move the project's media to {}", args.get("folder").and_then(Value::as_str).unwrap_or("another folder"))),
         _ => None,
     }
@@ -1496,6 +1497,8 @@ mod tests {
         assert!(asks("account", &json!({"action": "status"}), false).is_none());
         assert!(asks("project_care", &json!({"action": "clean", "apply": true}), false).is_some());
         assert!(asks("project_care", &json!({"action": "clean"}), false).is_none());
+        assert!(asks("project_care", &json!({"action": "convert", "apply": true}), false).is_some(), "moving a project's files asks");
+        assert!(asks("project_care", &json!({"action": "convert"}), false).is_none(), "the plan only reads");
         let wait = std::time::Duration::from_secs(5);
         let (calls, rx) = mpsc::channel();
         let (events, ev) = mpsc::channel();

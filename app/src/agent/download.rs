@@ -48,6 +48,13 @@ pub fn folder_for_kind(home: Option<&Path>, kind: m::file::MediaKind) -> PathBuf
     }
 }
 
+/// Where a download from `url` goes for a project in `home`: a package sorts
+/// it by the file type the link names, earlier folders use `Downloads`.
+pub fn folder_for_url(home: Option<&Path>, url: &str) -> PathBuf {
+    let kind = url_ext(url).map_or(m::file::MediaKind::Other, |e| m::file::MediaKind::for_extension(&e));
+    folder_for_kind(home, kind)
+}
+
 /// The path part of a link (after the host, before `?` and `#`).
 fn url_path(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
