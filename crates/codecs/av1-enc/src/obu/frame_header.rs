@@ -157,12 +157,16 @@ pub fn write_frame_header(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) 
         w.put(0, 3); // loop_filter_sharpness
         w.flag(false); // loop_filter_delta_enabled
         if seq.enable_cdef {
-            w.put(0, 2); // cdef_damping_minus_3
-            w.put(0, 2); // cdef_bits
-            w.put(0, 4); // cdef_y_pri_strength[0]
-            w.put(0, 2); // cdef_y_sec_strength[0]
-            w.put(0, 4); // cdef_uv_pri_strength[0]
-            w.put(0, 2); // cdef_uv_sec_strength[0]
+            let c = &fh.cdef;
+            w.put(c.damping as u32 - 3, 2); // cdef_damping_minus_3
+            w.put(c.bits as u32, 2); // cdef_bits
+            let sec = |v: u8| if v == 4 { 3 } else { v as u32 };
+            for i in 0..1usize << c.bits {
+                w.put(c.y_pri[i] as u32, 4);
+                w.put(sec(c.y_sec[i]), 2);
+                w.put(c.uv_pri[i] as u32, 4);
+                w.put(sec(c.uv_sec[i]), 2);
+            }
         }
         if seq.enable_restoration {
             for _ in 0..3 {

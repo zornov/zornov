@@ -43,10 +43,24 @@ fn run(filters: FilterSet, q: u8, n: u32) -> (usize, u64) {
     (bytes, err)
 }
 
+const OFF: FilterSet = FilterSet { deblock: false, cdef: false };
+const DEBLOCK: FilterSet = FilterSet { deblock: true, cdef: false };
+const BOTH: FilterSet = FilterSet { deblock: true, cdef: true };
+
 #[test]
 fn deblocked_frames_decode_to_the_encoders_reconstruction_and_beat_unfiltered() {
-    let off = run(FilterSet { deblock: false }, 220, 6);
-    let on = run(FilterSet { deblock: true }, 220, 6);
+    let off = run(OFF, 220, 6);
+    let on = run(DEBLOCK, 220, 6);
     println!("deblock off {off:?} on {on:?}");
     assert!(on.1 < off.1, "deblocking did not reduce the error: {on:?} vs {off:?}");
+}
+
+#[test]
+fn cdef_frames_decode_to_the_encoders_reconstruction_and_beat_deblocking_alone() {
+    for q in [120u8, 200] {
+        let deblock = run(DEBLOCK, q, 6);
+        let both = run(BOTH, q, 6);
+        println!("q {q}: deblock {deblock:?} deblock+cdef {both:?}");
+        assert!(both.1 < deblock.1, "CDEF did not reduce the error at q {q}: {both:?} vs {deblock:?}");
+    }
 }

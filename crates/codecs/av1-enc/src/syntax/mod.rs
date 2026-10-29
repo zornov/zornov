@@ -76,6 +76,12 @@ impl TileWriter {
         }
     }
 
+    /// Codes `cdef_idx` (`bits` literal bits, from `idx`, one per 64x64 block) as the decoder reads it.
+    pub fn with_cdef(mut self, bits: u32, idx: Vec<i8>) -> TileWriter {
+        self.ctx.cdef = Some(CdefSyntax::new(bits, self.mi_cols.div_ceil(16), idx));
+        self
+    }
+
     /// Mirrors `disable_cdf_update` of the frame header. Call before writing anything.
     pub fn with_disable_cdf_update(mut self, disable: bool) -> TileWriter {
         self.enc = SymbolEncoder::with_disable_update(disable);

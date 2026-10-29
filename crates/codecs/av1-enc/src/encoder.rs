@@ -96,7 +96,7 @@ impl Encoder {
             profile: 0,
             level_idx: level_for(cfg.width, cfg.height),
             use_128x128_superblock: false,
-            enable_cdef: false,
+            enable_cdef: true,
             enable_restoration: false,
             enable_order_hint: true,
             // BT.709, limited range: what `color::from_rgba8` produces
@@ -134,6 +134,7 @@ impl Encoder {
         buf.enable_intra_edge_filter = false;
         let mut tw = TileWriter::new(&self.seq, q, mi_cols, mi_rows);
         let ref_idx = [0u8; 7];
+        let (mut intra_sbs, mut inter_sbs) = (Vec::new(), Vec::new());
         if key {
             let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(SearchDecider { base_q_idx: q }) };
             for row in 0..mi_rows.div_ceil(16) {
@@ -141,6 +142,7 @@ impl Encoder {
                     let pos = SbPos { col, row };
                     let sb = decider.decide_sb(frame, &mut buf, pos);
                     tw.write_sb(pos, &sb);
+                    intra_sbs.push((pos, sb));
                 }
             }
         } else {
@@ -154,13 +156,34 @@ impl Encoder {
                     let pos = SbPos { col, row };
                     let sb = coder.decide_sb(&mut buf, pos);
                     tw.write_inter_sb(pos, &sb);
+                    inter_sbs.push((pos, sb));
                 }
             }
         }
         // in-loop filters: the search sees the finished tile, the references the filtered frame
-        let lf = if self.cfg.speed >= FIXED_FROM_SPEED || !self.filters.deblock { [0, 0] } else { filters::search_deblock(&self.dseq, &buf, tw.mode_info(), frame) };
-        let buf = filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf });
-        let tile = tw.finish();
+        let fast = self.cfg.speed >= FIXED_FROM_SPEED;
+        let lf = if fast || !self.filters.deblock { [0, 0] } else { filters::search_deblock(&self.dseq, &buf, tw.mode_info(), frame) };
+        let deblocked = filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf, cdef: None });
+        let cdef = if fast || !self.filters.cdef { None } else { filters::search_cdef(&self.dseq, &deblocked, tw.mode_info(), frame, q) };
+        let buf = match &cdef {
+            Some(c) => filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf, cdef: Some(c.clone()) }),
+            None => deblocked,
+        };
+        // the strength index is coded with the first coded block of every 64x64, so a frame that
+        // uses more than one set is written again
+        let tile = match &cdef {
+            Some(c) if c.params.bits > 0 => {
+                let mut tw2 = TileWriter::new(&self.seq, q, mi_cols, mi_rows).with_cdef(c.params.bits as u32, c.idx.clone());
+                for (pos, sb) in &intra_sbs {
+                    tw2.write_sb(*pos, sb);
+                }
+                for (pos, sb) in &inter_sbs {
+                    tw2.write_inter_sb(*pos, sb);
+                }
+                tw2.finish()
+            }
+            _ => tw.finish(),
+        };
 
         let fp = FrameParams {
             frame_type: if key { FrameType::Key } else { FrameType::Inter },
@@ -172,6 +195,7 @@ impl Encoder {
             ref_frame_idx: ref_idx,
             loop_filter_level: [lf[0] as u8, lf[1] as u8],
             cdef_enabled: false,
+            cdef: cdef.map(|c| c.params).unwrap_or_default(),
             tile_cols_log2: 0,
             tile_rows_log2: 0,
         };

@@ -121,6 +121,22 @@ pub struct RegionSave {
 }
 
 /// The context state of one tile.
+/// `cdef_idx` syntax of a frame: the index of every 64x64 block and which ones are coded already.
+pub struct CdefSyntax {
+    pub bits: u32,
+    /// Row-major, one per 64x64 block.
+    pub idx: Vec<i8>,
+    pub cols: usize,
+    written: Vec<std::cell::Cell<bool>>,
+}
+
+impl CdefSyntax {
+    pub fn new(bits: u32, cols: usize, idx: Vec<i8>) -> CdefSyntax {
+        let written = vec![std::cell::Cell::new(false); idx.len()];
+        CdefSyntax { bits, idx, cols, written }
+    }
+}
+
 pub struct ContextState {
     pub mi_rows: usize,
     pub mi_cols: usize,
@@ -133,6 +149,8 @@ pub struct ContextState {
     left_dc: [Vec<u8>; 3],
     /// `TileIntraFrameYModeCdf`: reset at every tile start, outside the saved CDF set.
     pub intra_y_mode_cdf: [[[u16; 14]; 5]; 5],
+    /// `read_cdef()` state; none when the sequence has CDEF off.
+    pub cdef: Option<CdefSyntax>,
 }
 
 impl ContextState {
@@ -146,6 +164,21 @@ impl ContextState {
             left_level: std::array::from_fn(|_| vec![0; mi_rows + ARRAY_SLACK]),
             left_dc: std::array::from_fn(|_| vec![0; mi_rows + ARRAY_SLACK]),
             intra_y_mode_cdf: DEFAULT_INTRA_FRAME_Y_MODE_CDF,
+            cdef: None,
+        }
+    }
+
+    /// `read_cdef()`: the index of the 64x64 block, coded with the first block of it that is not
+    /// skipped.
+    pub fn write_cdef(&self, enc: &mut crate::entropy::SymbolEncoder, r: usize, c: usize, skip: bool) {
+        let Some(cd) = &self.cdef else { return };
+        if skip || cd.bits == 0 {
+            return;
+        }
+        let slot = (r >> 4) * cd.cols + (c >> 4);
+        if !cd.written[slot].get() {
+            cd.written[slot].set(true);
+            enc.write_literal(cd.idx[slot].max(0) as u32, cd.bits);
         }
     }
 
