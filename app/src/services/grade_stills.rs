@@ -15,7 +15,7 @@ use studio_model as m;
 /// Where the stills of this project are.
 pub fn folder(doc: &Doc) -> PathBuf {
     match &doc.folder {
-        Some(f) => f.root().join("Stills"),
+        Some(f) => f.generated_dir(m::file::MadeKind::Stills),
         None => studio_paths::cache().join("Stills"),
     }
 }

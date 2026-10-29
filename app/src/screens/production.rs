@@ -188,8 +188,13 @@ fn rgb(c: [u8; 3]) -> Color32 {
     Color32::from_rgb(c[0], c[1], c[2])
 }
 
+/// Where the call sheets, reports and budgets are written.
+fn papers_dir(dir: &Path) -> PathBuf {
+    studio_model::file::ProjectFolder::new(dir).generated_dir(studio_model::file::MadeKind::Production)
+}
+
 fn write_pdf(st: &mut ProductionUi, dir: &Path, name: &str, bytes: Vec<u8>) {
-    let d = dir.join("production");
+    let d = papers_dir(dir);
     let path = d.join(name);
     st.flash = match std::fs::create_dir_all(&d).and_then(|_| std::fs::write(&path, bytes)) {
         Ok(()) => crate::i18n::tf(format!("Wrote {}", path.display())),
@@ -363,7 +368,7 @@ fn schedule(ui: &mut egui::Ui, st: &mut ProductionUi, story: &Story, dir: &Path)
                     write_pdf(st, dir, &format!("call-sheet-day-{}.pdf", i + 1), report::call_sheet_pdf(&c));
                 }
             }
-            st.flash = crate::i18n::tf(format!("Wrote {n} call sheets to {}", dir.join("production").display()));
+            st.flash = crate::i18n::tf(format!("Wrote {n} call sheets to {}", papers_dir(dir).display()));
         }
     });
     for w in st.prod.schedule_warnings(story) {

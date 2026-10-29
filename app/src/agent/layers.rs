@@ -154,7 +154,7 @@ impl Session {
         if len <= 0 {
             return Err("the merged clip is empty".into());
         }
-        let dir = self.home.clone().map(|h| h.join("media").join("flattened")).unwrap_or_else(|| studio_paths::cache().join("flattened"));
+        let dir = self.home.clone().map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Flattened)).unwrap_or_else(|| studio_paths::cache().join("flattened"));
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let name: String = self.doc.model.sequence(inner).map(|s| s.name.clone()).unwrap_or_default().chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-').collect();
         let stem = if name.trim().is_empty() { "flattened".into() } else { name.trim().replace(' ', "-") };

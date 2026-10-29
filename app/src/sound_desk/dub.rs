@@ -207,7 +207,7 @@ pub fn prepare(project: &m::Project, home: Option<&std::path::Path>, lang: &str,
     let dx = super::render::render(project, &req, 0, end);
     let dx: Vec<f32> = dx[0].iter().zip(&dx[1]).map(|(a, b)| 0.5 * (a + b)).collect();
     let service = crate::agent::voice_service::VoiceSettings::load();
-    let dir = home.map(|h| h.join("Dubs").join(lang)).unwrap_or_else(|| studio_paths::cache().join("dubs").join(lang));
+    let dir = home.map(|h| m::file::ProjectFolder::new(h).generated_dir(m::file::MadeKind::Dubs).join(lang)).unwrap_or_else(|| studio_paths::cache().join("dubs").join(lang));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut made: Vec<Made> = Vec::new();
     let mut reports = Vec::new();

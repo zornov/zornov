@@ -194,7 +194,7 @@ fn footage(proj: &view::Project, mc: &m::Clip) -> Result<Footage, String> {
 pub fn cut_dir(doc: &crate::doc::Doc) -> PathBuf {
     // Tests never write into the person's Studio folder.
     let home = if cfg!(test) { std::env::temp_dir().join("studio-tests") } else { studio_paths::studio() };
-    doc.folder.as_ref().map(|f| f.root().join("Cut-outs")).unwrap_or_else(|| home.join("Cut-outs"))
+    doc.folder.as_ref().map(|f| f.generated_dir(m::file::MadeKind::Cutouts)).unwrap_or_else(|| home.join("Cut-outs"))
 }
 
 /// Canvas points at timeline time `t` → pixels of the matte frame.

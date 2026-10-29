@@ -120,7 +120,7 @@ impl Session {
     /// Where simulations are kept.
     fn sim_dir(&self) -> std::path::PathBuf {
         match self.doc.folder.as_ref() {
-            Some(f) => f.root().join("Simulations"),
+            Some(f) => f.simulations_dir(),
             None => std::env::temp_dir().join("Zornov Simulations"),
         }
     }

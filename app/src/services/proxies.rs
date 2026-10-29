@@ -53,7 +53,7 @@ pub fn set_enabled(p: &m::Project, on: bool) -> m::Edit {
 /// Where proxies of this project go.
 pub fn folder(doc: &Doc) -> PathBuf {
     match &doc.folder {
-        Some(f) => f.root().join("Proxies"),
+        Some(f) => f.proxies_dir(),
         None => PathBuf::from(crate::prefs::Prefs::load(None).proxy_dir),
     }
 }

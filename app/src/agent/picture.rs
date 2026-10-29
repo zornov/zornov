@@ -35,9 +35,12 @@ fn s<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
 }
 
 impl Session {
+    fn picture_root(&self) -> Option<PathBuf> {
+        self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()))
+    }
+
     fn pictures_home(&self) -> PathBuf {
-        let root = self.home.clone().or_else(|| self.doc.folder.as_ref().map(|f| f.root().to_path_buf()));
-        crate::paint::pictures_dir(root.as_deref())
+        crate::paint::pictures_dir(self.picture_root().as_deref())
     }
 
     pub(super) fn picture(&mut self, a: &Value) -> Result<Vec<Content>, String> {
@@ -140,7 +143,10 @@ impl Session {
             let st = c.engine.active().ok_or("no picture open")?;
             (saved, fb, studio_canvas::stem(&st.doc.name).to_owned(), (st.doc.size.width, st.doc.size.height), st.revision)
         };
-        let placed = self.pictures_home().join("Placed");
+        let placed = match self.picture_root() {
+            Some(r) => studio_model::file::ProjectFolder::new(r).generated_dir(studio_model::file::MadeKind::Placed),
+            None => self.pictures_home().join("Placed"),
+        };
         std::fs::create_dir_all(&placed).map_err(|e| e.to_string())?;
         let tag = format!("{name}-{rev}-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() % 100_000));
         let sources: Vec<PathBuf> = match (&fb, saved["frames"].as_array()) {
