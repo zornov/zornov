@@ -239,74 +239,12 @@ impl StudioApp {
                 // What the file held: a later save that finds it changed
                 // (an agent saved meanwhile) takes that work in first.
                 self.doc.synced = Some(crate::doc::Synced { stamp, base });
-                let older = folder.layout() == m::file::Layout::Legacy;
                 self.doc.folder = Some(folder);
                 self.remember(&dir);
-                if older {
-                    kit::push(ctx, crate::i18n::tf("An older project folder. File ▸ Convert to package makes it a .zornov package.".to_owned()), None, Some(Icon::Info));
-                }
             }
             Err(e) => {
                 self.prefs.recents.retain(|r| r.path != dir);
                 kit::push(ctx, crate::i18n::tf(format!("Could not open {}: {e:?}", dir.display())), None, Some(Icon::Warning));
-            }
-        }
-    }
-
-    /// File ▸ Convert to package: an older project folder becomes a
-    /// `.zornov` package, after the person has seen what would move.
-    pub fn convert_project(&mut self, ctx: &egui::Context) {
-        use m::file::convert;
-        let Some(folder) = self.doc.folder.clone() else {
-            kit::push(ctx, crate::i18n::tf("Save the project first".to_owned()), None, Some(Icon::Warning));
-            return;
-        };
-        if folder.layout() == m::file::Layout::Package {
-            kit::push(ctx, crate::i18n::tf("This project is a package already".to_owned()), None, Some(Icon::Info));
-            return;
-        }
-        let root = folder.root().to_path_buf();
-        if let Err(e) = crate::services::project::save(&mut self.doc, None) {
-            kit::push(ctx, crate::i18n::tf(e), None, Some(Icon::Warning));
-            return;
-        }
-        let plan = match convert::plan(&root) {
-            Ok(p) => p,
-            Err(e) => {
-                kit::push(ctx, crate::i18n::tf(e.to_string()), None, Some(Icon::Warning));
-                return;
-            }
-        };
-        let lines: Vec<String> = plan.areas().into_iter().map(|(area, (n, bytes))| format!("{area}: {n} files, {}", crate::safety::human(bytes))).collect();
-        let text = format!(
-            "{} becomes {}.{}.\n\n{}\n\nThe undo history starts fresh. Convert moves the files and puts them back if anything goes wrong; Make a copy leaves this folder as it is.",
-            folder.name(),
-            folder.name(),
-            m::file::PACKAGE_EXT,
-            lines.join("\n")
-        );
-        let answer = rfd::MessageDialog::new()
-            .set_title("Convert to a Zornov package")
-            .set_description(text)
-            .set_buttons(rfd::MessageButtons::YesNoCancelCustom("Convert".into(), "Make a copy".into(), "Cancel".into()))
-            .show();
-        let copy = match answer {
-            rfd::MessageDialogResult::Custom(s) if s == "Convert" => false,
-            rfd::MessageDialogResult::Custom(s) if s == "Make a copy" => true,
-            _ => return,
-        };
-        // This window's own hold on the project would read as another window.
-        self.doc.open_hold = None;
-        match convert::convert(&root, convert::Options { copy }, &convert::Hooks::default()) {
-            Ok(report) => {
-                self.prefs.recents.retain(|r| r.path != root);
-                self.open_folder(ctx, Some(report.package.clone()));
-                let note = if report.unresolved.is_empty() { String::new() } else { format!(" {} media files could not be found.", report.unresolved.len()) };
-                kit::push(ctx, crate::i18n::tf(format!("Converted to {}.{note}", report.package.display())), None, Some(Icon::CheckCircle));
-            }
-            Err(e) => {
-                self.doc.open_hold = folder.hold_open().ok();
-                kit::push(ctx, crate::i18n::tf(e.to_string()), None, Some(Icon::Warning));
             }
         }
     }

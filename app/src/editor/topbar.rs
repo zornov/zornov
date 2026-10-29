@@ -260,7 +260,6 @@ fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
             item("Open…", "⌘O", Some(Icon::FolderOpen), true, || Some(Action::Open)),
             item("Save", "⌘S", None, true, || Some(Action::Save)),
             item("Save as…", "⇧⌘S", None, true, || Some(Action::SaveAs)),
-            item("Convert to package…", "", None, d.folder.as_ref().is_some_and(|f| f.layout() == studio_model::file::Layout::Legacy), || Some(Action::ConvertProject)),
             None,
             item("Import media…", "⌘I", Some(Icon::DownloadSimple), true, || Some(Action::ImportMedia)),
             item("Add sample media", "", None, true, || Some(Action::SampleMedia)),
