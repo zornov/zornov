@@ -97,6 +97,29 @@ pub fn coeff_base_eob_ctx(c: usize, bwl: usize, height: usize) -> usize {
     3
 }
 
+/// The mode info of one 4x4 unit, as saved and restored by [`ContextState::save_region`].
+#[derive(Clone)]
+struct MiEntry {
+    mi_size: u8,
+    skip: bool,
+    y_mode: u8,
+    tx_size: u8,
+    inter_tx_size: u8,
+    is_inter: bool,
+    ref_frame: [i8; 2],
+    mv: [Mv; 2],
+    written: bool,
+}
+
+/// A saved rectangle of mode info.
+pub struct RegionSave {
+    r: usize,
+    c: usize,
+    rows: usize,
+    cols: usize,
+    data: Vec<MiEntry>,
+}
+
 /// The context state of one tile.
 pub struct ContextState {
     pub mi_rows: usize,
@@ -214,6 +237,40 @@ impl ContextState {
                 mi.ref_frame[i] = ref_frame;
                 mi.mv[i] = mv;
                 mi.written[i] = true;
+            }
+        }
+    }
+
+    /// Saves the mode info of the `rows` x `cols` units at `(r, c)` (clipped to the frame), so a
+    /// search can try several codings of the region and go back.
+    pub fn save_region(&self, r: usize, c: usize, rows: usize, cols: usize) -> RegionSave {
+        let (rows, cols) = (rows.min(self.mi_rows.saturating_sub(r)), cols.min(self.mi_cols.saturating_sub(c)));
+        let mut data = Vec::with_capacity(rows * cols);
+        for y in 0..rows {
+            for x in 0..cols {
+                let (i, mi) = (self.idx(r + y, c + x), &self.mi);
+                data.push(MiEntry { mi_size: mi.mi_size[i], skip: mi.skip[i], y_mode: mi.y_mode[i], tx_size: mi.tx_size[i], inter_tx_size: mi.inter_tx_size[i], is_inter: mi.is_inter[i], ref_frame: mi.ref_frame[i], mv: mi.mv[i], written: mi.written[i] });
+            }
+        }
+        RegionSave { r, c, rows, cols, data }
+    }
+
+    /// Puts a saved rectangle back.
+    pub fn restore_region(&mut self, save: &RegionSave) {
+        for y in 0..save.rows {
+            for x in 0..save.cols {
+                let e = &save.data[y * save.cols + x];
+                let i = self.idx(save.r + y, save.c + x);
+                let mi = &mut self.mi;
+                mi.mi_size[i] = e.mi_size;
+                mi.skip[i] = e.skip;
+                mi.y_mode[i] = e.y_mode;
+                mi.tx_size[i] = e.tx_size;
+                mi.inter_tx_size[i] = e.inter_tx_size;
+                mi.is_inter[i] = e.is_inter;
+                mi.ref_frame[i] = e.ref_frame;
+                mi.mv[i] = e.mv;
+                mi.written[i] = e.written;
             }
         }
     }
