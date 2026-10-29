@@ -326,6 +326,14 @@ fn notes_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         ui.add_space(4.0);
     }
     ui.add_space(8.0);
+    if finish_ready(with(|u| u.store.open_count()), with(|u| u.store.list(&app.doc.model, comments::Filter::All).len())) {
+        // Notes all answered: the next step is the render.
+        ui.label(egui::RichText::new("Every note is resolved").color(t.text));
+        if Button::primary("Export…").compact().show(ui).clicked() {
+            super::run(app, ui.ctx(), super::Action::Export);
+        }
+        ui.add_space(8.0);
+    }
     ui.horizontal_wrapped(|ui| {
         for (label, fmt, ext) in [("Export CSV", "csv", "csv"), ("Markdown", "markdown", "md"), ("EDL markers", "edl", "edl")] {
             if ui.small_button(label).clicked() {
@@ -369,12 +377,32 @@ fn note_actions(app: &mut StudioApp, ui: &mut egui::Ui, c: &comments::Comment, m
         }
         if ui.small_button("Delete").clicked() {
             with(|u| {
-                let _ = u.store.delete(&c.id);
+                match u.store.delete(&c.id) {
+                    Ok(()) => u.status = Some("Deleted the note".to_owned()),
+                    Err(e) => u.status = Some(format!("Could not delete the note: {e}")),
+                }
                 u.selected = None;
                 save_store(u);
             });
         }
     });
+}
+
+/// Review is finished when there are notes and none is open.
+fn finish_ready(open: usize, total: usize) -> bool {
+    total > 0 && open == 0
+}
+
+#[cfg(test)]
+mod finish_tests {
+    use super::finish_ready;
+
+    #[test]
+    fn the_export_step_shows_once_every_note_is_resolved() {
+        assert!(!finish_ready(0, 0), "no notes: nothing was reviewed");
+        assert!(!finish_ready(2, 5));
+        assert!(finish_ready(0, 5));
+    }
 }
 
 fn export_notes(app: &mut StudioApp, format: &str, ext: &str) {
@@ -441,8 +469,11 @@ fn versions_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                 if ui.small_button("Restore").on_hover_text("Back to this version, as one undo step").clicked() {
                     match versions::load(&root, &v.id).and_then(|(_, p)| app.doc.take_in(&format!("Restore {}", v.name), &p)) {
                         Ok(_) => {
-                            let _ = versions::set_current(&root, &v.id);
-                            with(|u| u.status = Some(format!("Restored {} (undo takes it back)", v.name)));
+                            let note = match versions::set_current(&root, &v.id) {
+                                Ok(_) => format!("Restored {} (undo takes it back)", v.name),
+                                Err(e) => format!("Restored {} (undo takes it back), but could not mark it current: {e}", v.name),
+                            };
+                            with(|u| u.status = Some(note));
                         }
                         Err(e) => with(|u| u.status = Some(e)),
                     }
@@ -479,12 +510,13 @@ fn branch(app: &mut StudioApp, root: &Path, version: &str, name: &str) {
         app.doc.model.next_id = counter.next_id;
         if app.doc.apply(&format!("Branch {name}"), m::Edit::Batch { edits }) { Ok(()) } else { Err(app.doc.error.take().unwrap_or_default()) }
     });
-    let _ = versions::set_branch(root, name);
+    let marked = versions::set_branch(root, name);
     with(|u| {
         u.index = versions::Index::load(root).unwrap_or_default();
-        u.status = Some(match r {
-            Ok(()) => format!("\"{name}\" is now a cut of its own"),
-            Err(e) => e,
+        u.status = Some(match (r, marked) {
+            (Ok(()), Ok(_)) => format!("\"{name}\" is now a cut of its own"),
+            (Ok(()), Err(e)) => format!("\"{name}\" is now a cut of its own, but could not be marked current: {e}"),
+            (Err(e), _) => e,
         });
     });
 }
@@ -734,7 +766,9 @@ fn sync_now(app: &mut StudioApp, root: &Path, remote: &str) {
         if let Ok(o) = &r
             && o.team_updated
         {
-            let _ = collab::write_json(&team::file(root), &u.team);
+            if let Err(e) = collab::write_json(&team::file(root), &u.team) {
+                u.status = Some(format!("Could not save the team: {e}"));
+            }
             app.doc.guard = u.team.guard_for(&collab::identity());
         }
         u.status = Some(match r {
