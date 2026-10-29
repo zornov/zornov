@@ -227,6 +227,17 @@ impl FrameState {
         self.cdef[(r >> 4) * self.cdef_cols + (c >> 4)]
     }
 
+    pub fn set_cdef_idx(&mut self, r: usize, c: usize, v: i8) {
+        let i = (r >> 4) * self.cdef_cols + (c >> 4);
+        if i < self.cdef.len() {
+            self.cdef[i] = v;
+        }
+    }
+
+    pub fn set_lf_tx_size(&mut self, plane: usize, row: usize, col: usize, v: u8) {
+        self.lf_tx_size[plane].set(row, col, v);
+    }
+
     #[inline]
     pub fn lf_tx_size(&self, plane: usize, row: usize, col: usize) -> usize {
         self.lf_tx_size[plane].get(row, col) as usize

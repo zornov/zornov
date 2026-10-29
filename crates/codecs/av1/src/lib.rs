@@ -42,6 +42,7 @@ mod tile;
 pub mod transform;
 
 pub use decoder::Decoder;
+pub use postfilter::PostFilter;
 pub use header::{ColorConfig, FrameHeader, SequenceHeader};
 pub use stats::{DecodeStats, Stage};
 

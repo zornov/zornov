@@ -414,6 +414,11 @@ impl TileWriter {
     }
 
     /// The finished tile data.
+    /// The mode info of the frame coded so far.
+    pub fn mode_info(&self) -> &studio_av1::frame::MiInfo {
+        &self.ctx.mi
+    }
+
     pub fn finish(self) -> Vec<u8> {
         self.enc.finish()
     }

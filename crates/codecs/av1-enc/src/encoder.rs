@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use crate::bits::BitWriter;
+use crate::filters::{self, FilterParams};
 use crate::error::{Error, Result};
 use crate::mode::{FixedDecider, ModeDecider, SearchDecider};
 use crate::rc::gop::GopPlanner;
@@ -45,6 +46,8 @@ fn level_for(width: u32, height: u32) -> u8 {
 pub struct Encoder {
     cfg: Config,
     seq: SeqParams,
+    dseq: studio_av1::SequenceHeader,
+    filters: filters::FilterSet,
     gop: GopPlanner,
     rc: RateControl,
     frames: u32,
@@ -102,7 +105,14 @@ impl Encoder {
             matrix_coefficients: 1,
             full_range: false,
         };
-        Ok(Encoder { gop: GopPlanner::new(cfg.keyint), rc: RateControl::new(&cfg), cfg, seq, frames: 0, refs: RefStore::default(), recon: None })
+        let dseq = filters::decoder_sequence(&write_sequence_header(&seq));
+        Ok(Encoder { dseq, filters: Default::default(), gop: GopPlanner::new(cfg.keyint), rc: RateControl::new(&cfg), cfg, seq, frames: 0, refs: RefStore::default(), recon: None })
+    }
+
+    /// Chooses which in-loop filters may be used (all of them by default).
+    pub fn with_filters(mut self, filters: filters::FilterSet) -> Encoder {
+        self.filters = filters;
+        self
     }
 
     /// The `av1C` record for the MP4 track.
@@ -147,6 +157,9 @@ impl Encoder {
                 }
             }
         }
+        // in-loop filters: the search sees the finished tile, the references the filtered frame
+        let lf = if self.cfg.speed >= FIXED_FROM_SPEED || !self.filters.deblock { [0, 0] } else { filters::search_deblock(&self.dseq, &buf, tw.mode_info(), frame) };
+        let buf = filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf });
         let tile = tw.finish();
 
         let fp = FrameParams {
@@ -157,7 +170,7 @@ impl Encoder {
             refresh_frame_flags: if key { 0xFF } else { 0x01 },
             order_hint: self.frames & 0x7F,
             ref_frame_idx: ref_idx,
-            loop_filter_level: [0, 0],
+            loop_filter_level: [lf[0] as u8, lf[1] as u8],
             cdef_enabled: false,
             tile_cols_log2: 0,
             tile_rows_log2: 0,
