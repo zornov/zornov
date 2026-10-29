@@ -7,8 +7,7 @@
 //! checks (clipping, black level, cast, saturation).
 
 use crate::app::StudioApp;
-use crate::icons::Icon;
-use crate::kit::{self, IconButton, Segment};
+use crate::kit::{self, Segment};
 use crate::theme;
 use eframe::egui::{self, Align2, Color32, ColorImage, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 use studio_colour::image::Image;
@@ -30,14 +29,6 @@ pub fn is_on(ctx: &egui::Context) -> bool {
 /// Show or hide the scopes (a workspace does this).
 pub fn set_on(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_persisted(on_id(), on));
-}
-
-/// The toolbar's scopes button.
-pub fn toolbar_button(ui: &mut egui::Ui) {
-    let on = is_on(ui.ctx());
-    if IconButton::new(Icon::Waveform, "Scopes").active(on).show(ui).clicked() {
-        ui.ctx().data_mut(|d| d.insert_persisted(on_id(), !on));
-    }
 }
 
 /// Settings for frames that are already display-encoded 8-bit RGB.
