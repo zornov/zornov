@@ -918,7 +918,10 @@ mod scripted {
         assert!(matches!(p("click \"Save as\"#2 cmd").unwrap(), Some(Step::Click { at: ui_script::Target::Label(l, 2), mods, .. }) if l == "Save as" && mods.command));
         assert!(matches!(p("move \"File\"").unwrap(), Some(Step::Move { at: ui_script::Target::Label(_, 1) })));
         assert!(p("click \"File").is_err() && p("click \"File\"#0").is_err() && p("move \"File\" cmd").is_err());
-        assert!(matches!(p("drag 1 2 30 40").unwrap(), Some(Step::Drag { .. })));
+        assert!(matches!(p("drag 1 2 30 40").unwrap(), Some(Step::Drag { hold: false, .. })));
+        assert!(matches!(p("drag 1 2 30 40 shift hold").unwrap(), Some(Step::Drag { hold: true, mods, .. }) if mods.shift));
+        assert!(matches!(p("drag \"Clip\"#2 30 40").unwrap(), Some(Step::Drag { from: ui_script::Target::Label(_, 2), to: (30.0, 40.0), .. })));
+        assert_eq!(p("release").unwrap(), Some(Step::Release));
         assert!(matches!(p("scroll 5 5 -40 alt").unwrap(), Some(Step::Scroll { dy, .. }) if dy == -40.0));
         assert!(matches!(p("key Enter").unwrap(), Some(Step::Key { key: Key::Enter, .. })));
         assert!(matches!(p("key esc").unwrap(), Some(Step::Key { key: Key::Escape, .. })));
@@ -966,6 +969,23 @@ mod scripted {
         assert_eq!(s.app.overlay, crate::app::Overlay::Settings, "File ▸ Settings… opened by name (was {before:?})");
         assert_eq!(report.failures.len(), 2, "{:?}", report.failures);
         assert!(report.log.iter().filter(|l| l.starts_with("failed")).count() == 2 && report.log.last().unwrap().starts_with("ok") && report.shots.len() == 1, "{:?}", report.log);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn a_held_drag_keeps_the_button_down_until_the_shot_or_a_release() {
+        let _s = serial();
+        let out = std::env::temp_dir().join(format!("zornov-ui-script-{}-hold-out", std::process::id()));
+        let mut s = session(&out, &["--size", "800x600"]);
+        let down = |s: &Session| s.ctx.input(|i| i.pointer.primary_down());
+        let r = ui_script::run_text(&mut s, "drag 100 100 300 200 hold\n", &out, "h");
+        assert!(r.failures.is_empty() && down(&s), "{:?}", r.failures);
+        let r = ui_script::run_text(&mut s, "shot held\n", &out, "h");
+        assert!(r.failures.is_empty() && !down(&s), "the shot is taken, then the button is let go");
+        ui_script::run_text(&mut s, "drag 100 100 300 200 hold\nrelease\n", &out, "h");
+        assert!(!down(&s));
+        let r = ui_script::run_text(&mut s, "release\n", &out, "h");
+        assert_eq!(r.failures.len(), 1, "nothing is held");
         let _ = std::fs::remove_dir_all(&out);
     }
 

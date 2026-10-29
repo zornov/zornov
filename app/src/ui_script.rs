@@ -25,7 +25,9 @@
 //! click "Label"[#N] [mods]   the widget a screen reader calls Label (its
 //!                       centre); #N is the Nth match in reading order
 //! move X Y              or move "Label"[#N]
-//! drag X1 Y1 X2 Y2 [mods]
+//! drag X1 Y1 X2 Y2 [mods] [hold]   or drag "Label"[#N] X2 Y2; `hold` keeps
+//!                       the button down (a shot is taken, then it is let go)
+//! release               let the button go where the pointer is
 //! scroll X Y DY [mods]  DY in points, positive scrolls up
 //! key NAME [mods]       an egui key name (A, Enter, Escape, ArrowDown…)
 //! text "…"              typed text
@@ -66,7 +68,8 @@ pub enum Step {
     Home,
     Click { at: Target, mods: Modifiers, button: PointerButton, count: u8 },
     Move { at: Target },
-    Drag { from: (f32, f32), to: (f32, f32), mods: Modifiers },
+    Drag { from: Target, to: (f32, f32), mods: Modifiers, hold: bool },
+    Release,
     Scroll { x: f32, y: f32, dy: f32, mods: Modifiers },
     Key { key: Key, mods: Modifiers },
     Text(String),
@@ -199,6 +202,15 @@ pub fn parse_line(line: &str) -> Result<Option<Step>, String> {
             }));
         }
     }
+    if let Some(rest) = trimmed.strip_prefix("drag").map(str::trim_start).filter(|r| r.starts_with('"')) {
+        let (from, tail) = label_target(rest)?;
+        let w = words(tail)?;
+        let n = |i: usize| w.get(i).and_then(|v| v.parse::<f32>().ok()).ok_or_else(|| "drag \"Label\" needs X2 Y2".to_owned());
+        let (to, rest) = ((n(0)?, n(1)?), &w[2..]);
+        let hold = rest.iter().any(|x| x == "hold");
+        let mods = mods_of(&rest.iter().filter(|x| *x != "hold").cloned().collect::<Vec<_>>())?;
+        return Ok(Some(Step::Drag { from, to, mods, hold }));
+    }
     let w = words(line)?;
     let Some(cmd) = w.first() else { return Ok(None) };
     let num = |i: usize, what: &str| -> Result<f32, String> { w.get(i).ok_or_else(|| format!("{what} is missing"))?.parse::<f32>().map_err(|_| format!("{what} `{}` is not a number", w[i])) };
@@ -213,7 +225,12 @@ pub fn parse_line(line: &str) -> Result<Option<Step>, String> {
             count: if cmd == "dclick" { 2 } else { 1 },
         },
         "move" => Step::Move { at: Target::At(num(1, "x")?, num(2, "y")?) },
-        "drag" => Step::Drag { from: (num(1, "x1")?, num(2, "y1")?), to: (num(3, "x2")?, num(4, "y2")?), mods: mods_of(&w[5.min(w.len())..])? },
+        "drag" => {
+            let rest = &w[5.min(w.len())..];
+            let mods = mods_of(&rest.iter().filter(|x| *x != "hold").cloned().collect::<Vec<_>>())?;
+            Step::Drag { from: Target::At(num(1, "x1")?, num(2, "y1")?), to: (num(3, "x2")?, num(4, "y2")?), mods, hold: rest.iter().any(|x| x == "hold") }
+        }
+        "release" => Step::Release,
         "scroll" => Step::Scroll { x: num(1, "x")?, y: num(2, "y")?, dy: num(3, "dy")?, mods: mods_of(&w[4.min(w.len())..])? },
         "key" => {
             let name = w.get(1).ok_or("a key name is missing")?;
@@ -231,8 +248,8 @@ pub fn parse_line(line: &str) -> Result<Option<Step>, String> {
         }
         other => return Err(format!("`{other}` is not a step")),
     };
-    if matches!(step, Step::Home) && w.len() > 1 {
-        return Err("home takes nothing".into());
+    if matches!(step, Step::Home | Step::Release) && w.len() > 1 {
+        return Err(format!("{cmd} takes nothing"));
     }
     Ok(Some(step))
 }
@@ -380,6 +397,8 @@ pub struct Session {
     /// Pictures large enough to be a frame, as egui was given them.
     /// The viewer's frame has been asked for again since the project opened.
     nudged: bool,
+    /// A drag with `hold`: where the pointer is and the modifiers held.
+    held: Option<(egui::Pos2, Modifiers)>,
     pub frames_seen: HashMap<TextureId, std::sync::Arc<egui::ColorImage>>,
 }
 
@@ -399,7 +418,7 @@ impl Session {
         } else {
             (None, None)
         };
-        let mut s = Session { app, ctx, frame: eframe::Frame::_new_kittest(), time: 0.0, size, ppp, gpu, cpu: Default::default(), textures: HashMap::new(), shapes: vec![], frame_ppp: ppp, mods: Modifiers::NONE, sent_mods: Modifiers::NONE, quiet: 0, last_hash: 0, gpu_note, nodes: vec![], nudged: false, frames_seen: HashMap::new() };
+        let mut s = Session { app, ctx, frame: eframe::Frame::_new_kittest(), time: 0.0, size, ppp, gpu, cpu: Default::default(), textures: HashMap::new(), shapes: vec![], frame_ppp: ppp, mods: Modifiers::NONE, sent_mods: Modifiers::NONE, quiet: 0, last_hash: 0, gpu_note, nodes: vec![], nudged: false, held: None, frames_seen: HashMap::new() };
         s.frames(3);
         s
     }
@@ -553,6 +572,15 @@ impl Session {
         Event::PointerButton { pos, button, pressed, modifiers }
     }
 
+    /// Let go of a held drag.
+    fn release(&mut self) {
+        if let Some((p, mods)) = self.held.take() {
+            self.frame(vec![Self::button(p, PointerButton::Primary, false, mods)]);
+            self.set_mods(Modifiers::NONE);
+            self.frames(2);
+        }
+    }
+
     /// Run one step.
     pub fn step(&mut self, step: &Step) -> Result<(), String> {
         match step {
@@ -598,8 +626,11 @@ impl Session {
                 self.set_mods(Modifiers::NONE);
                 self.frames(2);
             }
-            Step::Drag { from, to, mods } => {
-                let (a, b) = (self.pos(from.0, from.1)?, self.pos(to.0, to.1)?);
+            Step::Drag { from, to, mods, hold } => {
+                if self.held.is_some() {
+                    self.release();
+                }
+                let (a, b) = (self.target(from)?, self.pos(to.0, to.1)?);
                 self.set_mods(*mods);
                 self.frame(vec![Event::PointerMoved(a)]);
                 self.frame(vec![Self::button(a, PointerButton::Primary, true, *mods)]);
@@ -607,9 +638,20 @@ impl Session {
                     let p = a + (b - a) * (i as f32 / 8.0);
                     self.frame(vec![Event::PointerMoved(p)]);
                 }
-                self.frame(vec![Self::button(b, PointerButton::Primary, false, *mods)]);
-                self.set_mods(Modifiers::NONE);
-                self.frames(2);
+                if *hold {
+                    self.held = Some((b, *mods));
+                    self.frames(2);
+                } else {
+                    self.frame(vec![Self::button(b, PointerButton::Primary, false, *mods)]);
+                    self.set_mods(Modifiers::NONE);
+                    self.frames(2);
+                }
+            }
+            Step::Release => {
+                if self.held.is_none() {
+                    return Err("no drag is being held".into());
+                }
+                self.release();
             }
             Step::Scroll { x, y, dy, mods } => {
                 let p = self.pos(*x, *y)?;
@@ -751,7 +793,11 @@ pub fn run_text(s: &mut Session, text: &str, out: &Path, file: &str) -> Report {
         };
         r.steps += 1;
         let result = match &step {
-            Step::Shot(name) => s.shot_to(out, name).map(|p| r.shots.push(p)),
+            Step::Shot(name) => {
+                let shot = s.shot_to(out, name).map(|p| r.shots.push(p));
+                s.release();
+                shot
+            }
             other => s.step(other),
         };
         match result {
