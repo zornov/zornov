@@ -783,7 +783,7 @@ fn the_top_bar_is_menus_then_workspace_tabs_then_jobs_and_export() {
 /// that one Workspace dropdown has the same list.
 #[test]
 fn the_workspace_tabs_reach_1100_px_and_become_a_dropdown_below() {
-    let mut h = top_bar(1100.0);
+    let h = top_bar(1100.0);
     for t in TABS {
         assert!(h.find(Some(accesskit::Role::RadioButton), t).is_some(), "{t} is a tab at 1100 px");
     }

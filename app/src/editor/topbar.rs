@@ -70,10 +70,10 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     let tabs_fit = gap - tabs_w >= NAME_MIN_W;
     bar.add_space(6.0);
     let used = if tabs_fit {
-        workspace_tabs(app, &mut bar, &spaces, current, &mut out);
+        workspace_tabs(&mut bar, &spaces, current, &mut out);
         tabs_w
     } else {
-        workspace_menu(app, &mut bar, &spaces, current, &mut out);
+        workspace_menu(&mut bar, &spaces, current, &mut out);
         DROPDOWN_W
     };
 
@@ -153,7 +153,7 @@ fn tabs_width(ui: &egui::Ui, spaces: &[Workspace]) -> f32 {
 }
 
 /// The workspace tabs, with their names. Your own workspaces are in the dropdown and the View menu.
-fn workspace_tabs(app: &mut StudioApp, ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
+fn workspace_tabs(ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
     let names = tab_names(spaces);
     let builtin = names.len() - 1;
     let opts: Vec<kit::Segment> = names.iter().map(|n| kit::Segment::text(n)).collect();
@@ -168,14 +168,13 @@ fn workspace_tabs(app: &mut StudioApp, ui: &mut egui::Ui, spaces: &[Workspace], 
             out.workspace = spaces.get(i).cloned();
         }
     }
-    let _ = app;
 }
 
 /// Wide enough for "Motion" and a caret.
 const DROPDOWN_W: f32 = 132.0;
 
 /// The same list as a dropdown, for a window too narrow for the tabs.
-fn workspace_menu(app: &mut StudioApp, ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
+fn workspace_menu(ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
     let mut names: Vec<&str> = spaces.iter().map(|w| tab_label(&w.name)).collect();
     names.push(PAINT);
     let cur = current.unwrap_or(0);
@@ -189,7 +188,6 @@ fn workspace_menu(app: &mut StudioApp, ui: &mut egui::Ui, spaces: &[Workspace], 
             out.workspace = spaces.get(i).cloned();
         }
     }
-    let _ = app;
 }
 
 /// The name (at most `max_w` wide with its padding), double-click to rename.

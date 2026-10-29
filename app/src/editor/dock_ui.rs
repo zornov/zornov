@@ -313,7 +313,7 @@ fn keeps_own_keys(p: Panel) -> bool {
 
 /// Follows clicks to find the keyboard's owner, and tells the key dispatcher
 /// (`crate::keymap::claim`) when it is not the editor.
-fn track_key_scope(app: &StudioApp, ctx: &egui::Context) {
+fn track_key_scope(ctx: &egui::Context) {
     let press = ctx.input(|i| if i.pointer.primary_pressed() { i.pointer.interact_pos() } else { None });
     if let Some(pos) = press {
         let rects: Vec<(Panel, Rect)> = ctx.data(|d| d.get_temp(rects_id())).unwrap_or_default();
@@ -340,7 +340,6 @@ fn track_key_scope(app: &StudioApp, ctx: &egui::Context) {
     {
         claim(ctx, KeyOwner::Panel);
     }
-    let _ = app;
 }
 
 /// The panel the person last clicked in, if it is docked.
@@ -381,7 +380,7 @@ fn maximised_layout(lay: &Layout, p: Panel) -> Option<Layout> {
 /// Keys: Esc cancels a drag; ⇧F10 opens the focused region's Move menu;
 /// ⌘\ maximises the panel being worked in.
 pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    track_key_scope(app, ctx);
+    track_key_scope(ctx);
     let maximise = egui::KeyboardShortcut::new(egui::Modifiers { command: true, mac_cmd: cfg!(target_os = "macos"), ctrl: !cfg!(target_os = "macos"), ..egui::Modifiers::NONE }, egui::Key::Backslash);
     if app.overlay == crate::app::Overlay::None && ctx.input_mut(|i| i.consume_shortcut(&maximise)) {
         toggle_maximised(app, ctx);
@@ -1048,21 +1047,6 @@ pub fn float_grip(app: &mut StudioApp, ui: &mut egui::Ui, p: Panel) {
 /// right-to-left window).
 fn on_screen(lay: &Layout, r: Rect) -> Rect {
     if crate::i18n::is_rtl() { crate::i18n::mirror(r, lay.body) } else { r }
-}
-
-/// Layout ▸ Move panel: the open panels, each opening its Move menu.
-pub fn move_panel_items(app: &StudioApp, ui: &mut egui::Ui) -> Option<(Panel, Rect)> {
-    let lay = app.editor.dock_layout.as_ref()?;
-    let mut out = None;
-    for tile in &lay.tiles {
-        for p in &tile.panels {
-            if MenuItem::new(p.name()).reserve_icon().show(ui).clicked() {
-                let r = on_screen(lay, tile.rect);
-                out = Some((*p, Rect::from_min_size(r.min, Vec2::new(r.width(), header_h(*p).min(r.height())))));
-            }
-        }
-    }
-    out
 }
 
 /// The AI's `layout` tool, run by the window (see `agent::live`).
