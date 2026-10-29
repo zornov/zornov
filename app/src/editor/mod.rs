@@ -505,38 +505,18 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
                 kit::push(ctx, if ed.selection.is_empty() { "No clip under the playhead to split" } else { "The playhead is not inside the selected clip" }, None, Some(Icon::Info));
             }
             if doc.project.clips.len() > before {
-                ed.undo_toast = Some(kit::push(ctx, crate::i18n::tf(format!("Split at {}", view::timecode(t, doc.project.fps))), Some("Undo"), Some(Icon::Scissors)));
+                toast_undo(ed, ctx, crate::i18n::tf(format!("Split at {}", view::timecode(t, doc.project.fps))), Icon::Scissors);
             }
         }
         Action::Delete => {
             if let Some(id) = ed.selected_cut.take() {
                 let seq = doc.seq();
                 if doc.apply("Remove cut", m::Edit::RemoveTransition { seq, id: m::TransitionId(id) }) {
-                    ed.undo_toast = Some(kit::push(ctx, "Cut removed", Some("Undo"), Some(Icon::Trash)));
+                    toast_undo(ed, ctx, "Cut removed", Icon::Trash);
                 }
                 return;
             }
-            if ed.selection.is_empty() {
-                kit::push(ctx, "Select a clip to delete", None, Some(Icon::Info));
-                return;
-            }
-            let n = ed.selection.len();
-            let seq = doc.seq();
-            // The spine closes up (ripple); free lanes just lose the clip.
-            let spine = doc.project.spine();
-            let (on_spine, others): (Vec<u32>, Vec<u32>) = ed.selection.iter().partition(|id| doc.project.clip(**id).is_some_and(|c| Some(c.lane) == spine));
-            let ids = |v: &[u32]| v.iter().map(|id| m::ClipId(*id as u64)).collect::<Vec<_>>();
-            let mut edits = Vec::new();
-            if !others.is_empty() {
-                edits.push(m::Edit::Lift { seq, clips: ids(&others) });
-            }
-            if !on_spine.is_empty() {
-                edits.push(m::Edit::RippleDelete { seq, clips: ids(&on_spine) });
-            }
-            if doc.apply("Delete", m::Edit::Batch { edits }) {
-                ed.selection.clear();
-                ed.undo_toast = Some(kit::push(ctx, if n == 1 { "Clip deleted".to_owned() } else { format!("{n} clips deleted") }, Some("Undo"), Some(Icon::Trash)));
-            }
+            delete_selected(ed, doc, ctx, false);
         }
         Action::Duplicate => {
             if ed.selection.is_empty() {
@@ -548,6 +528,8 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             let clips = ed.selection.iter().map(|id| m::ClipId(*id as u64)).collect();
             if doc.apply("Duplicate", m::Edit::Duplicate { seq, clips }) {
                 ed.selection = doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
+                let n = ed.selection.len();
+                toast_undo(ed, ctx, if n == 1 { "Duplicated clip".to_owned() } else { format!("Duplicated {n} clips") }, Icon::Copy);
             }
         }
         Action::SelectAll => ed.selection = doc.project.clips.iter().map(|c| c.id).collect(),
@@ -616,6 +598,40 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
     }
 }
 
+/// A toast with an Undo button that undoes the person's last step: the one
+/// way every edit announces itself.
+pub(crate) fn toast_undo(ed: &mut EditorState, ctx: &egui::Context, text: impl Into<String>, icon: Icon) {
+    ed.undo_toast = Some(kit::push(ctx, text, Some("Undo"), Some(icon)));
+}
+
+/// Delete (or cut) the selected clips: the main lane closes up, free lanes
+/// just lose the clip. Says what happened; false when nothing was removed.
+pub(crate) fn delete_selected(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context, cut: bool) -> bool {
+    if ed.selection.is_empty() {
+        kit::push(ctx, if cut { "Select a clip to cut" } else { "Select a clip to delete" }, None, Some(Icon::Info));
+        return false;
+    }
+    let n = ed.selection.len();
+    let seq = doc.seq();
+    let spine = doc.project.spine();
+    let (on_spine, others): (Vec<u32>, Vec<u32>) = ed.selection.iter().partition(|id| doc.project.clip(**id).is_some_and(|c| Some(c.lane) == spine));
+    let ids = |v: &[u32]| v.iter().map(|id| m::ClipId(*id as u64)).collect::<Vec<_>>();
+    let mut edits = Vec::new();
+    if !others.is_empty() {
+        edits.push(m::Edit::Lift { seq, clips: ids(&others) });
+    }
+    if !on_spine.is_empty() {
+        edits.push(m::Edit::RippleDelete { seq, clips: ids(&on_spine) });
+    }
+    if !doc.apply(if cut { "Cut" } else { "Delete" }, m::Edit::Batch { edits }) {
+        return false;
+    }
+    ed.selection.clear();
+    let verb = if cut { "cut" } else { "deleted" };
+    toast_undo(ed, ctx, if n == 1 { format!("Clip {verb}") } else { format!("{n} clips {verb}") }, if cut { Icon::Scissors } else { Icon::Trash });
+    true
+}
+
 /// Say what a marker or in/out edit did; a refusal says so too (the
 /// model's own reason, when it gave one, is shown by the error toast).
 fn range_toast(ctx: &egui::Context, doc: &Doc, ok: bool, done: String) {
@@ -645,7 +661,7 @@ fn undo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
 fn redo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
     match doc.redo() {
         Some(l) => {
-            ed.undo_toast = Some(kit::push(ctx, crate::i18n::tf(format!("Redid {}", l.to_lowercase())), Some("Undo"), Some(Icon::ArrowUUpRight)));
+            toast_undo(ed, ctx, crate::i18n::tf(format!("Redid {}", l.to_lowercase())), Icon::ArrowUUpRight);
             show_changed(ed, doc);
         }
         None if doc.error.is_none() => {
@@ -787,19 +803,25 @@ fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     let ed = &mut app.editor;
     // An open popover closes itself on Escape.
     if !kit::any_popover_open(ctx) && pressed(M::NONE, Key::Escape) {
-        if ed.tl_drag.is_some() || ctx.input(|i| i.pointer.any_down()) {
-            // Esc during a drag puts everything back.
-            ed.tl_drag = None;
-            ed.snap_line = None;
-            app.doc.cancel_gesture();
-        } else if ed.fullscreen {
-            ed.fullscreen = false;
-        } else if ed.sheet_open {
-            ed.sheet_open = false;
-        } else {
-            ed.selection.clear();
-            ed.selected_cut = None;
-        }
+        escape(ed, &mut app.doc, ctx.input(|i| i.pointer.any_down()));
+    }
+}
+
+/// Esc, one step at a time: an open drag goes back, then full screen, the
+/// Inspector sheet, and last the selection (a selected cut included).
+fn escape(ed: &mut EditorState, doc: &mut Doc, pointer_down: bool) {
+    if ed.tl_drag.is_some() || pointer_down {
+        // Esc during a drag puts everything back.
+        ed.tl_drag = None;
+        ed.snap_line = None;
+        doc.cancel_gesture();
+    } else if ed.fullscreen {
+        ed.fullscreen = false;
+    } else if ed.sheet_open {
+        ed.sheet_open = false;
+    } else {
+        ed.selection.clear();
+        ed.selected_cut = None;
     }
 }
 
@@ -878,5 +900,126 @@ mod history_focus_tests {
         assert!(doc.redo().is_some());
         show_changed(&mut ed, &mut doc);
         assert_eq!(ed.playhead, mid);
+    }
+}
+
+#[cfg(test)]
+mod edit_flow_tests {
+    use super::*;
+    use crate::app::StudioApp;
+
+    fn editor_app() -> (StudioApp, egui::Context) {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        (app, ctx)
+    }
+
+    fn two_cards(app: &mut StudioApp) -> Vec<u32> {
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Flow", 320, 180, 24.0));
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#ff0000", "at": 0.0, "duration": 3.0}), serde_json::json!({"op": "card", "colour": "#00ff00", "at": 3.0, "duration": 3.0})], "cards", false).unwrap();
+        app.doc = s.doc;
+        app.doc.project.clips.iter().map(|c| c.id).collect()
+    }
+
+    fn said(ctx: &egui::Context) -> Vec<String> {
+        kit::recent(ctx).into_iter().map(|t| t.text).collect()
+    }
+
+    #[test]
+    fn keys_with_nothing_selected_say_so() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        two_cards(&mut app);
+        app.editor.selection.clear();
+        for (action, text) in [(Action::Delete, "Select a clip to delete"), (Action::Duplicate, "Select a clip to duplicate")] {
+            run(&mut app, &ctx, action);
+            assert!(said(&ctx).iter().any(|t| t == text), "{text}: {:?}", said(&ctx));
+        }
+        clip_menu::copy_selection(&mut app, &ctx, false);
+        clip_menu::paste_selection(&mut app, &ctx);
+        let all = said(&ctx);
+        assert!(all.iter().any(|t| t == "Select a clip to copy") && all.iter().any(|t| t.starts_with("Nothing to paste")), "{all:?}");
+    }
+
+    #[test]
+    fn marker_and_range_edits_say_what_they_did() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        two_cards(&mut app);
+        app.editor.playhead = SEC;
+        run(&mut app, &ctx, Action::Marker);
+        run(&mut app, &ctx, Action::RangeIn);
+        run(&mut app, &ctx, Action::RangeOut);
+        let all = said(&ctx).join("|");
+        assert!(all.contains("Marker added at") && all.contains("In point set at"), "{all}");
+        // Out at the in point is refused by the model's minimum range: it still answers.
+        assert!(all.contains("Out point set at") || all.contains("Nothing changed"), "{all}");
+    }
+
+    #[test]
+    fn split_away_from_the_clip_says_why() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        let ids = two_cards(&mut app);
+        app.editor.selection = vec![ids[0]];
+        app.editor.playhead = 5 * SEC;
+        let before = app.doc.project.clips.len();
+        run(&mut app, &ctx, Action::Split);
+        assert_eq!(app.doc.project.clips.len(), before);
+        assert!(!said(&ctx).is_empty() || app.doc.error.is_some());
+    }
+
+    #[test]
+    fn cut_says_cut_only_when_the_clips_are_gone_and_paste_brings_them_back() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        let ids = two_cards(&mut app);
+        app.editor.selection = vec![ids[0]];
+        let n = app.doc.project.clips.len();
+        clip_menu::copy_selection(&mut app, &ctx, true);
+        assert_eq!(app.doc.project.clips.len(), n - 1);
+        let all = said(&ctx);
+        assert!(all.iter().any(|t| t == "Clip cut") && !all.iter().any(|t| t.starts_with("Copied")), "{all:?}");
+        assert_eq!(kit::recent(&ctx)[0].action.as_deref(), Some("Undo"));
+        assert_eq!(app.editor.undo_toast, Some(kit::recent(&ctx)[0].id), "the Undo button belongs to this toast");
+        app.editor.playhead = 0;
+        clip_menu::paste_selection(&mut app, &ctx);
+        assert_eq!(app.doc.project.clips.len(), n);
+        assert!(said(&ctx).iter().any(|t| t == "Pasted clip"));
+    }
+
+    #[test]
+    fn escape_clears_a_selected_cut_too() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, _ctx) = editor_app();
+        let ids = two_cards(&mut app);
+        app.editor.selection = vec![ids[0]];
+        app.editor.selected_cut = Some(7);
+        escape(&mut app.editor, &mut app.doc, false);
+        assert!(app.editor.selection.is_empty() && app.editor.selected_cut.is_none());
+    }
+
+    #[test]
+    fn one_helper_gives_every_edit_toast_a_working_undo() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        let ids = two_cards(&mut app);
+        app.editor.selection = vec![ids[0]];
+        run(&mut app, &ctx, Action::Duplicate);
+        let t = &kit::recent(&ctx)[0];
+        assert_eq!((t.action.as_deref(), Some(t.id)), (Some("Undo"), app.editor.undo_toast));
+        assert!(app.doc.undo().is_some());
+        assert_eq!(app.doc.project.clips.len(), ids.len());
+    }
+
+    #[test]
+    fn stepping_a_frame_pauses_and_stays_inside() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, _ctx) = editor_app();
+        two_cards(&mut app);
+        let end = crate::services::transport::duration(&app.doc);
+        assert_eq!(crate::services::transport::step(&app.doc, end, 1), end);
+        assert_eq!(crate::services::transport::step(&app.doc, 0, -1), 0);
     }
 }

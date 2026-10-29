@@ -299,7 +299,7 @@ pub fn paste_at(app: &mut StudioApp, ctx: &egui::Context, at: Time) {
         if app.doc.apply("Paste", m::Edit::Paste { seq, at, clipboard: Box::new(cb), mode: m::PasteMode::Insert }) {
             app.editor.selection = app.doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
             let n = app.editor.selection.len();
-            app.editor.undo_toast = Some(kit::push(ctx, if n == 1 { "Pasted clip".to_owned() } else { format!("Pasted {n} clips") }, Some("Undo"), Some(Icon::DownloadSimple)));
+            super::toast_undo(&mut app.editor, ctx, if n == 1 { "Pasted clip".to_owned() } else { format!("Pasted {n} clips") }, Icon::DownloadSimple);
         }
     }
 }
@@ -368,14 +368,23 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
         Act::Marker => super::run(app, ctx, Action::Marker),
         Act::Delete => super::run(app, ctx, Action::Delete),
         Act::Copy | Act::Cut => {
-            if let Ok(cb) = m::Clipboard::copy(&app.doc.model, seq, &clips) {
-                let mut h = held(ctx);
-                h.clips = Some(cb);
-                hold(ctx, h);
-                if matches!(act, Act::Cut) {
-                    super::run(app, ctx, Action::Delete);
-                } else {
-                    kit::push(ctx, if ids.len() == 1 { "Copied clip".to_owned() } else { format!("Copied {} clips", ids.len()) }, None, Some(Icon::Copy));
+            match m::Clipboard::copy(&app.doc.model, seq, &clips) {
+                Ok(cb) => {
+                    let mut h = held(ctx);
+                    h.clips = Some(cb);
+                    hold(ctx, h);
+                    if matches!(act, Act::Cut) {
+                        app.editor.selection = ids.to_vec();
+                        // "Cut" is said only once the clips are really gone.
+                        if !super::delete_selected(&mut app.editor, &mut app.doc, ctx, true) {
+                            kit::push(ctx, "Copied, but could not remove the clips", None, Some(Icon::Warning));
+                        }
+                    } else {
+                        kit::push(ctx, if ids.len() == 1 { "Copied clip".to_owned() } else { format!("Copied {} clips", ids.len()) }, None, Some(Icon::Copy));
+                    }
+                }
+                Err(e) => {
+                    kit::push(ctx, format!("Could not copy: {e}"), None, Some(Icon::Warning));
                 }
             }
         }
@@ -449,7 +458,7 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
             };
             match restack(app, ids[0], &op) {
                 Ok(done) => {
-                    app.editor.undo_toast = Some(kit::push(ctx, done, Some("Undo"), Some(Icon::Stack)));
+                    super::toast_undo(&mut app.editor, ctx, done, Icon::Stack);
                 }
                 Err(e) => {
                     kit::push(ctx, e, None, Some(Icon::Warning));
@@ -578,5 +587,30 @@ mod tests {
         let op = restack_op(&s.doc.project, a, Stack::Forward).expect("an op");
         s.edit(&[op], "forward", false).expect("restack");
         assert!(lanes(&s, a) < lanes(&s, b), "a is over b again");
+    }
+
+    /// Restack is a plain edit: one undo step, authored by the person, and
+    /// a lane is added when none is free.
+    #[test]
+    fn restack_is_one_plain_undo_step() {
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let _serial = crate::ui_tests::serial();
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Stack", 320, 180, 24.0));
+        s.edit(&[json!({"op": "card", "colour": "#ff0000", "at": 0.0, "duration": 3.0, "lane": "overlay", "width": 100, "height": 100}), json!({"op": "card", "colour": "#00ff00", "at": 0.0, "duration": 3.0, "lane": "overlay", "width": 100, "height": 100})], "cards", false).unwrap();
+        app.doc = s.doc;
+        let lane_pos = |app: &StudioApp, id: u32| app.doc.project.lanes.iter().position(|l| Some(l.id) == app.doc.project.clip(id).map(|c| c.lane)).unwrap();
+        let ids: Vec<u32> = app.doc.project.clips.iter().filter(|c| c.name.contains("card")).map(|c| c.id).collect();
+        let (a, b) = if lane_pos(&app, ids[0]) < lane_pos(&app, ids[1]) { (ids[0], ids[1]) } else { (ids[1], ids[0]) };
+        let steps = app.doc.history_len();
+        let op = restack_op(&app.doc.project, a, Stack::Bottom).expect("an op");
+        let done = restack(&mut app, a, &op).expect("restacked");
+        assert_eq!(done, "Restacked clip");
+        assert!(lane_pos(&app, a) > lane_pos(&app, b));
+        assert_eq!(app.doc.history_len(), steps + 1, "one undo step, lane included");
+        assert!(app.doc.can_undo());
+        assert!(app.doc.undo().is_some());
+        assert!(lane_pos(&app, a) < lane_pos(&app, b), "undo puts it back");
     }
 }
