@@ -668,7 +668,7 @@ impl Session {
             let t = from + (dur as f64 * u).round() as m::Micros;
             let rig = state(ease_u(u));
             for p in &paths {
-                key(mc, p, t, rig_value(&rig, p), "smooth")?;
+                key(mc, p, t, rig_value(&rig, p), "spline")?;
             }
         }
         Ok(())
@@ -716,7 +716,7 @@ impl Session {
             let n = ((secs(dur) * 6.0).round() as usize).clamp(2, 600);
             for i in 0..=n {
                 let t = from + dur * i as i64 / n as i64;
-                keys.push((t, depth_at(self, mc, t)?, "smooth"));
+                keys.push((t, depth_at(self, mc, t)?, "spline"));
             }
         } else {
             let start = mc.generator_params_at(from).get("focus_distance").and_then(m::Value::as_f64).unwrap_or(num(&gen_params(mc), "focus_distance", base_zoom));

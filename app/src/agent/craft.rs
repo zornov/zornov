@@ -396,6 +396,9 @@ impl Session {
         let mut keys: Vec<(f64, Value, String)> = Vec::new();
         // Path handles a position key was given itself, by key time.
         let mut own_paths: Vec<(f64, m::PathHandles)> = Vec::new();
+        // Tangent shaping for `through` keys: the op's, or a key's own.
+        let tcb_all = op.get("tcb").map(tcb_of).transpose()?;
+        let mut own_tcb: Vec<(f64, m::keyframe::Tcb)> = Vec::new();
         if let Some(w) = op.get("wiggle") {
             // A hand-held wobble around the current value.
             let amount = w.get("amount").and_then(Value::as_f64).ok_or("wiggle needs \"amount\" (in the property's units)")?;
@@ -455,6 +458,9 @@ impl Session {
                 }
                 if let Some(e) = &e {
                     curve(e).ok_or_else(|| format!("ease \"{e}\": {CURVES}"))?;
+                }
+                if let Some(tc) = k.get("tcb") {
+                    own_tcb.push((t, tcb_of(tc)?));
                 }
                 keys.push((t, v, e.unwrap_or_else(|| curve_all.clone())));
             }
@@ -550,6 +556,7 @@ impl Session {
                 // key's in-handle.
                 let (interp, out, _, shape) = curve(e).expect("checked");
                 let mut key = m::Keyframe::new(micros(*t), v.clone(), interp);
+                key.tcb = own_tcb.iter().find(|(x, _)| (x - t).abs() < 1e-9).map(|x| x.1).or(tcb_all).filter(|_| interp == m::Interp::Through);
                 key.curve = shape;
                 key.path = paths[i];
                 if let Some(o) = out {
@@ -850,6 +857,9 @@ impl Session {
                         }
                         next_in = inn;
                     }
+                    if let Some(tc) = cv.get("tcb") {
+                        k.tcb = if tc.is_null() { None } else { Some(tcb_of(tc)?) };
+                    }
                     let handle = |v: Option<&Value>| v.and_then(Value::as_array).map(|a| m::Handle { x: a.first().and_then(Value::as_f64).unwrap_or(0.42).clamp(0.0, 1.0), y: a.get(1).and_then(Value::as_f64).unwrap_or(0.0) });
                     if let Some(h) = handle(cv.get("out")) {
                         k.ease_out = h;
@@ -962,7 +972,19 @@ fn unit_word(v: &mut Value) {
 }
 
 /// Named curves an animation can move along.
-pub const CURVES: &str = "smooth, linear, hold, ease_in_out (or ease), ease_in, ease_out, overshoot, anticipate, snap, whip; and the GSAP family, each with _in, _out (the default) or _in_out: elastic (rings and settles; elastic(1.2, 0.4) = amplitude, period), spring (a softer elastic), bounce, back (back(2.5) = how far past), expo, circ, sine, power1..power4 (or quad, cubic, quart, quint), steps(6). GSAP spellings work too: \"elastic.out(1, 0.3)\", \"power3.inOut\", \"steps(12)\"";
+pub const CURVES: &str = "smooth, spline (a C2 curve through every key of a run: no stops at the keys), through (C1 through every key, no stop at the turning ones; add \"tcb\": [tension, continuity, bias] to shape it), linear, hold, ease_in_out (or ease), ease_in, ease_out, overshoot, anticipate, snap, whip; and the GSAP family, each with _in, _out (the default) or _in_out: elastic (rings and settles; elastic(1.2, 0.4) = amplitude, period), spring (a softer elastic), bounce, back (back(2.5) = how far past), expo, circ, sine, power1..power4 (or quad, cubic, quart, quint), steps(6). GSAP spellings work too: \"elastic.out(1, 0.3)\", \"power3.inOut\", \"steps(12)\"";
+
+/// Kochanek-Bartels shaping for `through` keys: `[tension, continuity, bias]`
+/// or `{"tension", "continuity", "bias"}`, each -1 to 1 (0 is plain).
+pub fn tcb_of(v: &Value) -> Result<m::keyframe::Tcb, String> {
+    let bad = || "tcb is [tension, continuity, bias] or {\"tension\", \"continuity\", \"bias\"}, numbers from -1 to 1".to_string();
+    let n = |x: Option<&Value>| -> Result<f64, String> { x.map_or(Ok(0.0), |x| x.as_f64().filter(|f| f.is_finite() && (-1.0..=1.0).contains(f)).ok_or_else(bad)) };
+    match v {
+        Value::Array(a) if a.len() <= 3 => Ok(m::keyframe::Tcb { tension: n(a.first())?, continuity: n(a.get(1))?, bias: n(a.get(2))? }),
+        Value::Object(o) => Ok(m::keyframe::Tcb { tension: n(o.get("tension"))?, continuity: n(o.get("continuity"))?, bias: n(o.get("bias"))? }),
+        _ => Err(bad()),
+    }
+}
 
 /// A curve by name: how keys interpolate, for eased curves the handle
 /// leaving the key and the one arriving at the next (fractions of the
@@ -972,6 +994,8 @@ pub fn curve(name: &str) -> Option<(m::Interp, Option<m::Handle>, Option<m::Hand
     let h = |x: f64, y: f64| Some(m::Handle { x, y });
     Some(match name {
         "smooth" | "auto" => (m::Interp::Auto, None, None, None),
+        "spline" => (m::Interp::Spline, None, None, None),
+        "through" => (m::Interp::Through, None, None, None),
         "linear" | "none" => (m::Interp::Linear, None, None, None),
         "hold" | "step" => (m::Interp::Hold, None, None, None),
         // The short names (as the shape keys and CSS write them) too.
@@ -1152,6 +1176,24 @@ mod tests {
         let said = notes(&r);
         assert!(said.contains(&format!("{kept} of")) && said.contains("dropped"), "{said}");
         assert!(said.contains("undefined, skipped"), "{said}");
+    }
+
+    /// `spline` and `through` are eases like any other, `tcb` lands on
+    /// through keys only, and a bad `tcb` is refused.
+    #[test]
+    fn spline_and_through_are_accepted_with_tcb() {
+        let mut s = session();
+        let id = added(&s.edit(&[json!({"op": "card", "colour": "#ff0000", "at": 0, "duration": 4})], "card", false).unwrap());
+        s.edit(&[json!({"op": "animate", "clip": id, "property": "x", "keys": [[0, 0], [1, 100], [2, 0], [3, 50]], "ease": "spline"})], "a", false).unwrap();
+        let tr = s.model_clip(id).unwrap().keyframes.values().next().unwrap().clone();
+        assert!(tr.keys.iter().all(|k| k.interp == m::Interp::Spline && k.tcb.is_none()));
+        s.edit(&[json!({"op": "animate", "clip": id, "property": "x", "keys": [[0, 0], {"t": 1, "v": 100, "tcb": [0.5, 0, -0.5]}, [2, 0]], "ease": "through", "tcb": [0.1, 0, 0]})], "a", false).unwrap();
+        let tr = s.model_clip(id).unwrap().keyframes.values().next().unwrap().clone();
+        assert!(tr.keys.iter().all(|k| k.interp == m::Interp::Through));
+        assert_eq!(tr.keys[1].tcb.map(|t| (t.tension, t.bias)), Some((0.5, -0.5)));
+        assert_eq!(tr.keys[0].tcb.map(|t| t.tension), Some(0.1));
+        let bad = s.edit(&[json!({"op": "animate", "clip": id, "property": "x", "keys": [[0, 0], [1, 1]], "ease": "through", "tcb": [2, 0, 0]})], "a", false);
+        assert!(bad.is_err_and(|e| e.contains("tcb")));
     }
 
     #[test]
