@@ -28,7 +28,7 @@ use crate::types::{BlockDecision, BlockMode, CoefBlock, InterDecision, InterSbDe
 use coef::{TxbParams, write_coefficients};
 use ctx::*;
 use inter_info::write_inter_block_mode_info;
-use intra_info::{BlockInfo, FrameSyntax, write_intra_frame_mode_info};
+use intra_info::{BlockInfo, FrameSyntax, write_intra_block_in_inter_frame, write_intra_frame_mode_info};
 
 /// A leaf of a partition: `(mi_row, mi_col, w4, h4)`.
 type Leaf = (usize, usize, usize, usize);
@@ -255,6 +255,30 @@ impl TileWriter {
         self.ctx.store_inter_block(r, c, ms, d.mode, d.skip, tx, d.ref_frame as i8, d.mv);
     }
 
+    /// One intra block of an inter frame (8x8 or larger), with no angle deltas.
+    pub fn write_intra_block_in_inter(&mut self, dec: &BlockDecision) {
+        self.write_intra_block_in_inter_ex(dec, IntraExtra::default());
+    }
+
+    /// One intra block of an inter frame: like [`write_block_ex`](Self::write_block_ex), with the
+    /// mode info of `inter_frame_mode_info()`.
+    pub fn write_intra_block_in_inter_ex(&mut self, dec: &BlockDecision, extra: IntraExtra) {
+        let (r, c) = (dec.mi_row as usize, dec.mi_col as usize);
+        let (bw4, bh4) = (dec.w4 as usize, dec.h4 as usize);
+        assert!(bw4 >= 2 && bh4 >= 2, "blocks of inter frames are at least 8x8");
+        let ms = block_size_of(bw4, bh4).unwrap_or_else(|| panic!("no block size {bw4}x{bh4}"));
+        assert!(r < self.mi_rows && c < self.mi_cols, "block outside the frame");
+        let info = BlockInfo { mi_row: r, mi_col: c, mi_size: ms, has_chroma: true, y_mode: dec.y_mode, uv_mode: dec.uv_mode, skip: dec.skip, tx_size: dec.tx_size, extra };
+        write_intra_block_in_inter_frame(&mut self.enc, &mut self.cdfs.cdfs, &mut self.ctx, &info, self.frame);
+        if dec.skip {
+            self.ctx.reset_block_context(r, c, bw4, bh4, true);
+        } else {
+            self.write_residual(&info, dec);
+        }
+        let tx = if self.frame.lossless { TX_4X4 } else { dec.tx_size };
+        self.ctx.store_block(r, c, ms, dec.y_mode, dec.skip, tx);
+    }
+
     /// Writes one superblock of an inter frame, blocks in decode order; see
     /// [`write_sb`](Self::write_sb).
     pub fn write_inter_sb(&mut self, sb: SbPos, dec: &InterSbDecision) {
@@ -266,7 +290,7 @@ impl TileWriter {
         let mut cur = 0;
         let mut emit = |w: &mut TileWriter, i: usize| match &dec.blocks[i] {
             BlockMode::Inter(d) => w.write_inter_block(d),
-            BlockMode::Intra(_) => panic!("intra blocks in inter frames are not written yet"),
+            BlockMode::Intra(b) => w.write_intra_block_in_inter(b),
         };
         self.write_tree(&shapes, &mut cur, sb.row as usize * sb4, sb.col as usize * sb4, self.sb_size, &mut emit);
         assert_eq!(cur, shapes.len(), "blocks left over after the partition tree");

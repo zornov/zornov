@@ -26,12 +26,12 @@ fn encoder_validates_then_says_unsupported_for_what_is_not_built() {
     let mut c = Config::new(64, 64);
     c.bit_depth = 12;
     assert!(matches!(Encoder::new(c), Err(Error::Invalid(_))));
-    // 10-bit and rate control are later phases
+    // 10-bit and lossless are later phases
     c = Config::new(64, 64);
     c.bit_depth = 10;
     assert!(matches!(Encoder::new(c), Err(Error::Unsupported(_))));
     let mut c = Config::new(64, 64);
-    c.rate = RateMode::Crf(30);
+    c.rate = RateMode::Cqp(0);
     assert!(matches!(Encoder::new(c), Err(Error::Unsupported(_))));
     assert!(Encoder::new(Config::new(64, 64)).is_ok());
 }

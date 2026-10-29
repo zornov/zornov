@@ -48,8 +48,10 @@ fn bad_configurations_are_refused() {
     // not built yet
     assert!(matches!(Encoder::new(Config { bit_depth: 10, ..cfg(64, 64, 100) }), Err(Error::Unsupported(_))));
     assert!(matches!(Encoder::new(cfg(64, 64, 0)), Err(Error::Unsupported(_))));
-    assert!(matches!(Encoder::new(Config { rate: RateMode::Crf(30), ..cfg(64, 64, 0) }), Err(Error::Unsupported(_))));
-    assert!(matches!(Encoder::new(Config { rate: RateMode::Bitrate(2000), ..cfg(64, 64, 0) }), Err(Error::Unsupported(_))));
+    assert!(matches!(Encoder::new(Config { rate: RateMode::Crf(64), ..cfg(64, 64, 0) }), Err(Error::Invalid(_))));
+    assert!(matches!(Encoder::new(Config { rate: RateMode::Bitrate(0), ..cfg(64, 64, 0) }), Err(Error::Invalid(_))));
+    assert!(Encoder::new(Config { rate: RateMode::Crf(30), ..cfg(64, 64, 0) }).is_ok());
+    assert!(Encoder::new(Config { rate: RateMode::Bitrate(2000), ..cfg(64, 64, 0) }).is_ok());
     assert!(matches!(Encoder::new(Config { tiles: (1, 0), ..cfg(64, 64, 100) }), Err(Error::Unsupported(_))));
 }
 
