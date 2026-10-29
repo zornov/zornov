@@ -1,7 +1,7 @@
 // Copyright 2026 Ashrox LLC and contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! M1: uncompressed frame header writer (spec 5.9) for key and intra-only frames.
+//! M1: uncompressed frame header writer (spec 5.9) for key, intra-only and inter frames.
 //!
 //! Choices fixed here (the sequence header the writer pairs with is in `seq_header.rs`): frame size
 //! equals the sequence size (no override, no superres, render size equal), no segmentation, no
@@ -10,6 +10,11 @@
 //! with `context_update_tile_id = 0` and `tile_size_bytes = 4`. CDEF (when the sequence enables it)
 //! is coded with zero strengths and loop restoration as `RESTORE_NONE`, because `FrameParams`
 //! carries only on/off flags for them.
+//!
+//! Inter frames (phase (b)) use no primary reference frame (default CDFs), the seven references
+//! named by `FrameParams::ref_frame_idx`, quarter-pel motion vectors (no high precision), the fixed
+//! regular 8-tap interpolation filter, no switchable motion modes, no reference mvs, single
+//! reference prediction (`reference_select = 0`, so no skip mode) and no global motion.
 
 use crate::bits::BitWriter;
 use crate::types::{FrameParams, FrameType, SeqParams};
@@ -63,16 +68,21 @@ pub fn clamp_tile_log2(seq: &SeqParams, cols_log2: u8, rows_log2: u8) -> (u8, u8
 /// Write `uncompressed_header()` into `w`. The caller adds `trailing_bits()` (frame header OBU) or
 /// `byte_alignment()` and the tile group (frame OBU).
 ///
-/// Panics for inter frames, which belong to phase (b), and for parameter combinations the spec
-/// forbids (e.g. an intra-only frame refreshing all slots).
+/// Panics for parameter combinations the spec forbids (e.g. an intra-only frame refreshing all
+/// slots).
 pub fn write_frame_header(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) {
-    assert!(
-        fh.frame_type != FrameType::Inter,
-        "inter frame headers are phase (b)"
-    );
     let is_key = fh.frame_type == FrameType::Key;
+    let is_inter = fh.frame_type == FrameType::Inter;
     w.flag(false); // show_existing_frame
-    w.put(if is_key { 0 } else { 2 }, 2); // frame_type: KEY_FRAME = 0, INTRA_ONLY_FRAME = 2
+    // frame_type: KEY_FRAME = 0, INTER_FRAME = 1, INTRA_ONLY_FRAME = 2
+    w.put(
+        match fh.frame_type {
+            FrameType::Key => 0,
+            FrameType::Inter => 1,
+            FrameType::IntraOnly => 2,
+        },
+        2,
+    );
     w.flag(fh.show_frame);
     if !fh.show_frame {
         w.flag(!is_key); // showable_frame
@@ -90,18 +100,37 @@ pub fn write_frame_header(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) 
             ORDER_HINT_BITS,
         );
     }
-    // primary_ref_frame is PRIMARY_REF_NONE and not coded for intra frames.
+    if is_inter {
+        w.put(7, 3); // primary_ref_frame = PRIMARY_REF_NONE
+    }
+    // (for intra frames primary_ref_frame is PRIMARY_REF_NONE and not coded)
     if !(is_key && fh.show_frame) {
         assert!(
-            fh.refresh_frame_flags != 0xFF || is_key,
+            fh.refresh_frame_flags != 0xFF || fh.frame_type != FrameType::IntraOnly,
             "an intra-only frame cannot refresh every slot"
         );
         w.put(fh.refresh_frame_flags as u32, 8);
     }
     // ref_order_hint[] is only coded under error_resilient_mode, which is off here.
+    if is_inter {
+        if seq.enable_order_hint {
+            w.flag(false); // frame_refs_short_signaling
+        }
+        for &idx in &fh.ref_frame_idx {
+            assert!(idx < 8, "ref_frame_idx is a slot number");
+            w.put(idx as u32, 3);
+        }
+    }
     // frame_size(): no override, no superres; render_size():
     w.flag(false); // render_and_frame_size_different
     // allow_intrabc is not coded (screen content tools off).
+    if is_inter {
+        w.flag(false); // allow_high_precision_mv
+        w.flag(false); // is_filter_switchable
+        w.put(0, 2); // interpolation_filter = EIGHTTAP
+        w.flag(false); // is_motion_mode_switchable
+        // use_ref_frame_mvs is not coded (enable_ref_frame_mvs is off)
+    }
     if !fh.disable_cdf_update {
         w.flag(true); // disable_frame_end_update_cdf (implied 1 when disable_cdf_update is set)
     }
@@ -142,9 +171,17 @@ pub fn write_frame_header(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) 
         }
         w.flag(false); // tx_mode_select = 0: TX_MODE_LARGEST
     }
-    // Intra frames: no reference_select, skip mode or warped motion. reduced_tx_set:
+    if is_inter {
+        w.flag(false); // reference_select (skip mode is then not allowed, so not coded)
+    }
+    // warped motion is off in the sequence header. reduced_tx_set:
     w.flag(false);
-    // global_motion_params() and film_grain_params() code nothing here.
+    if is_inter {
+        for _ in 0..7 {
+            w.flag(false); // is_global for LAST_FRAME..=ALTREF_FRAME
+        }
+    }
+    // film_grain_params() codes nothing here.
 }
 
 fn write_tile_info(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) {

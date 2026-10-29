@@ -595,3 +595,45 @@ fn decoder_notices_a_damaged_frame_header() {
     tu.extend(truncated);
     assert!(Decoder::new().decode(&tu).is_err());
 }
+
+// ---- inter frame headers ----
+
+/// A key frame then inter frames, read back by the decoder's own header parser: every field the
+/// writer fixes must come out as written, and the parser must consume exactly the bits written.
+#[test]
+fn inter_frame_header_reads_back_with_the_decoders_parser() {
+    use studio_av1::header::HeaderTracker;
+    for &(w, h, q) in &[(64u32, 64u32, 60u8), (130, 70, 1), (1920, 1080, 200)] {
+        let s = seq(w, h);
+        let parsed_seq = SequenceHeader::parse(&write_sequence_header(&s)).unwrap();
+        let mut t = HeaderTracker::new();
+        let mut kw = BitWriter::new();
+        write_frame_header(&s, &key(q), &mut kw);
+        let (k, _) = t.parse_frame_header(&parsed_seq, &kw.finish(), 0, 0).unwrap();
+        assert_eq!(k.frame_type, 0);
+        for (i, (refresh, hint, idx)) in [(1u8, 1u32, [0u8; 7]), (3, 2, [0, 1, 0, 1, 0, 1, 0]), (0x80, 3, [1; 7])].into_iter().enumerate() {
+            let mut f = key(q);
+            f.frame_type = FrameType::Inter;
+            f.refresh_frame_flags = refresh;
+            f.order_hint = hint;
+            f.ref_frame_idx = idx;
+            f.disable_cdf_update = i == 1;
+            let mut bw = BitWriter::new();
+            write_frame_header(&s, &f, &mut bw);
+            let bits = bw.bit_len();
+            let (fh, used) = t.parse_frame_header(&parsed_seq, &bw.finish(), 0, 0).unwrap_or_else(|e| panic!("{w}x{h} q{q} inter {i}: {e:?}"));
+            assert_eq!(used, bits, "the parser reads exactly the bits written");
+            assert_eq!((fh.frame_type, fh.frame_is_intra, fh.show_frame), (1, false, true));
+            assert_eq!(fh.refresh_frame_flags, refresh as u32);
+            assert_eq!(fh.order_hint, hint);
+            assert_eq!(fh.ref_frame_idx, idx.map(|v| v as usize));
+            assert_eq!(fh.primary_ref_frame, 7);
+            assert_eq!(fh.disable_cdf_update, i == 1);
+            assert_eq!(fh.quant.base_q_idx, q as u32);
+            assert!(!fh.allow_high_precision_mv && !fh.is_motion_mode_switchable && !fh.use_ref_frame_mvs);
+            assert_eq!(fh.interpolation_filter, 0, "EIGHTTAP");
+            assert!(!fh.reference_select && !fh.skip_mode_present && !fh.allow_warped_motion);
+            assert!(fh.gm_type[1..8].iter().all(|&g| g == 0), "no global motion");
+        }
+    }
+}
