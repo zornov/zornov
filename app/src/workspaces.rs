@@ -313,8 +313,8 @@ pub fn switch(app: &mut StudioApp, ctx: &eframe::egui::Context, w: &Workspace) {
         }
     });
     let shown = crate::i18n::t(&w.name).into_owned();
-    // The toast is also what a screen reader hears.
-    crate::kit::push(ctx, crate::i18n::tr_args("workspace-switched", &[("name", shown.into())]).into_owned(), None, Some(crate::icons::Icon::SquaresFour));
+    // The layout changing is the feedback; only a screen reader is told.
+    crate::a11y::announce(ctx, crate::i18n::tr_args("workspace-switched", &[("name", shown.into())]).into_owned());
 }
 
 fn tab_id() -> eframe::egui::Id {
@@ -477,6 +477,7 @@ mod tests {
         app.editor.playhead = 5 * crate::view::SEC;
         for w in build_in() {
             switch(&mut app, &ctx, &w);
+            assert!(crate::kit::recent(&ctx).iter().all(|t| !t.text.contains("orkspace")), "no toast for {}", w.name);
             assert_eq!(app.editor.px_per_sec, 91.0, "zoom after {}", w.name);
             assert_eq!(app.editor.tl_scroll, eframe::egui::vec2(333.0, 12.0), "scroll after {}", w.name);
             assert!(!app.editor.fit_pending, "no refit after {}", w.name);
