@@ -446,9 +446,9 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             set_tool(&ctx, next);
         }
         let hint = match tool_now {
-            TrackTool::Point => "Click a point with detail (an eye, a logo, a corner) on the canvas: it is followed through the whole clip.",
-            TrackTool::Plane => "Drag a box over a flat surface (a screen, a sign, a wall): its four corners are followed in perspective.",
-            TrackTool::Correct => "Drag the point (or a corner) to where it should be at the playhead: it is re-tracked from this frame.",
+            TrackTool::Point => "Click a point (eye, logo, corner) to track it through the clip",
+            TrackTool::Plane => "Drag a box over a flat surface; its four corners are tracked",
+            TrackTool::Correct => "Drag the point (or corner) to its spot at the playhead",
             TrackTool::Off => "",
         };
         if !hint.is_empty() {

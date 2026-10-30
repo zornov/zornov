@@ -375,15 +375,57 @@ pub fn set_folder(doc: &mut Doc, id: u32, folder: &str) -> Result<String, Refusa
 
 // --- waveforms ---------------------------------------------------------------
 
-/// Number of bars a sound's real waveform is summed to.
-pub const PEAK_BARS: usize = 96;
+/// Bars a sound is summed to. Fine enough for a long clip stretched across a
+/// zoomed timeline; tiles read the same bars at their own width.
+pub const WAVE_BARS: usize = 2048;
 
-/// The peaks of the sound in `path`, 0..1 over `PEAK_BARS` bars, once they
-/// are known. The first ask reads the sound on a worker thread and returns
-/// `None`; the tile shows a quiet line meanwhile (never an invented wave).
-/// A file with no readable sound stays `None` for good.
-pub fn peaks(path: &std::path::Path) -> Option<Arc<Vec<f32>>> {
-    type Slot = Option<Arc<Vec<f32>>>;
+/// Quietest level a waveform draws, in dB below full scale. Anything under
+/// it is the centre line.
+pub const WAVE_FLOOR_DB: f32 = -54.0;
+
+/// A sound's real shape: per bar the loudest sample (`peak`) and the
+/// root-mean-square level (`rms`), both absolute 0..1 (full scale is 1, never
+/// rescaled to the file's loudest bar), plus its length in seconds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wave {
+    pub peak: Vec<f32>,
+    pub rms: Vec<f32>,
+    pub secs: f64,
+}
+
+impl Wave {
+    /// The peak and RMS over the stretch `from..to` of the sound (fractions
+    /// 0..1 of its length). A stretch narrower than one bar reads that bar.
+    pub fn range(&self, from: f32, to: f32) -> (f32, f32) {
+        let n = self.peak.len();
+        if n == 0 || !(from.is_finite() && to.is_finite()) {
+            return (0.0, 0.0);
+        }
+        let a = (from.clamp(0.0, 1.0) * n as f32) as usize;
+        let b = ((to.clamp(0.0, 1.0) * n as f32).ceil() as usize).max(a + 1).min(n);
+        let a = a.min(b - 1);
+        let peak = self.peak[a..b].iter().fold(0.0f32, |m, x| m.max(*x));
+        let ms = self.rms[a..b].iter().map(|x| x * x).sum::<f32>() / (b - a) as f32;
+        (peak, ms.sqrt())
+    }
+}
+
+/// A level (linear, 1 = full scale) as a 0..1 height on a decibel scale from
+/// `WAVE_FLOOR_DB` up, so quiet passages stay visible and loud ones don't
+/// all flatten into the same full-height block.
+pub fn wave_height(level: f32) -> f32 {
+    if !(level > 0.0) {
+        return 0.0;
+    }
+    ((20.0 * level.log10() - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB).clamp(0.0, 1.0)
+}
+
+/// The real waveform of the sound in `path`, once it is known. The first ask
+/// reads the sound on a worker thread and returns `None`; callers show a
+/// quiet line meanwhile (never an invented wave). A file with no readable
+/// sound stays `None` for good.
+pub fn wave(path: &std::path::Path) -> Option<Arc<Wave>> {
+    type Slot = Option<Arc<Wave>>;
     static CACHE: Mutex<Option<HashMap<PathBuf, Slot>>> = Mutex::new(None);
     {
         let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -395,29 +437,41 @@ pub fn peaks(path: &std::path::Path) -> Option<Arc<Vec<f32>>> {
     }
     let path = path.to_path_buf();
     std::thread::spawn(move || {
-        let found = crate::sound_bridge::decoded(&path.to_string_lossy()).map(|d| Arc::new(peaks_of(&d.left)));
+        let found = crate::sound_bridge::decoded(&path.to_string_lossy()).map(|d| {
+            let right: &[f32] = if d.mono { &[] } else { &d.right };
+            Arc::new(wave_of(&d.left, right, d.rate))
+        });
         CACHE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(path, found);
     });
     None
 }
 
-/// `samples` summed to `PEAK_BARS` bars of their loudest value, scaled so
-/// the loudest bar is 1.
-pub fn peaks_of(samples: &[f32]) -> Vec<f32> {
-    if samples.is_empty() {
-        return vec![0.0; PEAK_BARS];
+/// `left` (and `right` when it has a second channel) summed to `WAVE_BARS`
+/// bars of peak and RMS.
+pub fn wave_of(left: &[f32], right: &[f32], rate: u32) -> Wave {
+    let n = left.len();
+    let secs = if rate > 0 { n as f64 / rate as f64 } else { 0.0 };
+    if n == 0 {
+        return Wave { peak: vec![0.0; WAVE_BARS], rms: vec![0.0; WAVE_BARS], secs };
     }
-    let mut bars: Vec<f32> = (0..PEAK_BARS)
-        .map(|k| {
-            let (a, b) = (k * samples.len() / PEAK_BARS, ((k + 1) * samples.len() / PEAK_BARS).max(k * samples.len() / PEAK_BARS + 1).min(samples.len()));
-            samples[a.min(samples.len() - 1)..b].iter().fold(0.0f32, |m, x| m.max(x.abs()))
-        })
-        .collect();
-    let top = bars.iter().copied().fold(0.0f32, f32::max);
-    if top > 0.0 {
-        bars.iter_mut().for_each(|x| *x /= top);
+    let stereo = right.len() == n;
+    let mut peak = Vec::with_capacity(WAVE_BARS);
+    let mut rms = Vec::with_capacity(WAVE_BARS);
+    for k in 0..WAVE_BARS {
+        let a = k * n / WAVE_BARS;
+        let b = ((k + 1) * n / WAVE_BARS).max(a + 1).min(n);
+        let a = a.min(b - 1);
+        let (mut pk, mut sq) = (0.0f32, 0.0f64);
+        for i in a..b {
+            let l = left[i].abs();
+            let r = if stereo { right[i].abs() } else { l };
+            pk = pk.max(l).max(r);
+            sq += ((l * l + r * r) * 0.5) as f64;
+        }
+        peak.push(pk.min(1.0));
+        rms.push(((sq / (b - a) as f64).sqrt() as f32).min(1.0));
     }
-    bars
+    Wave { peak, rms, secs }
 }
 
 // --- offline media and relinking -------------------------------------------
@@ -1248,13 +1302,58 @@ mod tests {
     fn waveform_peaks_are_real_not_invented() {
         let mut tone: Vec<f32> = (0..9600).map(|i| (i as f32 * 0.05).sin() * 0.1).collect();
         tone[4800..4900].iter_mut().for_each(|x| *x = 0.8);
-        let p = peaks_of(&tone);
-        assert_eq!(p.len(), PEAK_BARS);
-        let loud = p.iter().position(|&x| x >= 0.999).unwrap();
-        assert_eq!(loud, 4800 * PEAK_BARS / 9600, "the loud burst sits where it is in the file");
-        assert!(p.iter().all(|&x| (0.0..=1.0).contains(&x)));
-        assert!(peaks_of(&[]).iter().all(|&x| x == 0.0), "silence stays flat");
-        assert!(peaks(std::path::Path::new("/no/such/sound.wav")).is_none());
+        let w = wave_of(&tone, &[], 9600);
+        assert_eq!(w.peak.len(), WAVE_BARS);
+        assert_eq!(w.rms.len(), WAVE_BARS);
+        assert!((w.secs - 1.0).abs() < 1e-9);
+        let loud = w.peak.iter().position(|&x| x >= 0.79).unwrap();
+        assert_eq!(loud, 4800 * WAVE_BARS / 9600, "the loud burst sits where it is in the file");
+        // Absolute levels: the quiet tone stays near 0.1, it is not scaled up to the burst.
+        assert!(w.peak[0] < 0.11, "quiet bars are not normalised to the loudest");
+        assert!(w.rms.iter().zip(&w.peak).all(|(r, p)| r <= &(p + 1e-6)), "RMS never exceeds the peak");
+        assert!(w.peak.iter().chain(&w.rms).all(|&x| (0.0..=1.0).contains(&x)));
+        let silent = wave_of(&[], &[], 48000);
+        assert!(silent.peak.iter().chain(&silent.rms).all(|&x| x == 0.0), "silence stays flat");
+        assert!(wave(std::path::Path::new("/no/such/sound.wav")).is_none());
+    }
+
+    #[test]
+    fn rms_separates_a_sustained_tone_from_a_spike() {
+        // A square wave at 0.5 has RMS = peak; a sparse spike has high peak, tiny RMS.
+        let square: Vec<f32> = (0..4096).map(|i| if i % 2 == 0 { 0.5 } else { -0.5 }).collect();
+        let w = wave_of(&square, &[], 4096);
+        assert!((w.rms[10] - 0.5).abs() < 0.01 && (w.peak[10] - 0.5).abs() < 1e-6);
+        let mut spike = vec![0.0f32; 65536];
+        spike[1000] = 1.0;
+        let s = wave_of(&spike, &[], 48000);
+        let k = 1000 * WAVE_BARS / 65536;
+        assert_eq!(s.peak[k], 1.0);
+        assert!(s.rms[k] < 0.25, "a click is not a sustained loud sound: {}", s.rms[k]);
+    }
+
+    #[test]
+    fn wave_range_reads_the_asked_stretch() {
+        let mut x = vec![0.0f32; 8192];
+        x[6000..6100].iter_mut().for_each(|v| *v = 0.6);
+        let w = wave_of(&x, &x, 8192);
+        assert_eq!(w.range(0.0, 0.5).0, 0.0);
+        assert!(w.range(0.7, 0.8).0 > 0.59);
+        assert!(w.range(0.5, 0.5).1 >= 0.0, "an empty stretch reads one bar, no panic");
+        assert_eq!(w.range(f32::NAN, 1.0), (0.0, 0.0));
+        assert_eq!(w.range(2.0, 3.0).0, w.range(1.0, 1.0).0, "out-of-range clamps to the end");
+    }
+
+    #[test]
+    fn wave_height_is_a_decibel_scale() {
+        assert_eq!(wave_height(0.0), 0.0);
+        assert_eq!(wave_height(f32::NAN), 0.0);
+        assert!((wave_height(1.0) - 1.0).abs() < 1e-6, "full scale reaches the top");
+        assert!(wave_height(1.0e-4) == 0.0, "below the floor is the centre line");
+        let (loud, mid, quiet) = (wave_height(0.9), wave_height(0.25), wave_height(0.02));
+        assert!(loud > mid && mid > quiet && quiet > 0.0, "{loud} {mid} {quiet}");
+        // 0.5 (-6 dB) sits at about 89 %, not the top: dynamics stay visible.
+        assert!((wave_height(0.5) - (1.0 - 6.02 / 54.0)).abs() < 0.01);
+        assert!(wave_height(0.9) < 1.0);
     }
 
     #[test]
