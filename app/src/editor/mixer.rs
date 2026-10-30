@@ -287,6 +287,15 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
 }
 
 const STRIP_W: f32 = 108.0;
+/// The widest a strip grows to show a long name whole (past it the name
+/// ends in an ellipsis, whole on hover).
+const STRIP_W_MAX: f32 = 168.0;
+
+/// A strip's width: the standard one, wider when its name needs the room.
+fn strip_width(ui: &egui::Ui, name: &str) -> f32 {
+    let name_w = kit::text_width(ui, name, theme::caption()) * 1.08;
+    (name_w + 10.0 + 6.0).clamp(STRIP_W, STRIP_W_MAX)
+}
 /// The fader's drawing area: the track, its dB scale and its meter.
 const FADER_W: f32 = 62.0;
 /// Room one channel's meter and its label take on the master.
@@ -463,7 +472,13 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
     master_strip(app, &mut mui, d, &meters, t);
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(strips_rect).layout(egui::Layout::top_down(egui::Align::Min)));
     sui.set_clip_rect(strips_rect.intersect(ui.clip_rect()));
-    let strips = egui::ScrollArea::both().id_salt("mixer-strips").show_h(&mut sui, |ui| {
+    // A plain mouse wheel over strips that only overflow sideways scrolls
+    // them sideways, so the strips past the edge can be reached.
+    let fits_down = sui.data(|d| d.get_temp::<bool>(egui::Id::new("mixer-strips-fit-down"))).unwrap_or(false);
+    if sui.rect_contains_pointer(strips_rect) {
+        sui.input_mut(|i| i.smooth_scroll_delta = wheel_sideways(i.smooth_scroll_delta, fits_down));
+    }
+    let strips = egui::ScrollArea::both().id_salt("mixer-strips").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show_h(&mut sui, |ui| {
         ui.set_max_height(view_h);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -478,7 +493,14 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
             }
         });
     });
+    sui.data_mut(|d| d.insert_temp(egui::Id::new("mixer-strips-fit-down"), strips.content_size.y <= strips.inner_rect.height() + 1.0));
     kit::note_scroll(ui.ctx(), strips.inner_rect, false);
+}
+
+/// The wheel's movement for the strips: when they do not need to scroll
+/// down, a vertical wheel turn moves them sideways.
+fn wheel_sideways(delta: Vec2, fits_down: bool) -> Vec2 {
+    if fits_down && delta.x == 0.0 && delta.y != 0.0 { Vec2::new(delta.y, 0.0) } else { delta }
 }
 
 /// The master strip's width: room for the loudness table, or its meters.
@@ -490,12 +512,13 @@ fn master_width(layout: Layout) -> f32 {
 fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, aux: Option<u64>, surround: bool, peak: f32, index: usize, t: &theme::Tokens) {
     let mix = LaneMix::of(lane);
     let role = desk::lane_role(lane);
+    let name = if lane.name.is_empty() { crate::i18n::tf(format!("Lane {}", index + 1)) } else { lane.name.clone() };
+    let strip_w = strip_width(ui, &name);
     let h = ui.available_height().max(180.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(STRIP_W, h), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(strip_w, h), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(6), t.raised);
     let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(5.0)).layout(egui::Layout::top_down(egui::Align::Min)));
     c.spacing_mut().item_spacing.y = 3.0;
-    let name = if lane.name.is_empty() { crate::i18n::tf(format!("Lane {}", index + 1)) } else { lane.name.clone() };
     kit::label_trunc(&mut c, egui::RichText::new(name).font(theme::caption()).color(t.text).strong());
     // Role: click to cycle.
     let roles = ["dialogue", "music", "effects", "ambience"];
@@ -522,7 +545,7 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
     // Bus.
     if !d.buses.is_empty() {
         let current = mix.bus.and_then(|b| d.bus(b)).map(|b| b.name.clone()).unwrap_or_else(|| d.buses.iter().find(|b| b.kind() == role.bus_kind()).map(|b| format!("{} (auto)", b.name)).unwrap_or_else(|| "Master".into()));
-        egui::ComboBox::from_id_salt(("lane-bus", lane.id.0)).selected_text(egui::RichText::new(current).font(theme::caption())).width(STRIP_W - 14.0).show_ui(&mut c, |ui| {
+        egui::ComboBox::from_id_salt(("lane-bus", lane.id.0)).selected_text(egui::RichText::new(current).font(theme::caption())).width(strip_w - 14.0).show_ui(&mut c, |ui| {
             crate::kit::note_list(ui);
             if ui.selectable_label(mix.bus.is_none(), "By role").clicked() {
                 edit_lane(ui.ctx(), &mut app.doc, lane.id.0, "Track bus", |mix, _| {
@@ -560,7 +583,7 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
         c.horizontal(|ui| {
             ui.label(egui::RichText::new(crate::i18n::shown("Position")).font(theme::caption()).color(t.text_2));
         });
-        let pad = c.allocate_exact_size(Vec2::splat(STRIP_W - 14.0), Sense::click_and_drag());
+        let pad = c.allocate_exact_size(Vec2::splat(strip_w - 14.0), Sense::click_and_drag());
         let (r, resp) = pad;
         let p = c.painter();
         p.rect_filled(r, 4, t.sunken);
@@ -595,7 +618,7 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
                 ui.label(egui::RichText::new(crate::i18n::shown(&pan_text(pan))).font(theme::caption()).color(t.text));
             });
         });
-        if kit::Slider::new("Pan", &mut pan, -1.0..=1.0).default(0.0).decimals(2).width(STRIP_W - 14.0).show(&mut c).changed() {
+        if kit::Slider::new("Pan", &mut pan, -1.0..=1.0).default(0.0).decimals(2).width(strip_w - 14.0).show(&mut c).changed() {
             set_lane_gesture(app, &format!("pan-{}", lane.id.0), lane.id.0, |mix, l| {
                 l.pan = pan as f64;
                 mix.pan_keys.clear();
@@ -603,7 +626,7 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
         }
     }
     // Mute, solo.
-    let (mute, solo) = mute_solo(&mut c, lane.muted, lane.solo, STRIP_W - 10.0, t);
+    let (mute, solo) = mute_solo(&mut c, lane.muted, lane.solo, strip_w - 10.0, t);
     if mute {
         let v = !lane.muted;
         edit_lane(ui.ctx(), &mut app.doc, lane.id.0, "Mute track", |_, l| {
@@ -634,14 +657,15 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
 }
 
 fn bus_strip(app: &mut StudioApp, ui: &mut egui::Ui, b: &desk::Bus, peak: f32, t: &theme::Tokens) {
+    let strip_w = strip_width(ui, &b.name);
     let h = ui.available_height().max(180.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(STRIP_W, h), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(strip_w, h), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(6), theme::alpha(t.accent, 0.08));
     let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(5.0)).layout(egui::Layout::top_down(egui::Align::Min)));
     kit::label_trunc(&mut c, egui::RichText::new(&b.name).font(theme::caption()).color(t.text).strong());
     c.label(egui::RichText::new(format!("{} bus{}", b.kind().stem(), if b.effects.is_empty() { String::new() } else { format!(" · {}", b.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>().join(", ")) })).font(theme::caption()).color(t.text_2));
     let id = b.id;
-    let (mute, solo) = mute_solo(&mut c, b.muted, b.solo, STRIP_W - 10.0, t);
+    let (mute, solo) = mute_solo(&mut c, b.muted, b.solo, strip_w - 10.0, t);
     if mute {
         let v = !b.muted;
         edit_desk(ui.ctx(), &mut app.doc, "Mute bus", |d| {
@@ -1263,6 +1287,27 @@ mod tests {
             assert!(h.overlaps().iter().all(|o| !o.a.contains("Master") && !o.b.contains("Master")), "overlap at {w}");
             shot(&h, &format!("mixer-{w}"));
         }
+    }
+
+    #[test]
+    fn wheel_moves_wide_strips_sideways_only_when_they_fit_down() {
+        assert_eq!(wheel_sideways(Vec2::new(0.0, 12.0), true), Vec2::new(12.0, 0.0));
+        assert_eq!(wheel_sideways(Vec2::new(0.0, 12.0), false), Vec2::new(0.0, 12.0), "strips taller than the panel keep the vertical wheel");
+        assert_eq!(wheel_sideways(Vec2::new(5.0, 12.0), true), Vec2::new(5.0, 12.0), "a trackpad's own sideways swipe is left alone");
+        assert_eq!(wheel_sideways(Vec2::ZERO, true), Vec2::ZERO);
+    }
+
+    #[test]
+    fn strip_grows_to_show_its_name_whole() {
+        let ctx = egui::Context::default();
+        crate::editor::test_frame(&ctx, egui::RawInput::default(), |ui| {
+            assert_eq!(strip_width(ui, "Lane 1"), STRIP_W, "a short name keeps the standard strip");
+            let name = "Street ambience";
+            let w = strip_width(ui, name);
+            assert!(w - 10.0 >= kit::text_width(ui, name, theme::caption()), "{name} must fit inside its strip of {w}");
+            let long = "Street ambience, wide stereo bed with rain and traffic";
+            assert_eq!(strip_width(ui, long), STRIP_W_MAX, "a very long name stops growing and ends in an ellipsis");
+        });
     }
 
     #[test]
