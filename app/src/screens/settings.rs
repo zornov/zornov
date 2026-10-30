@@ -166,7 +166,7 @@ const LICENCES: &[Licence] = &[
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     // Esc while a shortcut is being captured cancels the capture only.
     let was_capturing = app.settings.capturing.is_some();
-    let out = kit::modal(ctx, egui::Id::unique("settings-dialog"), Vec2::new(900.0, 620.0), "Settings", |ui| body(app, ui));
+    let out = kit::modal_sized(ctx, egui::Id::unique("settings-dialog"), kit::DialogSize::Large, "Settings", |ui| body(app, ui));
     if out.close && !was_capturing && app.settings.capturing.is_none() {
         app.overlay = Overlay::None;
     }
@@ -606,7 +606,7 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
                 if saved {
                     pill(ui, &saved_label(ui, account), true);
                     let id = egui::Id::unique(("remove-api-key", account));
-                    let label = if kit::armed(ui.ctx(), id) { "Click again to remove" } else { "Remove" };
+                    let label = if kit::armed(ui.ctx(), id) { "Click again to remove the key" } else { "Remove" };
                     if Button::secondary(label).icon(Icon::Trash).show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                         keychain::remove_api_key(account);
                         forget_saved_label(ui, account);
@@ -721,7 +721,7 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                             st.lesson_edit = Some((l.id, l.text.clone()));
                         }
                         let id = egui::Id::unique(("delete-lesson", l.id));
-                        let label = if kit::armed(ui.ctx(), id) { "Click again to delete" } else { "Delete" };
+                        let label = if kit::armed(ui.ctx(), id) { "Click again to delete the lesson" } else { "Delete" };
                         if Button::ghost(label).icon(Icon::Trash).compact().show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                             match store.forget(l.id) {
                                 Ok(()) => {
@@ -900,7 +900,12 @@ fn forget_saved_label(ui: &egui::Ui, account: &str) {
 /// again to remove"), the second within the window returns true. For what
 /// undo cannot bring back (a saved key, a downloaded model, a team member).
 pub(crate) fn remove_click(ui: &mut egui::Ui, id: egui::Id, min_width: Option<f32>) -> bool {
-    let label = if kit::armed(ui.ctx(), id) { "Click again to remove" } else { "Remove" };
+    remove_click_named(ui, id, min_width, "Click again to remove")
+}
+
+/// [`remove_click`] whose armed label says what goes ("Click again to delete the model").
+pub(crate) fn remove_click_named(ui: &mut egui::Ui, id: egui::Id, min_width: Option<f32>, armed: &'static str) -> bool {
+    let label = if kit::armed(ui.ctx(), id) { armed } else { "Remove" };
     let mut b = Button::secondary(label).icon(Icon::Trash);
     if let Some(w) = min_width {
         b = b.min_width(w);
@@ -914,7 +919,7 @@ fn key_row(ui: &mut egui::Ui, account: &str, saved: bool, typed: &mut String, no
     kit::labeled_row(ui, "API key", |ui| {
         if saved {
             ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
-            if remove_click(ui, egui::Id::unique(("remove-api-key", account)), None) {
+            if remove_click_named(ui, egui::Id::unique(("remove-api-key", account)), None, "Click again to remove the key") {
                 keychain::remove_api_key(account);
                 forget_saved_label(ui, account);
                 set_saved(false);
@@ -1024,7 +1029,7 @@ fn models(app: &mut StudioApp, ui: &mut egui::Ui) {
                 m.verify(row.id);
                 ui.ctx().request_repaint();
             }
-            if remove_click(&mut bui, egui::Id::unique(("remove-model", row.id)), Some(104.0)) {
+            if remove_click_named(&mut bui, egui::Id::unique(("remove-model", row.id)), None, "Click again to delete the model") {
                 m.clear_verify(row.id);
                 match m.remove(row.id) {
                     Ok(()) => {

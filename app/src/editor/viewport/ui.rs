@@ -1676,7 +1676,7 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
                     }
                 });
                 kit::menu_separator(ui);
-                if MenuItem::new("Done").show(ui).clicked() {
+                if MenuItem::new("Finish sculpting").show(ui).clicked() {
                     picked = Some(None);
                 }
             }
