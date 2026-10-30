@@ -235,20 +235,24 @@ fn the_rest_check_is_not_redone_for_an_unchanged_scene() {
     let mut s = session();
     floor(&mut s);
     let ids: Vec<u32> = (0..24).map(|k| add(&mut s, json!({"op": "model", "shape": "cube", "size": 60, "position": [-600 + 50 * k, if k % 2 == 0 { 270 } else { 120 }, (k % 4) * 80], "name": format!("Crate {k}"), "rest": false}))).collect();
-    let time = |s: &Session| {
-        let t = std::time::Instant::now();
+    // Work is counted (models simulated on this thread), not timed: wall
+    // clock moves with machine load, the count does not.
+    let run = |s: &Session| {
+        let (n0, t0) = (crate::physics3d::rest::simulated(), std::time::Instant::now());
         let f = crate::physics3d::rest::check(&s.doc.model, s.doc.seq(), 0);
-        (f, t.elapsed().as_secs_f64() * 1e3)
+        (f, crate::physics3d::rest::simulated() - n0, t0.elapsed().as_secs_f64() * 1e3)
     };
-    let (first, cold) = time(&s);
-    let (again, warm) = time(&s);
-    eprintln!("rest check of {} models: {cold:.0} ms, again unchanged {warm:.1} ms", ids.len());
+    let (first, cold_work, cold) = run(&s);
+    let (again, warm_work, warm) = run(&s);
+    eprintln!("rest check of {} models: {cold_work} simulated, {cold:.0} ms; again unchanged {warm_work} simulated, {warm:.1} ms", ids.len());
     assert_eq!(first, again, "the same answer");
     assert!(!first.is_empty(), "floating crates are found");
-    assert!(warm < cold / 5.0, "asked again unchanged: {warm:.1} ms vs {cold:.0} ms");
-    // One crate moved: the answer follows.
+    assert!(cold_work >= ids.len(), "the first ask simulates every crate: {cold_work}");
+    assert_eq!(warm_work, 0, "asked again unchanged, nothing is simulated");
+    // One crate moved: the answer follows, and it was worked out afresh.
     s.edit(&[json!({"op": "set", "clip": ids[1], "y": 270})], "move", false).unwrap();
-    let (moved, _) = time(&s);
+    let (moved, moved_work, _) = run(&s);
+    assert!(moved_work > 0, "a moved crate is checked again");
     assert!(first.iter().any(|f| f.clip == ids[1] as u64 && f.kind == "floating"), "crate 1 floated: {first:?}");
     assert!(moved.iter().all(|f| f.clip != ids[1] as u64), "the crate set on the floor no longer floats: {moved:?}");
 }
