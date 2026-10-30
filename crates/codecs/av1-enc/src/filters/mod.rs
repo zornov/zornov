@@ -32,6 +32,97 @@ impl Default for FilterSet {
     }
 }
 
+/// Wall-clock spans of the filter stages, for profiling (`take_profile`).
+pub mod profile {
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed};
+    use std::time::Instant;
+
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct Spans {
+        pub deblock_search_ns: u64,
+        pub cdef_search_ns: u64,
+        pub lr_search_ns: u64,
+        /// `apply` calls made outside the searches (the final filtered reconstruction).
+        pub apply_ns: u64,
+    }
+
+    static DEBLOCK: AtomicU64 = AtomicU64::new(0);
+    static CDEF: AtomicU64 = AtomicU64::new(0);
+    static LR: AtomicU64 = AtomicU64::new(0);
+    static APPLY: AtomicU64 = AtomicU64::new(0);
+    /// Searches running (on any thread): `apply` calls inside them are part of the search's span.
+    static DEPTH: AtomicU32 = AtomicU32::new(0);
+
+    pub(super) struct Span {
+        counter: &'static AtomicU64,
+        start: Instant,
+        search: bool,
+        record: bool,
+    }
+
+    pub(super) fn span(which: u8) -> Span {
+        let top = DEPTH.load(Relaxed) == 0;
+        let (counter, search) = match which {
+            0 => (&DEBLOCK, true),
+            1 => (&CDEF, true),
+            2 => (&LR, true),
+            _ => (&APPLY, false),
+        };
+        if search {
+            DEPTH.fetch_add(1, Relaxed);
+        }
+        Span { counter, start: Instant::now(), search, record: search || top }
+    }
+
+    impl Drop for Span {
+        fn drop(&mut self) {
+            if self.search {
+                DEPTH.fetch_sub(1, Relaxed);
+            }
+            if self.record {
+                self.counter.fetch_add(self.start.elapsed().as_nanos() as u64, Relaxed);
+            }
+        }
+    }
+
+    /// The spans since the last call, reset to zero.
+    pub fn take() -> Spans {
+        Spans { deblock_search_ns: DEBLOCK.swap(0, Relaxed), cdef_search_ns: CDEF.swap(0, Relaxed), lr_search_ns: LR.swap(0, Relaxed), apply_ns: APPLY.swap(0, Relaxed) }
+    }
+}
+
+/// `f(0..n)` in index order, spread over up to `threads` workers. The result does not depend on the
+/// worker count.
+pub(crate) fn par_map<T: Send>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+    let workers = threads.min(n);
+    if workers <= 1 {
+        return (0..n).map(f).collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let parts: Vec<Vec<(usize, T)>> = std::thread::scope(|sc| {
+        let hs: Vec<_> = (0..workers)
+            .map(|_| {
+                sc.spawn(|| {
+                    let mut out = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if i >= n {
+                            return out;
+                        }
+                        out.push((i, f(i)));
+                    }
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().expect("filter worker")).collect()
+    });
+    let mut slots: Vec<Option<T>> = (0..n).map(|_| None).collect();
+    for (i, t) in parts.into_iter().flatten() {
+        slots[i] = Some(t);
+    }
+    slots.into_iter().map(|t| t.expect("every index was evaluated")).collect()
+}
+
 /// The decoder-side view of the sequence header the encoder writes.
 pub fn decoder_sequence(payload: &[u8]) -> SequenceHeader {
     SequenceHeader::parse(payload).expect("the encoder's own sequence header parses")
@@ -120,6 +211,7 @@ fn to_decoder(buf: &FrameBuf) -> DecBuf {
 
 /// `recon` (the reconstruction before filtering) run through the decoder's post-filters.
 pub fn apply(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, p: &FilterParams) -> FrameBuf {
+    let _t = profile::span(3);
     if p.lf_level == [0, 0] && p.cdef.is_none() && p.lr.is_none() {
         return recon.clone();
     }
@@ -160,19 +252,34 @@ pub fn sse(buf: &FrameBuf, src: &Frame) -> u64 {
 /// `src`; 0 when filtering does not help. A ternary search over 0..=63 assumes the error is
 /// unimodal in the level, which holds well enough in practice, and a 0 is always compared.
 pub fn search_deblock(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame) -> [u32; 2] {
-    let eval = |l: u32| sse(&apply(seq, recon, mi, &FilterParams { lf_level: [l, l], cdef: None, lr: None }), src);
+    search_deblock_mt(seq, recon, mi, src, 1)
+}
+
+/// [`search_deblock`] with the two probes of every round (and the final candidates) evaluated on up
+/// to `threads` workers. The levels visited, and so the result, do not depend on `threads`.
+pub fn search_deblock_mt(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame, threads: usize) -> [u32; 2] {
+    let _t = profile::span(0);
+    let mut memo: std::collections::HashMap<u32, u64> = Default::default();
+    let eval = |levels: &[u32], memo: &mut std::collections::HashMap<u32, u64>| {
+        let todo: Vec<u32> = levels.iter().copied().filter(|l| !memo.contains_key(l)).collect();
+        let sses = par_map(todo.len(), threads, |i| sse(&apply(seq, recon, mi, &FilterParams { lf_level: [todo[i]; 2], cdef: None, lr: None }), src));
+        memo.extend(todo.into_iter().zip(sses));
+    };
     let (mut lo, mut hi) = (1u32, 63u32);
     while hi - lo > 2 {
         let a = lo + (hi - lo) / 3;
         let b = hi - (hi - lo) / 3;
-        if eval(a) <= eval(b) {
+        eval(&[a, b], &mut memo);
+        if memo[&a] <= memo[&b] {
             hi = b;
         } else {
             lo = a;
         }
     }
-    let best = (lo..=hi).min_by_key(|&l| eval(l)).unwrap();
-    if eval(best) < sse(recon, src) { [best, best] } else { [0, 0] }
+    let last: Vec<u32> = (lo..=hi).collect();
+    eval(&last, &mut memo);
+    let best = last.iter().copied().min_by_key(|l| memo[l]).unwrap();
+    if memo[&best] < sse(recon, src) { [best, best] } else { [0, 0] }
 }
 
 /// Squared error of every 64x64 block (luma and its chroma) of `buf` against `src`, row-major.
@@ -211,6 +318,13 @@ const CDEF_CANDIDATES: [(u8, u8); 20] = [
 /// The CDEF strength sets and per-64x64 indices that minimise squared error plus the cost of
 /// coding the indices, on top of the deblocked `deblocked`; none when it does not pay.
 pub fn search_cdef(seq: &SequenceHeader, deblocked: &FrameBuf, mi: &MiInfo, src: &Frame, base_q_idx: u8) -> Option<CdefChoice> {
+    search_cdef_mt(seq, deblocked, mi, src, base_q_idx, 1)
+}
+
+/// [`search_cdef`] with the candidate strengths evaluated on up to `threads` workers; the result
+/// does not depend on `threads`.
+pub fn search_cdef_mt(seq: &SequenceHeader, deblocked: &FrameBuf, mi: &MiInfo, src: &Frame, base_q_idx: u8, threads: usize) -> Option<CdefChoice> {
+    let _t = profile::span(1);
     let (cols, rows) = (mi.cols.div_ceil(16), mi.rows.div_ceil(16));
     let n = cols * rows;
     let damping = (3 + base_q_idx as u32 / 64).min(6) as u8;
@@ -224,16 +338,14 @@ pub fn search_cdef(seq: &SequenceHeader, deblocked: &FrameBuf, mi: &MiInfo, src:
     if !active.iter().any(|&a| a) {
         return None;
     }
-    let table: Vec<Vec<u64>> = CDEF_CANDIDATES
-        .iter()
-        .map(|&(pri, sec)| {
-            let mut params = CdefParams { damping, ..Default::default() };
-            (params.y_pri[0], params.y_sec[0], params.uv_pri[0], params.uv_sec[0]) = (pri, sec, pri, sec);
-            let choice = CdefChoice { params, idx: vec![0; n], cols };
-            let out = apply(seq, deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(choice), lr: None });
-            block_sse(&out, src, cols, rows)
-        })
-        .collect();
+    let table: Vec<Vec<u64>> = par_map(CDEF_CANDIDATES.len(), threads, |i| {
+        let (pri, sec) = CDEF_CANDIDATES[i];
+        let mut params = CdefParams { damping, ..Default::default() };
+        (params.y_pri[0], params.y_sec[0], params.uv_pri[0], params.uv_sec[0]) = (pri, sec, pri, sec);
+        let choice = CdefChoice { params, idx: vec![0; n], cols };
+        let out = apply(seq, deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(choice), lr: None });
+        block_sse(&out, src, cols, rows)
+    });
     let lambda = filter_lambda(base_q_idx);
     let n_active = active.iter().filter(|&&a| a).count();
     let total = |best: &[u64]| -> u64 { (0..n).filter(|&b| active[b]).map(|b| best[b]).sum() };
@@ -377,6 +489,7 @@ fn probe_indices(cands: &[LrUnit]) -> Vec<usize> {
 /// plane picks none, one of the Wiener filters or a self-guided set by squared error plus an
 /// estimate of its bits. None when no plane gains.
 pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame, lf: [u32; 2], cdef: Option<&CdefChoice>, base_q_idx: u8, threads: usize) -> Option<LrChoice> {
+    let _t = profile::span(2);
     let deblocked = apply(seq, recon, mi, &FilterParams { lf_level: lf, cdef: None, lr: None });
     let cdef_out = match cdef {
         Some(c) => apply(seq, &deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(c.clone()), lr: None }),

@@ -125,3 +125,196 @@ fn every_filter_saves_bytes_at_equal_psnr() {
     assert!(c < 1.0, "CDEF does not pay: {c}");
     assert!(l <= 1.0, "restoration does not pay: {l}");
 }
+
+/// Where the time goes at 1080p, for the profile report: `cargo test --release -p studio-av1-enc
+/// --test filters -- --ignored --nocapture profile_1080p`. One key frame and a few P frames of a pan.
+#[test]
+#[ignore = "benchmark: run in release mode and read the printed numbers"]
+fn profile_1080p() {
+    use studio_av1_enc::filters::profile;
+    let (w, h) = (1920usize, 1080usize);
+    let threads: usize = std::env::var("PROFILE_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+    let n: usize = std::env::var("PROFILE_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let frames: Vec<Frame> = (0..n as u32)
+        .map(|i| {
+            let rgba: Vec<u8> = (0..(w * h) as u32)
+                .flat_map(|j| {
+                    let (x, y) = (j % w as u32 + 3 * i, j / w as u32 + 2 * i);
+                    let edge = if (x / 24 + y / 40) % 2 == 0 { 50 } else { 0 };
+                    [((x / 8 + y / 12) as i32 % 256 + noise(x, y, 0)).clamp(0, 255) as u8, ((y / 4 % 200 + edge) as i32 + noise(y, x, 1)).clamp(0, 255) as u8, ((x * y / 4000 % 256) as i32 + noise(x + 7, y, 2)).clamp(0, 255) as u8, 255]
+                })
+                .collect();
+            from_rgba8(&rgba, w as u32, h as u32, 8, false)
+        })
+        .collect();
+    for speed in [8u8, 6] {
+        let mut e = Encoder::new(Config { speed, keyint: 240, rate: RateMode::Cqp(140), threads, ..Config::new(w as u32, h as u32) }).unwrap();
+        for (label, range) in [("key", 0..1), ("P", 1..n)] {
+            let _ = profile::take();
+            let t = std::time::Instant::now();
+            let mut bytes = 0;
+            for i in range.clone() {
+                bytes += e.push_frame(&frames[i], i as i64).unwrap()[0].data.len();
+            }
+            let total = t.elapsed().as_secs_f64() * 1000.0 / range.len() as f64;
+            let s = profile::take();
+            let per = |ns: u64| ns as f64 / 1e6 / range.len() as f64;
+            let filt = per(s.deblock_search_ns) + per(s.cdef_search_ns) + per(s.lr_search_ns) + per(s.apply_ns);
+            eprintln!(
+                "speed {speed} {label:3} threads {threads}: {total:8.1} ms/frame ({} B) | deblock search {:7.1} | cdef search {:7.1} | restoration search {:7.1} | final apply {:6.1} | rest (mode+motion+entropy+rewrite) {:7.1}",
+                bytes / range.len(), per(s.deblock_search_ns), per(s.cdef_search_ns), per(s.lr_search_ns), per(s.apply_ns), total - filt
+            );
+        }
+    }
+}
+
+/// Splits the non-filter time of a 1080p frame (threads 1) into the mode and motion decisions and
+/// the entropy writing, by driving the stages directly like `Encoder` does. A second write of the
+/// same decisions stands for the rewrite after the filter search.
+#[test]
+#[ignore = "benchmark: run in release mode and read the printed numbers"]
+fn profile_1080p_stages() {
+    use std::sync::Arc;
+    use studio_av1_enc::mode::{ModeDecider, PartitionDecider};
+    use studio_av1_enc::motion::InterFrameCoder;
+    use studio_av1_enc::recon::{FrameBuf, QuantInfo, RefStore};
+    use studio_av1_enc::syntax::TileWriter;
+    use studio_av1_enc::types::{SbPos, SeqParams};
+    let (w, h) = (1920u32, 1080u32);
+    let mk = |i: u32| {
+        let rgba: Vec<u8> = (0..w * h)
+            .flat_map(|j| {
+                let (x, y) = (j % w + 3 * i, j / w + 2 * i);
+                let edge = if (x / 24 + y / 40) % 2 == 0 { 50 } else { 0 };
+                [((x / 8 + y / 12) as i32 % 256 + noise(x, y, 0)).clamp(0, 255) as u8, ((y / 4 % 200 + edge) as i32 + noise(y, x, 1)).clamp(0, 255) as u8, ((x * y / 4000 % 256) as i32 + noise(x + 7, y, 2)).clamp(0, 255) as u8, 255]
+            })
+            .collect();
+        from_rgba8(&rgba, w, h, 8, false)
+    };
+    let (f0, f1) = (mk(0), mk(1));
+    let seq = SeqParams { width: w, height: h, bit_depth: 8, fps: (30, 1), profile: 0, level_idx: 8, use_128x128_superblock: false, enable_cdef: true, enable_restoration: true, enable_order_hint: true, color_primaries: 1, transfer_characteristics: 1, matrix_coefficients: 1, full_range: false };
+    let (mi_cols, mi_rows) = (2 * ((w + 7) >> 3), 2 * ((h + 7) >> 3));
+    let q = 140u8;
+    for speed in [8u8, 6] {
+        let min_n4 = if speed >= 7 { 4 } else { 2 };
+        // key frame
+        let mut buf = FrameBuf::new(w, h, 8);
+        buf.quant = QuantInfo { base_q_idx: q, ..Default::default() };
+        buf.enable_intra_edge_filter = false;
+        let mut tw = TileWriter::new(&seq, q, mi_cols, mi_rows);
+        let mut dec = PartitionDecider { base_q_idx: q, min_n4 };
+        let (mut t_dec, mut t_wr) = (0.0, 0.0);
+        let mut sbs = Vec::new();
+        for row in 0..mi_rows.div_ceil(16) {
+            for col in 0..mi_cols.div_ceil(16) {
+                let pos = SbPos { col, row };
+                let t = std::time::Instant::now();
+                let sb = dec.decide_sb(&f0, &mut buf, pos);
+                t_dec += t.elapsed().as_secs_f64();
+                let t = std::time::Instant::now();
+                tw.write_sb(pos, &sb);
+                t_wr += t.elapsed().as_secs_f64();
+                sbs.push((pos, sb));
+            }
+        }
+        let t = std::time::Instant::now();
+        let mut tw2 = TileWriter::new(&seq, q, mi_cols, mi_rows);
+        for (pos, sb) in &sbs {
+            tw2.write_sb(*pos, sb);
+        }
+        let t_rewrite = t.elapsed().as_secs_f64();
+        eprintln!("speed {speed} key: intra mode+partition search {:7.1} ms | entropy write {:6.1} ms | rewrite {:6.1} ms", t_dec * 1e3, t_wr * 1e3, t_rewrite * 1e3);
+        // inter frame from that reconstruction
+        let mut refs = RefStore::default();
+        refs.refresh(0xFF, Arc::new(buf));
+        let mut buf = FrameBuf::new(w, h, 8);
+        buf.quant = QuantInfo { base_q_idx: q, ..Default::default() };
+        buf.enable_intra_edge_filter = false;
+        let mut tw = TileWriter::new(&seq, q, mi_cols, mi_rows);
+        let mut coder = InterFrameCoder::new(&f1, &refs, [0u8; 7], 0, speed <= 6).with_min_block(min_n4);
+        let (mut t_dec, mut t_wr) = (0.0, 0.0);
+        let mut sbs = Vec::new();
+        for row in 0..mi_rows.div_ceil(16) {
+            for col in 0..mi_cols.div_ceil(16) {
+                let pos = SbPos { col, row };
+                let t = std::time::Instant::now();
+                let sb = coder.decide_sb(&mut buf, pos);
+                t_dec += t.elapsed().as_secs_f64();
+                let t = std::time::Instant::now();
+                tw.write_inter_sb(pos, &sb);
+                t_wr += t.elapsed().as_secs_f64();
+                sbs.push((pos, sb));
+            }
+        }
+        let t = std::time::Instant::now();
+        let mut tw2 = TileWriter::new(&seq, q, mi_cols, mi_rows);
+        for (pos, sb) in &sbs {
+            tw2.write_inter_sb(*pos, sb);
+        }
+        let t_rewrite = t.elapsed().as_secs_f64();
+        eprintln!("speed {speed} P:   mode+motion search {:7.1} ms | entropy write {:6.1} ms | rewrite {:6.1} ms", t_dec * 1e3, t_wr * 1e3, t_rewrite * 1e3);
+        if speed == 6 {
+            use studio_av1_enc::filters::{apply, decoder_sequence, search_cdef_mt, search_deblock_mt, search_lr, FilterParams};
+            let dseq = decoder_sequence(&studio_av1_enc::obu::write_sequence_header(&seq));
+            let mi = tw2.mode_info();
+            for threads in [1usize, 2, 4, 14] {
+                let t = std::time::Instant::now();
+                let lf = search_deblock_mt(&dseq, &buf, mi, &f1, threads);
+                let t_lf = t.elapsed().as_secs_f64() * 1e3;
+                let deblocked = apply(&dseq, &buf, mi, &FilterParams { lf_level: lf, cdef: None, lr: None });
+                let t = std::time::Instant::now();
+                let cdef = search_cdef_mt(&dseq, &deblocked, mi, &f1, q, threads);
+                let t_cdef = t.elapsed().as_secs_f64() * 1e3;
+                let t = std::time::Instant::now();
+                let lr = search_lr(&dseq, &buf, mi, &f1, lf, cdef.as_ref(), q, threads);
+                let t_lr = t.elapsed().as_secs_f64() * 1e3;
+                eprintln!("speed 6 P filters at {threads:2} threads: deblock search {t_lf:6.1} ms (lf {lf:?}) | cdef search {t_cdef:6.1} ms | restoration search {t_lr:7.1} ms ({})", lr.is_some());
+            }
+        }
+    }
+}
+
+/// The searches pick the same parameters whatever the worker count.
+#[test]
+fn filter_searches_do_not_depend_on_the_thread_count() {
+    use studio_av1_enc::filters::{decoder_sequence, search_cdef_mt, search_deblock_mt, search_lr};
+    use studio_av1_enc::mode::{ModeDecider, PartitionDecider};
+    use studio_av1_enc::obu::write_sequence_header;
+    use studio_av1_enc::recon::{FrameBuf, QuantInfo};
+    use studio_av1_enc::syntax::TileWriter;
+    use studio_av1_enc::types::{SbPos, SeqParams};
+    let (w, h) = (210u32, 140u32);
+    let src = picture(w, h, 2);
+    let seq = SeqParams { width: w, height: h, bit_depth: 8, fps: (30, 1), profile: 0, level_idx: 0, use_128x128_superblock: false, enable_cdef: true, enable_restoration: true, enable_order_hint: true, color_primaries: 1, transfer_characteristics: 1, matrix_coefficients: 1, full_range: false };
+    let dseq = decoder_sequence(&write_sequence_header(&seq));
+    let (mi_cols, mi_rows) = (2 * ((w + 7) >> 3), 2 * ((h + 7) >> 3));
+    for q in [100u8, 200] {
+        let mut buf = FrameBuf::new(w, h, 8);
+        buf.quant = QuantInfo { base_q_idx: q, ..Default::default() };
+        buf.enable_intra_edge_filter = false;
+        let mut tw = TileWriter::new(&seq, q, mi_cols, mi_rows);
+        let mut dec = PartitionDecider { base_q_idx: q, min_n4: 2 };
+        for row in 0..mi_rows.div_ceil(16) {
+            for col in 0..mi_cols.div_ceil(16) {
+                let pos = SbPos { col, row };
+                let sb = dec.decide_sb(&src, &mut buf, pos);
+                tw.write_sb(pos, &sb);
+            }
+        }
+        let mi = tw.mode_info();
+        let lf1 = search_deblock_mt(&dseq, &buf, mi, &src, 1);
+        for t in [2usize, 8] {
+            assert_eq!(search_deblock_mt(&dseq, &buf, mi, &src, t), lf1, "deblock at {t} threads, q {q}");
+        }
+        let deblocked = studio_av1_enc::filters::apply(&dseq, &buf, mi, &studio_av1_enc::filters::FilterParams { lf_level: lf1, cdef: None, lr: None });
+        let cdef1 = search_cdef_mt(&dseq, &deblocked, mi, &src, q, 1);
+        for t in [2usize, 8] {
+            assert_eq!(search_cdef_mt(&dseq, &deblocked, mi, &src, q, t), cdef1, "cdef at {t} threads, q {q}");
+        }
+        let lr1 = search_lr(&dseq, &buf, mi, &src, lf1, cdef1.as_ref(), q, 1);
+        for t in [2usize, 8] {
+            assert_eq!(search_lr(&dseq, &buf, mi, &src, lf1, cdef1.as_ref(), q, t), lr1, "restoration at {t} threads, q {q}");
+        }
+        println!("q {q}: lf {lf1:?} cdef {} lr {}", cdef1.is_some(), lr1.is_some());
+    }
+}
