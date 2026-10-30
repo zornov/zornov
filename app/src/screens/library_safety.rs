@@ -47,6 +47,8 @@ struct State {
     history: Vec<(String, u64, String)>,
     rights: Option<Value>,
     clean: Option<Value>,
+    /// The plan `clean` was made from: "Clean now" applies exactly this.
+    clean_plan: Option<safety::Plan>,
     note: String,
     /// Long work (backup, collect) reports here.
     work: Arc<Mutex<Option<String>>>,
@@ -405,7 +407,9 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         }
         Some(Act::Clean) => {
             let o = safety::CleanOptions::default();
-            st.clean = Some(safety::clean_plan(&root, &o).json(5));
+            let plan = safety::clean_plan(&root, &o);
+            st.clean = Some(plan.json(5));
+            st.clean_plan = Some(plan);
         }
         None => {}
     }
@@ -413,12 +417,7 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(crate::i18n::tf(format!("Would free {} ({} files). Never media, never anything a project uses.", c["would_free"].as_str().unwrap_or("0"), c["files"]))).font(theme::caption()).color(t.text_2));
             if c["files"].as_u64().unwrap_or(0) > 0 && Button::secondary("Clean now").compact().show(ui).clicked() {
-                let o = safety::CleanOptions::default();
-                let plan = safety::clean_plan(&root, &o);
-                st.note = match safety::clean_apply(&root, &o, &plan) {
-                    Ok(freed) => crate::i18n::tf(format!("Freed {}.", safety::human(freed))),
-                    Err(e) => e,
-                };
+                st.note = clean_previewed(&root, &safety::CleanOptions::default(), st.clean_plan.take());
                 st.clean = None;
                 st.health = None;
             }
@@ -519,6 +518,16 @@ fn rights_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     ui.label(egui::RichText::new(hint).font(theme::caption()).color(t.text_2));
 }
 
+/// Applies the plan the person was shown (never a fresh one, which could
+/// hold other files); `clean_apply` still re-checks each file before removing it.
+fn clean_previewed(root: &std::path::Path, o: &safety::CleanOptions, plan: Option<safety::Plan>) -> String {
+    let Some(plan) = plan else { return crate::i18n::tf("Nothing to clean; preview again".to_owned()) };
+    match safety::clean_apply(root, o, &plan) {
+        Ok(freed) => crate::i18n::tf(format!("Freed {}.", safety::human(freed))),
+        Err(e) => e,
+    }
+}
+
 /// Saves the project to its folder, quietly (before a backup or restore).
 fn save_now(app: &mut StudioApp) {
     if let Some(f) = app.doc.folder.clone() {
@@ -557,6 +566,33 @@ pub fn export_block(doc: &crate::doc::Doc) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_now_applies_the_plan_that_was_previewed() {
+        let d = std::env::temp_dir().join(format!("zornov-clean-now-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let root = d.join("proj");
+        let pf = studio_model::file::ProjectFolder::create(&root).unwrap();
+        pf.save(&studio_model::Project::new(Default::default())).unwrap();
+        let shared = d.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::create_dir_all(pf.cache_dir()).unwrap();
+        let (shown, later) = (pf.cache_dir().join("shown.png"), pf.cache_dir().join("made-after-preview.png"));
+        std::fs::write(&shown, vec![1u8; 2000]).unwrap();
+        let o = safety::CleanOptions { shared_cache: shared, ..Default::default() };
+        let plan = safety::clean_plan(&root, &o);
+        assert_eq!(plan.items.len(), 1);
+        // A file that appears after the preview was never shown, so it stays.
+        std::fs::write(&later, vec![2u8; 2000]).unwrap();
+        let note = clean_previewed(&root, &o, Some(plan));
+        assert!(note.starts_with("Freed"), "{note}");
+        assert!(!shown.exists(), "the previewed file is gone");
+        assert!(later.exists(), "a file that was not in the preview is not removed");
+        // No preview, nothing removed.
+        assert!(clean_previewed(&root, &o, None).contains("preview"));
+        assert!(later.exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn ages_are_words_not_timestamps() {
