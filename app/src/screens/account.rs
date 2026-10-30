@@ -20,48 +20,20 @@ pub fn page(st: &mut AccountState, ui: &mut egui::Ui) {
     on::page(&mut st.inner, ui);
 }
 
-/// The longest help line a row carries; the rest is in its tooltip.
-// TODO(kit): a shared one-line help row and status pill for every settings page.
-const HELP_MAX: usize = 64;
+use crate::screens::settings::pill;
+
 /// One width for every text field on the page.
 const FIELD_W: f32 = 240.0;
+
+/// One line of help under a row, the rest on hover.
+fn hint(ui: &mut egui::Ui, text: &str) {
+    crate::screens::settings::hint(ui, text, None);
+}
 
 /// A status line (the answer to what the person just did), wrapped.
 fn note(ui: &mut egui::Ui, text: &str) {
     let t = theme::tokens(ui.ctx());
     ui.add(egui::Label::new(egui::RichText::new(text).font(theme::caption()).color(t.text_2)).wrap());
-}
-
-/// `text` cut to one help line; the whole of it when it was cut.
-fn one_line(text: &str) -> (String, Option<String>) {
-    if text.chars().count() <= HELP_MAX {
-        return (text.to_owned(), None);
-    }
-    let cut: String = text.chars().take(HELP_MAX - 1).collect();
-    (format!("{}…", cut.trim_end()), Some(text.to_owned()))
-}
-
-/// One line of help under a row, in the control column, the rest on hover.
-fn hint(ui: &mut egui::Ui, text: &str) {
-    let t = theme::tokens(ui.ctx());
-    let (shown, full) = one_line(text);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.add_space(kit::label_width(ui.ctx()));
-        let r = ui.add(egui::Label::new(egui::RichText::new(shown).font(theme::caption()).color(t.text_2)).truncate());
-        if let Some(full) = full {
-            r.on_hover_text(full);
-        }
-    });
-}
-
-/// A small status tag: green when `ok`, quiet otherwise.
-fn pill(ui: &mut egui::Ui, text: &str, ok: bool) {
-    let t = theme::tokens(ui.ctx());
-    let (fill, ink) = if ok { (t.ok.gamma_multiply(0.18), t.ok) } else { (t.alt, t.text_2) };
-    egui::Frame::new().fill(fill).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 1)).show(ui, |ui| {
-        ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown(text)).font(theme::caption()).color(ink)).extend());
-    });
 }
 
 mod on {
@@ -445,7 +417,7 @@ mod on {
             let help: Vec<_> = texts.iter().filter(|(t, _, size)| (*size - caption).abs() < 0.1 && t.chars().count() > 20).collect();
             assert!(!help.is_empty(), "{texts:?}");
             for (t, r, _) in &help {
-                assert!(t.chars().count() <= super::super::HELP_MAX, "help too long: {t}");
+                assert!(t.chars().count() <= crate::screens::settings::HELP_MAX, "help too long: {t}");
                 assert!((r.left() - col_x).abs() < 1.5, "help {t:?} starts at {} not {col_x}", r.left());
                 assert!(r.height() < 2.0 * caption, "help wraps: {t}");
             }
@@ -458,10 +430,10 @@ mod on {
 
         #[test]
         fn one_line_keeps_short_text_and_cuts_long_text_with_the_whole_in_a_tooltip() {
-            assert_eq!(super::super::one_line("Short."), ("Short.".to_owned(), None));
+            assert_eq!(crate::screens::settings::one_line("Short."), ("Short.".to_owned(), None));
             let long = "x".repeat(200);
-            let (shown, full) = super::super::one_line(&long);
-            assert!(shown.chars().count() <= super::super::HELP_MAX);
+            let (shown, full) = crate::screens::settings::one_line(&long);
+            assert!(shown.chars().count() <= crate::screens::settings::HELP_MAX);
             assert_eq!(full.as_deref(), Some(long.as_str()));
         }
     }
