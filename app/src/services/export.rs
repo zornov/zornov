@@ -8,6 +8,14 @@
 //! polls `ExportJob::poll` each frame and gets the events since the last
 //! poll. Needs the `render` feature (the default).
 
+mod bundle;
+mod check;
+mod cutdown;
+pub use bundle::{BundleOut, BundleReq, bundle};
+pub use check::{CheckOut, Problem, Severity, accept, check_file, check_project, is_fixable, preflight, profile_for, unaccept};
+pub use cutdown::{CutdownOut, CutdownReq, RenderReq, cutdown};
+pub(crate) use cutdown::{free_dir, sanitize};
+
 use crate::doc::Doc;
 use crate::export_run::{self, Request};
 use crate::formats::Format;

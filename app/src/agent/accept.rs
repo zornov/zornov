@@ -74,6 +74,25 @@ impl Session {
         Ok(Some(json!(items)))
     }
 
+    /// Accepts one finding as intended: `kind` on `clip`, or everywhere without one.
+    pub fn accept_finding(&mut self, kind: &str, clip: Option<u32>, why: &str) -> Result<(), String> {
+        let mut item = json!({"kind": kind});
+        if let Some(c) = clip {
+            item["clip"] = json!(c);
+        }
+        if !why.is_empty() {
+            item["why"] = json!(why);
+        }
+        self.take_accepts(&json!({"accept": [item]})).map(|_| ())
+    }
+
+    /// Takes an acceptance back: `kind` on `clip` (or the kind-wide one when `clip` is none).
+    pub fn unaccept_finding(&mut self, kind: &str, clip: Option<u32>) -> Result<(), String> {
+        let mut items = self.accepted_items();
+        items.retain(|x| !(x["kind"] == kind && x.get("clip").and_then(Value::as_u64) == clip.map(u64::from)));
+        self.save_accepted(items)
+    }
+
     /// Whether a finding of `kind` on `clips` is accepted.
     fn is_accepted(items: &[Value], kind: &str, clips: &[u64]) -> bool {
         items.iter().any(|x| x["kind"] == kind && x.get("clip").and_then(Value::as_u64).is_none_or(|c| clips.is_empty() || clips.contains(&c)))
