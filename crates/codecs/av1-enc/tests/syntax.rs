@@ -476,3 +476,31 @@ fn plane_sizes_helper_matches_the_decoder_tables() {
     assert_eq!(plane_residual_size(BLOCK_64X64, 0), BLOCK_64X64);
     assert_eq!(plane_residual_size(BLOCK_4X4, 1), BLOCK_4X4);
 }
+
+/// A tile of a bigger frame is coded like a picture of its own size: the same blocks at the tile's
+/// position give the same bytes as a standalone writer, wherever the tile sits (the neighbours
+/// outside it count as unavailable and every context starts fresh).
+#[test]
+fn a_tile_writer_matches_a_standalone_picture_of_the_tile_size() {
+    let q = 90u8;
+    for (seed, big) in [(7u64, false), (8, true)] {
+        let mut rng = Rng(seed);
+        let (tw_px, th_px) = (128usize, 64usize);
+        let case = gen_case(&mut rng, tw_px, th_px, q, true, None, big);
+        let small = encode(&seq(tw_px as u32, th_px as u32), &case, q, true, false).tile;
+        // the same blocks as the tile at superblock (row 1, col 1) of a 256x192 frame
+        let (fw, fh) = (256usize, 192usize);
+        let (f_cols, f_rows) = (2 * ((fw + 7) >> 3), 2 * ((fh + 7) >> 3));
+        for (tile_sb_row, tile_sb_col) in [(0usize, 0usize), (1, 1), (2, 0)] {
+            let (dr, dc) = (tile_sb_row * 16, tile_sb_col * 16);
+            let mut tw = TileWriter::new(&seq(fw as u32, fh as u32), q, f_cols as u32, f_rows as u32)
+                .with_tx_mode_select(true)
+                .with_tile(dr, dr + case.mi_rows, dc, dc + case.mi_cols);
+            for (pos, sb, extras) in &case.sbs {
+                let moved = SbDecision { blocks: sb.blocks.iter().map(|b| BlockDecision { mi_row: b.mi_row + dr as u32, mi_col: b.mi_col + dc as u32, ..b.clone() }).collect() };
+                tw.write_sb_ex(SbPos { col: pos.col + tile_sb_col as u32, row: pos.row + tile_sb_row as u32 }, &moved, extras);
+            }
+            assert_eq!(tw.finish(), small, "seed {seed}: tile at superblock ({tile_sb_row}, {tile_sb_col}) differs from the standalone picture");
+        }
+    }
+}

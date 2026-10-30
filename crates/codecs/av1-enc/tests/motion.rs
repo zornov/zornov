@@ -17,7 +17,7 @@ use std::sync::Arc;
 use studio_av1::Decoder;
 use studio_av1::spec_tables::*;
 use studio_av1_enc::bits::BitWriter;
-use studio_av1_enc::motion::mvpred::{find_stack, frame_info, predicted_mv};
+use studio_av1_enc::motion::mvpred::{find_stack, find_stack_in_tile, frame_info, predicted_mv};
 use studio_av1_enc::obu::{ObuType, obu, write_frame_header};
 use studio_av1_enc::recon::{FrameBuf, QuantInfo, RefStore};
 use studio_av1_enc::syntax::TileWriter;
@@ -477,6 +477,27 @@ fn candidate_stack_follows_the_neighbours() {
     // another reference frame finds no match: the stack falls back to the global vector
     let other = find_stack(&ctx.mi, &f, (0, 8, 8, 8), 2);
     assert_eq!(predicted_mv(&other, GLOBALMV, 0), [0, 0]);
+}
+
+#[test]
+fn candidate_stack_stops_at_the_tile_edge() {
+    // the inter block at column 0 is a neighbour of the block at column 8 only while both are in
+    // the same tile; with a tile starting at column 8 the block there sees nothing
+    let (mi_cols, mi_rows) = (32, 16);
+    let mut ctx = ContextState::new(mi_cols, mi_rows);
+    let f = frame_info(mi_rows, mi_cols);
+    ctx.store_inter_block(0, 0, BLOCK_32X32, NEWMV, false, TX_32X32, 1, [-24, 16]);
+    let whole = find_stack_in_tile(&ctx.mi, &f, (0, 8, 8, 8), 1, [0, 16, 0, 32]);
+    assert!(whole.num_mv_found >= 1 && whole.ref_stack_mv[0][0] == [-24, 16]);
+    let tiled = find_stack_in_tile(&ctx.mi, &f, (0, 8, 8, 8), 1, [0, 16, 8, 32]);
+    assert_eq!(tiled.num_mv_found, 0, "a block outside the tile must not be a candidate");
+    assert_eq!(predicted_mv(&tiled, NEARESTMV, 0), [0, 0]);
+    // and the same for the block above a tile's first row
+    let mut ctx = ContextState::new(16, 32);
+    let f = frame_info(32, 16);
+    ctx.store_inter_block(0, 0, BLOCK_32X32, NEWMV, false, TX_32X32, 1, [8, -40]);
+    assert_eq!(find_stack_in_tile(&ctx.mi, &f, (8, 0, 8, 8), 1, [0, 32, 0, 16]).num_mv_found, 1);
+    assert_eq!(find_stack_in_tile(&ctx.mi, &f, (8, 0, 8, 8), 1, [8, 32, 0, 16]).num_mv_found, 0);
 }
 
 #[test]
