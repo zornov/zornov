@@ -113,7 +113,7 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     let story = std::mem::take(&mut st.story);
     st.refresh(dir.as_deref(), now);
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
-    let out = kit::modal(ctx, egui::Id::new("production-dialog"), Vec2::new(1080.0, 700.0), "Production", |ui| body(ui, &mut st, &story, dir.as_deref()));
+    let out = kit::modal(ctx, egui::Id::new("production-dialog"), Vec2::new(1080.0, 700.0), "Production planning", |ui| body(ui, &mut st, &story, dir.as_deref()));
     st.story = story;
     let story_panel = std::mem::take(&mut st.open_story);
     drop(st);

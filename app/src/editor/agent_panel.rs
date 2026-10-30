@@ -519,7 +519,7 @@ impl AgentUi {
                                 Some(why) => kit::push(ctx, crate::i18n::tf(format!("Could not {}. {}", url.replacen("converted ", "convert ", 1), one_line(&why, 140))), None, Some(Icon::Warning)),
                             },
                             Ok(_) => kit::push(ctx, crate::i18n::tf(format!("Downloaded {short} into the media bin")), None, Some(Icon::CheckCircle)),
-                            Err(e) => kit::push(ctx, crate::i18n::tf(format!("Could not download {short}: {}", one_line(&e, 140))), None, Some(Icon::Warning)),
+                            Err(_) => kit::push(ctx, crate::i18n::tf(format!("Could not download {short}. Check the link and try again")), None, Some(Icon::Warning)),
                         };
                     }
                     Err(mpsc::TryRecvError::Empty) => i += 1,
@@ -927,24 +927,27 @@ fn link_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     let Some(link) = a.link.as_mut() else { return };
     let t = theme::tokens(ctx);
     let mut go = false;
-    let out = kit::modal(ctx, egui::Id::unique("download-link"), Vec2::new(520.0, 250.0), "Download from a link", |ui| {
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 14)).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 10.0;
-            ui.label(egui::RichText::new(crate::i18n::shown("A link to a video, sound or picture file, or to a web page whose video is openly available. It is saved in the project's Downloads folder and added to the media bin.")).font(theme::body()).color(t.text_2));
-            let resp = ui.add(egui::TextEdit::singleline(link).hint_text("https://…").font(chat_font()).desired_width(f32::INFINITY));
-            if !resp.has_focus() && link.is_empty() {
-                resp.request_focus();
-            }
-            if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                go = true;
-            }
-            ui.label(egui::RichText::new("Pages work when their video is openly exposed; protected or signed-in video does not. Only download what you have the right to use.").font(theme::caption()).color(t.text_2));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if Button::primary("Download").icon(Icon::DownloadSimple).show(ui).clicked() {
-                    go = true;
-                }
-            });
-        });
+    let id = egui::Id::unique("download-link");
+    let mut cancel = false;
+    let out = kit::modal_sized(ctx, id, kit::DialogSize::Medium, "Download from a link", |ui| {
+        let body = kit::above_footer(ui).shrink2(Vec2::new(kit::DIALOG_PAD, theme::space::LG));
+        let mut ui_body = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt("download-body"));
+        let ui_b = &mut ui_body;
+        ui_b.spacing_mut().item_spacing.y = 10.0;
+        ui_b.label(egui::RichText::new(crate::i18n::shown("A link to a video, sound or picture file, or to a web page whose video is openly available. It is saved in the project's Downloads folder and added to the media bin.")).font(theme::body()).color(t.text_2));
+        let resp = ui_b.add(egui::TextEdit::singleline(link).hint_text("https://…").font(chat_font()).desired_width(f32::INFINITY));
+        if !resp.has_focus() && link.is_empty() {
+            resp.request_focus();
+        }
+        if resp.lost_focus() && ui_b.input(|i| i.key_pressed(egui::Key::Enter)) {
+            go = true;
+        }
+        ui_b.label(egui::RichText::new("Pages work when their video is openly exposed; protected or signed-in video does not. Only download what you have the right to use.").font(theme::caption()).color(t.text_2));
+        match kit::dialog_footer(ui, "Download", Some("Cancel"), false) {
+            kit::Choice::Primary => go = true,
+            kit::Choice::Secondary => cancel = true,
+            kit::Choice::None => {}
+        }
     });
     let url = link.trim().to_owned();
     if go {
@@ -960,7 +963,7 @@ fn link_dialog(app: &mut StudioApp, ctx: &egui::Context) {
                 kit::push(ctx, e, None, Some(Icon::Warning));
             }
         }
-    } else if out.close {
+    } else if out.close || cancel {
         a.link = None;
     }
 }
@@ -1360,7 +1363,7 @@ fn welcome(app: &mut StudioApp, ui: &mut egui::Ui) {
     ui.add_space(18.0);
     for (icon, head, body) in [
         (Icon::MagicWand, "Live on your timeline", "Every change appears as it is made, and you can keep editing alongside it."),
-        (Icon::ArrowUUpLeft, "Its own Undo", "Undo this request takes back what it did for a request; ⌘Z undoes only your own edits, so you can keep working while it does."),
+        (Icon::ArrowUUpLeft, "Its own Undo", "Undo this request takes back what it did for a request; Undo in the editor only takes back your own edits, so you can keep working while it does."),
         (Icon::Info, "What is sent", "Your requests, descriptions of the project and the frames it looks at go to Claude (Anthropic) or ChatGPT (OpenAI). Media files are never uploaded."),
         (Icon::Cpu, "Local tools stay local", "Captions, background removal and voice cleanup still run on this computer."),
     ] {
@@ -1602,7 +1605,7 @@ fn empty_state(input: &mut String, focus_input: &mut bool, ui: &mut egui::Ui, w:
         ui.add_space(gap);
     }
     ui.add_space(8.0);
-    centred(ui, "Type / for Zornov commands  ·  ⌘K opens this panel", theme::caption(), t.text_2, w);
+    centred(ui, "Type / for Zornov commands", theme::caption(), t.text_2, w);
 }
 
 fn centred(ui: &mut egui::Ui, text: &str, font: FontId, colour: Color32, w: f32) {
@@ -1693,7 +1696,7 @@ fn step_name(tool: &str) -> String {
         "save" => w("Saving"),
         "open" | "new_project" => w("Opening"),
         "save_move" | "save_design" => w("Saving to your library"),
-        other => other.replace('_', " "),
+        _ => w("Working on it"),
     }
 }
 
@@ -1981,7 +1984,7 @@ fn working_row(ui: &mut egui::Ui, entries: &[Entry], plan_title: Option<&str>, t
     p.rect_filled(pr, CornerRadius::same(11), if on { theme::alpha(t.accent, 0.18) } else { card_fill(t) });
     icons::paint(p, Rect::from_center_size(egui::pos2(pr.left() + 14.0, pr.center().y), Vec2::splat(10.0)), if paused { Icon::PlayFill } else { Icon::PauseFill }, 10.0, if on { t.accent } else { t.text_2 });
     p.text(egui::pos2(pr.left() + 24.0, pr.center().y), Align2::LEFT_CENTER, label, theme::caption(), if on { t.text } else { t.text_2 });
-    let pause = presp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(if paused { "Go on from where it held" } else { "Hold at the next step; nothing is lost. Type a correction meanwhile (⌘↵)." }).clicked();
+    let pause = presp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(if paused { "Go on from where it held" } else { "Hold at the next step; nothing is lost. Type a correction meanwhile." }).clicked();
     (stop, pause)
 }
 
@@ -2424,7 +2427,7 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     } else if !a.attachments.is_empty() {
         "Say what to do with what you marked…"
     } else if busy {
-        "Working… ⌘↵ corrects it now; ↵ queues a next request"
+        "Working… send a correction now, or queue the next request"
     } else {
         "Ask for anything, or / for a command"
     };
@@ -2483,7 +2486,7 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         while a.input.ends_with('\n') {
             a.input.pop();
         }
-        // ⌘↵ while working: a correction it takes in now.
+        // Cmd+Enter while working: a correction it takes in now.
         if busy && ui.input(|i| i.modifiers.command) {
             correct = true;
         } else {
@@ -2513,7 +2516,7 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let correct_w = kit::text_width(ui, "Correct now", theme::caption()) + 20.0;
     // The keys hint, only where it fits between the modes and what is at
     // the end of the row (the Correct now chip, the round button).
-    let hint = if busy { "⌘↵ correct now  ·  ↵ queue  ·  Esc stop" } else { "↵ send  ·  ⇧↵ new line" };
+    let hint = if busy { "Cmd+Enter corrects now  ·  Enter queues  ·  Esc stops" } else { "Enter sends  ·  Shift+Enter adds a line" };
     let hint_end = if show_correct { r.right() - 44.0 - correct_w - 8.0 } else { r.right() - 48.0 };
     if r.width() > 360.0 && kit::text_width(ui, hint, theme::caption()) <= hint_end - x - 8.0 {
         p.text(egui::pos2(hint_end, row_y), Align2::RIGHT_CENTER, hint, theme::caption(), theme::alpha(t.text_2, 0.8));
@@ -2526,7 +2529,7 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         let cres = ui.interact(cr, ui.scope_id().with("agent-correct"), Sense::click());
         p.rect_filled(cr, CornerRadius::same(11), if cres.hovered() { t.hover(t.accent_soft) } else { t.accent_soft });
         p.text(cr.center(), Align2::CENTER_CENTER, label, theme::caption(), t.accent);
-        if cres.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Send this to the running request now (⌘↵): it changes course at its next step").clicked() {
+        if cres.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Send this to the running request now (Cmd+Enter): it changes course at its next step").clicked() {
             correct = true;
         }
     }
@@ -2549,7 +2552,7 @@ fn composer_card(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         p.line_segment([bc + Vec2::new(0.0, 5.5), bc + Vec2::new(0.0, -5.5)], s);
         p.line_segment([bc + Vec2::new(-4.5, -1.0), bc + Vec2::new(0.0, -5.5)], s);
         p.line_segment([bc + Vec2::new(4.5, -1.0), bc + Vec2::new(0.0, -5.5)], s);
-        if bres.on_hover_cursor(if can_send { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default }).on_hover_text(if busy { "Send when this one finishes (↵)" } else { "Send (↵)" }).clicked() && can_send {
+        if bres.on_hover_cursor(if can_send { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default }).on_hover_text(if busy { "Send when this one finishes (Enter)" } else { "Send (Enter)" }).clicked() && can_send {
             send = true;
         }
     }
@@ -2602,6 +2605,14 @@ fn failed_in(content: &[Content]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn show_steps_never_prints_a_tool_name() {
+        for tool in ["guide", "edit", "ai", "dub", "plan", "mix_stems", "subtitles"] {
+            let name = step_name(tool);
+            assert!(!name.contains('_') && name.chars().next().is_some_and(|c| c.is_uppercase()), "{tool} -> {name}");
+        }
+    }
+
     #[test]
     fn a_converted_import_with_failures_is_not_done() {
         let ok = vec![Content::Text(r#"{"media":[3],"failed":[]}"#.into())];
