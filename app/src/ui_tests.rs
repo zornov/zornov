@@ -874,6 +874,22 @@ fn each_menu_command_has_one_home() {
     }
 }
 
+/// The View menu scrolls on a short window; its Layout block stays below the
+/// scroll area, so Maximise panel is never cut off or hidden past the fold.
+#[test]
+fn view_menu_layout_block_is_reachable_on_short_windows() {
+    for (w, hgt) in [(960.0, 600.0), (1024.0, 640.0)] {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(w, hgt);
+        h.frames(6);
+        open_menu_items(&mut h, "View");
+        h.frames(3);
+        for item in ["Maximise panel", "Reset layout"] {
+            let r = h.find(Some(accesskit::Role::Button), item).unwrap_or_else(|| panic!("{item} in View at {w}x{hgt}"));
+            assert!(r.top() >= 0.0 && r.bottom() <= hgt - 4.0, "{item} fits the {w}x{hgt} window: {r:?}");
+        }
+    }
+}
+
 /// The surfaces that were buttons are reached from the menus, the tabs or a panel.
 #[test]
 fn library_production_review_and_paint_still_open() {
