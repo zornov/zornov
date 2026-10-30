@@ -53,7 +53,7 @@ pub fn saved(dir: &Path) -> Vec<PathBuf> {
                 .collect()
         })
         .unwrap_or_default();
-    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.sort_by_key(|e| std::cmp::Reverse(e.0));
     v.into_iter().map(|(_, p)| p).collect()
 }
 
@@ -95,10 +95,8 @@ pub fn bring(c: &mut Canvas, dir: &Path, name: Option<&str>) -> Result<(), Strin
             }
         }
         None => {
-            if c.doc().is_none() {
-                if let Some(p) = saved(dir).into_iter().next() {
-                    open_saved(c, &p)?;
-                }
+            if c.doc().is_none() && let Some(p) = saved(dir).into_iter().next() {
+                open_saved(c, &p)?;
             }
             Ok(())
         }

@@ -665,6 +665,7 @@ thread_local! {
 
 /// Open the picture at `path` (a still, or a frame saved from a clip) in
 /// Paint, as the screen next draws. The file is only read; Paint works on a copy.
+#[allow(dead_code)] // the clip and library menus call it once they offer "Edit in Paint" (see the report)
 pub fn edit_in_paint(app: &mut StudioApp, path: std::path::PathBuf) {
     WANTED.with(|w| *w.borrow_mut() = Some(path));
     app.screen = Screen::Paint;
@@ -692,10 +693,8 @@ fn workspace(app: &mut StudioApp, st: &mut PaintState, ui: &mut egui::Ui, root: 
     if let Some(mut c) = crate::paint::try_canvas() {
         let dir = crate::paint::pictures_dir(root);
         crate::paint::use_dir(&mut c, dir.clone());
-        if c.doc().is_none() && st.jobs.is_empty() {
-            if let Err(e) = crate::paint::bring(&mut c, &dir, None) {
-                kit::push_error(&ctx, format!("The last picture could not be opened: {e}"));
-            }
+        if c.doc().is_none() && st.jobs.is_empty() && let Err(e) = crate::paint::bring(&mut c, &dir, None) {
+            kit::push_error(&ctx, format!("The last picture could not be opened: {e}"));
         }
         empty = c.doc().is_none();
     }
@@ -800,11 +799,10 @@ fn top_bar_row(app: &mut StudioApp, st: &mut PaintState, bar: &mut egui::Ui) {
         kit::toggle_open(bar.ctx(), new_id);
     }
     kit::popover(bar.ctx(), new_id, new.rect, kit::Side::Below, 280.0, |ui| new_sheet(st, ui, &names));
-    if kit::Button::secondary("Open").icon(Icon::FolderOpen).show(bar).on_hover_text("PSD, TIFF, PNG, JPEG, WebP, HEIC, EXR or camera raw. The file is only read").clicked() {
-        if let Some(p) = rfd::FileDialog::new().add_filter("Pictures", studio_canvas::files::READS).pick_file() {
-            run(st, "Open", vec![json!({"op": "open", "path": p.display().to_string()})]);
-            st.fit_pending = true;
-        }
+    let open = kit::Button::secondary("Open").icon(Icon::FolderOpen).show(bar).on_hover_text("PSD, TIFF, PNG, JPEG, WebP, HEIC, EXR or camera raw. The file is only read");
+    if open.clicked() && let Some(p) = rfd::FileDialog::new().add_filter("Pictures", studio_canvas::files::READS).pick_file() {
+        run(st, "Open", vec![json!({"op": "open", "path": p.display().to_string()})]);
+        st.fit_pending = true;
     }
     bar.separator();
     if kit::Button::secondary("Save").shortcut("⌘S").show(bar).on_hover_text("Into the project's Pictures folder").clicked() {
@@ -1174,11 +1172,9 @@ fn canvas_view(st: &mut PaintState, ui: &mut egui::Ui, r: Rect) {
         painter.add(egui::Shape::line(pts, Stroke::new(1.0, Color32::WHITE)));
     }
     // The brush outline.
-    if let Some(h) = resp.hover_pos() {
-        if st.tool.strokes() {
-            painter.circle_stroke(h, (st.size * st.zoom / 2.0).max(2.0), Stroke::new(1.0, Color32::from_white_alpha(200)));
-            painter.circle_stroke(h, (st.size * st.zoom / 2.0).max(2.0) + 1.0, Stroke::new(1.0, Color32::from_black_alpha(120)));
-        }
+    if let Some(h) = resp.hover_pos() && st.tool.strokes() {
+        painter.circle_stroke(h, (st.size * st.zoom / 2.0).max(2.0), Stroke::new(1.0, Color32::from_white_alpha(200)));
+        painter.circle_stroke(h, (st.size * st.zoom / 2.0).max(2.0) + 1.0, Stroke::new(1.0, Color32::from_black_alpha(120)));
     }
 }
 
@@ -1242,10 +1238,8 @@ fn input(st: &mut PaintState, ui: &mut egui::Ui, resp: &egui::Response, view: &V
             st.stroke.push([d[0], d[1], pressure]);
         }
     }
-    if resp.dragged() && (st.tool.strokes() || st.tool == Tool::Lasso) {
-        if st.stroke.last().is_none_or(|l| (l[0] - d[0]).hypot(l[1] - d[1]) * view.zoom > 1.0) {
-            st.stroke.push([d[0], d[1], pressure]);
-        }
+    if resp.dragged() && (st.tool.strokes() || st.tool == Tool::Lasso) && st.stroke.last().is_none_or(|l| (l[0] - d[0]).hypot(l[1] - d[1]) * view.zoom > 1.0) {
+        st.stroke.push([d[0], d[1], pressure]);
     }
     let released = resp.drag_stopped() || resp.clicked();
     if !released {
@@ -1479,10 +1473,8 @@ fn colour_panel(st: &mut PaintState, ui: &mut egui::Ui) {
             st.hex_text = before;
         }
         let edit = ui.add(egui::TextEdit::singleline(&mut st.hex_text).desired_width(76.0).hint_text("#rrggbb"));
-        if edit.changed() {
-            if let Some(c) = parse_hex(&st.hex_text) {
-                st.color = c;
-            }
+        if edit.changed() && let Some(c) = parse_hex(&st.hex_text) {
+            st.color = c;
         }
         if icon_button(st, ui, "swap", "Swap colours (X)", false).clicked() {
             std::mem::swap(&mut st.color, &mut st.back);
@@ -1687,7 +1679,7 @@ fn status_bar(st: &mut PaintState, ui: &mut egui::Ui, r: Rect) {
     // One line: a long note ends in an ellipsis and shows whole on hover.
     let cut = kit::paint_text_clipped(ui.painter(), Pos2::new(r.left() + 10.0, r.center().y), egui::Align2::LEFT_CENTER, &text, theme::caption(), t.text_2, (r.width() - rw - 40.0).max(40.0));
     if cut {
-        ui.interact(r, ui.id().with("paint-status"), Sense::hover()).on_hover_text(text);
+        ui.interact(r, egui::Id::NULL.with("paint-status"), Sense::hover()).on_hover_text(text);
     }
 }
 
@@ -1774,10 +1766,9 @@ fn shortcuts(st: &mut PaintState, ctx: &egui::Context) {
         }
         if i.modifiers.is_none() {
             for tool in Tool::ALL {
-                if let Some(k) = tool.key() {
-                    if i.key_pressed(k) {
-                        st.tool = tool;
-                    }
+                if let Some(k) = tool.key() && i.key_pressed(k) {
+                    st.tool = tool;
+                    st.status.clear();
                 }
             }
             if i.key_pressed(Key::OpenBracket) {
