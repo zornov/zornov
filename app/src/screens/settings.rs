@@ -302,7 +302,7 @@ fn editing(app: &mut StudioApp, ui: &mut egui::Ui) {
         kit::labeled_row(ui, "Hover scrub", |ui| {
             kit::toggle(ui, &mut p.hover_scrub, "Hover scrub", None);
         });
-        note(ui, "Preview frames under the pointer in the timeline without moving the playhead.");
+        note(ui, "Preview frames under the pointer; the playhead stays put");
         kit::labeled_row(ui, "Autosave", |ui| {
             kit::toggle(ui, &mut p.autosave, "Autosave", None);
         });
@@ -380,7 +380,7 @@ fn storage(app: &mut StudioApp, ui: &mut egui::Ui) {
             ui.add_space(kit::label_width(ui.ctx()));
             clean = Button::secondary("Clean up cache").icon(Icon::Trash).show(ui).clicked();
         });
-        note(ui, "Removes cached frames, waveforms and proxies. Projects and media are not touched.");
+        note(ui, "Clears cache, waveforms and proxies; projects and media stay");
     });
     if clean {
         let ctx = ui.ctx().clone();
@@ -561,7 +561,7 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
                     *chosen = models[i].0.to_owned();
                 }
             });
-            note(ui, "The first is the strongest editor; the last is quickest and cheapest.");
+            note(ui, "First is strongest; last is quickest and cheapest");
             let saved = *st.ai_key_saved.get_or_insert_with(|| keychain::api_key(account).is_some());
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
@@ -1041,7 +1041,7 @@ fn about(app: &mut StudioApp, ui: &mut egui::Ui) {
         });
     }
     ui.add_space(theme::space::XS);
-    ui.label(egui::RichText::new(crate::i18n::shown("Library content shows its own source and licence in each item's info.")).font(theme::caption()).color(t.text_2));
+    ui.label(egui::RichText::new(crate::i18n::shown("Library items show source and licence in their info")).font(theme::caption()).color(t.text_2));
     ui.label(egui::RichText::new(crate::i18n::shown("Zornov™ is a trademark of Ashrox LLC.")).font(theme::caption()).color(t.text_2));
 }
 
