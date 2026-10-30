@@ -484,6 +484,42 @@ fn view_sections(ui: &mut egui::Ui, menu_id: egui::Id, v: &ViewMenu, out: &mut P
     }
 }
 
+/// A job that stopped on an error (a cancelled one stopped on request).
+fn failed(j: &crate::app::Job) -> bool {
+    j.error.is_some()
+}
+
+/// What the popover says under a job's name.
+fn job_status(j: &crate::app::Job) -> String {
+    if failed(j) {
+        "Failed · export again from File ▸ Export".to_owned()
+    } else if j.cancelled {
+        "Cancelled".to_owned()
+    } else if j.done {
+        "Done".to_owned()
+    } else {
+        format!("{} · {}%  ·  {}", j.detail, (j.progress * 100.0) as u32, Jobs::eta(j))
+    }
+}
+
+/// How many finished jobs the popover keeps listed.
+const KEPT_FINISHED: usize = 6;
+
+/// Every running job and the last few finished ones, newest first.
+fn shown_jobs(list: &[crate::app::Job]) -> Vec<&crate::app::Job> {
+    let mut finished = 0;
+    list.iter()
+        .rev()
+        .filter(|j| {
+            if !j.done && !j.cancelled {
+                return true;
+            }
+            finished += 1;
+            finished <= KEPT_FINISHED
+        })
+        .collect()
+}
+
 /// Jobs button: a spinner while anything runs; opens the jobs popover.
 fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
@@ -510,15 +546,18 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
             return;
         }
         let mut cancel = None;
-        for j in jobs.list.iter().rev().take(6) {
-            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.0), Sense::hover());
+        for j in shown_jobs(&jobs.list) {
+            let (r, row) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.0), Sense::hover());
+            if let Some(e) = &j.error {
+                row.on_hover_text(e);
+            }
             let p = ui.painter();
             kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 14.0), Align2::LEFT_CENTER, &j.name, theme::control_medium(), t.text, r.width() - 50.0);
-            let status = if j.cancelled { "Cancelled".to_owned() } else if j.done { "Done".to_owned() } else { format!("{} · {}%  ·  {}", j.detail, (j.progress * 100.0) as u32, Jobs::eta(j)) };
-            kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 32.0), Align2::LEFT_CENTER, &status, theme::caption(), t.text_2, r.width() - 50.0);
+            let status = job_status(j);
+            kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 32.0), Align2::LEFT_CENTER, &status, theme::caption(), if failed(j) { t.danger } else { t.text_2 }, r.width() - 50.0);
             let bar = Rect::from_min_size(egui::pos2(r.left() + 8.0, r.bottom() - 6.0), Vec2::new(r.width() - 50.0, 3.0));
             p.rect_filled(bar, CornerRadius::same(2), t.raised);
-            p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * j.progress, 3.0)), CornerRadius::same(2), if j.cancelled { t.text_2 } else { t.accent });
+            p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * j.progress, 3.0)), CornerRadius::same(2), if failed(j) { t.danger } else if j.cancelled { t.text_2 } else { t.accent });
             if !j.done && !j.cancelled {
                 let br = Rect::from_center_size(egui::pos2(r.right() - 18.0, r.center().y), Vec2::splat(24.0));
                 if IconButton::new(Icon::X, "Cancel job").size(24.0, 14.0).show_at(ui, br).clicked() {
@@ -549,6 +588,31 @@ mod tests {
         }
         assert_eq!(rows.iter().find(|r| r.0 == "Copy").unwrap().2, "⌘C");
         assert_eq!(rows.iter().find(|r| r.0 == "Group").unwrap().2, "⌘G");
+    }
+
+    fn job(id: u64, done: bool, cancelled: bool, error: Option<&str>) -> crate::app::Job {
+        crate::app::Job { id, name: format!("Export {id}"), detail: String::new(), progress: 0.5, length: 10.0, done, cancelled, task: None, started: 0.0, error: error.map(str::to_owned), path: None }
+    }
+
+    #[test]
+    fn a_failed_job_says_failed_and_a_cancelled_one_says_cancelled() {
+        // The task loop marks a failed export cancelled and records why.
+        let failed_job = job(1, false, true, Some("No space left on disk"));
+        assert!(job_status(&failed_job).starts_with("Failed"));
+        assert!(job_status(&job(2, false, true, None)).starts_with("Cancelled"));
+        assert_eq!(job_status(&job(3, true, false, None)), "Done");
+        assert!(job_status(&job(4, false, false, None)).contains('%'));
+    }
+
+    #[test]
+    fn the_popover_lists_running_jobs_and_the_last_six_finished() {
+        let mut list: Vec<_> = (1..=9).map(|i| job(i, true, false, None)).collect();
+        list.insert(0, job(100, false, false, None)); // the oldest, still running
+        let ids: Vec<u64> = shown_jobs(&list).iter().map(|j| j.id).collect();
+        assert_eq!(ids.len(), 7, "{ids:?}");
+        assert!(ids.contains(&100), "a running job is never dropped");
+        assert_eq!(&ids[..6], &[9, 8, 7, 6, 5, 4]);
+        assert!(!ids.contains(&3));
     }
 
     #[test]
