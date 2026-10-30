@@ -661,7 +661,7 @@ mod tests {
         let at = |x: usize| red[(x, 0)];
         assert!(at(pane / 2).r() > 150 && at(pane / 2).g() < 100, "{:?}", at(pane / 2));
         assert!(row_lit(&red, 127), "green and blue sit at zero");
-        assert_eq!(red[(pane * 2, 0)].a() == 0 || red[(pane * 2 + 10, 0)].a() == 0, true);
+        assert!(red[(pane * 2, 0)].a() == 0 || red[(pane * 2 + 10, 0)].a() == 0);
         // RGB overlay draws the three on the same width.
         let over = picture_with(&frame(|_, _| [255, 0, 0]), 0, &s, Trace::Rgb);
         assert_eq!(over.size, [256, 128]);

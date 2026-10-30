@@ -210,25 +210,24 @@ fn curves(ui: &mut Ui, st: &mut Ui_, id: u32, p: &mut m::ParamMap, ch: &mut Chan
             ui.data_mut(|d| d.insert_temp(drag_id, hit));
             changed = true;
         }
-        if resp.dragged() {
-            if let Some(i) = ui.data(|d| d.get_temp::<usize>(drag_id)).filter(|i| *i < pts.len()) {
-                let mut q = from_screen(pos);
-                // Keep the order of the points: stay between the neighbours.
-                let lo = if i > 0 { pts[i - 1][0] + 0.005 } else { 0.0 };
-                let hi = if i + 1 < pts.len() { pts[i + 1][0] - 0.005 } else { 1.0 };
-                q[0] = q[0].clamp(lo.min(hi), hi.max(lo));
-                pts[i] = q;
-                changed = true;
-            }
+        if resp.dragged()
+            && let Some(i) = ui.data(|d| d.get_temp::<usize>(drag_id)).filter(|i| *i < pts.len())
+        {
+            let mut q = from_screen(pos);
+            // Keep the order of the points: stay between the neighbours.
+            let lo = if i > 0 { pts[i - 1][0] + 0.005 } else { 0.0 };
+            let hi = if i + 1 < pts.len() { pts[i + 1][0] - 0.005 } else { 1.0 };
+            q[0] = q[0].clamp(lo.min(hi), hi.max(lo));
+            pts[i] = q;
+            changed = true;
         }
     }
-    if resp.secondary_clicked() || resp.double_clicked() {
-        if let Some(i) = resp.interact_pointer_pos().and_then(|pos| near(pos, &pts)) {
-            if pts.len() > 2 {
-                pts.remove(i);
-                changed = true;
-            }
-        }
+    if (resp.secondary_clicked() || resp.double_clicked())
+        && let Some(i) = resp.interact_pointer_pos().and_then(|pos| near(pos, &pts))
+        && pts.len() > 2
+    {
+        pts.remove(i);
+        changed = true;
     }
     let painter = ui.painter();
     painter.rect_filled(rect, 4, Color32::from_black_alpha(160));
@@ -293,10 +292,8 @@ fn qualifier(app: &mut StudioApp, ui: &mut Ui, st: &mut Ui_, id: u32, c: &mut m:
             if let Some(f) = label.get_mut(0..1) {
                 f.make_ascii_uppercase();
             }
-            if kit::chip(ui, &label, current.as_deref() == Some(*p), None).clicked() {
-                if sg::set_qualifier_preset(&mut nodes[i], p).is_ok() {
-                    ch.set("Colour range", None);
-                }
+            if kit::chip(ui, &label, current.as_deref() == Some(*p), None).clicked() && sg::set_qualifier_preset(&mut nodes[i], p).is_ok() {
+                ch.set("Colour range", None);
             }
         }
         if (current.is_some() || !nodes[i].qualifier.is_empty()) && kit::Button::ghost("Whole picture").compact().show(ui).clicked() {
@@ -364,17 +361,16 @@ fn lut(_app: &mut StudioApp, ui: &mut Ui, g: &mut m::Grade, ch: &mut Change) {
     let name = g.lut.as_deref().map(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string()));
     ui.label(egui::RichText::new(name.clone().unwrap_or_else(|| crate::i18n::shown("No LUT").to_string())).font(theme::body()).color(if name.is_some() { t.text } else { t.text_2 }));
     ui.horizontal(|ui| {
-        if kit::Button::secondary("Load LUT…").compact().show(ui).clicked() {
-            if let Some(path) = rfd::FileDialog::new().set_title("Load a LUT").add_filter("LUT", &["cube", "3dl"]).pick_file() {
-                match studio_colour::read_lut(&path) {
-                    Ok(_) => {
-                        g.lut = Some(path.to_string_lossy().into_owned());
-                        ch.set("Load LUT", None);
-                        kit::push(ui.ctx(), format!("Loaded {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), None, None);
-                    }
-                    Err(e) => {
-                        kit::push_error(ui.ctx(), format!("Could not load the LUT: {e}"));
-                    }
+                if kit::Button::secondary("Load LUT…").compact().show(ui).clicked()
+            && let Some(path) = rfd::FileDialog::new().set_title("Load a LUT").add_filter("LUT", &["cube", "3dl"]).pick_file() {
+            match studio_colour::read_lut(&path) {
+                Ok(_) => {
+                    g.lut = Some(path.to_string_lossy().into_owned());
+                    ch.set("Load LUT", None);
+                    kit::push(ui.ctx(), format!("Loaded {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), None, None);
+                }
+                Err(e) => {
+                    kit::push_error(ui.ctx(), format!("Could not load the LUT: {e}"));
                 }
             }
         }
@@ -382,16 +378,15 @@ fn lut(_app: &mut StudioApp, ui: &mut Ui, g: &mut m::Grade, ch: &mut Change) {
             g.lut = None;
             ch.set("Remove LUT", None);
         }
-        if kit::Button::ghost("Export LUT…").compact().show(ui).clicked() {
-            if let Some(path) = rfd::FileDialog::new().set_title("Export the grade as a LUT").set_file_name("grade.cube").add_filter("LUT", &["cube"]).save_file() {
-                match sg::export_lut(g, &path, 33, "Zornov grade") {
-                    Ok(b) => {
-                        let note = if b.windows > 0 { " (nodes with windows are not in it)" } else { "" };
-                        kit::push(ui.ctx(), format!("Exported {}{note}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), None, None);
-                    }
-                    Err(e) => {
-                        kit::push_error(ui.ctx(), format!("Could not export the LUT: {e}"));
-                    }
+                if kit::Button::ghost("Export LUT…").compact().show(ui).clicked()
+            && let Some(path) = rfd::FileDialog::new().set_title("Export the grade as a LUT").set_file_name("grade.cube").add_filter("LUT", &["cube"]).save_file() {
+            match sg::export_lut(g, &path, 33, "Zornov grade") {
+                Ok(b) => {
+                    let note = if b.windows > 0 { " (nodes with windows are not in it)" } else { "" };
+                    kit::push(ui.ctx(), format!("Exported {}{note}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), None, None);
+                }
+                Err(e) => {
+                    kit::push_error(ui.ctx(), format!("Could not export the LUT: {e}"));
                 }
             }
         }
@@ -413,7 +408,7 @@ fn lut(_app: &mut StudioApp, ui: &mut Ui, g: &mut m::Grade, ch: &mut Change) {
 fn cdl(app: &mut StudioApp, ui: &mut Ui, id: u32, p: &mut m::ParamMap, ch: &mut Change) {
     let _ = app;
     for (group, range) in [("slope", 0.0..=3.0f32), ("offset", -0.5..=0.5), ("power", 0.2..=3.0)] {
-        ui.label(egui::RichText::new(crate::i18n::shown(&format!("{}{}", &group[..1].to_uppercase(), &group[1..]))).font(theme::caption()).color(theme::tokens(ui.ctx()).text_2));
+        ui.label(egui::RichText::new(crate::i18n::shown(&format!("{}{}", group[..1].to_uppercase(), &group[1..]))).font(theme::caption()).color(theme::tokens(ui.ctx()).text_2));
         for ch_name in ["r", "g", "b"] {
             let key = format!("cdl_{group}_{ch_name}");
             let default = sg::CDL_FIELDS.iter().find(|(k, _)| *k == key).map_or(0.0, |(_, d)| *d);
@@ -439,32 +434,30 @@ fn cdl(app: &mut StudioApp, ui: &mut Ui, id: u32, p: &mut m::ParamMap, ch: &mut 
             }
             ch.set("Reset CDL", None);
         }
-        if kit::Button::ghost("Import CDL…").compact().show(ui).clicked() {
-            if let Some(path) = rfd::FileDialog::new().set_title("Import an ASC CDL").add_filter("ASC CDL", &["cdl", "cc", "xml"]).pick_file() {
-                match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|x| sg::cdl_from_xml(&x, &path.to_string_lossy())) {
-                    Ok(v) => {
-                        for (k, val) in v {
-                            if let Some(n) = val.as_f64() {
-                                p.insert(k, m::Value::Scalar(n));
-                            }
+                if kit::Button::ghost("Import CDL…").compact().show(ui).clicked()
+            && let Some(path) = rfd::FileDialog::new().set_title("Import an ASC CDL").add_filter("ASC CDL", &["cdl", "cc", "xml"]).pick_file() {
+            match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|x| sg::cdl_from_xml(&x, &path.to_string_lossy())) {
+                Ok(v) => {
+                    for (k, val) in v {
+                        if let Some(n) = val.as_f64() {
+                            p.insert(k, m::Value::Scalar(n));
                         }
-                        ch.set("Import CDL", None);
                     }
-                    Err(e) => {
-                        kit::push_error(ui.ctx(), format!("Could not import the CDL: {e}"));
-                    }
+                    ch.set("Import CDL", None);
+                }
+                Err(e) => {
+                    kit::push_error(ui.ctx(), format!("Could not import the CDL: {e}"));
                 }
             }
         }
-        if kit::Button::ghost("Export CDL…").compact().show(ui).clicked() {
-            if let Some(path) = rfd::FileDialog::new().set_title("Export the CDL").set_file_name("grade.cdl").add_filter("ASC CDL", &["cdl"]).save_file() {
-                match std::fs::write(&path, sg::cdl_xml(&[(id, p.clone())])) {
-                    Ok(()) => {
-                        kit::push(ui.ctx(), format!("Exported {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), None, None);
-                    }
-                    Err(e) => {
-                        kit::push_error(ui.ctx(), format!("Could not export the CDL: {e}"));
-                    }
+                if kit::Button::ghost("Export CDL…").compact().show(ui).clicked()
+            && let Some(path) = rfd::FileDialog::new().set_title("Export the CDL").set_file_name("grade.cdl").add_filter("ASC CDL", &["cdl"]).save_file() {
+            match std::fs::write(&path, sg::cdl_xml(&[(id, p.clone())])) {
+                Ok(()) => {
+                    kit::push(ui.ctx(), format!("Exported {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), None, None);
+                }
+                Err(e) => {
+                    kit::push_error(ui.ctx(), format!("Could not export the CDL: {e}"));
                 }
             }
         }
@@ -584,11 +577,10 @@ fn project_colour(app: &mut StudioApp, ui: &mut Ui, selected: Option<u32>) {
         let name = st.colour.ocio_config.as_deref().map(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string()));
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(name.clone().unwrap_or_else(|| crate::i18n::shown("No OCIO config").to_string())).font(theme::body()));
-            if kit::Button::ghost("Choose OCIO config…").compact().show(ui).clicked() {
-                if let Some(path) = rfd::FileDialog::new().set_title("Choose an OCIO config").add_filter("OCIO", &["ocio"]).pick_file() {
-                    let p = path.to_string_lossy().into_owned();
-                    apply_settings(app, ui.ctx(), "OCIO config", |s| sg::set_ocio(s, &p).map(|_| ()));
-                }
+                        if kit::Button::ghost("Choose OCIO config…").compact().show(ui).clicked()
+                && let Some(path) = rfd::FileDialog::new().set_title("Choose an OCIO config").add_filter("OCIO", &["ocio"]).pick_file() {
+                let p = path.to_string_lossy().into_owned();
+                apply_settings(app, ui.ctx(), "OCIO config", |s| sg::set_ocio(s, &p).map(|_| ()));
             }
             if name.is_some() && kit::Button::ghost("Clear").compact().show(ui).clicked() {
                 apply_settings(app, ui.ctx(), "OCIO config", |s| sg::set_ocio(s, "").map(|_| ()));
@@ -737,14 +729,14 @@ mod tests {
         let mut wedge = None;
         let mut n = 0;
         for c in &out.shapes {
-            if let egui::epaint::Shape::Path(p) = &c.shape {
-                if p.points.len() == 3 {
-                    let r = egui::Rect::from_points(&p.points);
-                    wedge = Some(wedge.map_or(r, |w: egui::Rect| w.union(r)));
-                    n += 1;
-                    if n == 48 {
-                        break;
-                    }
+            if let egui::epaint::Shape::Path(p) = &c.shape
+                && p.points.len() == 3
+            {
+                let r = egui::Rect::from_points(&p.points);
+                wedge = Some(wedge.map_or(r, |w: egui::Rect| w.union(r)));
+                n += 1;
+                if n == 48 {
+                    break;
                 }
             }
         }
@@ -816,7 +808,7 @@ mod tests {
         assert_eq!(mc.grade.as_ref().unwrap().nodes().len(), 1);
         b.h.app.doc.undo();
         let mc = b.h.app.doc.model.active().clip(m::ClipId(id as u64)).unwrap().clone();
-        assert!(mc.masks.is_empty() && mc.grade.map_or(true, |g| g.nodes().is_empty()));
+        assert!(mc.masks.is_empty() && mc.grade.is_none_or(|g| g.nodes().is_empty()));
         b.h.app.doc.redo();
         let mc = b.h.app.doc.model.active().clip(m::ClipId(id as u64)).unwrap().clone();
         assert_eq!((mc.masks.len(), mc.grade.unwrap().nodes().len()), (1, 1));
@@ -825,7 +817,7 @@ mod tests {
     #[test]
     fn the_scopes_panel_has_a_grade_tab_beside_the_scopes() {
         let mut b = Bench::new();
-        let mut shown = |b: &mut Bench| {
+        let shown = |b: &mut Bench| {
             b.time += 1.0;
             let raw = RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(340.0, 700.0))), time: Some(b.time), ..Default::default() };
             let app = &mut b.h.app;
