@@ -511,6 +511,7 @@ impl eframe::App for StudioApp {
             }
         }
         editor::agent_panel::AgentUi::tick(self, &ctx);
+        crate::macmenu::frame(self, &ctx);
         self.global_shortcuts(&ctx);
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
         let now = ctx.input(|i| i.time);
