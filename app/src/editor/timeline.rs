@@ -945,6 +945,54 @@ fn commit_move(app: &mut StudioApp, ctx: &egui::Context, proj: &Project, ids: &[
     }
 }
 
+/// How a clip reads its sound's real waveform: which stretch of the file it
+/// plays, and the gain and fades that shape it. Pure, so tests can check the
+/// numbers without painting.
+struct AudioShape {
+    /// Where the clip's stretch starts / ends in the file, 0..1.
+    from: f32,
+    to: f32,
+    /// Linear gain from the clip's volume.
+    gain: f32,
+    fade_in: f32,
+    fade_out: f32,
+    /// The clip's length in seconds.
+    secs: f32,
+    /// Fraction of the clip one drawn column covers.
+    step: f32,
+}
+
+impl AudioShape {
+    fn of(c: &Clip, media_dur: view::Time, width: f32) -> Self {
+        let len = media_dur.max(1) as f32;
+        let speed = if c.speed > 0.0 { c.speed / 100.0 } else { 1.0 };
+        let from = (c.src_in as f32 / len).clamp(0.0, 1.0);
+        let to = ((c.src_in as f32 + c.dur as f32 * speed) / len).clamp(from, 1.0);
+        AudioShape { from, to, gain: 10f32.powf(c.audio.volume / 20.0), fade_in: c.audio.fade_in, fade_out: c.audio.fade_out, secs: c.dur as f32 / SEC as f32, step: 2.0 / width.max(1.0) }
+    }
+
+    /// The (peak, body) half-heights 0..1 at `u` (0..1 along the clip): the
+    /// real bars under that column, times gain and fades, on the decibel
+    /// scale. Fades are in the level, so a fade-in ramps the wave up.
+    fn column(&self, w: &crate::services::library::Wave, u: f32) -> (f32, f32) {
+        use crate::services::library::wave_height;
+        let u = u.clamp(0.0, 1.0);
+        let at = |x: f32| self.from + (self.to - self.from) * x;
+        let (peak, rms) = w.range(at(u), at((u + self.step).min(1.0)));
+        let t = u * self.secs;
+        let mut fade = 1.0f32;
+        if self.fade_in > 0.0 {
+            fade *= (t / self.fade_in).min(1.0);
+        }
+        if self.fade_out > 0.0 {
+            fade *= ((self.secs - t) / self.fade_out).clamp(0.0, 1.0);
+        }
+        let k = self.gain * fade;
+        let (pk, bd) = (wave_height(peak * k), wave_height(rms * k));
+        (pk, bd.min(pk))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c: &Clip, lane: &Lane, r: Rect, selected: bool, hover: f32, lifted: bool, t: &theme::Tokens, beats: &[Time]) {
     let cr = CornerRadius::same(theme::radius::CLIP);
@@ -994,29 +1042,35 @@ fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c
                 }
             }
             ClipKind::Audio => {
-                let seed = c.media.and_then(|m| proj.media(m)).map_or(c.id, |m| m.seed);
+                let media = c.media.and_then(|m| proj.media(m));
+                let wave = media.and_then(|m| m.path.as_deref()).and_then(crate::services::library::wave);
                 let mid = body.center().y;
-                let amp = body.height() * 0.42 * (10f32.powf(c.audio.volume / 20.0)).sqrt().clamp(0.15, 1.3);
+                let room = body.height() * 0.46;
                 let clip_r = inner.clip_rect();
                 let x0 = clip_r.left().max(body.left()) as i32;
                 let x1 = clip_r.right().min(body.right()) as i32;
-                let len = c.media.and_then(|m| proj.media(m)).map_or(c.dur, |m| m.dur).max(1) as f32;
-                let col = Color32::from_white_alpha(if dim { 90 } else { 175 });
-                let mut x = x0 - x0 % 2;
-                while x < x1 {
-                    let u = (x as f32 - r.left()) / r.width();
-                    let src = (c.src_in as f32 + u * c.dur as f32) / len;
-                    let mut a = library::waveform_sample(seed, src * 6.0) * amp;
-                    // Fades shape the waveform.
-                    let tsec = u * c.dur as f32 / SEC as f32;
-                    if c.audio.fade_in > 0.0 {
-                        a *= (tsec / c.audio.fade_in).min(1.0);
+                let ink = Color32::from_white_alpha(if dim { 90 } else { 200 });
+                match wave.as_deref() {
+                    // Still being read, or no readable sound: a quiet dotted line, never an invented wave.
+                    None => {
+                        let mut x = (x0 + 4) as f32;
+                        while x < (x1 - 4) as f32 {
+                            inner.circle_filled(egui::pos2(x, mid), 0.7, Color32::from_white_alpha(70));
+                            x += 6.0;
+                        }
                     }
-                    if c.audio.fade_out > 0.0 {
-                        a *= ((c.dur as f32 / SEC as f32 - tsec) / c.audio.fade_out).min(1.0);
+                    Some(w) => {
+                        let shape = AudioShape::of(c, media.map_or(c.dur, |m| m.dur), r.width());
+                        let mut x = x0 - x0 % 2;
+                        while x < x1 {
+                            let (peak, body_h) = shape.column(w, (x as f32 - r.left()) / r.width());
+                            let edge = Rect::from_center_size(egui::pos2(x as f32 + 0.75, mid), Vec2::new(1.5, (peak * room * 2.0).max(1.0)));
+                            let core = Rect::from_center_size(edge.center(), Vec2::new(1.5, (body_h * room * 2.0).max(1.0).min(edge.height())));
+                            inner.rect_filled(edge, 0, ink.gamma_multiply(0.4));
+                            inner.rect_filled(core, 0, ink);
+                            x += 2;
+                        }
                     }
-                    inner.line_segment([egui::pos2(x as f32, mid - a), egui::pos2(x as f32, mid + a)], Stroke::new(1.0, col));
-                    x += 2;
                 }
                 // Beat ticks on music clips.
                 if lane.name == "Music" {
@@ -1127,6 +1181,11 @@ fn headers(app: &mut StudioApp, ui: &mut egui::Ui, lanes: &[(u32, Rect)], area: 
             let nresp = hui.interact(name_r, egui::Id::unique(("lane-name", lane.id)), Sense::click()).on_hover_text(format!("{} (double-click to rename)", lane.name));
             if nresp.double_clicked() {
                 ctx.data_mut(|d| d.insert_temp(rename_id(), (lane.id, lane.name.clone())));
+            }
+            // The name sits over the header and takes its clicks, so a right-click
+            // on the name opens the track menu from here.
+            if nresp.secondary_clicked() {
+                open_menu(&ctx, TlMenu::Track(lane.id), nresp.interact_pointer_pos().unwrap_or(name_r.center()));
             }
         }
         let sound_on = lane.kind == LaneKind::Audio || lane.kind == LaneKind::Spine;
@@ -1592,6 +1651,100 @@ fn t_accent(ui: &egui::Ui) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Centre of the first accessibility node with this label.
+    fn node_centre(h: &crate::ui_tests::Harness, label: &str) -> Option<Pos2> {
+        let update = h.last.as_ref()?.platform_output.accesskit_update.as_ref()?;
+        update.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.bounds()).map(|b| egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32))
+    }
+
+    fn right_click(h: &mut crate::ui_tests::Harness, at: Pos2) {
+        use egui::{Event, Modifiers, PointerButton};
+        h.with_events(vec![Event::PointerMoved(at)]);
+        h.with_events(vec![Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE }]);
+        h.with_events(vec![Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE }]);
+        h.frames(2);
+    }
+
+    #[test]
+    fn right_click_on_a_track_header_opens_the_track_menu() {
+        let mut h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        h.frames(4);
+        let lock = node_centre(&h, "Lock track").or_else(|| node_centre(&h, "Unlock track")).expect("a track header is on screen");
+        // The name sits left of the lock button, on the header.
+        let on_header = egui::pos2(lock.x - 50.0, lock.y);
+        right_click(&mut h, on_header);
+        assert!(kit::is_open(&h.ctx, menu_id()), "the menu opened on the header");
+        let what = h.ctx.data(|d| d.get_temp::<(TlMenu, Pos2)>(menu_id().with("what"))).expect("a menu target");
+        assert!(matches!(what.0, TlMenu::Track(_)), "it is the track menu, not the empty-timeline one: {:?}", what.0);
+        let labels = h.labels();
+        for want in ["Rename", "Add track above", "Delete track"] {
+            assert!(labels.iter().any(|l| l == want), "{want} is in the menu: {labels:?}");
+        }
+    }
+
+    fn burst_wave() -> crate::services::library::Wave {
+        // 10 s at 2048 samples/s: quiet tone, a loud burst at 6.0–6.5 s.
+        let mut x: Vec<f32> = (0..20480).map(|i| (i as f32 * 0.3).sin() * 0.05).collect();
+        x[12288..13312].iter_mut().for_each(|v| *v = 0.8);
+        crate::services::library::wave_of(&x, &[], 2048)
+    }
+
+    fn audio_clip(src_in_s: i64, dur_s: i64) -> Clip {
+        let mut c = view::demo().clips[0].clone();
+        c.kind = ClipKind::Audio;
+        c.src_in = src_in_s * SEC;
+        c.dur = dur_s * SEC;
+        c.speed = 100.0;
+        c.audio = view::AudioParams { enabled: true, volume: 0.0, pan: 0.0, fade_in: 0.0, fade_out: 0.0 };
+        c
+    }
+
+    #[test]
+    fn timeline_audio_reads_the_stretch_the_clip_plays() {
+        let w = burst_wave();
+        // A clip that plays 5–8 s of a 10 s sound: the burst is a third in.
+        let shape = AudioShape::of(&audio_clip(5, 3), 10 * SEC, 300.0);
+        let quiet = shape.column(&w, 0.05).0;
+        let loud = shape.column(&w, 0.4).0;
+        assert!(loud > quiet + 0.2, "the burst shows where it is: {quiet} vs {loud}");
+        // A clip that plays 0–3 s never sees the burst.
+        let early = AudioShape::of(&audio_clip(0, 3), 10 * SEC, 300.0);
+        assert!((0..150).all(|k| early.column(&w, k as f32 / 150.0).0 < loud - 0.2));
+        // Faster playback covers more of the file in the same clip length.
+        let mut fast = audio_clip(0, 3);
+        fast.speed = 200.0;
+        assert!((AudioShape::of(&fast, 10 * SEC, 300.0).to - 0.6).abs() < 1e-4);
+    }
+
+    #[test]
+    fn timeline_audio_gain_and_fades_shape_the_real_peaks() {
+        let w = burst_wave();
+        let at = |c: &Clip, u: f32| AudioShape::of(c, 10 * SEC, 300.0).column(&w, u).0;
+        let flat = audio_clip(5, 3);
+        let mut down = flat.clone();
+        down.audio.volume = -12.0;
+        assert!(at(&down, 0.4) < at(&flat, 0.4) - 0.1, "-12 dB draws lower");
+        let mut up = flat.clone();
+        up.audio.volume = 6.0;
+        assert!(at(&up, 0.4) >= at(&flat, 0.4));
+        let mut faded = flat.clone();
+        faded.audio.fade_in = 1.5;
+        faded.audio.fade_out = 1.5;
+        assert_eq!(at(&faded, 0.0), 0.0, "a fade-in starts from nothing");
+        assert_eq!(at(&faded, 1.0), 0.0, "a fade-out ends in nothing");
+        let mid = AudioShape::of(&faded, 10 * SEC, 300.0).column(&w, 0.5);
+        let plain = AudioShape::of(&flat, 10 * SEC, 300.0).column(&w, 0.5);
+        assert_eq!(mid, plain, "between the fades the wave is untouched");
+        let (pk, body) = AudioShape::of(&flat, 10 * SEC, 300.0).column(&w, 0.4);
+        assert!(body <= pk && (0.0..=1.0).contains(&pk));
+    }
+
+    #[test]
+    fn timeline_audio_without_a_read_sound_has_no_wave_to_draw() {
+        // The wave comes only from the cache of real reads: a missing file never gets one.
+        assert!(crate::services::library::wave(std::path::Path::new("/no/such/clip.wav")).is_none());
+    }
 
     /// A trim or slip the model refuses leaves the clip alone, keeps its
     /// reason through the drag, and says it once when the pointer is released.

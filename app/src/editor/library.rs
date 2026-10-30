@@ -408,6 +408,22 @@ fn media_menu_anchor(ctx: &egui::Context) -> egui::Pos2 {
     ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("media-menu-at"))).unwrap_or_default()
 }
 
+/// The Name and Folder fields of the media menu, each under a caption (the
+/// placeholder hint is gone once a field holds text). Returns whether Enter
+/// was pressed in the name / the folder.
+fn media_menu_fields(ui: &mut egui::Ui, name: &mut String, folder: &mut String) -> (bool, bool) {
+    let t = theme::tokens(ui.ctx());
+    let caption = |ui: &mut egui::Ui, text: &str| {
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new(crate::i18n::tf(text.to_owned())).font(theme::caption()).color(t.text_2));
+    };
+    caption(ui, "Name");
+    let renamed = kit::text_field(ui, name, "Name", Some(Icon::FilmStrip), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    caption(ui, "Folder");
+    let filed = kit::text_field(ui, folder, "No folder", Some(Icon::Folder), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    (renamed, filed)
+}
+
 /// Right-click on a bin item: add it, or (when its file is gone) relink it.
 fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collections::HashSet<u32>) {
     let id = egui::Id::new("media-menu");
@@ -435,8 +451,7 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
             proxy_it = kit::MenuItem::new("Make proxy").show(ui).clicked();
         }
         kit::menu_separator(ui);
-        renamed = kit::text_field(ui, &mut name, "Name", Some(Icon::FilmStrip), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        filed = kit::text_field(ui, &mut folder, "Folder", Some(Icon::Folder), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        (renamed, filed) = media_menu_fields(ui, &mut name, &mut folder);
     });
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("media-menu-fields"), (name.clone(), folder.clone())));
     if renamed || filed {
@@ -665,6 +680,7 @@ fn badge(app: &StudioApp, rail: RailItem, i: usize) -> Option<String> {
             let m = &app.doc.project.media[i];
             match m.kind {
                 MediaKind::Image => None,
+                MediaKind::Audio => Some(audio_badge(m.dur, m.path.as_deref().and_then(crate::services::library::wave).map(|w| w.secs))),
                 _ => Some(view::format_short(m.dur)),
             }
         }
@@ -700,8 +716,8 @@ fn paint_thumb(thumbs: &mut thumbs::Thumbs, media: &[view::MediaItem], rail: Rai
         RailItem::Media => {
             let m = &media[i];
             if m.kind == MediaKind::Audio {
-                let peaks = m.path.as_deref().and_then(crate::services::library::peaks);
-                peaks_tile(p, r, peaks.as_deref().map(|v| v.as_slice()), live.then_some(clock), t);
+                let wave = m.path.as_deref().and_then(crate::services::library::wave);
+                peaks_tile(p, r, wave.as_deref(), live.then_some(clock), hover, t);
                 return;
             }
             // Hover plays through the footage.
@@ -850,26 +866,76 @@ pub fn image_rotated_uv(p: &Painter, tex: egui::TextureId, r: Rect, uv: Rect, an
     p.add(egui::Shape::mesh(mesh));
 }
 
-/// A sound's real peaks as bars; `None` (still being read, or unreadable)
-/// is a quiet centre line, not an invented wave.
-fn peaks_tile(p: &Painter, r: Rect, peaks: Option<&[f32]>, clock: Option<f64>, t: &theme::Tokens) {
-    p.rect_filled(r, 0, theme::mix(t.sunken, t.audio, if t.dark { 0.35 } else { 0.55 }));
+/// Column pitch and width of a tile's waveform, in points.
+const WAVE_PITCH: f32 = 3.0;
+const WAVE_BAR: f32 = 2.0;
+
+/// Per column of a tile `width` wide, the (peak, body) half-heights as 0..1
+/// of the tile's waveform room: the peak edge and the RMS body, on a decibel
+/// scale. Always `columns` entries, read from the real bars.
+fn tile_columns(w: &crate::services::library::Wave, columns: usize) -> Vec<(f32, f32)> {
+    use crate::services::library::wave_height;
+    (0..columns)
+        .map(|k| {
+            let (pk, rms) = w.range(k as f32 / columns as f32, (k + 1) as f32 / columns as f32);
+            let peak = wave_height(pk);
+            (peak, wave_height(rms).min(peak))
+        })
+        .collect()
+}
+
+/// A sound's real waveform, centred and symmetric: a pale peak edge round a
+/// stronger RMS body, so dynamics show. `None` (still being read, or
+/// unreadable) is a quiet dotted centre line, not an invented wave. The tile
+/// is a quiet tint of the audio colour; hovering brightens it and sweeps a
+/// playhead, the part already played drawn full strength.
+fn peaks_tile(p: &Painter, r: Rect, wave: Option<&crate::services::library::Wave>, clock: Option<f64>, hover: f32, t: &theme::Tokens) {
+    let bg = theme::mix(t.sunken, t.audio, if t.dark { 0.16 } else { 0.22 });
+    p.rect_filled(r, 0, theme::mix(bg, Color32::WHITE, 0.05 * hover));
     let mid = r.center().y;
-    let Some(peaks) = peaks else {
-        p.hline(r.x_range().shrink(6.0), mid, egui::Stroke::new(1.5, Color32::from_white_alpha(110)));
+    let ink = theme::mix(t.audio, Color32::WHITE, if t.dark { 0.62 } else { 0.35 });
+    let Some(wave) = wave else {
+        let mut x = r.left() + 8.0;
+        while x < r.right() - 8.0 {
+            p.circle_filled(egui::pos2(x, mid), 0.8, theme::mix(bg, ink, 0.5));
+            x += 6.0;
+        }
         return;
     };
-    let bars = ((r.width() - 4.0) / 3.0).max(1.0) as usize;
+    let cols = (((r.width() - 4.0) / WAVE_PITCH) as usize).max(1);
+    let room = r.height() * 0.4;
     let play = clock.map(|c| ((c * 0.3) % 1.0) as f32);
-    for k in 0..bars {
-        let x = r.left() + 2.0 + k as f32 * 3.0;
-        let u = k as f32 / bars as f32;
-        let h = (peaks[(u * peaks.len() as f32) as usize % peaks.len()] * r.height() * 0.36).max(0.8);
-        let c = if play.is_some_and(|pl| u < pl) { Color32::WHITE } else { Color32::from_white_alpha(170) };
-        p.line_segment([egui::pos2(x, mid - h), egui::pos2(x, mid + h)], egui::Stroke::new(1.6, c));
+    for (k, (peak, body)) in tile_columns(wave, cols).into_iter().enumerate() {
+        let x = r.left() + 2.0 + k as f32 * WAVE_PITCH;
+        let played = play.is_none_or(|pl| (k as f32 / cols as f32) < pl);
+        let k_ink = if played { 1.0 } else { 0.55 };
+        let edge = Rect::from_center_size(egui::pos2(x + WAVE_BAR / 2.0, mid), Vec2::new(WAVE_BAR, (peak * room * 2.0).max(2.0)));
+        let core = Rect::from_center_size(edge.center(), Vec2::new(WAVE_BAR, (body * room * 2.0).max(1.0).min(edge.height())));
+        p.rect_filled(edge, 1, ink.gamma_multiply(0.38 * k_ink));
+        p.rect_filled(core, 1, ink.gamma_multiply(k_ink));
     }
     if let Some(pl) = play {
-        p.vline(egui::lerp(r.left()..=r.right(), pl), r.y_range(), egui::Stroke::new(1.0, Color32::WHITE));
+        p.vline(egui::lerp(r.left()..=r.right(), pl), r.y_range(), egui::Stroke::new(1.0, Color32::from_white_alpha(200)));
+    }
+}
+
+/// Width a Tools card gives its Run button: the label, the icon and the
+/// button's padding (so "Needs model" is never cut at the card edge), at
+/// least 92 and at most half the card.
+fn run_button_width(p: &Painter, label: &str, card_w: f32) -> f32 {
+    let text = p.layout_no_wrap(label.to_owned(), theme::control_medium(), Color32::WHITE).size().x;
+    (text + 2.0 * 12.0 + icons::SIZE + 6.0).max(92.0).min(card_w * 0.5)
+}
+
+/// The duration badge of a sound: the project's length for it, else the
+/// length read from the file, else a dash. Never missing.
+fn audio_badge(dur: Time, read_secs: Option<f64>) -> String {
+    if dur > 0 {
+        view::format_short(dur)
+    } else if let Some(s) = read_secs.filter(|s| *s > 0.0) {
+        view::format_short((s * SEC as f64) as Time)
+    } else {
+        "–".into()
     }
 }
 
@@ -999,11 +1065,12 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
         p.rect_filled(icon_r, CornerRadius::same(8), t.accent_soft);
         icons::paint(p, icon_r, Icon::Sparkle, 16.0, t.accent);
         let tx = icon_r.right() + 12.0;
-        let btn_w = 92.0;
-        kit::paint_text_clipped(p, egui::pos2(tx, r.top() + 22.0), Align2::LEFT_CENTER, tool.name, theme::control_medium(), t.text, r.right() - tx - btn_w - 16.0);
         let running = action.is_some_and(|a| ai_runner().lock().unwrap_or_else(|e| e.into_inner()).is_running(a));
         #[cfg(feature = "render")]
         let running = running || (cut && (crate::editor::cutout::busy() || crate::editor::slowmo::busy()));
+        let label = if running { "Running" } else if ready { "Run" } else { "Needs model" };
+        let btn_w = run_button_width(p, label, r.width());
+        kit::paint_text_clipped(p, egui::pos2(tx, r.top() + 22.0), Align2::LEFT_CENTER, tool.name, theme::control_medium(), t.text, r.right() - tx - btn_w - 16.0);
         let note = match (&row, action) {
             (Some(r), None) if cut && !r.ready => format!("{} {}", tool.blurb, r.note),
             (_, None) if cut => format!("{} {}", tool.blurb, if tool.name == "Remove background" { "People stay, the rest goes; Inspector ▸ Cut out picks objects." } else { "On the selected slowed clip (speed under 1, or a ramp)." }),
@@ -1018,7 +1085,6 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
         kit::on_card(&mut bui);
         let enabled = (action.is_some() || cut) && ready && !running;
         bui.add_enabled_ui(enabled, |bui| {
-            let label = if running { "Running" } else if ready { "Run" } else { "Needs model" };
             let b = Button::secondary(label).icon(Icon::PlayFill).busy(running).min_width(btn_w).show(bui);
             let tip = if !ready && (action.is_some() || cut) { "Install the model in Settings ▸ Models".to_owned() } else if cut { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first video clip" })) } else { crate::i18n::tf(format!("Run on the {}", if sel_clip.is_some() { "selected clip" } else { "first clip with sound" })) };
             let b = kit::tip(b, &tip, None);
@@ -1270,6 +1336,158 @@ pub fn apply_to(app: &mut StudioApp, ctx: &egui::Context, d: LibDrag, clip: u32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_menu_name_and_folder_rows_are_labelled() {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(300.0, 200.0))), ..Default::default() };
+        let (mut name, mut folder) = ("clip_b.mp4".to_owned(), String::new());
+        let mut out = ctx.run_ui(raw, |ui| {
+            media_menu_fields(ui, &mut name, &mut folder);
+        });
+        out.textures_delta.clear();
+        let mut texts = vec![];
+        fn walk(s: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut texts));
+        assert!(texts.iter().any(|t| t == "Name"), "a Name caption: {texts:?}");
+        assert!(texts.iter().any(|t| t == "Folder"), "a Folder caption: {texts:?}");
+        assert!(texts.iter().any(|t| t == "clip_b.mp4"), "the name is the field's text");
+        assert!(texts.iter().any(|t| t == "No folder"), "an empty folder says so: {texts:?}");
+    }
+
+    /// A tile drawn on the CPU, no window: RGBA of `w`×`h` points.
+    fn tile_frame(wave: Option<&crate::services::library::Wave>, clock: Option<f64>, hover: f32, dark: bool) -> (Vec<u8>, usize, usize, theme::Tokens) {
+        let ctx = egui::Context::default();
+        ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+        let (w, h) = (180usize, 100usize);
+        let mut textures = crate::ui_shot::Textures::default();
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(w as f32, h as f32))), ..Default::default() };
+        let mut tokens = None;
+        let mut out = ctx.run_ui(raw, |ui| {
+            let t = theme::tokens(ui.ctx());
+            peaks_tile(ui.painter(), Rect::from_min_size(Pos2::ZERO, egui::vec2(w as f32, h as f32)), wave, clock, hover, &t);
+            tokens = Some(t);
+        });
+        textures.apply(&out.textures_delta);
+        out.textures_delta.clear();
+        let prims = ctx.tessellate(out.shapes.clone(), 1.0);
+        let t = tokens.unwrap();
+        (crate::ui_shot::render(&prims, &textures, [w, h], 1.0, Color32::BLACK), w, h, t)
+    }
+
+    fn lum(px: &[u8], w: usize, x: usize, y: usize) -> f32 {
+        let i = (y * w + x) * 4;
+        0.2126 * px[i] as f32 + 0.7152 * px[i + 1] as f32 + 0.0722 * px[i + 2] as f32
+    }
+
+    /// Mostly quiet speech with two loud hits and a pause.
+    fn dynamic_wave() -> crate::services::library::Wave {
+        let n = 48000usize;
+        let x: Vec<f32> = (0..n)
+            .map(|i| {
+                let u = i as f32 / n as f32;
+                let env = if (0.40..0.50).contains(&u) { 0.0 } else if (0.25..0.30).contains(&u) || (0.70..0.75).contains(&u) { 0.9 } else { 0.08 };
+                (i as f32 * 0.21).sin() * env
+            })
+            .collect();
+        crate::services::library::wave_of(&x, &[], 48000)
+    }
+
+    #[test]
+    fn tile_columns_keep_dynamics_instead_of_clipped_blocks() {
+        let cols = tile_columns(&dynamic_wave(), 56);
+        assert_eq!(cols.len(), 56);
+        assert!(cols.iter().all(|&(p, b)| (0.0..=1.0).contains(&p) && b <= p));
+        let tallest = cols.iter().map(|c| c.0).fold(0.0, f32::max);
+        let at_top = cols.iter().filter(|c| c.0 > 0.95 * tallest).count();
+        assert!(at_top < cols.len() / 4, "only the loud hits reach the top ({at_top} of {})", cols.len());
+        assert!(cols.iter().any(|c| c.0 > 0.5 && c.0 < 0.9), "quiet speech has a visible, shorter body");
+        assert!(cols.iter().any(|c| c.0 == 0.0), "the pause is the centre line");
+    }
+
+    #[test]
+    fn audio_tile_frame_is_a_symmetric_waveform_on_a_quiet_tile() {
+        let wave = dynamic_wave();
+        for dark in [true, false] {
+            let (px, w, h, t) = tile_frame(Some(&wave), None, 0.0, dark);
+            let mid = h / 2;
+            // Quiet tile: the corner is close to the neutral sunken colour, far from a saturated fill.
+            let corner = [px[0], px[1], px[2]];
+            let sunken = [t.sunken.r(), t.sunken.g(), t.sunken.b()];
+            let tint = corner.iter().zip(sunken).map(|(a, b)| (*a as i32 - b as i32).abs()).max().unwrap();
+            assert!(tint < 60, "tile tint stays quiet (dark={dark}): {corner:?} vs {sunken:?}");
+            let bg = lum(&px, w, 1, 1);
+            // The waveform is symmetric about the centre line, row by row.
+            let mut ink_rows = vec![];
+            for d in 0..mid {
+                let up: usize = (0..w).filter(|&x| (lum(&px, w, x, mid - 1 - d) - bg).abs() > 14.0).count();
+                let down: usize = (0..w).filter(|&x| (lum(&px, w, x, mid + d) - bg).abs() > 14.0).count();
+                assert!((up as i32 - down as i32).abs() <= 2, "row {d} off the centre: {up} above, {down} below (dark={dark})");
+                ink_rows.push(up);
+            }
+            assert!(ink_rows[0] > 20, "there is a body at the centre line");
+            // Not a solid block: the wave thins out going up, and the very top rows are nearly empty.
+            let near_top = ink_rows[(mid as f32 * 0.9) as usize];
+            assert!(near_top < ink_rows[0] / 2, "only the loud hits reach the top: {near_top} vs {}", ink_rows[0]);
+            assert!(ink_rows.windows(2).all(|p| p[1] <= p[0] + 2), "rows never fill in higher up");
+            // The body is stronger than its peak edge: at a loud column the centre is brighter than the outer rows.
+            let loud_x = (w as f32 * 0.28) as usize;
+            let centre = (loud_x - 3..loud_x + 3).map(|x| (lum(&px, w, x, mid) - bg).abs()).fold(0.0, f32::max);
+            let edge_row = (mid as f32 * 0.25) as usize;
+            let edge = (loud_x - 3..loud_x + 3).map(|x| (lum(&px, w, x, edge_row) - bg).abs()).fold(0.0, f32::max);
+            assert!(centre > edge, "RMS body {centre} stronger than the peak edge {edge}");
+        }
+    }
+
+    #[test]
+    fn audio_tile_without_a_read_is_a_quiet_line_and_hover_plays() {
+        let (px, w, h, _) = tile_frame(None, None, 0.0, true);
+        let bg = lum(&px, w, 1, 1);
+        let off_centre = (0..h).filter(|y| (*y as i32 - (h / 2) as i32).abs() > 3).any(|y| (0..w).any(|x| (lum(&px, w, x, y) - bg).abs() > 8.0));
+        assert!(!off_centre, "no wave is invented while the sound is being read");
+        assert!((0..w).any(|x| (lum(&px, w, x, h / 2) - bg).abs() > 8.0), "a dotted centre line says it is waiting");
+        // Hovering brightens the tile and puts a playhead on it.
+        let wave = dynamic_wave();
+        let (rest, ..) = tile_frame(Some(&wave), None, 0.0, true);
+        let (live, ..) = tile_frame(Some(&wave), Some(1.0), 1.0, true);
+        assert!(lum(&live, w, 1, 1) > lum(&rest, w, 1, 1), "hover lifts the tile");
+        let head = ((1.0f64 * 0.3) % 1.0) as f32 * w as f32;
+        assert!(lum(&live, w, head as usize, 2) > lum(&live, w, (head as usize + 20).min(w - 1), 2) + 40.0, "the playhead shows");
+    }
+
+    #[test]
+    fn audio_badge_is_never_missing() {
+        assert_eq!(audio_badge(2 * SEC, None), "2.0s");
+        assert_eq!(audio_badge(0, Some(75.0)), view::format_short(75 * SEC));
+        assert_eq!(audio_badge(0, None), "–");
+        assert_eq!(audio_badge(0, Some(0.0)), "–");
+    }
+
+    #[test]
+    fn tools_run_button_is_given_the_room_its_label_needs() {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(420.0, 200.0))), ..Default::default() };
+        let mut checked = 0;
+        ctx.run_ui(raw, |ui| {
+            for label in ["Run", "Running", "Needs model"] {
+                let card_w = 360.0;
+                let w = run_button_width(ui.painter(), label, card_w);
+                assert!(w >= 92.0 && w <= card_w * 0.5);
+                let r = Button::secondary(label).icon(Icon::PlayFill).min_width(w).show(ui);
+                assert!(r.rect.width() <= w + 0.5, "{label}: button {} wider than its slot {w}", r.rect.width());
+                checked += 1;
+            }
+        })
+        .textures_delta
+        .clear();
+        assert_eq!(checked, 3);
+    }
 
     #[test]
     fn media_menu_stays_where_it_opened_while_the_pointer_moves() {
