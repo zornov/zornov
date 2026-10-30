@@ -60,6 +60,7 @@ pub(crate) mod modifiers;
 mod physics;
 mod body3d;
 pub(crate) mod review;
+pub(crate) mod grade;
 pub(crate) mod scopes;
 mod story;
 
