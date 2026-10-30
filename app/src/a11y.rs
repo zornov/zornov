@@ -177,7 +177,7 @@ impl Region {
             Region::Timeline => "Timeline",
             Region::Sound => "Sound",
             Region::Scopes => "Scopes",
-            Region::Review => "Review",
+            Region::Review => "Feedback",
             Region::Record => "Record",
             Region::Editorial => "Editorial",
             Region::Ai => "Assistant",

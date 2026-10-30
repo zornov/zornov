@@ -114,6 +114,18 @@ fn bitrate_mbps(s: &ExportState, w: u32, h: u32, fps: f32) -> f32 {
 }
 
 /// Which project an export state belongs to: its folder and name.
+/// Whether the sequence has anything to mix: an audio clip, or a picture clip whose file carries sound.
+fn has_sound(p: &view::Project) -> bool {
+    p.clips.iter().any(|c| {
+        c.audio.enabled
+            && match c.kind {
+                view::ClipKind::Audio => true,
+                view::ClipKind::Video => c.media.and_then(|m| p.media.iter().find(|i| i.id == m)).is_some_and(|i| i.kind != view::MediaKind::Image),
+                _ => false,
+            }
+    })
+}
+
 fn project_key(doc: &crate::doc::Doc) -> String {
     format!("{}|{}", doc.folder.as_ref().map(|f| f.root().display().to_string()).unwrap_or_default(), doc.project.name)
 }
@@ -345,7 +357,8 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mbps = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::H264 | Format::Hevc10) { s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) } else { bitrate_mbps(s, w, h, fps) };
     let mb = mbps * (len as f32 / SEC as f32) / 8.0;
     let size = if mb > 1024.0 { format!("{:.1} GB", mb / 1024.0) } else { format!("{:.0} MB", mb.max(1.0)) };
-    let est = format!("≈ {size} · {} · {w} × {h} · {:.0} Mbps · video only", view::format_duration(len), mbps);
+    let sound = if has_sound(proj) { "with sound" } else { "no sound" };
+    let est = crate::i18n::tf(format!("≈ {size} · {} · {w} × {h} · {:.0} Mbps · {}", view::format_duration(len), mbps, sound));
     let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(footer.shrink2(Vec2::new(20.0, 18.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     let job = s.job.and_then(|id| app.jobs.get(id).cloned());
     match job {
@@ -447,6 +460,20 @@ mod tests {
         assert!(!labels.iter().any(|l| l == "Small"), "Small is not offered yet: {labels:?}");
         assert!(h.cut_text().is_empty(), "nothing is cut off: {:?}", h.cut_text());
         assert!(h.overlaps().is_empty(), "nothing is drawn over: {:?}", h.overlaps());
+    }
+
+    #[test]
+    fn the_estimate_says_whether_there_is_sound() {
+        let mut p = crate::view::demo();
+        assert!(has_sound(&p), "the demo has clips with sound");
+        p.clips.retain(|c| c.kind == crate::view::ClipKind::Title);
+        assert!(!has_sound(&p), "titles alone are silent");
+        let mut a = p.clips.first().cloned().expect("a title");
+        a.kind = crate::view::ClipKind::Audio;
+        p.clips.push(a.clone());
+        assert!(has_sound(&p));
+        p.clips.last_mut().unwrap().audio.enabled = false;
+        assert!(!has_sound(&p), "muted audio is silent");
     }
 
     #[test]

@@ -40,14 +40,19 @@ fn clip_named(notes: &[String]) -> Option<u32> {
     })
 }
 
-fn done(app: &mut StudioApp, ctx: &egui::Context, r: Result<Vec<String>, String>, icon: Icon) {
+/// The toast after adding `what`: a plain sentence, never the operation's own note.
+fn added(what: &str) -> String {
+    crate::i18n::tf(format!("Added {what}"))
+}
+
+fn done(app: &mut StudioApp, ctx: &egui::Context, r: Result<Vec<String>, String>, icon: Icon, what: &str) {
     match r {
         Ok(notes) => {
             if let Some(id) = clip_named(&notes) {
                 app.editor.selection = vec![id];
             }
-            if let Some(n) = notes.first() {
-                kit::push(ctx, n.chars().take(140).collect::<String>(), None, Some(icon));
+            if !notes.is_empty() {
+                kit::push(ctx, added(what), None, Some(icon));
             }
         }
         Err(e) => {
@@ -116,11 +121,12 @@ pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::I
     let at = app.editor.playhead as f64 / 1e6;
     if let Some(t) = pick {
         let r = run(app, "Add template", vec![json!({"op": "template", "id": t, "at": at})]);
-        done(app, &ctx, r, Icon::Shapes);
+        let name = studio_mograph::find(t).map_or_else(|| "template".to_owned(), |m| m.name.to_string());
+        done(app, &ctx, r, Icon::Shapes, &name);
     }
     if let Some(p) = preset {
         let r = run(app, "Add shape layer", vec![json!({"op": "shape", "preset": p, "at": at, "duration": 4})]);
-        done(app, &ctx, r, Icon::Shapes);
+        done(app, &ctx, r, Icon::Shapes, "shape layer");
     }
     if let Some(k) = chart {
         let template = match k {
@@ -131,12 +137,12 @@ pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::I
         };
         let data = studio_mograph::find(template).and_then(|t| t.controls.iter().find(|c| c.id == "data").map(|c| c.default.clone())).unwrap_or(json!([]));
         let r = run(app, "Add chart", vec![json!({"op": "chart", "kind": k, "data": data, "at": at})]);
-        done(app, &ctx, r, Icon::Shapes);
+        done(app, &ctx, r, Icon::Shapes, "chart");
     }
     if text_3d {
         let words = app.editor.selection.first().and_then(|id| app.doc.project.clip(*id)).map(|c| c.text.clone()).filter(|t| !t.trim().is_empty()).unwrap_or_else(|| "STUDIO".into());
         let r = run(app, "Add 3D text", vec![json!({"op": "text_3d", "text": words, "at": at, "duration": 4})]);
-        done(app, &ctx, r, Icon::Aperture);
+        done(app, &ctx, r, Icon::Aperture, "3D text");
     }
 }
 
@@ -302,7 +308,7 @@ fn shape_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, g: &m::Ge
     let mut add: Option<Value> = None;
     Section::new("mograph-shape", "Shape layer").icon(Icon::Shapes).show(ui, |ui| {
         let tk = theme::tokens(ui.ctx());
-        ui.label(egui::RichText::new("Items run in order: shapes, then what changes them, then paint. Animated values are keyed or follow a formula; edit those with the AI or as JSON.").font(theme::caption()).color(tk.text_2));
+        ui.label(egui::RichText::new("Items run in order: shapes, changes, paint; edit animated values with the AI or as JSON").font(theme::caption()).color(tk.text_2));
         for (k, it) in items.iter().enumerate() {
             let Some(o) = it.as_object() else { continue };
             let kind = o.get("type").and_then(Value::as_str).unwrap_or("?");
@@ -432,6 +438,13 @@ fn text_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, g: &m::Gen
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adding_says_what_was_added_not_the_operation() {
+        assert_eq!(added("Handle Slide"), "Added Handle Slide");
+        let note = "template clip 47 (Handle Slide, 4s): handle=Name; fill in again with {\"op\": \"template\"}";
+        assert!(!added("Handle Slide").contains(note) && !added("Handle Slide").contains("clip 47"));
+    }
 
     /// Every control of every template (a lower third's name and role, a
     /// chart's data…) has a row in the Inspector, so a template the AI can
