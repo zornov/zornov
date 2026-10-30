@@ -185,7 +185,7 @@ pub fn rest(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
 
 fn clip_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
     let Some(mc) = ids.first().and_then(|id| mclip(app, *id)) else { return };
-    Section::new("clip", "Clip").icon(Icon::Faders).show(ui, |ui| {
+    let out = Section::new("clip", "Clip").icon(Icon::Faders).resettable(mc.label.is_some() || !mc.enabled).show(ui, |ui| {
         if ids.len() == 1 {
             let key = egui::Id::new(("clip-name", mc.id.0));
             let mut name: String = ui.data(|d| d.get_temp(key)).unwrap_or_else(|| mc.name.clone());
@@ -217,10 +217,16 @@ fn clip_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
                 put(app, ids, "label", "Label colour", |c| c.label = Some(r));
             }
             if had && Button::ghost("Clear").compact().show(ui).clicked() {
-                put(app, ids, "label", "Clear label", |c| c.label = None);
+                put(app, ids, "label-clear", "Clear label", |c| c.label = None);
             }
         });
     });
+    if out.reset {
+        put(app, ids, "clip-reset", "Reset clip", |c| {
+            c.label = None;
+            c.enabled = true;
+        });
+    }
 }
 
 // --- Crop & flip -------------------------------------------------------
@@ -1085,4 +1091,29 @@ mod tests {
         }
     }
 
+    /// Clearing a label is its own undo step, and Reset crop is undoable.
+    #[test]
+    fn clear_label_and_reset_crop_undo() {
+        use crate::agent::Session;
+        use crate::ui_tests::Harness;
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.frames(3);
+        let doc = std::mem::replace(&mut h.app.doc, Session::default().doc);
+        let mut s = Session::new(doc);
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#1030e0", "at": 0.0, "duration": 3.0, "lane": "overlay"})], "card", false).expect("a card");
+        let id = s.doc.model.active().clips.iter().map(|c| c.id.0).max().unwrap();
+        h.app.doc = s.doc;
+        let ids = [id as u32];
+        let label = |h: &Harness| mclip(&h.app, ids[0]).unwrap().label;
+        put(&mut h.app, &ids, "label", "Label colour", |c| c.label = Some(crate::bridge::rgba(Color32::RED)));
+        put(&mut h.app, &ids, "label-clear", "Clear label", |c| c.label = None);
+        assert!(label(&h).is_none());
+        h.app.doc.undo();
+        assert!(label(&h).is_some(), "the colour is still there: clearing was a step of its own");
+        put(&mut h.app, &ids, "crop-reset", "Reset crop", |c| c.transform.crop = m::Crop::default());
+        put(&mut h.app, &ids, "flip", "Flip", |c| c.transform.flip_x = true);
+        put(&mut h.app, &ids, "crop-reset", "Reset crop", |c| c.transform.flip_x = false);
+        h.app.doc.undo();
+        assert!(mclip(&h.app, ids[0]).unwrap().transform.flip_x, "undo brings the flip back");
+    }
 }
