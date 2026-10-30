@@ -213,13 +213,52 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     });
 }
 
-fn note(ui: &mut egui::Ui, text: &str) {
+/// The longest help line a row carries; the rest is in its tooltip.
+// TODO(kit): a shared one-line help row and status pill for every page.
+pub(crate) const HELP_MAX: usize = 64;
+
+/// `text` cut to one help line; the whole of it when it was cut.
+pub(crate) fn one_line(text: &str) -> (String, Option<String>) {
+    if text.chars().count() <= HELP_MAX {
+        return (text.to_owned(), None);
+    }
+    let cut: String = text.chars().take(HELP_MAX - 1).collect();
+    (format!("{}…", cut.trim_end()), Some(text.to_owned()))
+}
+
+/// One line of help under a row, in the control column. `more` (or the
+/// whole text, when it had to be cut) shows on hover.
+pub(crate) fn hint(ui: &mut egui::Ui, text: &str, more: Option<&str>) {
     let t = theme::tokens(ui.ctx());
+    let (shown, cut) = one_line(text);
+    let tip = more.map(str::to_owned).or(cut);
     ui.add_space(-4.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().interact_size.y = 14.0;
+        ui.spacing_mut().item_spacing.x = 0.0;
         ui.add_space(kit::label_width(ui.ctx()));
-        ui.add(egui::Label::new(egui::RichText::new(text).font(theme::caption()).color(t.text_2)).wrap());
+        let r = ui.add(egui::Label::new(egui::RichText::new(shown).font(theme::caption()).color(t.text_2)).truncate());
+        if let Some(tip) = tip {
+            r.on_hover_text(tip);
+        }
+    });
+}
+
+fn note(ui: &mut egui::Ui, text: &str) {
+    hint(ui, text, None);
+}
+
+/// A short line, with the details on hover.
+fn note_more(ui: &mut egui::Ui, short: &str, more: &str) {
+    hint(ui, short, Some(more));
+}
+
+/// A small status tag: green when `ok`, quiet otherwise.
+pub(crate) fn pill(ui: &mut egui::Ui, text: &str, ok: bool) {
+    let t = theme::tokens(ui.ctx());
+    let (fill, ink) = if ok { (t.ok.gamma_multiply(0.18), t.ok) } else { (t.alt, t.text_2) };
+    egui::Frame::new().fill(fill).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 1)).show(ui, |ui| {
+        ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown(text)).font(theme::caption()).color(ink)).extend());
     });
 }
 
@@ -228,7 +267,7 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
     Section::new("set-appearance", "Appearance").icon(Icon::Sun).fixed().show(ui, |ui| {
         kit::labeled_row(ui, "Theme", |ui| {
             let mut i = match p.theme { ThemeChoice::Dark => 0, ThemeChoice::Light => 1, ThemeChoice::System => 2 };
-            if kit::segmented(ui, "set-theme", &mut i, &[Segment::icon_text(Icon::Moon, "Dark"), Segment::icon_text(Icon::Sun, "Light"), Segment::text("System")], Some(260.0), None).changed() {
+            if kit::segmented(ui, "set-theme", &mut i, &[Segment::icon_text(Icon::Moon, "Dark"), Segment::icon_text(Icon::Sun, "Light"), Segment::text("System")], None, None).changed() {
                 p.theme = [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System][i];
             }
         });
@@ -269,7 +308,7 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
         note(ui, "Black or white backgrounds, pure text and strong outlines.");
         kit::labeled_row(ui, "Colour vision", |ui| {
             let mut i = p.colour_vision as usize;
-            if kit::segmented(ui, "set-colour-vision", &mut i, &[Segment::text("Standard"), Segment::text("Red-green safe"), Segment::text("Blue-yellow safe")], Some(360.0), None).changed() {
+            if kit::segmented(ui, "set-colour-vision", &mut i, &[Segment::text("Standard"), Segment::text("Red-green safe"), Segment::text("Blue-yellow safe")], None, None).changed() {
                 p.colour_vision = crate::prefs::ColourVision::from_u8(i as u8);
             }
         });
@@ -277,7 +316,7 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
         kit::labeled_row(ui, "Spoken updates", |ui| {
             kit::toggle(ui, &mut p.announce, "Spoken updates", None);
         });
-        note(ui, "Tell a screen reader what changed: undo, split, selection, export.");
+        note(ui, "Tells a screen reader what changed: undo, split, export.");
         kit::labeled_row(ui, "Quiet export chime", |ui| {
             kit::toggle(ui, &mut p.quiet_chime, "Quiet export chime", None);
         });
@@ -310,11 +349,11 @@ fn editing(app: &mut StudioApp, ui: &mut egui::Ui) {
         kit::labeled_row(ui, "Snapping", |ui| {
             kit::toggle(ui, &mut p.snapping, "Snapping", None);
         });
-        note(ui, "Clips and the playhead jump to edit points, markers and each other as you drag.");
+        note(ui, "Clips and the playhead jump to edit points and markers.");
         kit::labeled_row(ui, "Magnetic main lane", |ui| {
             kit::toggle(ui, &mut p.magnetic, "Magnetic main lane", None);
         });
-        note(ui, "Trimming a clip on the main track moves the clips after it, so no gaps are left.");
+        note(ui, "Trimming on the main track moves later clips: no gaps.");
     });
 }
 
@@ -323,7 +362,7 @@ fn playback(app: &mut StudioApp, ui: &mut egui::Ui) {
     let ed = &mut app.editor;
     Section::new("set-playback", "Playback").icon(Icon::MonitorPlay).fixed().show(ui, |ui| {
         FieldRow::new("Frame cache", &mut p.cache_gb, 1.0..=64.0).default(8.0).unit("GB").decimals(0).step(1.0).scrub(0.1).show(ui);
-        note(ui, "Memory kept for decoded frames. More cache keeps scrubbing smooth on long projects.");
+        note(ui, "Memory for decoded frames. More keeps scrubbing smooth.");
         kit::labeled_row(ui, "Preview quality", |ui| {
             if let Some(i) = kit::menu_button(ui, "set-quality", ed.quality, &["Full", "Half", "Quarter"], 160.0, None) {
                 ed.quality = i;
@@ -332,11 +371,11 @@ fn playback(app: &mut StudioApp, ui: &mut egui::Ui) {
         note(ui, "Zornov never lowers preview quality by itself.");
         kit::labeled_row(ui, "Preview engine", |ui| {
             let mut i = p.preview_engine as usize;
-            if kit::segmented(ui, "set-engine", &mut i, &[Segment::text("Zornov render"), Segment::text("Simple")], Some(260.0), None).changed() {
+            if kit::segmented(ui, "set-engine", &mut i, &[Segment::text("Zornov render"), Segment::text("Simple")], None, None).changed() {
                 p.preview_engine = i as u8;
             }
         });
-        note(ui, "Simple preview draws each clip on its own and is lighter on older machines.");
+        note(ui, "Simple draws each clip alone; lighter on older machines.");
         kit::labeled_row(ui, "Audio output", |ui| {
             kit::menu_button(ui, "set-audio", 0, &["System default"], 220.0, None);
         });
@@ -521,7 +560,7 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
     Section::new("set-ai-editor", "AI editor").icon(Icon::Sparkle).fixed().show(ui, |ui| {
         kit::labeled_row(ui, "Answered by", |ui| {
             let mut i = p.ai_provider as usize;
-            if kit::segmented(ui, "set-ai-provider", &mut i, &[Segment::text("Claude API"), Segment::text("Claude Code"), Segment::text("OpenAI API"), Segment::text("Codex")], Some(420.0), None).changed() {
+            if kit::segmented(ui, "set-ai-provider", &mut i, &[Segment::text("Claude API"), Segment::text("Claude Code"), Segment::text("OpenAI API"), Segment::text("Codex")], None, None).changed() {
                 p.ai_provider = i as u8;
                 st.ai_key.clear();
                 st.ai_key_note = None;
@@ -540,24 +579,24 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::labeled_row(ui, "Model", |ui| {
                 let mut i = models.iter().position(|m| m.0 == chosen.as_str()).map_or(0, |i| i + 1);
                 let segs: Vec<Segment> = std::iter::once(Segment::text("CLI default")).chain(models.iter().map(|m| Segment::text(m.1))).collect();
-                if kit::segmented(ui, "set-ai-cli-model", &mut i, &segs, Some(420.0), None).changed() {
+                if kit::segmented(ui, "set-ai-cli-model", &mut i, &segs, None, None).changed() {
                     *chosen = if i == 0 { String::new() } else { models[i - 1].0.to_owned() };
                 }
             });
-            note(ui, &match found {
-                Some(path) => crate::i18n::tf(format!("Uses your {name} sign-in ({}). Zornov's tools are connected to this window.", path.display())),
-                None => format!("{name} is not installed. Install it ({install}), or pick another AI editor."),
-            });
+            match found {
+                Some(path) => note_more(ui, &crate::i18n::tf(format!("Uses your {name} sign-in. Zornov's tools connect to this window.")), &crate::i18n::tf(format!("Found at {}", path.display()))),
+                None => note_more(ui, &crate::i18n::tf(format!("{name} is not installed. Install it, or pick another AI editor.")), &format!("Install with: {install}")),
+            }
         } else {
             let (models, chosen, account, hint, from) = if p.ai_provider == 2 {
-                (openai::MODELS, &mut p.ai_openai_model, keychain::OPENAI, "sk-…", "platform.openai.com")
+                (openai::MODELS, &mut p.ai_openai_model, keychain::OPENAI, "Paste your key", "platform.openai.com")
             } else {
-                (brain::MODELS, &mut p.ai_model, keychain::ANTHROPIC, "sk-ant-…", "console.anthropic.com")
+                (brain::MODELS, &mut p.ai_model, keychain::ANTHROPIC, "Paste your key", "console.anthropic.com")
             };
             kit::labeled_row(ui, "Model", |ui| {
                 let mut i = models.iter().position(|m| m.0 == chosen.as_str()).unwrap_or(0);
                 let segs: Vec<Segment> = models.iter().map(|m| Segment::text(m.1)).collect();
-                if kit::segmented(ui, "set-ai-model", &mut i, &segs, Some(380.0), None).changed() {
+                if kit::segmented(ui, "set-ai-model", &mut i, &segs, None, None).changed() {
                     *chosen = models[i].0.to_owned();
                 }
             });
@@ -565,14 +604,14 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
             let saved = *st.ai_key_saved.get_or_insert_with(|| keychain::api_key(account).is_some());
             kit::labeled_row(ui, "API key", |ui| {
                 if saved {
-                    ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
+                    pill(ui, &saved_label(ui, account), true);
                     let id = egui::Id::unique(("remove-api-key", account));
                     let label = if kit::armed(ui.ctx(), id) { "Click again to remove" } else { "Remove" };
                     if Button::secondary(label).icon(Icon::Trash).show(ui).clicked() && kit::confirm_click(ui.ctx(), id) {
                         keychain::remove_api_key(account);
                         forget_saved_label(ui, account);
                         st.ai_key_saved = Some(false);
-                        st.ai_key_note = Some("Key removed.".into());
+                        st.ai_key_note = Some("Removed the key".into());
                     }
                 } else {
                     ui.add(egui::TextEdit::singleline(&mut st.ai_key).password(true).hint_text(hint).desired_width(220.0));
@@ -589,25 +628,27 @@ fn ai(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                 }
             });
-            let default_note = crate::i18n::tf(format!("From {from}. {}; Zornov never shows it again.", keychain::kept_in()));
-            note(ui, st.ai_key_note.as_deref().unwrap_or(&default_note));
+            match st.ai_key_note.as_deref() {
+                Some(n) => note(ui, n),
+                None => note_more(ui, &crate::i18n::tf(format!("Get a key at {from}.")), &crate::i18n::tf(format!("{}; Zornov never shows it again.", keychain::kept_in()))),
+            }
         }
         kit::labeled_row(ui, "Changes", |ui| {
             let mut i = p.ai_ask_first as usize;
-            if kit::segmented(ui, "set-ai-mode", &mut i, &[Segment::text("Auto"), Segment::text("Ask first")], Some(260.0), None).changed() {
+            if kit::segmented(ui, "set-ai-mode", &mut i, &[Segment::text("Auto"), Segment::text("Ask first")], None, None).changed() {
                 p.ai_ask_first = i == 1;
             }
         });
-        note(ui, "Auto: edits land on the timeline as they are made. Ask first: you approve each change. Export, opening another project and saving elsewhere are always asked.");
+        note_more(ui, "Auto applies edits as they happen; Ask first waits for you.", "Auto: edits land on the timeline as they are made. Ask first: you approve each change. Export, opening another project and saving elsewhere are always asked.");
     });
     voice_and_sound(st, ui);
     generated_media(ui);
     lessons_section(st, ui);
     Section::new("set-ai-privacy", "What is sent").icon(Icon::Info).fixed().show(ui, |ui| {
-        note(ui, "The AI editor is Claude (Anthropic) or ChatGPT / Codex (OpenAI): your requests, descriptions of the project and footage, and frames it looks at go to the one you pick. Media files are never uploaded, except a picture you ask to have a new picture generated from (it goes to Codex, see Generated media). The AI tools (captions, background removal, voice cleanup…) run on this computer.");
         kit::labeled_row(ui, "AI editor on", |ui| {
             kit::toggle(ui, &mut p.ai_cloud_ok, "AI editor on", None);
         });
+        note_more(ui, "Requests and frames go to the AI you pick. Media stays here.", "The AI editor is Claude (Anthropic) or ChatGPT / Codex (OpenAI): your requests, descriptions of the project and footage, and frames it looks at go to the one you pick. Media files are never uploaded, except a picture you ask to have a new picture generated from (it goes to Codex, see Generated media). The AI tools (captions, background removal, voice cleanup…) run on this computer.");
     });
 }
 
@@ -626,7 +667,7 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
     let all = st.lessons.clone().unwrap_or_default();
     let mut changed = false;
     Section::new("set-ai-lessons", "What the AI has learned").icon(Icon::Sparkle).fixed().show(ui, |ui| {
-        note(ui, "After a job, and after you correct it, the AI saves a short lesson. A lesson loads with its skill the next time that kind of work starts. Lessons are kept on this computer in your Zornov folder, never in a project. Edit one to make it yours (it is then kept for good), or delete what is wrong.");
+        note_more(ui, "The AI saves a short lesson after a job or a correction.", "After a job, and after you correct it, the AI saves a short lesson. A lesson loads with its skill the next time that kind of work starts. Lessons are kept on this computer in your Zornov folder, never in a project. Edit one to make it yours (it is then kept for good), or delete what is wrong.");
         if all.is_empty() {
             note(ui, "Nothing learned yet.");
             return;
@@ -738,23 +779,23 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
         kit::labeled_row(ui, "Spoken by", |ui| {
             let mut i = Provider::ALL.iter().position(|p| *p == v.provider).unwrap_or(0);
             let segs: Vec<Segment> = Provider::ALL.iter().map(|p| Segment::text(p.name())).collect();
-            if kit::segmented(ui, "set-voice-provider", &mut i, &segs, Some(420.0), None).changed() {
+            if kit::segmented(ui, "set-voice-provider", &mut i, &segs, None, None).changed() {
                 v.provider = Provider::ALL[i];
                 st.voice_key.clear();
                 st.voice_key_note = None;
             }
         });
         if v.provider == Provider::Mac {
-            note(ui, &if v.mac_voice_allowed() {
-                "Narration uses the voices installed on this Mac (Premium voices sound best: System Settings ▸ Accessibility ▸ Spoken Content).".to_owned()
+            if v.mac_voice_allowed() {
+                note_more(ui, "Narration uses the voices installed on this Mac.", "Premium voices sound best: System Settings ▸ Accessibility ▸ Spoken Content.");
             } else {
-                "The Mac's voices are switched off below, so narration cannot be made until you choose a service.".to_owned()
-            });
+                note(ui, "Mac voices are off below: pick a service to narrate.");
+            }
         } else {
             let (voice, model, voice_hint, model_hint, from) = match v.provider {
-                Provider::Fish => (&mut v.fish_voice, &mut v.fish_model, "voice model id (empty: Fish's default)", "s2.1-pro", "fish.audio ▸ API keys; voice ids are on each voice's page"),
-                Provider::ElevenLabs => (&mut v.elevenlabs_voice, &mut v.elevenlabs_model, "voice id", "eleven_multilingual_v2", "elevenlabs.io ▸ Developers ▸ API keys; voice ids in the Voice Library"),
-                _ => (&mut v.openai_voice, &mut v.openai_model, "alloy, ash, coral, nova, sage…", "gpt-4o-mini-tts", "platform.openai.com (the same key as the OpenAI AI editor)"),
+                Provider::Fish => (&mut v.fish_voice, &mut v.fish_model, "Fish's default voice", "Model name", "fish.audio ▸ API keys; voice ids are on each voice's page"),
+                Provider::ElevenLabs => (&mut v.elevenlabs_voice, &mut v.elevenlabs_model, "Paste a voice from the library", "Model name", "elevenlabs.io ▸ Developers ▸ API keys; voice ids in the Voice Library"),
+                _ => (&mut v.openai_voice, &mut v.openai_model, "A voice name, like alloy", "Model name", "platform.openai.com (the same key as the OpenAI AI editor)"),
             };
             kit::labeled_row(ui, "Voice", |ui| {
                 ui.add(egui::TextEdit::singleline(voice).hint_text(voice_hint).desired_width(260.0));
@@ -772,8 +813,11 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
                 }
             };
             key_row(ui, account, saved, &mut st.voice_key, &mut st.voice_key_note, |s| st.voice_key_saved = Some((v.provider, s)));
-            let default_note = voice_note(v.provider.name(), from, v.mac_voice_allowed());
-            note(ui, st.voice_key_note.as_deref().unwrap_or(&default_note));
+            let more = voice_note(v.provider.name(), from, v.mac_voice_allowed());
+            match st.voice_key_note.as_deref() {
+                Some(n) => note(ui, n),
+                None => note_more(ui, &crate::i18n::tf(format!("Get a key at {}.", from.split(" ▸ ").next().unwrap_or(from).split(" (").next().unwrap_or(from))), &more),
+            }
         }
         kit::labeled_row(ui, "Never use Mac voices", |ui| {
             if forced_off() {
@@ -782,13 +826,13 @@ fn voice_and_sound(st: &mut SettingsState, ui: &mut egui::Ui) {
                 kit::toggle(ui, &mut v.mac_voice_off, "Never use Mac voices", None);
             }
         });
-        note(ui, "On: no agent can speak with the Mac's built-in voices, even by asking for one by name; narration comes only from the service above, or not at all. Holds for the assistant, the command line tool and Claude Code or Codex alike. It can also be switched on from outside the app, and then this setting is locked.");
+        note_more(ui, "No agent may use the Mac's built-in voices.", "On: no agent can speak with the Mac's built-in voices, even by asking for one by name; narration comes only from the service above, or not at all. Holds for the assistant, the command line tool and Claude Code or Codex alike. It can also be switched on from outside the app, and then this setting is locked.");
         let sound_saved = *st.sound_key_saved.get_or_insert_with(|| keychain::api_key(keychain::ELEVENLABS).is_some());
-        let (status, sound_note) = described_sounds(sound_saved);
+        let (status, sound_note, sound_more) = described_sounds(sound_saved);
         kit::labeled_row(ui, "Described sounds", |ui| {
             ui.label(egui::RichText::new(crate::i18n::shown(status)).font(theme::body()));
         });
-        note(ui, sound_note);
+        note_more(ui, sound_note, sound_more);
     });
     if v != before {
         if let Err(e) = v.save() {
@@ -811,9 +855,10 @@ fn voice_note(service: &str, from: &str, mac_allowed: bool) -> String {
 
 /// Who makes sounds described in words: ElevenLabs with its key, else
 /// Zornov's own physical models (`synth::described_sfx`). (status, note)
-fn described_sounds(key_saved: bool) -> (&'static str, &'static str) {
-    let status = if key_saved { "ElevenLabs, with Zornov's own models when it does not answer" } else { "Made by Zornov on this computer (an ElevenLabs key adds its sounds)" };
-    (status, "Risers, whooshes, booms and hits are made by Zornov itself. Any other sound described in words (\"rain on a tin roof\") comes from ElevenLabs when its key is saved; without one, or when ElevenLabs does not answer, Zornov makes it from its own physical models.")
+fn described_sounds(key_saved: bool) -> (&'static str, &'static str, &'static str) {
+    let status = if key_saved { "ElevenLabs, then Zornov's own models" } else { "Made on this computer" };
+    let short = if key_saved { "Zornov's own models step in when ElevenLabs does not answer." } else { "An ElevenLabs key adds more described sounds." };
+    (status, short, "Risers, whooshes, booms and hits are made by Zornov itself. Any other sound described in words (\"rain on a tin roof\") comes from ElevenLabs when its key is saved; without one, or when ElevenLabs does not answer, Zornov makes it from its own physical models.")
 }
 
 /// How things are generated: pictures by Codex, with no key; music and
@@ -823,15 +868,15 @@ fn generated_media(ui: &mut egui::Ui) {
     Section::new("set-ai-generate", "Generated media").icon(Icon::Sparkle).fixed().show(ui, |ui| {
         let codex = crate::agent::brain::find_codex().is_some();
         kit::labeled_row(ui, "Pictures", |ui| {
-            ui.label(egui::RichText::new(crate::i18n::shown(if codex { "Codex image generation (your ChatGPT plan)" } else { "Needs the Codex app on this Mac" })).font(theme::body()));
+            ui.label(egui::RichText::new(crate::i18n::shown(if codex { "Codex (your ChatGPT plan)" } else { "Needs the Codex app" })).font(theme::body()));
         });
         kit::labeled_row(ui, "Music and sound", |ui| {
-            ui.label(egui::RichText::new(crate::i18n::shown("Made on this computer by the AI editor")).font(theme::body()));
+            ui.label(egui::RichText::new(crate::i18n::shown("Made on this computer")).font(theme::body()));
         });
         kit::labeled_row(ui, "Video", |ui| {
             ui.label(egui::RichText::new(crate::i18n::shown("Not available yet")).font(theme::body()));
         });
-        note(ui, "Pictures the AI editor makes from words come from the Codex app's image generation, on your own ChatGPT plan: no API key, nothing billed by Zornov. Ask the AI editor for music or a sound in words and it makes them on this computer: original music in a genre, fitted to the length, and sounds from physical models. Video from words is not available yet; camera moves through a still cover it for now.");
+        note_more(ui, "Pictures use your ChatGPT plan: no key, no Zornov charge.", "Pictures the AI editor makes from words come from the Codex app's image generation, on your own ChatGPT plan: no API key, nothing billed by Zornov. Ask the AI editor for music or a sound in words and it makes them on this computer: original music in a genre, fitted to the length, and sounds from physical models. Video from words is not available yet; camera moves through a still cover it for now.");
     });
 }
 
@@ -873,7 +918,7 @@ fn key_row(ui: &mut egui::Ui, account: &str, saved: bool, typed: &mut String, no
                 keychain::remove_api_key(account);
                 forget_saved_label(ui, account);
                 set_saved(false);
-                *note_out = Some("Key removed.".into());
+                *note_out = Some("Removed the key".into());
             }
         } else {
             ui.add(egui::TextEdit::singleline(typed).password(true).hint_text("paste the key").desired_width(220.0));
@@ -896,7 +941,7 @@ fn models(app: &mut StudioApp, ui: &mut egui::Ui) {
     use crate::services::models::{DownloadState, Models, VerifyState};
     use studio_ai::ModelStatus;
     let t = theme::tokens(ui.ctx());
-    ui.label(egui::RichText::new(crate::i18n::shown("These AI features run on this computer. Models download once to Movies ▸ Studio ▸ Models and stay there; nothing is uploaded. (The AI editor in Settings ▸ AI is the exception: it is Claude or ChatGPT / Codex.)")).font(theme::body()).color(t.text_2));
+    ui.label(egui::RichText::new(crate::i18n::shown("These models run on this computer and download once.")).font(theme::body()).color(t.text_2)).on_hover_text(crate::i18n::shown("Models are kept in Movies ▸ Studio ▸ Models and nothing is uploaded. (The AI editor in Settings ▸ AI is the exception: it is Claude or ChatGPT / Codex.)"));
     ui.add_space(theme::space::XS);
     // What is installed is read from the models folder itself (it was a
     // fixed list, and a finished "download" was forgotten on quitting).
@@ -946,7 +991,7 @@ fn models(app: &mut StudioApp, ui: &mut egui::Ui) {
             (Some(DownloadState::Running { fraction, .. }), _) => crate::i18n::tf(format!("Downloading · {}% of {}", (fraction * 100.0) as u32, row.size_label)),
             (Some(DownloadState::Failed(e)), s) if *s != ModelStatus::Installed => crate::i18n::tf(format!("Download failed: {e}")),
             (_, ModelStatus::Installed) => format!("{} · installed · for {}", row.size_label, row.used_for),
-            (_, ModelStatus::Incomplete { .. }) => format!("{} · incomplete (an interrupted download): repair it", row.size_label),
+            (_, ModelStatus::Incomplete { .. }) => format!("{} · incomplete · repair it", row.size_label),
             (_, ModelStatus::NotInstalled) => format!("{} · not downloaded · for {}", row.size_label, row.used_for),
         };
         if kit::paint_text_clipped(p, egui::pos2(ir.right() + 12.0, r.center().y + 9.0), Align2::LEFT_CENTER, &status, theme::caption(), t.text_2, text_w) {
@@ -1194,10 +1239,63 @@ mod tests {
     /// Without a key, described sounds are made here (`synth::described_sfx`).
     #[test]
     fn described_sounds_without_a_key_are_made_here() {
-        let (label, _) = described_sounds(false);
+        let (label, ..) = described_sounds(false);
         assert!(!label.contains("Need"), "{label}");
         assert!(described_sounds(true).0.contains("ElevenLabs"));
-        let (_, note) = described_sounds(false);
+        let (.., note) = described_sounds(false);
         assert!(note.contains("Zornov makes"), "{note}");
+    }
+
+    /// Every page is a grid: its help lines are one line of at most
+    /// `HELP_MAX` characters in the control column, nothing is cut off or
+    /// drawn over anything else, and no raw path shows in the text. With
+    /// `ZORNOV_SHOT_DIR` set the frames are also written there as pictures.
+    #[test]
+    fn every_page_is_a_clean_grid_with_one_line_help() {
+        use crate::app::Overlay;
+        use crate::ui_tests::Harness;
+        let _serial = crate::ui_tests::serial();
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Settings;
+        let caption = theme::caption().size;
+        for (page, first_label) in [("General", "Theme"), ("Editing", "Hover scrub"), ("Playback", "Frame cache"), ("Storage", "Cache"), ("AI", "Answered by"), ("Models", ""), ("About", "")] {
+            h.app.settings.page = PAGES.iter().position(|p| p.0 == page).expect("a page");
+            h.frames(3);
+            let out = h.last.as_ref().expect("a frame");
+            let mut texts = vec![];
+            fn walk(shape: &egui::epaint::Shape, texts: &mut Vec<(String, Rect, f32)>) {
+                match shape {
+                    egui::epaint::Shape::Text(t) => {
+                        let size = t.galley.job.sections.first().map_or(0.0, |s| s.format.font_id.size);
+                        texts.push((t.galley.text().to_owned(), t.galley.rect.translate(t.pos.to_vec2()), size));
+                    }
+                    egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts)),
+                    _ => {}
+                }
+            }
+            for cs in &out.shapes {
+                walk(&cs.shape, &mut texts);
+            }
+            if !first_label.is_empty() {
+                let label_x = texts.iter().find(|(t, ..)| t == first_label).unwrap_or_else(|| panic!("{page}: no {first_label} row in {texts:?}")).1.left();
+                let col_x = label_x + kit::LABEL_W_WIDE;
+                for (t, r, size) in &texts {
+                    if (*size - caption).abs() < 0.1 && (r.left() - col_x).abs() < 1.5 {
+                        assert!(t.chars().count() <= HELP_MAX, "{page}: help too long: {t}");
+                        assert!(r.height() < 2.0 * caption, "{page}: help wraps: {t}");
+                    }
+                }
+            }
+            for (t, ..) in &texts {
+                assert!(!t.contains("/Users/") && !t.contains("/bin/") && !t.contains("sk-ant"), "{page}: raw path or id: {t}");
+            }
+            let cuts = h.cut_text();
+            assert!(cuts.is_empty(), "{page}: {cuts:?}");
+            let over = h.overlaps();
+            assert!(over.is_empty(), "{page}: {over:?}");
+            if let Some(dir) = std::env::var_os("ZORNOV_SHOT_DIR") {
+                h.shot(std::path::Path::new(&dir).join(format!("settings-{}.png", page.to_lowercase())));
+            }
+        }
     }
 }
