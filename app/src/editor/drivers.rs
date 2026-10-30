@@ -80,6 +80,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
     let fid = egui::Id::unique(("driver-form", id));
     let mut form: Form = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
     let mut changed: Option<m::Clip> = None;
+    let mut label = "Driver";
     let out = Section::new("drivers", "Drivers").icon(Icon::LinkSimple).resettable(!mc.drivers.is_empty()).show(ui, |ui| {
         let t = theme::tokens(ui.ctx());
         for (k, d) in &mc.drivers {
@@ -95,19 +96,18 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 kit::text_field(ui, &mut expr, "a * 0.5", None, w, None);
                 remove = IconButton::new(Icon::X, "Remove driver").compact().show(ui).clicked();
             });
-            let mut nd = d.clone();
-            nd.enabled = on;
-            nd.expr = expr;
-            if let Some(p) = nd.problem() {
-                ui.label(egui::RichText::new(p).font(theme::caption()).color(t.danger));
-            } else if remove || nd != *d {
-                let mut c = changed.take().unwrap_or_else(|| mc.clone());
-                if remove {
-                    c.drivers.remove(k);
-                } else {
-                    c.drivers.insert(k.clone(), nd);
+            match step(d, on, expr, remove) {
+                Step::Problem(p) => {
+                    ui.label(egui::RichText::new(p).font(theme::caption()).color(t.danger));
                 }
-                changed = Some(c);
+                Step::Keep => {}
+                Step::Remove => {
+                    label = "Remove driver";
+                    changed.get_or_insert_with(|| mc.clone()).drivers.remove(k);
+                }
+                Step::Set(nd) => {
+                    changed.get_or_insert_with(|| mc.clone()).drivers.insert(k.clone(), nd);
+                }
             }
         }
         if !mc.drivers.is_empty() {
@@ -152,17 +152,54 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         let mut c = mc.clone();
         c.drivers.clear();
         changed = Some(c);
+        label = "Reset drivers";
     }
     if let Some(c) = changed {
         let seq = app.doc.seq();
-        app.doc.apply("Driver", m::Edit::SetClip { seq, clip: Box::new(c) });
+        app.doc.apply(label, m::Edit::SetClip { seq, clip: Box::new(c) });
     }
     ui.data_mut(|d| d.insert_temp(fid, form));
+}
+
+/// What the row of one driver asks for after this frame's edits.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Problem(String),
+    Keep,
+    Remove,
+    Set(m::Driver),
+}
+
+/// A driver that cannot run still goes when asked: Remove comes before
+/// the problem its formula has.
+fn step(d: &m::Driver, on: bool, expr: String, remove: bool) -> Step {
+    if remove {
+        return Step::Remove;
+    }
+    let mut nd = d.clone();
+    nd.enabled = on;
+    nd.expr = expr;
+    if let Some(p) = nd.problem() {
+        Step::Problem(p)
+    } else if nd != *d {
+        Step::Set(nd)
+    } else {
+        Step::Keep
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broken_driver_can_still_be_removed() {
+        let d = link(4, 1, 0.5, 0.25);
+        assert_eq!(step(&d, true, "a * ".into(), false), Step::Problem(m::Driver { expr: "a * ".into(), ..d.clone() }.problem().unwrap()));
+        assert_eq!(step(&d, true, "a * ".into(), true), Step::Remove, "Remove works on a broken formula");
+        assert_eq!(step(&d, true, d.expr.clone(), false), Step::Keep);
+        assert!(matches!(step(&d, false, d.expr.clone(), false), Step::Set(n) if !n.enabled));
+    }
 
     #[test]
     fn a_link_reads_the_chosen_axis_late_and_scaled() {

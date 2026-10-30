@@ -7,6 +7,7 @@
 
 use super::{Content, Session};
 use crate::assets::{self, Asset, Query, Store};
+use crate::services::library::{manage, relink};
 use crate::{rights, safety, services};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -59,27 +60,6 @@ fn strs(v: &Value) -> Vec<String> {
 
 fn round(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
-}
-
-/// Default places to look for moved files: next to the project, the usual
-/// media folders and connected drives.
-fn usual_places(project: Option<&Path>) -> Vec<PathBuf> {
-    let mut v: Vec<PathBuf> = Vec::new();
-    if let Some(p) = project {
-        v.push(p.to_path_buf());
-        if let Some(parent) = p.parent() {
-            v.push(parent.to_path_buf());
-        }
-    }
-    let home = studio_paths::home();
-    v.extend([studio_paths::videos(), home.join("Desktop"), home.join("Downloads"), home.join("Documents"), home.join("Pictures"), home.join("Music")]);
-    if let Ok(rd) = std::fs::read_dir("/Volumes") {
-        v.extend(rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()));
-    }
-    v.retain(|p| p.is_dir());
-    v.sort();
-    v.dedup();
-    v
 }
 
 /// The rights check an export makes: `Ok(Null)` when all is well and there
@@ -282,7 +262,7 @@ impl Session {
                 }
                 Ok(json!({"noted": list.len()}))
             }
-            "bins" => Ok(json!({"bins": store.bins()?.into_iter().map(|(id, p, rule, n)| { let mut v = json!({"id": id, "bin": p, "assets": n}); if let Some(r) = rule { v["smart_rule"] = r; } v }).collect::<Vec<_>>()})),
+            "bins" => manage::bins_json(store),
             "bin" => {
                 let name = a.get("name").and_then(Value::as_str).or_else(|| a.get("bin").and_then(Value::as_str)).ok_or("bin needs \"name\"")?;
                 let id = store.bin_find(name)?;
@@ -315,50 +295,18 @@ impl Session {
                 let name = a.get("name").and_then(Value::as_str).ok_or("bin_delete needs \"name\"")?;
                 Ok(json!({"removed_bins": store.bin_delete(name)?, "note": "only the bin; the assets stay"}))
             }
-            "duplicates" => {
-                let groups = store.duplicates(a.get("near").and_then(Value::as_bool).unwrap_or(false))?;
-                let wasted: i64 = groups.iter().map(|g| g.iter().skip(1).map(|x| x.size).sum::<i64>()).sum();
-                Ok(json!({"groups": groups.len(), "wasted": safety::human(wasted.max(0) as u64), "duplicates": groups.iter().take(limit).map(|g| g.iter().map(|x| json!({"id": x.id, "path": x.path, "bytes": x.size, "missing": x.missing})).collect::<Vec<_>>()).collect::<Vec<_>>()}))
-            }
-            "missing" => {
-                let root = self.root();
-                let only = if a.get("all").and_then(Value::as_bool).unwrap_or(false) { None } else { root.as_deref() };
-                let list = store.missing(only)?;
-                Ok(json!({"missing": list.len(), "assets": list.iter().map(|x| json!({"id": x.id, "name": x.name, "was": x.path})).collect::<Vec<_>>(), "next": if list.is_empty() { Value::Null } else { json!("assets action \"relink\" searches for them") }}))
-            }
+            "duplicates" => manage::duplicates_json(store, a.get("near").and_then(Value::as_bool).unwrap_or(false), limit),
+            "missing" => manage::missing_json(store, self.root().as_deref(), a.get("all").and_then(Value::as_bool).unwrap_or(false)),
             "relink" => {
                 let root = self.root();
-                let only = if a.get("all").and_then(Value::as_bool).unwrap_or(false) { None } else { root.as_deref() };
-                let wanted = store.missing(only)?;
-                if wanted.is_empty() {
+                let all = a.get("all").and_then(Value::as_bool).unwrap_or(false);
+                let search: Vec<PathBuf> = strs(&a["search"]).into_iter().map(PathBuf::from).collect();
+                let apply = a.get("apply").and_then(Value::as_bool).unwrap_or(true);
+                let report = relink::relink_missing(&mut self.doc, store, root.as_deref(), all, &search, apply, false)?;
+                if report.wanted == 0 {
                     return Ok(json!({"relinked": 0, "note": "nothing is missing"}));
                 }
-                let dirs: Vec<PathBuf> = match strs(&a["search"]) {
-                    s if !s.is_empty() => s.into_iter().map(PathBuf::from).collect(),
-                    _ => usual_places(root.as_deref()),
-                };
-                let found = store.find_moved(&wanted, &dirs);
-                let apply = a.get("apply").and_then(Value::as_bool).unwrap_or(true);
-                let mut done = Vec::new();
-                for (asset, to, how) in &found {
-                    if apply {
-                        if let Some(old) = self.doc.model.media.iter().find(|m| m.path == asset.path).cloned() {
-                            let pr = crate::media_io::probe(to).ok();
-                            let mut item = old.clone();
-                            item.path = to.display().to_string();
-                            if let Some(pr) = pr {
-                                item.info = m::MediaInfo { kind: pr.kind, container: pr.container, duration: pr.duration.or(old.info.duration), video: pr.video, audio: pr.audio, extra: old.info.extra.clone() };
-                            }
-                            if !self.doc.apply("Relink media", m::Edit::SetMedia { item: Box::new(item) }) {
-                                return Err(self.doc.error.take().unwrap_or_else(|| format!("{} could not be relinked", asset.name)));
-                            }
-                        }
-                        store.moved(asset.id, to)?;
-                    }
-                    done.push(json!({"asset": asset.name, "now": to.display().to_string(), "match": how}));
-                }
-                let left: Vec<&str> = wanted.iter().filter(|w| !found.iter().any(|(f, _, _)| f.id == w.id)).map(|w| w.name.as_str()).collect();
-                Ok(json!({"relinked": if apply { done.len() } else { 0 }, "found": done, "still_missing": left, "searched": dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>(), "changed_project": apply && !found.is_empty(), "note": if left.is_empty() { Value::Null } else { json!("name other folders or drives in search to look further") }}))
+                Ok(report.json())
             }
             "index" => {
                 let pool: Vec<Asset> = if a.get("all").and_then(Value::as_bool).unwrap_or(false) {
@@ -398,10 +346,7 @@ impl Session {
                 Ok(json!({"assets": list.len(), "rights": last.map(|r| r.json())}))
             }
             "licences" => Ok(json!({"licences": rights::kinds_json()})),
-            "expiring" => {
-                let days = a.get("days").and_then(Value::as_i64).unwrap_or(60);
-                Ok(json!({"expiring": rights::expiring(store, days)?.into_iter().map(|(x, d, left)| json!({"asset": x.name, "expires": d, "days_left": left})).collect::<Vec<_>>()}))
-            }
+            "expiring" => manage::expiring_json(store, a.get("days").and_then(Value::as_i64).unwrap_or(60)),
             "rights_check" => {
                 let root = self.need_root()?;
                 let opts = rights::Options { commercial: a.get("commercial").and_then(Value::as_bool).unwrap_or(true), ..Default::default() };
@@ -675,10 +620,16 @@ mod tests {
         std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
         std::fs::rename(&blue, dir.join("elsewhere/azure.png")).unwrap();
         assert_eq!(call(&mut s, "assets", json!({"action": "missing"}))["missing"], 1);
+        let look = call(&mut s, "assets", json!({"action": "relink", "apply": false, "search": [dir.join("elsewhere").display().to_string()]}));
+        assert_eq!((look["relinked"].clone(), look["found"].as_array().map(Vec::len), look["changed_project"].clone()), (json!(0), Some(1), json!(false)), "{look}");
+        assert!(!s.doc.model.media.iter().any(|m| m.path.ends_with("azure.png")), "a preview changes nothing");
         let fix = call(&mut s, "assets", json!({"action": "relink", "search": [dir.join("elsewhere").display().to_string()]}));
         assert_eq!(fix["relinked"], 1, "{fix}");
+        assert_eq!(s.doc.undo_label(), Some("Relink media"), "one undo step");
         assert!(s.doc.model.media.iter().any(|m| m.path.replace('\\', "/").ends_with("elsewhere/azure.png")));
         assert_eq!(call(&mut s, "assets", json!({"action": "missing"}))["missing"], 0);
+        assert_eq!(call(&mut s, "assets", json!({"action": "bins"}))["bins"][0]["bin"], "Picks");
+        assert_eq!(call(&mut s, "assets", json!({"action": "expiring"}))["expiring"].as_array().map(Vec::len), Some(0));
         assert_eq!(call(&mut s, "assets", json!({"action": "bin", "name": "Picks"}))["assets"][0]["name"], "azure.png", "ratings follow the file");
         // Rights: an expired licence on something the timeline uses stops an export.
         let media_id = s.doc.model.media[0].id.0;

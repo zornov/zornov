@@ -575,7 +575,7 @@ impl StudioApp {
     }
 
     fn import_timeline_now(&mut self, ctx: &egui::Context) {
-        let Some(path) = rfd::FileDialog::new().set_title("Import timeline").add_filter("Timeline", &["otio", "fcpxml", "xml"]).pick_file() else { return };
+        let Some(path) = rfd::FileDialog::new().set_title("Import timeline").add_filter("Timeline", &["otio", "fcpxml", "xml", "edl"]).pick_file() else { return };
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) => {
@@ -584,8 +584,11 @@ impl StudioApp {
             }
         };
         let mut project = m::Project::new(m::ProjectSettings::default());
-        let is_otio = path.extension().is_some_and(|e| e == "otio");
-        let imported = if is_otio { m::interchange::otio::import(&mut project, &text) } else { m::interchange::fcpxml::import(&mut project, &text) };
+        let imported = match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+            Some("otio") => m::interchange::otio::import(&mut project, &text),
+            Some("edl") => m::interchange::edl::import(&mut project, &text, m::interchange::edl::EdlImport::default()),
+            _ => m::interchange::fcpxml::import(&mut project, &text),
+        };
         match imported {
             Ok(imp) => {
                 if let Err(e) = project.apply(imp.edit) {
@@ -789,24 +792,73 @@ pub fn seed_of(path: &Path) -> u32 {
     path.to_string_lossy().bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)) & !crate::thumbs::FILE_BIT
 }
 
-/// Export the active sequence as OTIO next to the project (File menu).
-pub fn export_otio(app: &mut StudioApp, ctx: &egui::Context) {
-    let Some(path) = rfd::FileDialog::new().set_title("Export OpenTimelineIO").set_file_name(format!("{}.otio", app.doc.project.name)).save_file() else { return };
-    match m::interchange::otio::export(&app.doc.model, app.doc.seq()) {
-        Ok((json, report)) => match m::file::write_atomic(&path, json.as_bytes()) {
+/// The formats the File menu hands a timeline to other editors in. The menu
+/// rows for Fcpxml and Edl wait on topbar.rs (see the report).
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TimelineFormat {
+    Otio,
+    Fcpxml,
+    Edl,
+}
+
+impl TimelineFormat {
+    #[allow(dead_code)]
+    pub const ALL: [TimelineFormat; 3] = [TimelineFormat::Otio, TimelineFormat::Fcpxml, TimelineFormat::Edl];
+
+    /// The name in the menu and the toast.
+    pub fn label(self) -> &'static str {
+        match self {
+            TimelineFormat::Otio => "OpenTimelineIO",
+            TimelineFormat::Fcpxml => "Final Cut Pro XML",
+            TimelineFormat::Edl => "EDL",
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            TimelineFormat::Otio => "otio",
+            TimelineFormat::Fcpxml => "fcpxml",
+            TimelineFormat::Edl => "edl",
+        }
+    }
+}
+
+/// The active sequence as text in `format`, and the notes the export made.
+pub fn timeline_text(model: &m::Project, seq: m::SequenceId, format: TimelineFormat) -> Result<(String, Vec<String>), String> {
+    let (text, report) = match format {
+        TimelineFormat::Otio => m::interchange::otio::export(model, seq),
+        TimelineFormat::Fcpxml => m::interchange::fcpxml_write::export(model, seq, Default::default()),
+        TimelineFormat::Edl => m::interchange::edl::export(model, seq, Default::default()),
+    }
+    .map_err(|e| format!("Could not export: {e:?}"))?;
+    Ok((text, report.issues.iter().map(|i| format!("{}: {}", i.item, i.message)).collect()))
+}
+
+/// Export the active sequence for another editor (File ▸ Export timeline).
+pub fn export_timeline(app: &mut StudioApp, ctx: &egui::Context, format: TimelineFormat) {
+    let title = format!("Export {}", format.label());
+    let Some(path) = rfd::FileDialog::new().set_title(title).set_file_name(format!("{}.{}", app.doc.project.name, format.extension())).add_filter(format.label(), &[format.extension()]).save_file() else { return };
+    match timeline_text(&app.doc.model, app.doc.seq(), format) {
+        Ok((text, notes)) => match m::file::write_atomic(&path, text.as_bytes()) {
             Ok(()) => {
-                let note = if report.issues.is_empty() { String::new() } else { format!(" ({} notes)", report.issues.len()) };
-                kit::push(ctx, crate::i18n::tf(format!("Exported OTIO{note}")), None, Some(Icon::CheckCircle));
+                let note = if notes.is_empty() { String::new() } else { format!(" ({} notes)", notes.len()) };
+                kit::push(ctx, crate::i18n::tf(format!("Exported timeline as {}{note}", format.label())), None, Some(Icon::CheckCircle));
             }
             Err(e) => {
                 say_error(ctx, crate::i18n::tf(format!("Could not write: {e}")));
             }
         },
         Err(e) => {
-            say_error(ctx, crate::i18n::tf(format!("Could not export: {e}")));
+            say_error(ctx, crate::i18n::tf(e));
         }
     }
     let _ = bridge::SEED_KEY;
+}
+
+/// Export the active sequence as OTIO (File menu).
+pub fn export_otio(app: &mut StudioApp, ctx: &egui::Context) {
+    export_timeline(app, ctx, TimelineFormat::Otio);
 }
 
 /// Writes `bytes` into `dir` as `<stem>-<content hash>.<ext>` unless that
@@ -1344,5 +1396,21 @@ mod tests {
         assert_eq!(package_path(PathBuf::from("/a/v1.2")), PathBuf::from("/a/v1.2.zornov"), "an unrelated dot is not the extension");
         let name = free_project_dir("My: film/2");
         assert_eq!(name.file_name().unwrap().to_string_lossy(), "My- film-2.zornov");
+    }
+
+    #[test]
+    fn a_timeline_leaves_as_otio_fcpxml_and_edl_and_comes_back() {
+        let doc = crate::services::project::new_custom("Out", 640, 360, 30.0);
+        let seq = doc.seq();
+        for f in TimelineFormat::ALL {
+            let (text, _notes) = timeline_text(&doc.model, seq, f).unwrap_or_else(|e| panic!("{f:?}: {e}"));
+            assert!(!text.trim().is_empty() && text.len() < 200_000, "{f:?}");
+            match f {
+                TimelineFormat::Otio => assert!(text.contains("OTIO_SCHEMA"), "{text}"),
+                TimelineFormat::Fcpxml => assert!(text.contains("<fcpxml"), "{text}"),
+                TimelineFormat::Edl => assert!(text.contains("TITLE:"), "{text}"),
+            }
+        }
+        assert_eq!(TimelineFormat::ALL.map(|f| f.extension()), ["otio", "fcpxml", "edl"]);
     }
 }

@@ -151,6 +151,9 @@ pub struct ContextState {
     pub intra_y_mode_cdf: [[[u16; 14]; 5]; 5],
     /// `read_cdef()` state; none when the sequence has CDEF off.
     pub cdef: Option<CdefSyntax>,
+    /// The tile being written, `[mi_row_start, mi_row_end, mi_col_start, mi_col_end]`: neighbours
+    /// outside it are not available. The whole frame by default.
+    pub tile: [usize; 4],
 }
 
 impl ContextState {
@@ -165,7 +168,20 @@ impl ContextState {
             left_dc: std::array::from_fn(|_| vec![0; mi_rows + ARRAY_SLACK]),
             intra_y_mode_cdf: DEFAULT_INTRA_FRAME_Y_MODE_CDF,
             cdef: None,
+            tile: [0, mi_rows, 0, mi_cols],
         }
+    }
+
+    /// The block above row `r` belongs to the tile.
+    #[inline]
+    pub fn avail_u(&self, r: usize) -> bool {
+        r > self.tile[0]
+    }
+
+    /// The block left of column `c` belongs to the tile.
+    #[inline]
+    pub fn avail_l(&self, c: usize) -> bool {
+        c > self.tile[2]
     }
 
     /// `read_cdef()`: the index of the 64x64 block, coded with the first block of it that is not
@@ -197,17 +213,17 @@ impl ContextState {
 
     /// The partition context (8.3.2) of the block of log2 width `bsl` (in 4x4 units) at `(r, c)`.
     pub fn partition_ctx(&self, r: usize, c: usize, bsl: usize) -> usize {
-        let above = r > 0 && (MI_WIDTH_LOG2[self.mi.mi_size[self.idx(r - 1, c)] as usize] as usize) < bsl;
-        let left = c > 0 && (MI_HEIGHT_LOG2[self.mi.mi_size[self.idx(r, c - 1)] as usize] as usize) < bsl;
+        let above = self.avail_u(r) && (MI_WIDTH_LOG2[self.mi.mi_size[self.idx(r - 1, c)] as usize] as usize) < bsl;
+        let left = self.avail_l(c) && (MI_HEIGHT_LOG2[self.mi.mi_size[self.idx(r, c - 1)] as usize] as usize) < bsl;
         left as usize * 2 + above as usize
     }
 
     pub fn skip_ctx(&self, r: usize, c: usize) -> usize {
         let mut ctx = 0;
-        if r > 0 {
+        if self.avail_u(r) {
             ctx += self.mi.skip[self.idx(r - 1, c)] as usize;
         }
-        if c > 0 {
+        if self.avail_l(c) {
             ctx += self.mi.skip[self.idx(r, c - 1)] as usize;
         }
         ctx
@@ -215,8 +231,8 @@ impl ContextState {
 
     /// `(above, left)` contexts of the intra frame y mode.
     pub fn y_mode_ctx(&self, r: usize, c: usize) -> (usize, usize) {
-        let above = if r > 0 { self.mi.y_mode[self.idx(r - 1, c)] as usize } else { DC_PRED };
-        let left = if c > 0 { self.mi.y_mode[self.idx(r, c - 1)] as usize } else { DC_PRED };
+        let above = if self.avail_u(r) { self.mi.y_mode[self.idx(r - 1, c)] as usize } else { DC_PRED };
+        let left = if self.avail_l(c) { self.mi.y_mode[self.idx(r, c - 1)] as usize } else { DC_PRED };
         (INTRA_MODE_CONTEXT[above] as usize, INTRA_MODE_CONTEXT[left] as usize)
     }
 
@@ -226,14 +242,14 @@ impl ContextState {
         let max_h = TX_HEIGHT[max_rect] as usize;
         let mi = &self.mi;
         // an inter neighbour counts with its block size, an intra one with its transform size
-        let above_w = if r == 0 {
+        let above_w = if !self.avail_u(r) {
             0
         } else if mi.is_inter[self.idx(r - 1, c)] {
             block_width(mi.mi_size[self.idx(r - 1, c)] as usize)
         } else {
             TX_WIDTH[mi.inter_tx_size[self.idx(r - 1, c)] as usize] as usize
         };
-        let left_h = if c == 0 {
+        let left_h = if !self.avail_l(c) {
             0
         } else if mi.is_inter[self.idx(r, c - 1)] {
             block_height(mi.mi_size[self.idx(r, c - 1)] as usize)
@@ -310,7 +326,7 @@ impl ContextState {
 
     /// The `is_inter` context.
     pub fn is_inter_ctx(&self, r: usize, c: usize) -> usize {
-        let (avail_u, avail_l) = (r > 0, c > 0);
+        let (avail_u, avail_l) = (self.avail_u(r), self.avail_l(c));
         let intra_of = |rr: usize, cc: usize| self.mi.ref_frame[self.idx(rr, cc)][0] <= INTRA_FRAME as i8;
         if avail_u && avail_l {
             let (a, l) = (intra_of(r - 1, c), intra_of(r, c - 1));
@@ -325,11 +341,11 @@ impl ContextState {
     /// How often the above and left neighbours use reference frame `frame_type` (`count_refs`).
     pub fn count_refs(&self, r: usize, c: usize, frame_type: usize) -> usize {
         let mut n = 0;
-        if r > 0 {
+        if self.avail_u(r) {
             let rf = self.mi.ref_frame[self.idx(r - 1, c)];
             n += (rf[0] == frame_type as i8) as usize + (rf[1] == frame_type as i8) as usize;
         }
-        if c > 0 {
+        if self.avail_l(c) {
             let rf = self.mi.ref_frame[self.idx(r, c - 1)];
             n += (rf[0] == frame_type as i8) as usize + (rf[1] == frame_type as i8) as usize;
         }

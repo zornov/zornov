@@ -977,13 +977,7 @@ fn popped_window(app: &mut StudioApp, ctx: &egui::Context, p: Panel, size: Optio
     let title = format!("{} · Zornov", crate::i18n::t(p.name()));
     let mut out = (false, None);
     if ctx.embed_viewports() {
-        egui::Window::new(crate::i18n::visual(&title).into_owned())
-            .id(Id::unique(("dock-panel-window", p.key())))
-            .default_size(size)
-            .min_size(min)
-            .resizable(true)
-            .collapsible(false)
-            .show(ctx, |ui| out = popped_body(app, ui, p, min, true, lay, rtl, narrow));
+        kit::floating_window(ctx, Id::unique(("dock-panel-window", p.key())), &crate::i18n::visual(&title), size, min, |ui| out = popped_body(app, ui, p, min, true, lay, rtl, narrow));
     } else {
         let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size(min);
         ctx.show_viewport_immediate(viewport_id(p), builder, |ui, _| out = popped_body(app, ui, p, min, false, lay, rtl, narrow));

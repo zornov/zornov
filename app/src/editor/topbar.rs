@@ -411,36 +411,54 @@ fn menu(ui: &mut egui::Ui, name: &str, rows: &[Row], scroll: Option<f32>, out: &
     if resp.clicked() {
         kit::toggle_open(ui.ctx(), id);
     }
+    // A scrolling menu keeps its Layout block (Maximise, Save, Reset) below the
+    // scroll area, so those rows are never hidden past the fold.
+    let split = if scroll.is_some() { rows.iter().position(|r| matches!(r, Row::Heading("Layout"))) } else { None };
+    let (body, pinned) = rows.split_at(split.unwrap_or(rows.len()));
     kit::popover(ui.ctx(), id, r, kit::Side::Below, 248.0, |ui| {
-        egui::ScrollArea::vertical().id_salt(("menu-scroll", name)).max_height(scroll.unwrap_or(f32::INFINITY)).show(ui, |ui| {
-            for row in rows {
-                match row {
-                    Row::Sep => kit::menu_separator(ui),
-                    Row::Heading(h) => kit::menu_heading(ui, h),
-                    Row::SaveLayout => save_layout_field(ui, id, out),
-                    Row::Item(it) => {
-                        let mut m = MenuItem::new(&it.label).enabled(it.enabled);
-                        if !it.shortcut.is_empty() {
-                            m = m.shortcut(&it.shortcut);
-                        }
-                        if let Some(on) = it.checked {
-                            m = m.checked(on);
-                        }
-                        m = match it.icon {
-                            Some(i) => m.icon(i),
-                            // Keep labels aligned with rows that have icons.
-                            None if it.checked.is_none() => m.reserve_icon(),
-                            None => m,
-                        };
-                        if m.show(ui).clicked() {
-                            out.pick = Some(it.what.clone());
-                            kit::set_open(ui.ctx(), id, false);
-                        }
-                    }
-                }
+        let room = scroll.map(|h| if pinned.is_empty() { h } else { (h - PINNED_H).max(120.0) });
+        egui::ScrollArea::vertical().id_salt(("menu-scroll", name)).max_height(room.unwrap_or(f32::INFINITY)).show(ui, |ui| {
+            for row in body {
+                menu_row(ui, id, row, out);
             }
         });
+        if !pinned.is_empty() {
+            kit::menu_separator(ui);
+            for row in pinned {
+                menu_row(ui, id, row, out);
+            }
+        }
     });
+}
+
+/// Height kept for a scrolling menu's pinned Layout block.
+const PINNED_H: f32 = 150.0;
+
+fn menu_row(ui: &mut egui::Ui, id: egui::Id, row: &Row, out: &mut Picked) {
+    match row {
+        Row::Sep => kit::menu_separator(ui),
+        Row::Heading(h) => kit::menu_heading(ui, h),
+        Row::SaveLayout => save_layout_field(ui, id, out),
+        Row::Item(it) => {
+            let mut m = MenuItem::new(&it.label).enabled(it.enabled);
+            if !it.shortcut.is_empty() {
+                m = m.shortcut(&it.shortcut);
+            }
+            if let Some(on) = it.checked {
+                m = m.checked(on);
+            }
+            m = match it.icon {
+                Some(i) => m.icon(i),
+                // Keep labels aligned with rows that have icons.
+                None if it.checked.is_none() => m.reserve_icon(),
+                None => m,
+            };
+            if m.show(ui).clicked() {
+                out.pick = Some(it.what.clone());
+                kit::set_open(ui.ctx(), id, false);
+            }
+        }
+    }
 }
 
 /// The View menu's "Save layout as…" field.

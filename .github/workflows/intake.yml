@@ -11,8 +11,10 @@
 #    workflow checks before it runs.
 #
 # Safety: this runs the checker from the base branch only. Pull request code
-# is fetched as data for the diff and never built or run, and the outside
-# text reaches the checker through a file, never through the shell.
+# is fetched as data for the diff, in a job with no write token and no
+# secrets, and never built or run; the labels are applied by another job that
+# fetches nothing. The outside text reaches the checker through a file, never
+# through the shell.
 # docs/automation-security.md has the setup.
 name: intake
 
@@ -80,18 +82,64 @@ jobs:
           NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
         run: gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" -f "labels[]=needs-human" > /dev/null
 
-      - name: Pull request risk labels
-        if: github.event_name == 'pull_request_target'
+  pr-risk:
+    # Reads the pull request as data, with no write token and no secrets: this
+    # job fetches untrusted objects, so it can change nothing. It hands the
+    # label names to pr-labels, which has the token and never fetches.
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      labels: ${{ steps.risk.outputs.labels }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - name: Build the checker (base branch)
+        run: cargo build -q --locked --release -p studio-guard
+      - name: Pull request risk
+        id: risk
         env:
-          GH_TOKEN: ${{ github.token }}
           NUMBER: ${{ github.event.pull_request.number }}
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch -q --no-tags origin "pull/$NUMBER/head:refs/guard/pr"
           target/release/studio-guard pr-risk "$BASE" refs/guard/pr > "$RUNNER_TEMP/risk.tsv"
           { echo "### Pull request risk"; echo; if [ -s "$RUNNER_TEMP/risk.tsv" ]; then sed 's/^\([^\t]*\)\t/- **\1**: /' "$RUNNER_TEMP/risk.tsv"; else echo "Nothing risky."; fi; } >> "$GITHUB_STEP_SUMMARY"
-          cut -f1 "$RUNNER_TEMP/risk.tsv" | sort -u | while read -r label; do
-            gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null
+          {
+            echo "labels<<LABELS_END"
+            cut -f1 "$RUNNER_TEMP/risk.tsv" | sort -u
+            echo "LABELS_END"
+          } >> "$GITHUB_OUTPUT"
+
+  pr-labels:
+    # Has the write token, never checks out or fetches pull request code.
+    needs: pr-risk
+    if: needs.pr-risk.outputs.labels != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Add the risk labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          LABELS: ${{ needs.pr-risk.outputs.labels }}
+        run: |
+          printf '%s\n' "$LABELS" | while read -r label; do
+            case $label in
+              "risk: "*) gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/labels" -f "labels[]=$label" > /dev/null ;;
+              *) echo "::warning::skipped an unexpected label" ;;
+            esac
           done
 
   kill-switch:

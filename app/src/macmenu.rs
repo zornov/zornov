@@ -90,7 +90,7 @@ pub fn installed() -> bool {
 }
 
 /// Queues a pick from the menu bar and wakes the window.
-fn push(what: Do) {
+pub(crate) fn push(what: Do) {
     PENDING.lock().unwrap_or_else(|e| e.into_inner()).push(what);
     if let Some(ctx) = WINDOW.get() {
         ctx.request_repaint();
@@ -102,8 +102,42 @@ fn push(what: Do) {
 pub fn frame(app: &mut StudioApp, ctx: &egui::Context) {
     WINDOW.get_or_init(|| ctx.clone());
     drain(app, ctx);
+    crate::palette::frame(app, ctx);
     #[cfg(target_os = "macos")]
     native::sync(app, ctx);
+}
+
+/// The menus as the top bar lists them now (empty before it has registered).
+pub fn menus(app: &StudioApp, ctx: &egui::Context) -> Vec<Menu> {
+    PROVIDER.get().map_or_else(Vec::new, |p| (p.model)(app, ctx))
+}
+
+/// Whether the window is on a screen with the editor (the editor's rows mean something there).
+fn in_editor(app: &StudioApp) -> bool {
+    use crate::cli::Screen;
+    matches!(app.screen, Screen::Editor | Screen::Export | Screen::Settings)
+}
+
+/// Rows that work on every screen.
+fn everywhere(what: &Do) -> bool {
+    matches!(what, Do::Act(f) if matches!(f(), Some(Action::Open | Action::Settings | Action::Help | Action::Tour | Action::Shortcuts | Action::CheckUpdates)))
+}
+
+/// Whether a row can run on this screen: the reason when it cannot.
+pub fn why_not(app: &StudioApp, item: &Item) -> Result<(), &'static str> {
+    if !in_editor(app) && !everywhere(&item.what) {
+        return Err("Open a project first");
+    }
+    if item.enabled {
+        return Ok(());
+    }
+    Err(match item.label.as_str() {
+        "Undo" => "Nothing to undo",
+        "Redo" => "Nothing to redo",
+        "Duplicate" | "Delete" => "Select a clip first",
+        "Clear range" => "Set an in point and an out point first",
+        _ => "Not available right now",
+    })
 }
 
 /// Runs the queued picks. In a text field the editing rows (undo, cut, copy,
@@ -315,17 +349,6 @@ mod native {
 
     fn system(mtm: MainThreadMarker, title: &str, action: Sel, key: &str, flags: u64) -> Retained<NSMenuItem> {
         make(mtm, title, Some(action), key, flags)
-    }
-
-    /// Whether the window is on a screen with the editor (the editor's rows mean something there).
-    fn in_editor(app: &StudioApp) -> bool {
-        use crate::cli::Screen;
-        matches!(app.screen, Screen::Editor | Screen::Export | Screen::Settings)
-    }
-
-    /// Rows that work on every screen.
-    fn everywhere(what: &Do) -> bool {
-        matches!(what, Do::Act(f) if matches!(f(), Some(Action::Open | Action::Settings | Action::Help | Action::Tour | Action::Shortcuts | Action::CheckUpdates)))
     }
 
     fn shape(menus: &[Menu], settings: &Item) -> String {

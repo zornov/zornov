@@ -441,6 +441,13 @@ pub fn confirm_dialog(ctx: &egui::Context, id: Id, title: &str, message: &str, a
     answer
 }
 
+/// A movable, resizable window inside the app window, for a panel that has
+/// no window of its own (popped-out panels in tests and screenshots). Not a
+/// dialog: nothing is dimmed and Esc is left to its content.
+pub fn floating_window(ctx: &egui::Context, id: Id, title: &str, size: Vec2, min: Vec2, add: impl FnOnce(&mut Ui)) {
+    egui::Window::new(title).id(id).default_size(size).min_size(min).resizable(true).collapsible(false).show(ctx, add);
+}
+
 /// A tall sheet over the middle of the window (the export screen): no
 /// title row and no dimming; a click outside it, Esc or its close button
 /// closes it. It fades in like a dialog.

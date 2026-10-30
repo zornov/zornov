@@ -438,7 +438,7 @@ mod tests {
         portable_windows_from(&bin, None, &notices, &o1, false).unwrap();
         let win = format!("zornov-windows-{}", crate::arch());
         let z = zip::ZipArchive::new(std::fs::File::open(o1.join(format!("{win}.zip"))).unwrap()).unwrap();
-        let zipped: Vec<String> = z.file_names().map(str::to_owned).collect();
+        let zipped: Vec<String> = z.file_names().map(|n| n.expect("a readable entry name").into_owned()).collect();
         has_all(&zipped, &win);
         for f in ["zornov.exe", WINDOWS_CLI, DXC_NOTICE].into_iter().chain(DXC) {
             assert!(zipped.contains(&format!("{win}/{f}")), "{f} missing from the zip");

@@ -110,6 +110,9 @@ pub struct Prefs {
     pub workspace: String,
     /// No chime when an export finishes (`chime::play_unless`).
     pub quiet_chime: bool,
+    /// Inspector sections the person opened or collapsed, by section kind
+    /// (`true`: collapsed). A kind not listed keeps its own default.
+    pub collapsed_sections: Vec<(String, bool)>,
 }
 
 impl Default for Prefs {
@@ -149,6 +152,7 @@ impl Default for Prefs {
             tips_seen: Vec::new(),
             workspace: String::new(),
             quiet_chime: false,
+            collapsed_sections: Vec::new(),
         }
     }
 }
@@ -220,6 +224,16 @@ mod tests {
         assert!(note.is_none() && !p.quiet_chime && p.tour_done, "settings saved before the option exist read as before");
         let quiet = serde_json::to_string(&Prefs { quiet_chime: true, ..Prefs::default() }).unwrap();
         assert!(read_in(Some(quiet), &std::env::temp_dir()).0.quiet_chime, "the choice survives a save");
+    }
+
+    #[test]
+    fn collapsed_sections_survive_a_save_and_old_settings_have_none() {
+        assert!(Prefs::default().collapsed_sections.is_empty());
+        let (old, note) = read_in(Some(r#"{"tour_done":true}"#.into()), &std::env::temp_dir().join("zornov-prefs-sections"));
+        assert!(note.is_none() && old.collapsed_sections.is_empty(), "settings saved before the option exist still load");
+        let saved = serde_json::to_string(&Prefs { collapsed_sections: vec![("transform".into(), true), ("crop".into(), false)], ..Prefs::default() }).unwrap();
+        let back = read_in(Some(saved), &std::env::temp_dir()).0;
+        assert_eq!(back.collapsed_sections, vec![("transform".to_owned(), true), ("crop".to_owned(), false)]);
     }
 
     #[test]

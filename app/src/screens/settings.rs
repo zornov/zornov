@@ -99,6 +99,7 @@ pub const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("export", "Export", "⌘E"),
     ("settings", "Settings", "⌘,"),
     ("agent", "Open the Assistant", "⌘K"),
+    ("palette", "Command palette", "⌥⌘P"),
     ("all-projects", "All projects", "⇧⌘H"),
     ("overlays", "Viewer overlays", "⇧O"),
     ("macro-record", "Start / stop recording a macro", "⌥⌘R"),
