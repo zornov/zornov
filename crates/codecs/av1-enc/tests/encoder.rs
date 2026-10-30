@@ -45,8 +45,9 @@ fn bad_configurations_are_refused() {
     assert_eq!(Encoder::new(cfg(0, 64, 100)).err(), Some(Error::Invalid("zero size")));
     assert!(matches!(Encoder::new(Config { bit_depth: 12, ..cfg(64, 64, 100) }), Err(Error::Invalid(_))));
     assert!(matches!(Encoder::new(Config { fps: (0, 1), ..cfg(64, 64, 100) }), Err(Error::Invalid(_))));
+    // 10-bit is accepted (its streams are tested in highbd.rs)
+    assert!(Encoder::new(Config { bit_depth: 10, ..cfg(64, 64, 100) }).is_ok());
     // not built yet
-    assert!(matches!(Encoder::new(Config { bit_depth: 10, ..cfg(64, 64, 100) }), Err(Error::Unsupported(_))));
     assert!(matches!(Encoder::new(cfg(64, 64, 0)), Err(Error::Unsupported(_))));
     assert!(matches!(Encoder::new(Config { rate: RateMode::Crf(64), ..cfg(64, 64, 0) }), Err(Error::Invalid(_))));
     assert!(matches!(Encoder::new(Config { rate: RateMode::Bitrate(0), ..cfg(64, 64, 0) }), Err(Error::Invalid(_))));

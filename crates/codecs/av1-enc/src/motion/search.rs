@@ -90,7 +90,7 @@ impl Matcher<'_> {
                 if (self.x + i) as i32 >= pw {
                     break;
                 }
-                sad += (src_row[i] as i32 - pred[j * PRED_STRIDE + i].clamp(0, 255)).unsigned_abs() as u64;
+                sad += (src_row[i] as i32 - pred[j * PRED_STRIDE + i].clamp(0, (1 << self.src.bit_depth) - 1)).unsigned_abs() as u64;
             }
         }
         sad
