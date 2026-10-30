@@ -294,6 +294,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let full = ui.max_rect();
     crate::a11y::begin_frame(&ctx);
+    // Undo puts back the selection an edit was made with.
+    app.doc.track_selection(&app.editor.selection);
     // Esc cancels a panel drag before anything else hears it.
     dock_ui::keys(app, &ctx);
     // The editor's keys are for the timeline and the viewer. A panel or
@@ -375,12 +377,56 @@ fn toasts(app: &mut StudioApp, ctx: &egui::Context) {
             app.editor.set_tree(before);
         } else if Some(id) == app.editor.undo_toast {
             undo_step(&mut app.editor, &mut app.doc, ctx);
-        } else if let Some((_, path)) = app.reveal.take().filter(|(rid, _)| *rid == id) {
-            let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
         } else if Some(id) == app.editor.redo_toast {
             redo_step(&mut app.editor, &mut app.doc, ctx);
+        } else {
+            toast_action(app, ctx, id);
         }
     }
+}
+
+/// The toast actions that are not about the edit history: "Show in Finder"
+/// for a finished export, and "Save now" / "Save as…" on a save that
+/// failed. Returns whether `id` was one of them. Every screen's toast
+/// layer can call this (the app's overlay layer too).
+pub fn toast_action(app: &mut StudioApp, ctx: &egui::Context, id: u64) -> bool {
+    if let Some(r) = reveal_action(&mut app.reveal, id) {
+        if let Err(e) = r {
+            kit::push_error(ctx, crate::i18n::tf(format!("Could not show it in Finder: {e}")));
+        }
+        return true;
+    }
+    let action = kit::recent(ctx).into_iter().find(|t| t.id == id).and_then(|t| t.action);
+    match action.as_deref().and_then(save_route) {
+        Some(save_as) => {
+            app.save(ctx, save_as);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Which save a toast action asks for: `Some(false)` "Save now" (to the
+/// project's folder), `Some(true)` "Save as…" (somewhere else).
+pub fn save_route(action: &str) -> Option<bool> {
+    match action {
+        "Save now" => Some(false),
+        "Save as…" => Some(true),
+        _ => None,
+    }
+}
+
+/// The path of the export reveal toast when `id` is that toast (taking it
+/// off, so it answers once).
+pub fn take_reveal(reveal: &mut Option<(u64, std::path::PathBuf)>, id: u64) -> Option<std::path::PathBuf> {
+    reveal.take_if(|(rid, _)| *rid == id).map(|(_, p)| p)
+}
+
+/// Run the reveal toast's action: show the file in Finder. `None` when
+/// `id` is not the reveal toast; otherwise how opening Finder went.
+pub fn reveal_action(reveal: &mut Option<(u64, std::path::PathBuf)>, id: u64) -> Option<Result<(), String>> {
+    let path = take_reveal(reveal, id)?;
+    Some(std::process::Command::new("open").arg("-R").arg(&path).spawn().map(drop).map_err(|e| e.to_string()))
 }
 
 /// Advance the playhead while playing.
@@ -501,8 +547,10 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             let clips = (!ed.selection.is_empty()).then(|| ed.selection.iter().map(|id| m::ClipId(*id as u64)).collect());
             let seq = doc.seq();
             doc.apply("Split", m::Edit::Split { seq, at: t, clips });
-            if doc.project.clips.len() == before && doc.error.is_none() {
-                kit::push(ctx, if ed.selection.is_empty() { "No clip under the playhead to split" } else { "The playhead is not inside the selected clip" }, None, Some(Icon::Info));
+            // The model says "nothing to split at that time"; say which case
+            // it is. The editor's frame shows `doc.error` as a warning.
+            if doc.project.clips.len() == before && doc.error.as_deref().is_none_or(|e| e.starts_with("nothing to split")) {
+                doc.error = Some(if ed.selection.is_empty() { "No clip under the playhead to split" } else { "The playhead is not inside the selected clip" }.to_owned());
             }
             if doc.project.clips.len() > before {
                 toast_undo(ed, ctx, crate::i18n::tf(format!("Split at {}", view::timecode(t, doc.project.fps))), Icon::Scissors);
@@ -674,10 +722,22 @@ fn redo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
 /// After undo or redo: select what changed (clips that are gone drop out)
 /// and bring the playhead to it when it is not already over it.
 pub(crate) fn show_changed(ed: &mut EditorState, doc: &mut Doc) {
+    show_changed_inner(ed, doc);
+    doc.track_selection(&ed.selection);
+}
+
+fn show_changed_inner(ed: &mut EditorState, doc: &mut Doc) {
     let touched: Vec<u32> = doc.take_history_touched().into_iter().filter(|id| doc.project.clip(*id).is_some()).collect();
     ed.selection.retain(|id| doc.project.clip(*id).is_some());
     ed.selected_cut = None;
+    // The selection as it was before the edit (after it, for redo), when
+    // the document knows it; clips that are gone drop out. With nothing to
+    // put back, the changed clips are selected so the change is seen.
+    let restore: Option<Vec<u32>> = doc.take_selection_restore().map(|s| s.into_iter().filter(|id| doc.project.clip(*id).is_some()).collect::<Vec<u32>>()).filter(|s| !s.is_empty());
     if touched.is_empty() {
+        if let Some(r) = restore {
+            ed.selection = r;
+        }
         return;
     }
     let spans: Vec<(Time, Time)> = touched.iter().filter_map(|id| doc.project.clip(*id)).map(|c| (c.start, c.end())).collect();
@@ -685,7 +745,7 @@ pub(crate) fn show_changed(ed: &mut EditorState, doc: &mut Doc) {
     if ed.playhead < lo || ed.playhead > hi {
         ed.playhead = lo;
     }
-    ed.selection = touched;
+    ed.selection = restore.unwrap_or(touched);
 }
 
 /// Editor actions in Settings ▸ Shortcuts, run from the person's keys.
@@ -901,6 +961,42 @@ mod history_focus_tests {
         show_changed(&mut ed, &mut doc);
         assert_eq!(ed.playhead, mid);
     }
+
+    /// Undo puts back the selection the edit was made with, redo the one
+    /// it left, through the same path as the key, the menu and the toast.
+    #[test]
+    fn undo_restores_the_selection_the_edit_was_made_with() {
+        let mut doc = Doc::from_view(&view::demo());
+        let mut ed = EditorState::new(&crate::prefs::Prefs::default());
+        let spine = doc.project.spine();
+        let free: Vec<u32> = doc.project.clips.iter().filter(|c| Some(c.lane) != spine).map(|c| c.id).collect();
+        let (a, b) = (free[0], free[1]);
+        let seq = doc.seq();
+        // Frame 1: a is selected; the edit trims b, and leaves b selected.
+        ed.selection = vec![a];
+        doc.track_selection(&ed.selection);
+        assert!(doc.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(b as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        ed.selection = vec![b];
+        // Frame 2 starts: the document learns the edit left b selected.
+        doc.track_selection(&ed.selection);
+        // The person clicks elsewhere meanwhile.
+        ed.selection.clear();
+        doc.track_selection(&ed.selection);
+        assert!(doc.undo().is_some());
+        show_changed(&mut ed, &mut doc);
+        assert_eq!(ed.selection, vec![a], "undo: what was selected before the edit");
+        assert!(doc.redo().is_some());
+        show_changed(&mut ed, &mut doc);
+        assert_eq!(ed.selection, vec![b], "redo: what the edit left selected");
+        // A new edit forgets the redo marks and undo still works.
+        doc.track_selection(&ed.selection);
+        assert!(doc.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(a as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        ed.selection = vec![a];
+        doc.track_selection(&ed.selection);
+        assert!(doc.undo().is_some());
+        show_changed(&mut ed, &mut doc);
+        assert_eq!(ed.selection, vec![b]);
+    }
 }
 
 #[cfg(test)]
@@ -962,12 +1058,45 @@ mod edit_flow_tests {
         let _serial = crate::ui_tests::serial();
         let (mut app, ctx) = editor_app();
         let ids = two_cards(&mut app);
+        let (clips, steps) = (app.doc.project.clips.clone(), app.doc.history_len());
+        // A selected clip, the playhead not inside it (inside the other one).
         app.editor.selection = vec![ids[0]];
         app.editor.playhead = 5 * SEC;
-        let before = app.doc.project.clips.len();
         run(&mut app, &ctx, Action::Split);
-        assert_eq!(app.doc.project.clips.len(), before);
-        assert!(!said(&ctx).is_empty() || app.doc.error.is_some());
+        assert_eq!(app.doc.error.take().as_deref(), Some("The playhead is not inside the selected clip"));
+        // Nothing selected and nothing under the playhead.
+        app.editor.selection.clear();
+        app.editor.playhead = 20 * SEC;
+        run(&mut app, &ctx, Action::Split);
+        assert_eq!(app.doc.error.take().as_deref(), Some("No clip under the playhead to split"));
+        // Neither refusal changed the project or the history, or offered an Undo.
+        assert_eq!(app.doc.project.clips, clips);
+        assert_eq!(app.doc.history_len(), steps);
+        assert!(said(&ctx).is_empty(), "{:?}", said(&ctx));
+    }
+
+    /// "Save now" and "Save as…" on a failed-save toast reach the save
+    /// functions; other actions are left to their own handlers. The reveal
+    /// toast answers once, for its own id only.
+    #[test]
+    fn toast_actions_are_routed() {
+        assert_eq!(save_route("Save now"), Some(false));
+        assert_eq!(save_route("Save as…"), Some(true));
+        assert_eq!(save_route("Undo"), None);
+        let mut reveal = Some((7, std::path::PathBuf::from("/nonexistent/zornov-test.mp4")));
+        assert_eq!(take_reveal(&mut reveal, 8), None);
+        assert!(reveal.is_some(), "another toast's click leaves it");
+        assert!(reveal_action(&mut reveal, 9).is_none());
+        assert_eq!(take_reveal(&mut reveal, 7), Some(std::path::PathBuf::from("/nonexistent/zornov-test.mp4")));
+        assert!(reveal.is_none() && take_reveal(&mut reveal, 7).is_none(), "once");
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        let undo = kit::push(&ctx, "Split at 0:01", Some("Undo"), Some(Icon::Scissors));
+        assert!(!toast_action(&mut app, &ctx, undo), "history actions are not this handler's");
+        assert!(!toast_action(&mut app, &ctx, 12345));
+        app.reveal = Some((undo + 1, std::path::PathBuf::from("/nonexistent/zornov-test.mp4")));
+        assert!(toast_action(&mut app, &ctx, undo + 1), "the reveal toast is handled");
+        assert!(app.reveal.is_none());
     }
 
     #[test]

@@ -852,9 +852,7 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
         app.doc.end_gesture();
         app.editor.tl_drag = None;
         app.editor.snap_line = None;
-        if let Some(why) = ctx.data_mut(|d| d.remove_temp::<String>(refused_id())) {
-            kit::push(&ctx, why, None, Some(Icon::Warning));
-        }
+        say_refused(&ctx);
     }
 
     // Optional hover-scrub: preview frames without moving the playhead.
@@ -881,6 +879,13 @@ fn refused_id() -> egui::Id {
 fn note_refused(ctx: &egui::Context, why: Option<String>) {
     if let Some(w) = why.filter(|w| !w.is_empty()) {
         ctx.data_mut(|d| d.insert_temp(refused_id(), w));
+    }
+}
+
+/// On release: say why a trim or slip during the drag was refused, once.
+fn say_refused(ctx: &egui::Context) {
+    if let Some(why) = ctx.data_mut(|d| d.remove_temp::<String>(refused_id())) {
+        kit::push(ctx, why, None, Some(Icon::Warning));
     }
 }
 
@@ -1587,6 +1592,39 @@ fn t_accent(ui: &egui::Ui) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A trim or slip the model refuses leaves the clip alone, keeps its
+    /// reason through the drag, and says it once when the pointer is released.
+    #[test]
+    fn a_refused_trim_or_slip_is_told_once_on_release() {
+        let mut doc = crate::doc::Doc::from_view(&crate::view::demo());
+        let before = doc.model.clone();
+        let seq = doc.seq();
+        let gone = m::ClipId(999_999);
+        for (key, label, edit) in [
+            ("tl-trim-999999", "Trim", m::Edit::Trim { seq, clip: gone, edge: m::Edge::End, delta: crate::view::SEC, ripple: false }),
+            ("tl-slip-999999", "Slip", m::Edit::Slip { seq, clip: gone, delta: crate::view::SEC }),
+        ] {
+            let ctx = egui::Context::default();
+            assert!(!doc.apply_gesture(key, label, edit), "{label} was accepted");
+            let why = doc.error.clone().unwrap_or_default();
+            assert!(!why.is_empty(), "{label}: the model gave no reason");
+            // The same hand-off the drag does mid-gesture.
+            note_refused(&ctx, doc.error.take());
+            assert!(kit::recent(&ctx).is_empty(), "nothing is said while the pointer is down");
+            say_refused(&ctx);
+            let said = kit::recent(&ctx);
+            assert_eq!(said.len(), 1, "{label}: {said:?}");
+            assert_eq!(said[0].text, why);
+            assert_eq!(said[0].icon, Some(Icon::Warning));
+            // Once: a second release says nothing more.
+            say_refused(&ctx);
+            assert_eq!(kit::recent(&ctx).len(), 1);
+        }
+        doc.end_gesture();
+        assert!(doc.model.content_eq(&before), "a refusal changes nothing");
+        assert!(!doc.can_undo(), "a refusal leaves no undo step");
+    }
 
     #[test]
     fn hover_scrub_waits_while_playing() {
