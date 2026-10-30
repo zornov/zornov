@@ -190,7 +190,7 @@ pub fn picker(ui: &mut Ui, id: egui::Id, colour: &mut Color32) {
         ui.spacing_mut().item_spacing.x = 6.0;
         let hex_id = id.with("hex");
         let mut text: String = ui.data(|d| d.get_temp(hex_id)).unwrap_or_else(|| to_hex(*colour));
-        let r = text_field(ui, &mut text, "Hex", None, w - 40.0, None);
+        let r = text_field(ui, &mut text, "Colour code", None, w - 40.0, None);
         if r.has_focus() {
             ui.data_mut(|d| d.insert_temp(hex_id, text.clone()));
         } else {

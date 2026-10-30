@@ -185,8 +185,8 @@ fn result_row(i: usize, s: &Step, prior_problems: &mut Option<usize>) -> Option<
             let now = problems(s.result);
             let text = match (now, *prior_problems) {
                 (Some(0), Some(n)) if n > 0 => word("Fixed"),
-                (Some(0), _) => word("Check: nothing to fix"),
-                (Some(n), _) => format!("{}: {n} {}", word("Check"), word("to fix")),
+                (Some(0), _) => word("No problems found"),
+                (Some(n), _) => format!("{n} {}", word(if n == 1 { "problem to fix" } else { "problems to fix" })),
                 (None, _) => word("Checked the edit"),
             };
             if now.is_some() {
@@ -290,7 +290,7 @@ pub fn outcome(tool: &str, v: &serde_json::Value) -> Option<String> {
         let bits: Vec<String> = [("added", "added"), ("removed", "removed"), ("changed", "changed")].iter().filter(|(k, _)| n(k) > 0).map(|(k, w)| format!("{} {w}", n(k))).collect();
         return (!bits.is_empty()).then(|| bits.join(" · "));
     }
-    v["problems"].as_array().map(|p| if p.is_empty() { "nothing to fix".into() } else { format!("{} to fix", p.len()) })
+    v["problems"].as_array().map(|p| if p.is_empty() { "no problems found".into() } else { format!("{} {}", p.len(), if p.len() == 1 { "problem to fix" } else { "problems to fix" }) })
 }
 
 #[cfg(test)]
@@ -331,7 +331,7 @@ mod tests {
     fn a_check_then_the_fix() {
         let steps = [step("check", "", "", State::Ok, r#"{"problems":[1,2]}"#), step("check", "", "", State::Ok, r#"{"problems":[]}"#)];
         let d = digest(&steps);
-        assert_eq!(d.rows.iter().map(Row::shown).collect::<Vec<_>>(), vec!["Check: 2 to fix", "Fixed"]);
+        assert_eq!(d.rows.iter().map(Row::shown).collect::<Vec<_>>(), vec!["2 problems to fix", "Fixed"]);
     }
 
     #[test]

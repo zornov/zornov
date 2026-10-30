@@ -547,7 +547,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
             #[cfg(feature = "render")]
             if app.render.as_ref().is_some_and(|r| r.dropping > 2) && app.editor.quality < 2 {
                 let id = egui::Id::unique("dropped-frames");
-                let resp = kit::Button::ghost("Dropping frames").icon(Icon::Warning).compact().show(bui);
+                let resp = kit::Button::ghost("Playback is lagging").icon(Icon::Warning).compact().show(bui);
                 if resp.clicked() {
                     kit::toggle_open(bui.ctx(), id);
                 }
@@ -562,7 +562,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
                     ui.horizontal(|ui| {
                         ui.add_space(6.0);
                         let next = ["Half", "Quarter"][ed.quality.min(1)];
-                        if kit::Button::primary(&crate::i18n::tf(format!("Switch to {next}"))).compact().show(ui).clicked() {
+                        if kit::Button::primary(&crate::i18n::tf(format!("Switch to {} resolution", next.to_lowercase()))).compact().show(ui).clicked() {
                             ed.quality += 1;
                             kit::set_open(ui.ctx(), id, false);
                         }
