@@ -451,12 +451,19 @@ fn f1_opens_help_and_search_finds_articles() {
 
 #[test]
 fn start_screen_offers_the_seven_templates() {
-    // Podcast and Ad are no longer on Home's template row (R3 Home redesign):
-    // they sit behind See all.
     let mut h = Harness::new(&[]);
     h.frames(4);
+    // Home shows the first five and a way to the rest.
     let labels = h.labels();
     for name in ["YouTube video", "Short film", "Music video", "Animated story", "Documentary"] {
+        assert!(labels.iter().any(|l| l == name), "Home shows {name}: {labels:?}");
+    }
+    assert!(labels.iter().any(|l| l == "See all"), "Home offers See all: {labels:?}");
+    // The Templates section lists all seven.
+    assert!(h.click("Templates"), "Templates in the side rail");
+    h.frames(4);
+    let labels = h.labels();
+    for name in ["YouTube video", "Short film", "Music video", "Animated story", "Documentary", "Podcast", "Ad"] {
         assert!(labels.iter().any(|l| l == name), "template {name}: {labels:?}");
     }
 }
