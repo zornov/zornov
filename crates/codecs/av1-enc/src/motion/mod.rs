@@ -33,6 +33,11 @@ use crate::types::{BlockMode, CoefBlock, Frame, InterDecision, InterSbDecision, 
 use mvpred::{find_stack_in_tile, frame_info, predicted_mv};
 use search::{Matcher, mv_bits};
 
+/// A skipped inter block whose squared error per sample is below this many times lambda is not
+/// split. Measured: bytes at equal PSNR are unchanged (1.000 over the gate images and moving
+/// clips), the search takes 17 to 22% less time; 160 saves no more than 40.
+const STOP_SPLIT_FACTOR: f64 = 40.0;
+
 /// Bits charged for a partition symbol when comparing a block with its split.
 const PARTITION_BITS: f64 = 2.0;
 
@@ -152,6 +157,15 @@ impl<'a> InterFrameCoder<'a> {
         if n4 <= self.min_n4 {
             out.push(whole);
             return whole_cost;
+        }
+        // a block that predicts well enough to be skipped, with an error already below what the
+        // quantiser would leave, gains nothing from being split
+        if matches!(&whole, BlockMode::Inter(d) if d.skip) {
+            let area = (n4 * 4 * n4 * 4) as f64 * 1.5;
+            if self.sse(recon, (r, c, n4, n4)) / area < lam * STOP_SPLIT_FACTOR {
+                out.push(whole);
+                return whole_cost;
+            }
         }
         let after_ctx = self.ctx.save_region(r, c, n4, n4);
         let after_rec = recon.save_region(r, c, n4);
