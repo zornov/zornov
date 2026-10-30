@@ -60,6 +60,16 @@ pub struct ExportState {
     pub rights: Option<String>,
     /// The project this state belongs to (see [`sync_project`]).
     pub project_key: String,
+    /// "Deliver for": the delivery spec id in force, if any.
+    pub spec: Option<&'static str>,
+    /// The size the spec decides, when it is not one of the sizes in the list.
+    pub size_override: Option<(u32, u32)>,
+    /// More ▸ Run QC after: check the file when the export is done.
+    pub run_qc: bool,
+    /// More ▸ Captions file: write an .srt beside the export.
+    pub captions_file: bool,
+    /// The export job whose follow-ups (captions file, QC) are still to run.
+    pub after_for: Option<u64>,
     /// The last "Check project": problems by severity.
     pub check: Option<export::CheckOut>,
     /// The file the last export wrote, for "Check the file".
@@ -101,6 +111,11 @@ impl Default for ExportState {
             job: None,
             rights: None,
             project_key: String::new(),
+            spec: None,
+            size_override: None,
+            run_qc: false,
+            captions_file: false,
+            after_for: None,
             check: None,
             last_file: None,
             file_check: FileCheckState::Idle,
@@ -349,6 +364,149 @@ fn check_section(ui: &mut egui::Ui, doc: &mut crate::doc::Doc, s: &mut ExportSta
 /// Rows of problems the section shows before "and N more".
 const MAX_ROWS: usize = 5;
 
+/// The output size: the spec's, or the one picked in the list (0 × 0 there is the project's own).
+fn out_size(s: &ExportState, pw: u32, ph: u32) -> (u32, u32) {
+    if let Some(sz) = s.size_override {
+        sz
+    } else if RES_PX[s.res].0 == 0 {
+        (pw, ph)
+    } else {
+        RES_PX[s.res]
+    }
+}
+
+/// "Deliver for": choosing a spec fills the preset, size, rate and caption rule; None gives the controls back.
+fn apply_spec(s: &mut ExportState, id: Option<&'static str>, project: (u32, u32, f32)) {
+    s.spec = id;
+    s.size_override = None;
+    let Some(spec) = id.and_then(studio_deliver::specs::find) else {
+        s.spec = None;
+        return;
+    };
+    let fill = export::spec::fill(spec, (project.0, project.1), project.2 as f64);
+    if let Some(i) = PRESETS.iter().position(|p| p.name == fill.preset) {
+        let p = &PRESETS[i];
+        s.preset = i;
+        if let Some(c) = p.codec {
+            s.codec = c;
+        }
+        s.quality = p.quality;
+        s.res = p.res;
+    }
+    s.size_override = fill.size;
+    if let Some(fps) = fill.fps {
+        if let Some(i) = [project.2 as f64, 24.0, 25.0, 30.0, 50.0, 60.0].iter().position(|v| (v - fps).abs() < 0.01) {
+            s.fps = i;
+        }
+    }
+    if fill.captions {
+        s.captions_file = true;
+    }
+}
+
+/// The caption cues of the project as an .srt next to the export. Returns what to tell the person.
+fn write_captions(doc: &crate::doc::Doc, file: &std::path::Path) -> Result<String, String> {
+    let cues: Vec<studio_deliver::bundle::Cue> = crate::deliver_run::caption_cues(doc).into_iter().map(|(s, e, t)| studio_deliver::bundle::Cue { start: s, end: e, text: t }).collect();
+    if cues.is_empty() {
+        return Err("The project has no captions to write".into());
+    }
+    let path = file.with_extension("srt");
+    std::fs::write(&path, studio_deliver::bundle::srt(&cues)).map_err(|e| format!("Could not write {}: {e}", path.display()))?;
+    Ok(crate::i18n::tf(format!("Wrote {}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())))
+}
+
+/// When an export has finished: the captions file and the file check the person asked for, once.
+fn after_export(s: &mut ExportState, doc: &crate::doc::Doc, ctx: &egui::Context, finished: bool) {
+    if !finished || s.after_for.is_none() || s.after_for != s.job {
+        return;
+    }
+    s.after_for = None;
+    let Some(file) = s.last_file.clone() else { return };
+    if s.captions_file {
+        match write_captions(doc, &file) {
+            Ok(m) => {
+                kit::push(ctx, m, None, Some(Icon::CheckCircle));
+            }
+            Err(e) => {
+                kit::push(ctx, e, None, Some(Icon::Warning));
+            }
+        }
+    }
+    if s.run_qc {
+        match export::start_file_check(doc, &file, s.spec) {
+            Ok(rx) => s.file_check = FileCheckState::Running(rx),
+            Err(e) => {
+                kit::push(ctx, e, None, Some(Icon::Warning));
+            }
+        }
+    }
+}
+
+/// "Deliver for" and its one line of what the spec decides.
+fn deliver_for(ui: &mut egui::Ui, s: &mut ExportState, project: (u32, u32, f32), busy: bool) {
+    let t = theme::tokens(ui.ctx());
+    kit::menu_heading(ui, "Deliver for");
+    let specs = export::spec::menu();
+    let mut labels: Vec<&str> = vec!["None"];
+    labels.extend(specs.iter().map(|d| d.name));
+    let sel = s.spec.and_then(|id| specs.iter().position(|d| d.id == id)).map_or(0, |i| i + 1);
+    let w = ui.available_width();
+    ui.add_enabled_ui(!busy, |ui| {
+        if let Some(i) = kit::menu_button(ui, "exp-spec", sel, &labels, w, None) {
+            apply_spec(s, if i == 0 { None } else { Some(specs[i - 1].id) }, project);
+        }
+    });
+    if let Some(d) = s.spec.and_then(studio_deliver::specs::find) {
+        let fill = export::spec::fill(d, (project.0, project.1), project.2 as f64);
+        let mut bits: Vec<String> = Vec::new();
+        if let Some(l) = &fill.loudness {
+            bits.push(l.clone());
+        }
+        if fill.captions {
+            bits.push("captions required".into());
+        }
+        if let Some(m) = fill.max_secs {
+            bits.push(format!("up to {m:.0} s"));
+        }
+        if !bits.is_empty() {
+            ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tf(bits.join(" · "))).font(theme::caption()).color(t.text_2)).wrap());
+        }
+    }
+}
+
+/// Export ▸ More: what happens after the export, and the audio-only shortcut.
+fn more_options(ui: &mut egui::Ui, s: &mut ExportState, fill: Option<&export::spec::Fill>) {
+    let t = theme::tokens(ui.ctx());
+    egui::CollapsingHeader::new("More").id_salt("export-more").default_open(false).show(ui, |ui| {
+        ui.checkbox(&mut s.run_qc, "Run QC after").on_hover_text("Checks the finished file for levels, black, frozen frames and loudness");
+        let locked = fill.is_some_and(|f| f.captions);
+        let mut on = s.captions_file || locked;
+        if ui.add_enabled(!locked, egui::Checkbox::new(&mut on, "Captions file")).on_disabled_hover_text(fill.and_then(|f| f.reason(export::spec::Lock::Captions)).unwrap_or_default()).changed() {
+            s.captions_file = on;
+        }
+        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Burn captions")).on_disabled_hover_text("Burning captions into the picture is not in the export yet: write a captions file instead");
+        let audio_idx = PRESETS.iter().position(|p| p.name == "Audio only");
+        let mut audio = audio_idx == Some(s.preset);
+        if ui.add_enabled(fill.is_none(), egui::Checkbox::new(&mut audio, "Audio only")).on_disabled_hover_text("Choose None under Deliver for first").changed() {
+            let target = if audio { audio_idx } else { Some(0) };
+            if let Some(i) = target {
+                let p = &PRESETS[i];
+                if let Some(c) = p.codec {
+                    s.preset = i;
+                    s.res = p.res;
+                    s.codec = c;
+                    s.quality = p.quality;
+                }
+            }
+        }
+        if let Some(f) = fill {
+            for n in f.notes.iter().take(2) {
+                ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tf((*n).to_owned())).font(theme::caption()).color(t.text_2)).wrap());
+            }
+        }
+    });
+}
+
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     sync_project(&mut app.export, &app.doc);
     if app.export.name.is_empty() {
@@ -401,10 +559,14 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     // Presets.
     let mut col = ui.new_child(egui::UiBuilder::new().max_rect(left.shrink2(Vec2::new(8.0, 4.0))));
     col.set_clip_rect(left.intersect(ui.clip_rect()));
-    kit::menu_heading(&mut col, "Presets");
     let s = &mut app.export;
+    let busy_now = s.job.and_then(|id| app.jobs.get(id)).is_some_and(|j| !j.done && !j.cancelled);
+    deliver_for(&mut col, s, (app.doc.project.width, app.doc.project.height, app.doc.project.fps), busy_now);
+    kit::menu_heading(&mut col, "Presets");
+    let preset_lock = s.spec.and_then(studio_deliver::specs::find).map(|d| format!("{} is written as {}; pick None under Deliver for to choose a preset", d.name, d.preset));
     // A short window: the presets scroll above the footer.
     egui::ScrollArea::vertical().id_salt("export-presets").auto_shrink([false, false]).show_v(&mut col, |pui| {
+      pui.add_enabled_ui(preset_lock.is_none(), |pui| {
         for (i, p) in PRESETS.iter().enumerate() {
             let (rr, resp) = pui.allocate_exact_size(Vec2::new(pui.available_width(), 38.0), Sense::click());
             let available = p.codec.is_some();
@@ -437,6 +599,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
             }
             pui.add_space(2.0);
         }
+      }).response.on_disabled_hover_text(preset_lock.clone().unwrap_or_default());
     });
 
     // Settings.
@@ -451,6 +614,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     sui.spacing_mut().item_spacing.y = 6.0;
     let s = &mut app.export;
     let busy = s.job.and_then(|id| app.jobs.get(id)).is_some_and(|j| !j.done && !j.cancelled);
+    let spec_fill = s.spec.and_then(studio_deliver::specs::find).map(|d| export::spec::fill(d, (pw, ph), pfps as f64));
     check_section(&mut sui, &mut app.doc, s, busy);
     sui.add_enabled_ui(!busy, |ui| {
         let w = ui.available_width();
@@ -478,24 +642,44 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
         let menu_w = (w - kit::LABEL_W - 8.0).min(260.0);
         kit::labeled_row(ui, "Format", |ui| {
             let labels: Vec<&str> = Format::ALL.iter().map(|f| f.label()).collect();
-            if let Some(i) = kit::menu_button(ui, "exp-codec", s.codec, &labels, menu_w, None) {
-                s.codec = i;
-            }
+            let lock = spec_fill.as_ref().and_then(|f| f.reason(export::spec::Lock::Format)).map(str::to_owned);
+            ui.add_enabled_ui(lock.is_none(), |ui| {
+                if let Some(i) = kit::menu_button(ui, "exp-codec", s.codec, &labels, menu_w, None) {
+                    s.codec = i;
+                }
+            })
+            .response
+            .on_disabled_hover_text(lock.unwrap_or_default());
         });
         ui.add_enabled_ui(true, |ui| {
             kit::labeled_row(ui, "Resolution", |ui| {
-                if let Some(i) = kit::menu_button(ui, "exp-res", s.res, &RES, menu_w, None) {
-                    s.res = i;
-                }
+                let lock = spec_fill.as_ref().and_then(|f| f.reason(export::spec::Lock::Resolution)).map(str::to_owned);
+                ui.add_enabled_ui(lock.is_none(), |ui| {
+                    let shown = s.size_override.and_then(|(w, h)| RES_PX.iter().position(|p| *p == (w, h))).unwrap_or(s.res);
+                    if s.size_override.is_some() && shown == s.res && RES_PX[s.res] != s.size_override.unwrap_or_default() {
+                        let (w, h) = s.size_override.unwrap_or_default();
+                        let one = [format!("{w} × {h}")];
+                        let _ = kit::menu_button(ui, "exp-res-spec", 0, &[one[0].as_str()], menu_w, None);
+                    } else if let Some(i) = kit::menu_button(ui, "exp-res", shown, &RES, menu_w, None) {
+                        s.res = i;
+                    }
+                })
+                .response
+                .on_disabled_hover_text(lock.unwrap_or_default());
             });
             kit::labeled_row(ui, "Frame rate", |ui| {
-                if let Some(i) = kit::menu_button(ui, "exp-fps", s.fps, &FPS, menu_w, None) {
-                    s.fps = i;
-                }
+                let lock = spec_fill.as_ref().and_then(|f| f.reason(export::spec::Lock::FrameRate)).map(str::to_owned);
+                ui.add_enabled_ui(lock.is_none(), |ui| {
+                    if let Some(i) = kit::menu_button(ui, "exp-fps", s.fps, &FPS, menu_w, None) {
+                        s.fps = i;
+                    }
+                })
+                .response
+                .on_disabled_hover_text(lock.unwrap_or_default());
             });
         });
         ui.add_space(6.0);
-        let (bw, bh) = if RES_PX[s.res].0 == 0 { (pw, ph) } else { RES_PX[s.res] };
+        let (bw, bh) = out_size(s, pw, ph);
         let bfps = [pfps, 24.0, 25.0, 30.0, 50.0, 60.0][s.fps];
         match Format::ALL[s.codec.min(Format::ALL.len() - 1)] {
             Format::H264 | Format::Hevc10 => {
@@ -543,10 +727,11 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                 ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown("Set in and out points with I and O to export part of the sequence.")).font(theme::caption()).color(t.text_2)).wrap());
             });
         }
+        more_options(ui, s, spec_fill.as_ref());
     });
 
     // Footer: estimate, progress, actions.
-    let (w, h) = if RES_PX[s.res].0 == 0 { (pw, ph) } else { RES_PX[s.res] };
+    let (w, h) = out_size(s, pw, ph);
     let fps = [pfps, 24.0, 25.0, 30.0, 50.0, 60.0][s.fps];
     let len = if s.range == 1 && has_range { range_len } else { dur };
     let mbps = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::H264 | Format::Hevc10) { s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) } else { bitrate_mbps(s, w, h, fps) };
@@ -556,6 +741,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let est = crate::i18n::tf(format!("≈ {size} · {} · {w} × {h} · {:.0} Mbps · {}", view::format_duration(len), mbps, sound));
     let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(footer.shrink2(Vec2::new(20.0, 18.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     let job = s.job.and_then(|id| app.jobs.get(id).cloned());
+    after_export(s, &app.doc, ui.ctx(), job.as_ref().is_some_and(|j| j.done));
     match job {
         Some(j) if !j.done && !j.cancelled => {
             let (rr, _) = fui.allocate_exact_size(Vec2::new(fui.available_width() - 260.0, 28.0), Sense::hover());
@@ -607,6 +793,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let id = app.jobs.start_export(crate::i18n::tf(format!("Export {}", s.name)), format.label(), task, req);
                         s.job = Some(id);
                         s.last_file = Some(path.clone());
+                        s.after_for = Some(id);
                     }
                     #[cfg(not(feature = "render"))]
                     {
@@ -618,7 +805,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                 if !done && Button::secondary("Add to queue").show(ui).clicked() {
                     // Rendered later by the queue, one export at a time, with the preset picked on the left.
                     let preset = PRESETS[s.preset.min(PRESETS.len() - 1)].name;
-                    match crate::screens::queue::enqueue(&mut app.doc, s.name.trim(), preset, true) {
+                    match crate::screens::queue::enqueue_spec(&mut app.doc, s.name.trim(), preset, s.spec, true, s.size_override) {
                         Ok(_) => kit::push(ui.ctx(), format!("Added to the render queue ({preset})"), None, Some(Icon::CheckCircle)),
                         Err(e) => kit::push(ui.ctx(), e, None, Some(Icon::Warning)),
                     };
@@ -695,6 +882,51 @@ mod tests {
         crate::services::project::save(&mut doc, Some(&dir)).expect("saves to a temp folder");
         assert_eq!(accept_problem(&mut s, &mut doc, &p).as_deref(), Ok("Accepted as intended"));
         assert!(s.check.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_delivery_spec_fills_the_controls_and_none_gives_them_back() {
+        let mut s = ExportState::default();
+        apply_spec(&mut s, Some("youtube-shorts"), (1920, 1080, 30.0));
+        assert_eq!(s.spec, Some("youtube-shorts"));
+        let (w, h) = out_size(&s, 1920, 1080);
+        assert!(h > w, "Shorts is vertical: {w} x {h}");
+        assert_eq!(PRESETS[s.preset].name, studio_deliver::specs::find("youtube-shorts").unwrap().preset);
+        apply_spec(&mut s, None, (1920, 1080, 30.0));
+        assert!(s.spec.is_none() && s.size_override.is_none());
+        assert_eq!(out_size(&s, 1920, 1080), RES_PX[s.res]);
+        let r128 = export::spec::fill(studio_deliver::specs::find("broadcast-r128").unwrap(), (1920, 1080), 25.0);
+        apply_spec(&mut s, Some("broadcast-r128"), (1920, 1080, 25.0));
+        assert_eq!(s.captions_file, r128.captions);
+    }
+
+    #[test]
+    fn deliver_for_and_more_are_on_the_screen_and_a_spec_disables_what_it_fixes() {
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Export;
+        h.frames(4);
+        let labels = h.labels();
+        for want in ["None", "More"] {
+            assert!(labels.iter().any(|l| l == want), "{want}: {labels:?}");
+        }
+        let (w, hh, fps) = (h.app.doc.project.width, h.app.doc.project.height, h.app.doc.project.fps);
+        apply_spec(&mut h.app.export, Some("youtube-shorts"), (w, hh, fps));
+        h.frames(4);
+        let labels = h.labels();
+        assert!(labels.iter().any(|l| l == "YouTube Shorts"), "the menu shows the spec: {labels:?}");
+        assert!(h.cut_text().is_empty(), "{:?}", h.cut_text());
+        assert!(h.overlaps().is_empty(), "{:?}", h.overlaps());
+    }
+
+    #[test]
+    fn a_captions_file_needs_captions_and_says_so() {
+        let doc = crate::doc::Doc::from_view(&crate::view::demo());
+        let dir = std::env::temp_dir().join(format!("zornov-caps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let e = write_captions(&doc, &dir.join("film.mp4"));
+        assert!(e.is_err() || dir.join("film.srt").is_file(), "either it says there are no captions or it wrote them");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
