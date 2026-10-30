@@ -1010,4 +1010,79 @@ mod tests {
             assert!(text.contains(w), "\"{w}\" is in the Text section:\n{text}");
         }
     }
+    /// Draws `rows` field rows and menu rows in a column `width` wide; returns
+    /// (content x of each labelled row, right edge of each menu, right edge
+    /// of each field, the column's right edge) and what is cut or overlapped.
+    fn grid(width: f32) -> (Vec<f32>, Vec<f32>, Vec<f32>, f32, usize, usize) {
+        let _serial = crate::ui_tests::serial();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::theme::install_fonts(&ctx);
+        let mut starts = vec![];
+        let mut menus = vec![];
+        let mut right = 0.0;
+        let mut out = None;
+        for frame in 0..3 {
+            starts.clear();
+            menus.clear();
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 400.0))), time: Some(frame as f64 / 60.0), ..Default::default() };
+            let mut frame_out = ctx.run_ui(raw, |ui| {
+                let col = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 400.0));
+                let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(col));
+                let ui = &mut ui;
+                right = ui.max_rect().right();
+                let (mut a, mut b, mut c) = (0.0f32, 12.5f32, 100.0f32);
+                kit::FieldRow::new("Position X", &mut a, -100.0..=100.0).unit("px").show(ui);
+                kit::FieldRow::new("Rotation", &mut b, -360.0..=360.0).unit("°").decimals(1).show(ui);
+                for (label, id) in [("Blend", "g-blend"), ("Style", "g-style")] {
+                    labeled_row(ui, label, |ui| {
+                        starts.push(ui.cursor().min.x);
+                        let w = ui.available_width() - 40.0;
+                        kit::menu_button(ui, id, 0, &["Normal", "Multiply"], w, None);
+                        menus.push(ui.min_rect().right());
+                    });
+                }
+                kit::FieldRow::new("Opacity", &mut c, 0.0..=100.0).unit("%").show(ui);
+            });
+            // Taken as a renderer takes them; dropping them unhandled would panic.
+            frame_out.textures_delta.clear();
+            out = Some(frame_out);
+        }
+        let out = out.unwrap();
+        let names: std::collections::HashMap<u64, String> = out.platform_output.accesskit_update.as_ref().map(|u| u.nodes.iter().map(|(id, n)| (id.0, n.label().or(n.value()).unwrap_or("").to_owned())).collect()).unwrap_or_default();
+        // A field row's value box is named by its value, so find it by the row
+        // its label opens: the rightmost draggable widget on that row.
+        let fields: Vec<f32> = ["Position X", "Rotation", "Opacity"]
+            .iter()
+            .map(|want| {
+                ctx.viewport(|v| {
+                    let all: Vec<_> = v.this_pass.widgets.layers().flat_map(|(_, l)| l.iter()).collect();
+                    let top = all.iter().find(|w| w.interact_rect.left() == 0.0 && names.get(&w.id.value()).is_some_and(|n| n == want)).map(|w| w.interact_rect.top()).expect("the row's label");
+                    all.iter().filter(|w| w.sense.is_focusable() && (w.interact_rect.top() - top).abs() < 0.5).map(|w| w.interact_rect.right()).fold(f32::MIN, f32::max)
+                })
+            })
+            .collect();
+        let cuts = crate::ui_shot::cut_text(&ctx, &out, &[], 1.0).len();
+        let over = crate::ui_shot::overlaps(&ctx, &names, 0.2).len();
+        (starts, menus, fields, right, cuts, over)
+    }
+
+    #[test]
+    fn labels_share_a_column_and_values_a_right_edge_at_narrow_and_wide_widths() {
+        for width in [240.0f32, 280.0, 480.0] {
+            let (starts, menus, fields, right, cuts, over) = grid(width);
+            let want_x = if width < 260.0 { 80.0 } else { kit::label_width(&egui::Context::default()) };
+            assert!(starts.iter().all(|x| (x - starts[0]).abs() < 0.5), "{width}: labelled rows start together: {starts:?}");
+            assert!((starts[0] - want_x).abs() < 1.0, "{width}: content starts after the label column ({want_x}): {starts:?}");
+            for m in &menus {
+                assert!((m - (right - 40.0)).abs() < 1.5, "{width}: menu ends at the value edge {}: {menus:?}", right - 40.0);
+            }
+            for f in &fields {
+                assert!((f - (right - 40.0)).abs() < 1.5, "{width}: field ends at the value edge {}: {fields:?}", right - 40.0);
+            }
+            assert_eq!(cuts, 0, "{width}: text cut off");
+            assert_eq!(over, 0, "{width}: widgets overlap");
+        }
+    }
+
 }

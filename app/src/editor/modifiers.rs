@@ -126,8 +126,7 @@ fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32) -
         let (r, resp) = ui.allocate_exact_size(Vec2::new(lw, theme::space::CONTROL_H), Sense::hover());
         let cut = kit::paint_text_clipped(ui.painter(), Pos2::new(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, lw - 8.0);
         kit::tip_if_cut(resp, cut, label);
-        let out = ui.scope(|ui| add(ui, w)).inner;
-        out
+        ui.scope(|ui| add(ui, w)).inner
     })
     .inner
 }
