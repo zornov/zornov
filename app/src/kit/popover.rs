@@ -15,7 +15,7 @@ fn open_id(id: Id) -> Id {
 /// Whether any popover was open on the last pass (keyboard shortcuts leave
 /// Escape to it).
 pub fn any_popover_open(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<u64>(Id::new("kit-popover-shown"))).is_some_and(|n| n + 1 >= ctx.cumulative_pass_nr())
+    ctx.data(|d| d.get_temp::<u64>(Id::unique("kit-popover-shown"))).is_some_and(|n| n + 1 >= ctx.cumulative_pass_nr())
 }
 
 /// Record that a popover, dialog or sheet is up on this pass.
@@ -23,7 +23,7 @@ fn mark_shown(ctx: &egui::Context) {
     // The pass number first: asking the context for it while its data
     // is locked would wait on itself forever.
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|d| d.insert_temp(Id::new("kit-popover-shown"), pass));
+    ctx.data_mut(|d| d.insert_temp(Id::unique("kit-popover-shown"), pass));
 }
 
 /// Take Escape if it was pressed, so the layer below never sees it too: the
@@ -226,6 +226,7 @@ pub fn menu_heading(ui: &mut Ui, text: &str) {
 /// The three dialog sizes. A dialog asks for one of these instead of its own
 /// numbers, so every dialog of a kind has the same width.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub enum DialogSize {
     /// A question and two buttons.
     Small,
@@ -236,6 +237,7 @@ pub enum DialogSize {
 }
 
 impl DialogSize {
+    #[allow(dead_code)]
     pub fn size(self) -> Vec2 {
         match self {
             Self::Small => Vec2::new(440.0, 200.0),
@@ -248,6 +250,7 @@ impl DialogSize {
 /// Height of the title row.
 pub const DIALOG_HEAD_H: f32 = 56.0;
 /// Height of the button row at the foot of a dialog.
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub const DIALOG_FOOT_H: f32 = 56.0;
 /// Space between a dialog's edge and its content.
 pub const DIALOG_PAD: f32 = theme::space::XL;
@@ -256,6 +259,7 @@ pub const DIALOG_PAD: f32 = theme::space::XL;
 pub struct ModalOutput {
     /// Esc, the close button or a click on the backdrop.
     pub close: bool,
+    #[allow(dead_code)] // read once dialogs wire Enter
     /// Enter, with no field or button holding the keyboard: the primary
     /// button's answer.
     pub confirm: bool,
@@ -363,12 +367,14 @@ pub fn modal(ctx: &egui::Context, id: Id, size: Vec2, title: &str, add: impl FnO
 }
 
 /// [`modal`] at one of the standard sizes.
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub fn modal_sized(ctx: &egui::Context, id: Id, size: DialogSize, title: &str, add: impl FnOnce(&mut Ui)) -> ModalOutput {
     modal(ctx, id, size.size(), title, add)
 }
 
 /// Which footer button was pressed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub enum Choice {
     None,
     Primary,
@@ -376,6 +382,7 @@ pub enum Choice {
 }
 
 /// The rectangle left for content above the footer.
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub fn above_footer(ui: &Ui) -> Rect {
     let r = ui.max_rect();
     Rect::from_min_max(r.min, egui::pos2(r.max.x, r.max.y - DIALOG_FOOT_H))
@@ -385,6 +392,7 @@ pub fn above_footer(ui: &Ui) -> Rect {
 /// action at the right edge with the secondary one to its left. Name the
 /// primary after what it does ("Delete 3 clips"), never "OK". `danger` draws
 /// it as a destructive action.
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub fn dialog_footer(ui: &mut Ui, primary: &str, secondary: Option<&str>, danger: bool) -> Choice {
     let r = ui.max_rect();
     let foot = Rect::from_min_max(egui::pos2(r.left(), r.bottom() - DIALOG_FOOT_H), r.max);
@@ -398,10 +406,10 @@ pub fn dialog_footer(ui: &mut Ui, primary: &str, secondary: Option<&str>, danger
     if Button::new(primary, kind).min_width(88.0).show(&mut row).clicked() {
         choice = Choice::Primary;
     }
-    if let Some(s) = secondary {
-        if Button::secondary(s).min_width(88.0).show(&mut row).clicked() {
-            choice = Choice::Secondary;
-        }
+    if let Some(s) = secondary
+        && Button::secondary(s).min_width(88.0).show(&mut row).clicked()
+    {
+        choice = Choice::Secondary;
     }
     choice
 }
@@ -409,6 +417,7 @@ pub fn dialog_footer(ui: &mut Ui, primary: &str, secondary: Option<&str>, danger
 /// A question dialog that names its action. `Some(true)` when confirmed,
 /// `Some(false)` when cancelled, `None` while it is open. Enter confirms
 /// unless the action is `danger`: a destructive answer takes a click.
+#[allow(dead_code)] // the dialog owners adopt it this round
 pub fn confirm_dialog(ctx: &egui::Context, id: Id, title: &str, message: &str, action: &str, danger: bool) -> Option<bool> {
     let mut answer = None;
     let out = modal_sized(ctx, id, DialogSize::Small, title, |ui| {
@@ -537,7 +546,7 @@ mod tests {
     fn escape_closes_a_modal_and_enter_confirms() {
         let _serial = crate::ui_tests::serial();
         let ctx = ctx();
-        let id = Id::new("t-modal");
+        let id = Id::unique("t-modal");
         let size = Vec2::new(800.0, 600.0);
         let mut last = None;
         for f in 0..3 {
@@ -555,11 +564,11 @@ mod tests {
     fn a_modal_gives_focus_back_when_it_closes() {
         let _serial = crate::ui_tests::serial();
         let ctx = ctx();
-        let id = Id::new("t-focus");
-        let origin = Id::new("origin-widget");
+        let id = Id::unique("t-focus");
+        let origin = Id::unique("origin-widget");
         let size = Vec2::new(800.0, 600.0);
         let widget = |c: &egui::Context, grab: bool| {
-            egui::Area::new(Id::new("origin-area")).show(c, |ui| {
+            egui::Area::new(Id::unique("origin-area")).show(c, |ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
                 ui.interact(rect, origin, Sense::click());
                 if grab {
@@ -587,7 +596,7 @@ mod tests {
     fn a_popover_stays_on_screen_and_escape_closes_it() {
         let _serial = crate::ui_tests::serial();
         let ctx = ctx();
-        let id = Id::new("t-pop");
+        let id = Id::unique("t-pop");
         let size = Vec2::new(600.0, 400.0);
         set_open(&ctx, id, true);
         // Anchored at the bottom-right corner, wider than the room.
@@ -624,14 +633,14 @@ mod tests {
         let mut out = None;
         for f in 0..4 {
             let mut o = run_with(&ctx, Vec2::new(size[0] as f32, size[1] as f32), vec![], f, true, |c| {
-                confirm_dialog(c, Id::new("t-anatomy"), "Delete 3 clips?", "The clips leave the timeline and their media stays in the library.", "Delete 3 clips", true);
+                confirm_dialog(c, Id::unique("t-anatomy"), "Delete 3 clips?", "The clips leave the timeline and their media stays in the library.", "Delete 3 clips", true);
             });
             textures.apply(&o.textures_delta);
             o.textures_delta.clear();
             out = Some(o);
         }
         let out = out.unwrap();
-        let rects = ctx.memory(|m| m.area_rect(Id::new("t-anatomy").with("dialog"))).unwrap();
+        let rects = ctx.memory(|m| m.area_rect(Id::unique("t-anatomy").with("dialog"))).unwrap();
         assert!((rects.width() - DialogSize::Small.size().x).abs() < 1.0);
         let prims = ctx.tessellate(out.shapes, 1.0);
         let rgba = crate::ui_shot::render(&prims, &textures, size, 1.0, theme::tokens(&ctx).ground);
@@ -644,7 +653,7 @@ mod tests {
         let _serial = crate::ui_tests::serial();
         let ctx = ctx();
         let size = Vec2::new(800.0, 600.0);
-        let id = Id::new("t-confirm");
+        let id = Id::unique("t-confirm");
         let mut a = None;
         for f in 0..3 {
             run(&ctx, size, vec![], f, |c| a = confirm_dialog(c, id, "T", "m", "Save", false));
@@ -652,7 +661,7 @@ mod tests {
         assert_eq!(a, None);
         run(&ctx, size, vec![key(egui::Key::Enter)], 4, |c| a = confirm_dialog(c, id, "T", "m", "Save", false));
         assert_eq!(a, Some(true), "Enter takes the primary answer");
-        let id2 = Id::new("t-confirm-danger");
+        let id2 = Id::unique("t-confirm-danger");
         for f in 5..8 {
             run(&ctx, size, vec![], f, |c| a = confirm_dialog(c, id2, "T", "m", "Delete 3 clips", true));
         }
