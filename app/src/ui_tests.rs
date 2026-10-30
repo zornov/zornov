@@ -1168,3 +1168,25 @@ fn the_viewer_starts_afresh_when_another_project_opens() {
     h.frames(4);
     assert_eq!(resets(&h), 1);
 }
+
+/// Screenshot 442: at a narrow width a selected clip had no Inspector and
+/// nothing to open one with. The viewer's toolbar has an Inspector button
+/// there (not in a wide window, where the Inspector is a tile).
+#[test]
+fn a_narrow_window_has_a_button_that_opens_the_inspector_sheet() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor"]).sized(960.0, 640.0);
+    h.frames(6);
+    if let Some(c) = h.app.doc.project.clips.iter().find(|c| c.kind == crate::view::ClipKind::Video) {
+        h.app.editor.selection = vec![c.id];
+    }
+    h.frames(6);
+    assert!(!h.app.editor.sheet_open, "the sheet starts closed");
+    let button = h.find(Some(accesskit::Role::Button), "Inspector").expect("an Inspector button in the narrow viewer toolbar");
+    h.click_at(button);
+    assert!(h.app.editor.sheet_open, "the button opens the sheet");
+    assert!(h.cut_text().is_empty(), "{:#?}", h.cut_text());
+    let mut wide = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+    wide.frames(6);
+    assert!(wide.find(Some(accesskit::Role::Button), "Inspector").is_none(), "wide windows have the tile instead");
+}

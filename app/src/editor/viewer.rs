@@ -572,7 +572,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     // hold them) and the tools scroll sideways beside the always-visible Add.
     let show_info = bui.available_width() >= 600.0;
     let info_w = if show_info { kit::text_width(&bui, &info, theme::caption()) + 8.0 } else { 0.0 };
-    let add_w = 76.0;
+    let add_w = 76.0 + if bui.ctx().content_rect().width() < super::NARROW { 32.0 } else { 0.0 };
     let strip_w = (bui.available_width() - info_w - add_w - 16.0).max(48.0);
     egui::ScrollArea::horizontal().id_salt("viewer-tools").max_width(strip_w).auto_shrink([true, true]).show_h(&mut bui, |ui| {
         ui.horizontal(|bui| {
@@ -665,6 +665,16 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         ui.add_space(4.0);
         if show_info {
             kit::label_trunc(ui, egui::RichText::new(info).font(theme::caption()).color(t.text_2));
+        }
+        // A narrow window has no Inspector tile: this opens its sheet. It sits
+        // beside Add, which never scrolls away.
+        if ui.ctx().content_rect().width() < super::NARROW {
+            let keys = crate::keymap::hint(&app.prefs, "panel-inspector");
+            let on = app.editor.sheet_open;
+            if IconButton::new(Icon::SidebarSimple, "Inspector").shortcut(&keys).active(on).show(ui).clicked() {
+                let ctx = ui.ctx().clone();
+                super::dock_ui::toggle_panel(app, &ctx, crate::dock::Panel::Inspector, true);
+            }
         }
         add_menu(app, ui);
     });
