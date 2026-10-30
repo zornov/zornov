@@ -129,6 +129,11 @@ pub fn accept(doc: &mut Doc, kind: &str, clip: Option<u32>) -> Result<(), String
     with_session(doc, |s| s.accept_finding(kind, clip, ""))
 }
 
+/// Mends one finding as one undo step "Fix"; what was done, one line each (nothing when it cannot be mended).
+pub fn fix_problem(doc: &mut Doc, kind: &str, clip: Option<u32>) -> Vec<String> {
+    with_session(doc, |s| s.fix_finding(kind, clip))
+}
+
 /// Takes an acceptance back.
 pub fn unaccept(doc: &mut Doc, kind: &str, clip: Option<u32>) -> Result<(), String> {
     with_session(doc, |s| s.unaccept_finding(kind, clip))
@@ -155,6 +160,25 @@ pub fn check_file(doc: &Doc, path: &Path, spec: Option<&str>) -> Result<(qc::Rep
     let range = (0, doc.project.duration());
     let extra = run::qc_extra(doc, range);
     run::qc_and_write(path, &profile, &extra)
+}
+
+/// The result of a file check running on its own thread.
+pub type FileCheck = std::sync::mpsc::Receiver<Result<(qc::Report, PathBuf), String>>;
+
+/// Starts the quality control of a rendered file on its own thread; poll the receiver.
+pub fn start_file_check(doc: &Doc, path: &Path, spec: Option<&str>) -> Result<FileCheck, String> {
+    if !path.is_file() {
+        return Err(format!("{} is not there any more; export again first", path.display()));
+    }
+    let profile = profile_for(doc, spec)?;
+    let extra = run::qc_extra(doc, (0, doc.project.duration()));
+    let path = path.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // The receiver may be gone (the person closed the screen); the report file is written anyway.
+        let _ = tx.send(run::qc_and_write(&path, &profile, &extra));
+    });
+    Ok(rx)
 }
 
 #[cfg(test)]

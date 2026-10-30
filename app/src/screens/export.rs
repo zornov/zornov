@@ -11,6 +11,7 @@ use crate::export_run;
 use crate::formats::Format;
 use crate::icons::{self, Icon};
 use crate::kit::{self, Button, FieldRow, Segment, ShowNoted};
+use crate::services::export;
 use crate::view::{self, SEC};
 use crate::theme;
 use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Vec2};
@@ -59,6 +60,21 @@ pub struct ExportState {
     pub rights: Option<String>,
     /// The project this state belongs to (see [`sync_project`]).
     pub project_key: String,
+    /// The last "Check project": problems by severity.
+    pub check: Option<export::CheckOut>,
+    /// The file the last export wrote, for "Check the file".
+    pub last_file: Option<std::path::PathBuf>,
+    /// The quality control of that file: running, or its one-line result.
+    pub file_check: FileCheckState,
+}
+
+/// "Check the file": runs on its own thread; the result is a verdict and the worst findings.
+#[derive(Default)]
+pub enum FileCheckState {
+    #[default]
+    Idle,
+    Running(export::FileCheck),
+    Done(Vec<String>),
 }
 
 /// Suggested H.264 bitrate in Mb/s for a size and rate (by
@@ -85,6 +101,9 @@ impl Default for ExportState {
             job: None,
             rights: None,
             project_key: String::new(),
+            check: None,
+            last_file: None,
+            file_check: FileCheckState::Idle,
         }
     }
 }
@@ -154,6 +173,181 @@ fn press_export_anyway(s: &mut ExportState) -> bool {
     s.rights = None;
     true
 }
+
+/// "Check project": looks at the project without rendering and keeps the result for the section.
+/// Returns what to tell the person.
+fn run_check(s: &mut ExportState, doc: &mut crate::doc::Doc) -> String {
+    let out = export::check_project(doc, false, false);
+    let msg = if out.is_clear() { "No problems found".to_owned() } else { crate::i18n::tf(format!("Found {}", count_words(&out))) };
+    s.check = Some(out);
+    msg
+}
+
+/// "3 problems and 2 worth a look".
+fn count_words(out: &export::CheckOut) -> String {
+    let (f, w) = (out.count(export::Severity::Fail), out.count(export::Severity::Warning));
+    let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    match (f, w) {
+        (0, w) => plural(w, "thing worth a look", "things worth a look"),
+        (f, 0) => plural(f, "problem", "problems"),
+        (f, w) => format!("{} and {}", plural(f, "problem", "problems"), plural(w, "thing worth a look", "things worth a look")),
+    }
+}
+
+/// "Fix" on one row, or "Fix all" (`only` is none): one undo step, then a fresh check.
+fn fix_problems(s: &mut ExportState, doc: &mut crate::doc::Doc, only: Option<&export::Problem>) -> String {
+    let done = match only {
+        Some(p) => export::fix_problem(doc, &p.kind, p.clip).len(),
+        None => export::check_project(doc, false, true).fixed.len(),
+    };
+    s.check = Some(export::check_project(doc, false, false));
+    match done {
+        0 => "Nothing could be fixed automatically: the advice says how to do it by hand".to_owned(),
+        1 => "Fixed 1 problem".to_owned(),
+        n => crate::i18n::tf(format!("Fixed {n} problems")),
+    }
+}
+
+/// "Accept as intended": the finding stops counting as a problem for this project.
+fn accept_problem(s: &mut ExportState, doc: &mut crate::doc::Doc, p: &export::Problem) -> Result<String, String> {
+    if doc.folder.is_none() {
+        return Err("Save the project to a folder first: accepted findings are kept with the project".into());
+    }
+    export::accept(doc, &p.kind, p.clip)?;
+    let out = export::check_project(doc, false, false);
+    s.check = Some(out);
+    Ok("Accepted as intended".to_owned())
+}
+
+/// A time in seconds as m:ss.
+fn clock(secs: f64) -> String {
+    let s = secs.max(0.0) as u64;
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// "Check project" / "Check the file": the section at the top of the settings.
+fn check_section(ui: &mut egui::Ui, doc: &mut crate::doc::Doc, s: &mut ExportState, busy: bool) {
+    let t = theme::tokens(ui.ctx());
+    // The file check, finished on its thread.
+    if let FileCheckState::Running(rx) = &s.file_check {
+        match rx.try_recv() {
+            Ok(Ok((r, file))) => {
+                let mut lines = vec![crate::i18n::tf(format!("{} · {} problems, {} warnings", r.verdict, r.fails, r.warnings))];
+                lines.extend(r.findings.iter().take(3).map(|f| crate::i18n::tf(format!("{} · {}", clock(f.start), f.message))));
+                lines.push(crate::i18n::tf(format!("Report: {}", studio_paths::tilde(&file))));
+                s.file_check = FileCheckState::Done(lines);
+                kit::push(ui.ctx(), format!("Checked {}", r.file), None, Some(Icon::CheckCircle));
+            }
+            Ok(Err(e)) => {
+                s.file_check = FileCheckState::Idle;
+                kit::push(ui.ctx(), format!("Could not check the file: {e}"), None, Some(Icon::Warning));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ui.ctx().request_repaint_after(std::time::Duration::from_millis(300)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => s.file_check = FileCheckState::Idle,
+        }
+    }
+    kit::menu_heading(ui, "Check");
+    ui.add_enabled_ui(!busy, |ui| {
+        ui.horizontal(|ui| {
+            if Button::secondary("Check project").compact().show(ui).clicked() {
+                let msg = run_check(s, doc);
+                kit::push(ui.ctx(), msg, None, Some(Icon::CheckCircle));
+            }
+            let have_file = s.last_file.as_ref().is_some_and(|p| p.is_file());
+            let running = matches!(s.file_check, FileCheckState::Running(_));
+            ui.add_enabled_ui(have_file && !running, |ui| {
+                let resp = Button::secondary("Check the file").compact().show(ui);
+                if resp.clicked() {
+                    if let Some(path) = s.last_file.clone() {
+                        match export::start_file_check(doc, &path, None) {
+                            Ok(rx) => s.file_check = FileCheckState::Running(rx),
+                            Err(e) => {
+                                kit::push(ui.ctx(), e, None, Some(Icon::Warning));
+                            }
+                        }
+                    }
+                }
+            });
+            if !have_file {
+                ui.label(egui::RichText::new("Export first to check the file").font(theme::caption()).color(t.text_2));
+            }
+        });
+    });
+    if let FileCheckState::Running(_) = s.file_check {
+        ui.label(egui::RichText::new("Checking the file…").font(theme::caption()).color(t.text_2));
+    }
+    if let FileCheckState::Done(lines) = &s.file_check {
+        for l in lines {
+            kit::label_trunc(ui, egui::RichText::new(l).font(theme::caption()).color(t.text_2));
+        }
+    }
+    let Some(out) = s.check.clone() else { return };
+    if out.is_clear() {
+        let n = out.accepted.len();
+        let msg = if n == 0 { "No problems found".to_owned() } else { crate::i18n::tf(format!("No problems found · {n} accepted as intended")) };
+        kit::label_trunc(ui, egui::RichText::new(msg).font(theme::caption()).color(t.ok));
+        return;
+    }
+    let mut act: Option<(usize, bool)> = None; // (row, fix? else accept)
+    let mut fix_all = false;
+    ui.horizontal(|ui| {
+        kit::label_trunc(ui, egui::RichText::new(count_words(&out)).font(theme::caption()).color(t.text_2));
+        if out.problems.iter().any(|p| p.fixable) {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                fix_all = Button::ghost("Fix all").compact().show(ui).clicked();
+            });
+        }
+    });
+    let mut last: Option<export::Severity> = None;
+    for (i, p) in out.problems.iter().take(MAX_ROWS).enumerate() {
+        if last != Some(p.severity) {
+            last = Some(p.severity);
+            ui.label(egui::RichText::new(p.severity.label()).font(theme::caption()).color(if p.severity == export::Severity::Fail { t.danger } else { t.warn }));
+        }
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if Button::ghost("Accept as intended").compact().show(ui).clicked() {
+                    act = Some((i, false));
+                }
+                if p.fixable && Button::secondary("Fix").compact().show(ui).clicked() {
+                    act = Some((i, true));
+                }
+                let text = match p.at {
+                    Some(at) => format!("{} · {}", clock(at), p.message),
+                    None => p.message.clone(),
+                };
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let r = kit::label_trunc(ui, egui::RichText::new(text).font(theme::caption()).color(t.text));
+                    if !p.advice.is_empty() {
+                        r.on_hover_text(&p.advice);
+                    }
+                });
+            });
+        });
+    }
+    if out.problems.len() > MAX_ROWS {
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("and {} more: fix these first", out.problems.len() - MAX_ROWS))).font(theme::caption()).color(t.text_2));
+    }
+    if fix_all {
+        let msg = fix_problems(s, doc, None);
+        kit::push(ui.ctx(), msg, None, Some(Icon::CheckCircle));
+    } else if let Some((i, fix)) = act {
+        let p = out.problems[i].clone();
+        if fix {
+            let msg = fix_problems(s, doc, Some(&p));
+            kit::push(ui.ctx(), msg, None, Some(Icon::CheckCircle));
+        } else {
+            match accept_problem(s, doc, &p) {
+                Ok(msg) => kit::push(ui.ctx(), msg, None, Some(Icon::CheckCircle)),
+                Err(e) => kit::push(ui.ctx(), format!("Could not accept it: {e}"), None, Some(Icon::Warning)),
+            };
+        }
+    }
+    ui.add_space(4.0);
+}
+
+/// Rows of problems the section shows before "and N more".
+const MAX_ROWS: usize = 5;
 
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     sync_project(&mut app.export, &app.doc);
@@ -257,6 +451,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     sui.spacing_mut().item_spacing.y = 6.0;
     let s = &mut app.export;
     let busy = s.job.and_then(|id| app.jobs.get(id)).is_some_and(|j| !j.done && !j.cancelled);
+    check_section(&mut sui, &mut app.doc, s, busy);
     sui.add_enabled_ui(!busy, |ui| {
         let w = ui.available_width();
         kit::labeled_row(ui, "File name", |ui| {
@@ -357,7 +552,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mbps = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::H264 | Format::Hevc10) { s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) } else { bitrate_mbps(s, w, h, fps) };
     let mb = mbps * (len as f32 / SEC as f32) / 8.0;
     let size = if mb > 1024.0 { format!("{:.1} GB", mb / 1024.0) } else { format!("{:.0} MB", mb.max(1.0)) };
-    let sound = if has_sound(proj) { "with sound" } else { "no sound" };
+    let sound = if has_sound(&app.doc.project) { "with sound" } else { "no sound" };
     let est = crate::i18n::tf(format!("≈ {size} · {} · {w} × {h} · {:.0} Mbps · {}", view::format_duration(len), mbps, sound));
     let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(footer.shrink2(Vec2::new(20.0, 18.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     let job = s.job.and_then(|id| app.jobs.get(id).cloned());
@@ -411,6 +606,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let task = export_run::start(&app.doc, req.clone());
                         let id = app.jobs.start_export(crate::i18n::tf(format!("Export {}", s.name)), format.label(), task, req);
                         s.job = Some(id);
+                        s.last_file = Some(path.clone());
                     }
                     #[cfg(not(feature = "render"))]
                     {
@@ -460,6 +656,55 @@ mod tests {
         assert!(!labels.iter().any(|l| l == "Small"), "Small is not offered yet: {labels:?}");
         assert!(h.cut_text().is_empty(), "nothing is cut off: {:?}", h.cut_text());
         assert!(h.overlaps().is_empty(), "nothing is drawn over: {:?}", h.overlaps());
+    }
+
+    fn problem(kind: &str, severity: export::Severity, fixable: bool) -> export::Problem {
+        export::Problem { kind: kind.into(), clip: Some(3), at: Some(75.0), message: format!("{kind} happened"), advice: "do the thing".into(), severity, fixable }
+    }
+
+    #[test]
+    fn the_check_section_lists_problems_by_severity_with_fix_and_accept() {
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Export;
+        h.app.export.check = Some(export::CheckOut { problems: vec![problem("gap", export::Severity::Fail, false), problem("audio_quiet", export::Severity::Warning, true)], ..Default::default() });
+        h.frames(4);
+        let labels = h.labels();
+        for want in ["Check project", "Check the file", "Problems", "Worth a look", "Fix", "Fix all", "Accept as intended"] {
+            assert!(labels.iter().any(|l| l == want), "{want} is shown: {labels:?}");
+        }
+        assert!(labels.iter().any(|l| l.contains("1:15 · gap happened")), "the row says when: {labels:?}");
+        assert!(h.cut_text().is_empty(), "nothing is cut off: {:?}", h.cut_text());
+        assert!(h.overlaps().is_empty(), "nothing is drawn over: {:?}", h.overlaps());
+        // A clear project says so.
+        h.app.export.check = Some(export::CheckOut::default());
+        h.frames(3);
+        assert!(h.labels().iter().any(|l| l == "No problems found"));
+    }
+
+    #[test]
+    fn accepting_needs_a_saved_project_and_then_sticks() {
+        let mut s = ExportState::default();
+        let mut doc = crate::doc::Doc::from_view(&crate::view::demo());
+        let msg = run_check(&mut s, &mut doc);
+        assert!(!msg.is_empty());
+        let p = problem("gap", export::Severity::Fail, false);
+        assert!(accept_problem(&mut s, &mut doc, &p).is_err(), "without a folder the acceptance would be lost");
+        let dir = std::env::temp_dir().join(format!("zornov-accept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::services::project::save(&mut doc, Some(&dir)).expect("saves to a temp folder");
+        assert_eq!(accept_problem(&mut s, &mut doc, &p).as_deref(), Ok("Accepted as intended"));
+        assert!(s.check.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn counts_read_as_words() {
+        let one = export::CheckOut { problems: vec![problem("gap", export::Severity::Fail, false)], ..Default::default() };
+        assert_eq!(count_words(&one), "1 problem");
+        let two = export::CheckOut { problems: vec![problem("gap", export::Severity::Fail, false), problem("x", export::Severity::Warning, false), problem("y", export::Severity::Warning, false)], ..Default::default() };
+        assert_eq!(count_words(&two), "1 problem and 2 things worth a look");
+        assert_eq!(clock(75.4), "1:15");
     }
 
     #[test]

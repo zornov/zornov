@@ -12,7 +12,7 @@ mod bundle;
 mod check;
 mod cutdown;
 pub use bundle::{BundleOut, BundleReq, bundle};
-pub use check::{CheckOut, Problem, Severity, accept, check_file, check_project, is_fixable, preflight, profile_for, unaccept};
+pub use check::{CheckOut, Problem, Severity, FileCheck, accept, check_file, start_file_check, check_project, fix_problem, is_fixable, preflight, profile_for, unaccept};
 pub use cutdown::{CutdownOut, CutdownReq, RenderReq, cutdown};
 pub(crate) use cutdown::{free_dir, sanitize};
 

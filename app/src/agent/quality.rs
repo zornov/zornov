@@ -206,6 +206,18 @@ impl Session {
         v
     }
 
+    /// Mends one finding (`kind` on `clip`) as one undo step; says what was done, nothing when it cannot.
+    pub fn fix_finding(&mut self, kind: &str, clip: Option<u32>) -> Vec<String> {
+        let mut p = json!({"kind": kind});
+        if let Some(c) = clip {
+            p["clip"] = json!(c);
+        }
+        self.doc.begin_batch("Fix");
+        let done = self.fix(&[p]);
+        self.doc.commit_batch();
+        done
+    }
+
     pub(super) fn quality(&mut self, look: bool) -> Value {
         let p = self.doc.project.clone();
         let mut problems: Vec<Value> = Vec::new();
