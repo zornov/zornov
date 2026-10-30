@@ -44,6 +44,23 @@ fn decide(base_q_idx: u8, search: bool, src: &Frame, recon: &mut FrameBuf, sb: S
     SbDecision { blocks }
 }
 
+/// Intra mode search with a partition search: every superblock is split recursively (down to 8x8)
+/// where that costs less than coding the block whole.
+pub struct PartitionDecider {
+    pub base_q_idx: u8,
+}
+
+impl ModeDecider for PartitionDecider {
+    fn decide_sb(&mut self, src: &Frame, recon: &mut FrameBuf, sb: SbPos) -> SbDecision {
+        assert_eq!(recon.quant.base_q_idx, self.base_q_idx, "recon.quant must carry the decider's base_q_idx");
+        let (mi_cols, mi_rows) = (2 * ((src.width as usize + 7) >> 3), 2 * ((src.height as usize + 7) >> 3));
+        recon.begin_sb(sb);
+        let mut blocks = Vec::new();
+        partition::search_partition(src, recon, sb.row as usize * SB4, sb.col as usize * SB4, SB4, mi_rows, mi_cols, true, &mut blocks);
+        SbDecision { blocks }
+    }
+}
+
 /// Fixed decisions: no search.
 pub struct FixedDecider {
     pub base_q_idx: u8,

@@ -13,7 +13,7 @@ use studio_av1::spec_tables::*;
 use studio_av1_enc::bits::BitWriter;
 use studio_av1_enc::mode::partition::fixed_partition;
 use studio_av1_enc::mode::rdcost::{lambda, sad, satd};
-use studio_av1_enc::mode::{FixedDecider, ModeDecider, SearchDecider};
+use studio_av1_enc::mode::{FixedDecider, ModeDecider, PartitionDecider};
 use studio_av1_enc::obu::{ObuType, obu, temporal_delimiter, write_frame_header, write_sequence_header};
 use studio_av1_enc::recon::{FrameBuf, QuantInfo};
 use studio_av1_enc::syntax::TileWriter;
@@ -179,7 +179,7 @@ struct Result {
 /// Encodes, decodes with the real decoder, checks bit-exactness against the reconstruction.
 fn run(name: &str, src: &Frame, q: u8, search: bool) -> Result {
     let mut fixed = FixedDecider { base_q_idx: q };
-    let mut srch = SearchDecider { base_q_idx: q };
+    let mut srch = PartitionDecider { base_q_idx: q };
     let decider: &mut dyn ModeDecider = if search { &mut srch } else { &mut fixed };
     let (coded, tu) = encode(src, q, decider);
     // bounded: a frame never costs more than ~3 bytes a sample at these quantisers
@@ -247,8 +247,7 @@ fn search_never_does_worse_than_dc_only_for_the_bits_spent() {
             tot_s += s.bytes;
             let reference = dc_psnr_at(&curve, s.bytes as f64);
             eprintln!("{name:16} q{q:3}: dc-only {:6} B {:5.2} dB | search {:6} B {:5.2} dB | dc curve at {} B: {}", f.bytes, f.psnr, s.bytes, s.psnr, s.bytes, reference.map_or("-".into(), |v| format!("{v:.2} dB")));
-            // at the same quantiser the search must not blow up the size
-            assert!(s.bytes as f64 <= f.bytes as f64 * 1.05 + 32.0, "{name} q{q}: search spends {} B against {} B", s.bytes, f.bytes);
+            // the partition search spends bytes to buy quality, so only the curve comparison below applies
             if s.bytes >= 100 {
                 if let Some(r) = reference {
                     // 0.4 dB: on noise the curve is flat and its interpolation moves by a few tenths of a dB
@@ -262,8 +261,7 @@ fn search_never_does_worse_than_dc_only_for_the_bits_spent() {
     let gain = gain_sum / n.max(1) as f64;
     eprintln!("total: dc-only {tot_f} B, search {tot_s} B; mean PSNR gain over the DC-only curve {gain:.2} dB in {n} cases");
     assert!(n >= 8, "too few comparable cases ({n})");
-    assert!(tot_s < tot_f, "the search should save bytes over all images ({tot_s} against {tot_f})");
-    assert!(gain > 0.0, "the search should beat the DC-only curve on average (mean gain {gain:.2} dB)");
+    assert!(gain > 0.3, "the mode and partition search should beat the DC-only curve by more than 0.3 dB on average (mean gain {gain:.2} dB)");
 }
 
 #[test]

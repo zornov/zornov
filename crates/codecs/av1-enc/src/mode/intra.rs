@@ -163,6 +163,22 @@ fn rd_cost(src: &Frame, recon: &mut FrameBuf, shape: Shape, y_mode: usize, uv_mo
     cost
 }
 
+/// Codes the block with the best modes the search finds and returns the decision with its
+/// rate-distortion cost over all planes: squared error plus lambda times the estimated bits of the
+/// coefficients and the modes. The block is left reconstructed in `recon`.
+pub fn code_block_rd(src: &Frame, recon: &mut FrameBuf, shape: Shape, search: bool) -> (BlockDecision, f64) {
+    let (y_mode, uv_mode) = if search { search_modes(src, recon, shape) } else { (DC_PRED, DC_PRED) };
+    let g = Geometry::new(shape.0, shape.1, shape.2, shape.3);
+    let d = code_block(src, recon, shape, y_mode, uv_mode);
+    let lam = lambda(recon.quant.base_q_idx, recon.bit_depth);
+    let mut cost = lam * (mode_bits(y_mode) + if g.has_chroma { mode_bits(uv_mode) } else { 0.0 });
+    for plane in 0..g.planes() {
+        cost += plane_sse(src, recon, plane, g.rect[plane]);
+        cost += lam * d.coefs.iter().find(|b| b.plane as usize == plane).map_or(0.5, |b| coef_bits(&b.levels, b.eob));
+    }
+    (d, cost)
+}
+
 /// How many of the best SATD candidates are coded in full to find the winner.
 const FINALISTS: usize = 3;
 

@@ -12,11 +12,17 @@ fn ac_step(base_q_idx: u8, bit_depth: u8) -> f64 {
     AC_QLOOKUP[bd_idx][base_q_idx as usize] as f64
 }
 
-/// Lagrange multiplier for a quantiser index: squared error per bit. The usual relation
-/// `lambda ~ 0.1 * step^2` for the AC quantiser step.
+/// How much smaller than the textbook `0.1 * step^2` the multiplier is. Measured: bytes at equal
+/// PSNR over the gate images and the moving clips fall steadily as the scale shrinks (4% at 1/2,
+/// 12% at 1/8, 18% at 1/64) and stay flat from there to 1/512, because at these rates most
+/// coefficients are zero and a bit buys far more squared error than the textbook slope says.
+pub const LAMBDA_SCALE: f64 = 1.0 / 64.0;
+
+/// Lagrange multiplier for a quantiser index: squared error per bit, `0.1 * step^2` for the AC
+/// quantiser step, times [`LAMBDA_SCALE`].
 pub fn lambda(base_q_idx: u8, bit_depth: u8) -> f64 {
     let q = ac_step(base_q_idx, bit_depth);
-    0.1 * q * q
+    0.1 * q * q * LAMBDA_SCALE
 }
 
 /// The multiplier for SATD costs: SATD units per bit.

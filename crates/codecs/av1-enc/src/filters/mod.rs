@@ -193,11 +193,10 @@ fn block_sse(buf: &FrameBuf, src: &Frame, cols: usize, rows: usize) -> Vec<u64> 
     out
 }
 
-/// Squared error per bit for the filter decisions. Measured on the rate/error curves of coded
-/// frames this is about a sixteenth of the mode decision's multiplier (most coefficients are
-/// zero at the rates in use, which flattens the curve).
+/// Squared error per bit for the filter decisions: the mode decision's multiplier (a multiple of
+/// 1/4 to 4 of it was tried; the equal-PSNR gate was best at 1).
 fn filter_lambda(base_q_idx: u8) -> f64 {
-    crate::mode::rdcost::lambda(base_q_idx, 8) / 16.0
+    crate::mode::rdcost::lambda(base_q_idx, 8)
 }
 
 /// Candidate strengths `(pri, sec)`.

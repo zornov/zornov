@@ -479,3 +479,21 @@ fn speed_6_needs_no_more_bytes_than_speed_8_at_equal_psnr() {
     assert!(mean <= 1.0, "speed 6 costs {:.1}% of speed 8's bytes", 100.0 * mean);
     assert!(ratios.iter().all(|&r| r <= 1.05), "speed 6 loses more than 5% at some operating point: {ratios:?}");
 }
+
+#[test]
+#[ignore = "exploration: bytes at fixed PSNR targets (AV1LAMBDA sets the RD multiplier scale)"]
+fn explore_lambda() {
+    let set = studio_av1_enc::filters::FilterSet::default();
+    let mut seqs: Vec<(String, Vec<Frame>)> = gate_images().into_iter().map(|(n, f, _)| (n, vec![f])).collect();
+    seqs.push(("pan".into(), moving_sequence(Motion::Pan(3.0, 2.0), 160, 96, 4)));
+    seqs.push(("object".into(), moving_sequence(Motion::Object, 160, 96, 4)));
+    for (name, frames) in &seqs {
+        let mut c: Vec<(f64, f64)> = (20..=240).step_by(20).map(|q| { let (b, p) = code_sequence_with(frames, q as u8, 6, set); (p, b as f64) }).collect();
+        c.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        for target in [30.0, 35.0, 40.0, 45.0] {
+            if let Some(b) = curve_bytes_at(&c, target) {
+                eprintln!("PT {name} {target} {b:.1}");
+            }
+        }
+    }
+}

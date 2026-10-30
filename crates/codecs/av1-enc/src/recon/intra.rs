@@ -98,6 +98,17 @@ impl IntraState {
     }
 }
 
+/// A saved square region of the reconstruction and its intra bookkeeping.
+pub struct SavedRegion {
+    r: usize,
+    c: usize,
+    n4: usize,
+    planes: [Vec<u16>; 3],
+    y_mode: Vec<u8>,
+    uv_mode: Vec<u8>,
+    block_decoded: Vec<bool>,
+}
+
 /// Block-level facts shared by all transform blocks of one block.
 struct Blk {
     mi_row: usize,
@@ -188,6 +199,49 @@ impl FrameBuf {
                 }
             }
         }
+    }
+
+    /// Copies the `n4` x `n4` (mode info units) region at (`r`, `c`): the samples of all planes,
+    /// the mode maps, and the availability flags of the superblock.
+    pub fn save_region(&self, r: usize, c: usize, n4: usize) -> SavedRegion {
+        let mut planes: [Vec<u16>; 3] = Default::default();
+        for p in 0..3 {
+            let sub = (p > 0) as usize;
+            let (x0, y0, w, h) = ((c * 4) >> sub, (r * 4) >> sub, (n4 * 4) >> sub, (n4 * 4) >> sub);
+            for y in 0..h {
+                planes[p].extend_from_slice(&self.planes[p].row_from(y0 + y, x0)[..w]);
+            }
+        }
+        let st = &self.intra;
+        let (mut y_mode, mut uv_mode) = (Vec::new(), Vec::new());
+        for rr in r..(r + n4).min(st.mi_rows) {
+            for cc in c..(c + n4).min(st.mi_cols) {
+                y_mode.push(st.y_mode[rr * st.mi_cols + cc]);
+                uv_mode.push(st.uv_mode[rr * st.mi_cols + cc]);
+            }
+        }
+        SavedRegion { r, c, n4, planes, y_mode, uv_mode, block_decoded: st.block_decoded.clone() }
+    }
+
+    /// Puts a region saved by [`FrameBuf::save_region`] back.
+    pub fn restore_region(&mut self, s: &SavedRegion) {
+        for p in 0..3 {
+            let sub = (p > 0) as usize;
+            let (x0, y0, w, h) = ((s.c * 4) >> sub, (s.r * 4) >> sub, (s.n4 * 4) >> sub, (s.n4 * 4) >> sub);
+            for y in 0..h {
+                self.planes[p].row_from_mut(y0 + y, x0)[..w].copy_from_slice(&s.planes[p][y * w..(y + 1) * w]);
+            }
+        }
+        let st = &mut self.intra;
+        let mut i = 0;
+        for rr in s.r..(s.r + s.n4).min(st.mi_rows) {
+            for cc in s.c..(s.c + s.n4).min(st.mi_cols) {
+                st.y_mode[rr * st.mi_cols + cc] = s.y_mode[i];
+                st.uv_mode[rr * st.mi_cols + cc] = s.uv_mode[i];
+                i += 1;
+            }
+        }
+        st.block_decoded.clone_from(&s.block_decoded);
     }
 
     /// Reconstructs one intra block with default [`IntraExtra`].

@@ -31,3 +31,69 @@ pub fn fixed_partition(r: usize, c: usize, n4: usize, mi_rows: usize, mi_cols: u
         }
     }
 }
+
+use super::intra::code_block_rd;
+use super::rdcost::lambda;
+use crate::recon::FrameBuf;
+use crate::types::{BlockDecision, Frame};
+
+/// Bits charged for a partition symbol when comparing a block with its split.
+const PARTITION_BITS: f64 = 2.0;
+
+/// Searches the partition of the `n4` x `n4` node at `(r, c)` of an intra frame: the block whole or
+/// split into four, recursively, whichever costs less (squared error plus lambda times the
+/// estimated bits). The blocks are coded into `recon` as they are decided, so the winner is left
+/// reconstructed there; `blocks` receives them in decode order. Returns the cost.
+///
+/// A node that reaches past the frame edge follows [`fixed_partition`]'s forced splits, with the
+/// search running inside the pieces. Blocks go down to 8x8.
+#[allow(clippy::too_many_arguments)]
+pub fn search_partition(src: &Frame, recon: &mut FrameBuf, r: usize, c: usize, n4: usize, mi_rows: usize, mi_cols: usize, search_modes: bool, blocks: &mut Vec<BlockDecision>) -> f64 {
+    if r >= mi_rows || c >= mi_cols {
+        return 0.0;
+    }
+    let half = n4 / 2;
+    let whole_allowed = n4 == 1 || (r + half < mi_rows && c + half < mi_cols);
+    let lam = lambda(recon.quant.base_q_idx, recon.bit_depth);
+    if !whole_allowed {
+        // forced: the pieces fixed_partition would make, each searched where it is a full node
+        let mut shapes = Vec::new();
+        fixed_partition(r, c, n4, mi_rows, mi_cols, &mut shapes);
+        let mut total = 0.0;
+        if shapes.len() == 1 || shapes.iter().any(|s| s.2 != s.3) {
+            // a HORZ / VERT piece: coded as it is
+            for shape in shapes {
+                let (d, cost) = code_block_rd(src, recon, shape, search_modes);
+                blocks.push(d);
+                total += cost;
+            }
+            return total;
+        }
+        for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
+            total += search_partition(src, recon, r + dr, c + dc, half, mi_rows, mi_cols, search_modes, blocks);
+        }
+        return total;
+    }
+    let base = recon.save_region(r, c, n4);
+    let (whole, whole_cost) = code_block_rd(src, recon, (r, c, n4, n4), search_modes);
+    let whole_cost = whole_cost + lam * PARTITION_BITS;
+    if n4 <= 2 {
+        blocks.push(whole);
+        return whole_cost;
+    }
+    let after_whole = recon.save_region(r, c, n4);
+    recon.restore_region(&base);
+    let mut split = Vec::new();
+    let mut split_cost = lam * PARTITION_BITS;
+    for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
+        split_cost += search_partition(src, recon, r + dr, c + dc, half, mi_rows, mi_cols, search_modes, &mut split);
+    }
+    if whole_cost <= split_cost {
+        recon.restore_region(&after_whole);
+        blocks.push(whole);
+        whole_cost
+    } else {
+        blocks.extend(split);
+        split_cost
+    }
+}

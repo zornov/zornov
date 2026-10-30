@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::bits::BitWriter;
 use crate::filters::{self, FilterParams};
 use crate::error::{Error, Result};
-use crate::mode::{FixedDecider, ModeDecider, SearchDecider};
+use crate::mode::{FixedDecider, ModeDecider, PartitionDecider};
 use crate::rc::gop::GopPlanner;
 use crate::rc::{MAX_RETRIES, RateControl};
 use crate::obu::{ObuType, av1c, obu, write_frame_header, write_sequence_header};
@@ -144,7 +144,7 @@ impl Encoder {
         let ref_idx = [0u8; 7];
         let (mut intra_sbs, mut inter_sbs) = (Vec::new(), Vec::new());
         if key {
-            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(SearchDecider { base_q_idx: q }) };
+            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(PartitionDecider { base_q_idx: q }) };
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
                     let pos = SbPos { col, row };
