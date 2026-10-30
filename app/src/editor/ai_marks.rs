@@ -144,7 +144,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, scale: f32
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 done = Some(false);
             }
-            ui.label(egui::RichText::new(crate::i18n::shown("↵ adds it to the chat · Esc cancels")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown("Enter adds it to the chat · Esc cancels")).font(theme::caption()).color(t.text_2));
         });
     });
     match done {
