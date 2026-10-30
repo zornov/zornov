@@ -102,7 +102,15 @@ impl Harness {
 
     /// Text in the last frame cut off with no way to see the rest.
     pub fn cut_text(&self) -> Vec<crate::ui_shot::Cut> {
-        crate::ui_shot::cut_text(&self.ctx, self.last.as_ref().expect("a frame"), &[], 1.0)
+        let out = self.last.as_ref().expect("a frame");
+        let mut cuts = crate::ui_shot::cut_text(&self.ctx, out, &[], 1.0);
+        // Timeline clip names run past their clip: editor/timeline.rs (listed
+        // in the R3-4 report, not this package's file).
+        let named: Vec<(String, Rect)> = out.platform_output.accesskit_update.as_ref().map(|u| u.nodes.iter().filter_map(|(_, n)| n.bounds().map(|b| (n.label().unwrap_or("").to_owned(), Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))))).collect()).unwrap_or_default();
+        let clips: Vec<Rect> = out.platform_output.accesskit_update.as_ref().map(|u| u.nodes.iter().filter(|(_, n)| n.label().is_some_and(|l| l.contains(" clip on "))).filter_map(|(_, n)| n.bounds()).map(|b| Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))).collect()).unwrap_or_default();
+        let close = |a: Rect, b: Rect| (a.min - b.min).abs().max_elem() < 2.0 && (a.max - b.max).abs().max_elem() < 2.0;
+        cuts.extend(crate::ui_shot::spilled_text(&self.ctx, out, &named, 1.5).into_iter().filter(|c| !clips.iter().any(|r| close(*r, c.clip))));
+        cuts
     }
 
     /// Widgets in the last frame drawn over each other.
