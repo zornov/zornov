@@ -259,9 +259,14 @@ fn openers(h: &Harness) -> Vec<(accesskit::Role, String)> {
         .filter(|(_, n)| matches!(n.role(), Tab | ComboBox) || (n.role() == Button && (n.is_selected().is_some() || n.toggled().is_some())))
         .map(|(_, n)| (n.role(), n.label().or(n.value()).unwrap_or("").to_owned()))
         .filter(|(_, l)| !l.is_empty())
+        // Controls that open a file dialog, which no test can answer.
+        .filter(|(_, l)| !DIALOG_OPENERS.contains(&l.as_str()))
         .filter(|x| seen.insert(x.clone()))
         .collect()
 }
+
+/// Home's side-rail entries that open the system's folder chooser.
+const DIALOG_OPENERS: &[&str] = &["Open project", "Open…", "Open folder…"];
 
 /// Named buttons that open a menu or popover.
 const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout", "Background jobs", "Overlays", "Add", "More", "Safety", "Rights"];
