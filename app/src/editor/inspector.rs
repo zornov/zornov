@@ -354,7 +354,8 @@ fn links(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
         .iter()
         .filter(|o| o.id != me.id && o.start < me.end() && o.end() > me.start && !matches!(o.source, studio_model::ClipSource::Gap))
         .filter(|o| sq.lanes.iter().find(|l| l.id == o.lane).is_some_and(|l| l.kind != studio_model::LaneKind::Audio))
-        .map(|o| (o.id.0, if o.name.is_empty() { crate::i18n::tf(format!("Clip {}", o.id.0)) } else { o.name.clone() }))
+        .enumerate()
+        .map(|(i, o)| (o.id.0, if o.name.is_empty() { crate::i18n::tf(format!("Unnamed clip {}", i + 1)) } else { o.name.clone() }))
         .collect();
     let mut names: Vec<String> = vec!["None".into()];
     names.extend(candidates.iter().map(|(_, n)| n.clone()));
