@@ -53,6 +53,10 @@ pub struct Job {
     pub error: Option<String>,
     /// Where the result was written (exports), for "Show in Finder".
     pub path: Option<std::path::PathBuf>,
+    /// What an export was asked to do, as data, so a failed one can be run
+    /// again as a new job (the Jobs popover's Retry).
+    #[cfg(feature = "render")]
+    pub request: Option<crate::export_run::Request>,
 }
 
 #[derive(Default)]
@@ -64,7 +68,7 @@ pub struct Jobs {
 impl Jobs {
     pub fn start(&mut self, name: impl Into<String>, detail: impl Into<String>, length: f32) -> u64 {
         self.next += 1;
-        self.list.push(Job { id: self.next, name: name.into(), detail: detail.into(), progress: 0.0, length, done: false, cancelled: false, task: None, started: -1.0, error: None, path: None });
+        self.list.push(Job { id: self.next, name: name.into(), detail: detail.into(), progress: 0.0, length, done: false, cancelled: false, task: None, started: -1.0, error: None, path: None, #[cfg(feature = "render")] request: None });
         self.next
     }
     #[cfg_attr(not(feature = "render"), allow(dead_code))]
@@ -75,6 +79,37 @@ impl Jobs {
             j.path = path;
         }
         id
+    }
+    /// Like [`Self::start_task`] for an export, remembering its request so it can be retried.
+    #[cfg(feature = "render")]
+    pub fn start_export(&mut self, name: impl Into<String>, detail: impl Into<String>, task: Arc<dyn JobTask>, request: crate::export_run::Request) -> u64 {
+        let path = request.path.clone();
+        let id = self.start_task(name, detail, task, Some(path));
+        if let Some(j) = self.list.last_mut() {
+            j.request = Some(request);
+        }
+        id
+    }
+    /// Runs a failed or cancelled export again as a new job with the same
+    /// request (`start` begins the work); the old row is replaced. `None`
+    /// when `id` is not such a job or has no request.
+    #[cfg(feature = "render")]
+    pub fn retry_with(&mut self, id: u64, start: impl FnOnce(&crate::export_run::Request) -> Arc<dyn JobTask>) -> Option<u64> {
+        let j = self.get(id).filter(|j| j.error.is_some() || j.cancelled)?.clone();
+        let request = j.request?;
+        let task = start(&request);
+        self.list.retain(|o| o.id != id);
+        Some(self.start_export(j.name, j.detail, task, request))
+    }
+    /// How many finished jobs are kept (and listed) after newer ones.
+    pub const KEPT_FINISHED: usize = 6;
+    /// Drops the oldest finished jobs beyond [`Self::KEPT_FINISHED`]; running ones stay.
+    pub fn prune(&mut self) {
+        let mut finished = 0;
+        let mut keep: Vec<bool> = self.list.iter().rev().map(|j| (!j.done && !j.cancelled) || { finished += 1; finished <= Self::KEPT_FINISHED }).collect();
+        keep.reverse();
+        let mut it = keep.into_iter();
+        self.list.retain(|_| it.next().unwrap_or(true));
     }
     pub fn running(&self) -> usize {
         self.list.iter().filter(|j| !j.done && !j.cancelled).count()
@@ -479,7 +514,9 @@ impl eframe::App for StudioApp {
         self.global_shortcuts(&ctx);
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
         let now = ctx.input(|i| i.time);
-        for job in self.jobs.tick(dt, now) {
+        let ticked = self.jobs.tick(dt, now);
+        self.jobs.prune();
+        for job in ticked {
             match (&job.error, job.cancelled) {
                 (Some(e), _) => kit::push(&ctx, format!("Couldn't export {}: {e}", job.name), None, Some(icons::Icon::Warning)),
                 (None, true) => kit::push(&ctx, format!("{} cancelled", job.name), None, Some(icons::Icon::XCircle)),
@@ -489,7 +526,7 @@ impl eframe::App for StudioApp {
                         self.reveal = Some((id, p.clone()));
                     }
                     if job.task.is_some() && self.cli.shot.is_none() {
-                        crate::chime::play();
+                        crate::chime::play_unless(self.prefs.quiet_chime);
                     }
                     id
                 }
@@ -531,9 +568,7 @@ impl eframe::App for StudioApp {
         // (above the transport), never both.
         if !matches!(self.screen, Screen::Editor | Screen::Export | Screen::Settings) {
             if let Some(id) = kit::show_overlay(&ctx) {
-                if let Some((_, path)) = self.reveal.take().filter(|(rid, _)| *rid == id) {
-                    let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
-                }
+                editor::toast_action(self, &ctx, id);
             }
         }
         crate::release::notice(self, &ctx);
@@ -700,5 +735,76 @@ impl StudioApp {
             theme::apply_style(ctx);
             ctx.request_repaint();
         }
+    }
+}
+
+#[cfg(all(test, feature = "render"))]
+mod jobs_tests {
+    use super::*;
+
+    #[derive(Debug, Default)]
+    struct Fake {
+        error: Option<String>,
+    }
+    impl JobTask for Fake {
+        fn fraction(&self) -> f32 {
+            0.0
+        }
+        fn finished(&self) -> bool {
+            self.error.is_some()
+        }
+        fn cancel(&self) {}
+        fn cancelled(&self) -> bool {
+            false
+        }
+        fn take_error(&self) -> Option<String> {
+            self.error.clone()
+        }
+    }
+
+    fn request() -> crate::export_run::Request {
+        crate::export_run::Request { path: std::env::temp_dir().join("zornov-retry-test.mp4"), format: crate::formats::Format::ALL[0], size: (640, 360), fps: 24.0, range: (0, 2_000_000), quality: 70.0, bitrate_kbps: 8000, av1_speed: Default::default() }
+    }
+
+    /// A failed export keeps its request; Retry starts a new job with the same one.
+    #[test]
+    fn retry_runs_the_same_request_as_a_new_job() {
+        let mut jobs = Jobs::default();
+        let first = jobs.start_export("Export A", "MP4", Arc::new(Fake { error: Some("disk full".into()) }), request());
+        let done = jobs.tick(0.1, 0.0);
+        assert_eq!(done.len(), 1);
+        assert!(jobs.get(first).is_some_and(|j| j.error.as_deref() == Some("disk full") && j.cancelled));
+        let mut seen = None;
+        let again = jobs.retry_with(first, |r| {
+            seen = Some(r.clone());
+            Arc::new(Fake::default())
+        });
+        let again = again.expect("a failed export can be retried");
+        assert_ne!(again, first, "a new job");
+        assert!(jobs.get(first).is_none(), "the failed row is replaced");
+        let j = jobs.get(again).unwrap();
+        assert!(j.error.is_none() && !j.cancelled && j.path == Some(request().path));
+        let (a, b) = (seen.unwrap(), j.request.clone().unwrap());
+        assert_eq!((a.path, a.size, a.range, a.bitrate_kbps), (b.path.clone(), b.size, b.range, b.bitrate_kbps));
+        assert_eq!(b.path, request().path);
+        // A running job, a finished one and one with no request cannot be retried.
+        assert!(jobs.retry_with(again, |_| Arc::new(Fake::default())).is_none());
+        let plain = jobs.start("Sim", "", 1.0);
+        assert!(jobs.retry_with(plain, |_| Arc::new(Fake::default())).is_none());
+    }
+
+    #[test]
+    fn finished_jobs_are_pruned_to_the_last_few() {
+        let mut jobs = Jobs::default();
+        let running = jobs.start("Long", "", 1000.0);
+        for _ in 0..10 {
+            jobs.start("Quick", "", 0.1);
+        }
+        jobs.tick(1.0, 0.0);
+        jobs.prune();
+        assert_eq!(jobs.list.iter().filter(|j| j.done).count(), Jobs::KEPT_FINISHED);
+        assert!(jobs.get(running).is_some(), "a running job is never pruned");
+        let ids: Vec<u64> = jobs.list.iter().filter(|j| j.done).map(|j| j.id).collect();
+        assert_eq!(ids, (6..=11).collect::<Vec<_>>(), "the newest stay");
     }
 }

@@ -23,6 +23,17 @@ pub(crate) fn say_error(ctx: &egui::Context, text: impl Into<String>) -> u64 {
     kit::push_error(ctx, text)
 }
 
+/// A save that failed, with "Save as…" on the toast: another place may work
+/// when this one does not. The editor's toast layer answers the click (`editor::toast_action`).
+pub(crate) fn say_save_failed(ctx: &egui::Context, text: impl Into<String>) -> u64 {
+    kit::toast::push_as(ctx, text, Some("Save as…"), Some(Icon::Warning), kit::toast::Level::Warning)
+}
+
+/// An autosave that failed, with "Save now" on the toast.
+pub(crate) fn say_autosave_failed(ctx: &egui::Context, why: &str) -> u64 {
+    kit::toast::push_as(ctx, crate::i18n::tf(format!("Autosave failed: {why}; it retries")), Some("Save now"), Some(Icon::Warning), kit::toast::Level::Warning)
+}
+
 /// A project on the Start screen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Recent {
@@ -266,7 +277,7 @@ impl StudioApp {
                 kit::push(ctx, crate::i18n::tf(format!("Saved {}", self.doc.project.name)), None, Some(Icon::CheckCircle));
             }
             Err(e) => {
-                say_error(ctx, crate::i18n::tf(e));
+                say_save_failed(ctx, crate::i18n::tf(e));
             }
         }
     }
@@ -391,7 +402,7 @@ impl StudioApp {
             say_error(ctx, crate::i18n::tf(note));
         }
         if let Some(e) = autosave_health().take_warning() {
-            say_error(ctx, crate::i18n::tf(format!("Autosave failed: {e}; it retries, and Cmd+S saves now")));
+            say_autosave_failed(ctx, &e);
         }
         let quitting = ctx.input(|i| i.viewport().close_requested()) && self.cli.shot.is_none() && !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("files-quit-ok"))).unwrap_or(false);
         if quitting {
@@ -1190,6 +1201,23 @@ mod tests {
         h.ok();
         h.failed("read-only".into());
         assert_eq!(h.take_warning().as_deref(), Some("read-only"), "a new run of failures is told again");
+    }
+
+    /// A failed save offers "Save as…", a failed autosave "Save now": both
+    /// stay until read, and the editor routes the click to the save.
+    #[test]
+    fn failed_saves_offer_a_way_forward() {
+        let ctx = egui::Context::default();
+        say_save_failed(&ctx, "Could not write the project: disk full");
+        say_autosave_failed(&ctx, "disk full");
+        let seen = kit::recent(&ctx);
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[1].action.as_deref(), Some("Save as…"));
+        assert_eq!(seen[0].action.as_deref(), Some("Save now"));
+        assert!(seen[0].text.contains("disk full") && seen.iter().all(|t| t.level == kit::toast::Level::Warning));
+        for t in &seen {
+            assert!(crate::editor::save_route(t.action.as_deref().unwrap()).is_some(), "{} has no route", t.text);
+        }
     }
 
     /// PR-5: an autosave keeps the undo history, so a reopen still undoes.

@@ -38,7 +38,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     if export_btn.clicked() {
         run(app, &ctx, Action::Export);
     }
-    jobs_button(&mut app.jobs, &mut right);
+    if let Some(id) = jobs_button(&mut app.jobs, &mut right) {
+        retry_job(app, &ctx, id);
+    }
     let right_start = right.min_rect().left();
 
     let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -503,7 +505,7 @@ fn job_status(j: &crate::app::Job) -> String {
 }
 
 /// How many finished jobs the popover keeps listed.
-const KEPT_FINISHED: usize = 6;
+const KEPT_FINISHED: usize = Jobs::KEPT_FINISHED;
 
 /// Every running job and the last few finished ones, newest first.
 fn shown_jobs(list: &[crate::app::Job]) -> Vec<&crate::app::Job> {
@@ -521,7 +523,8 @@ fn shown_jobs(list: &[crate::app::Job]) -> Vec<&crate::app::Job> {
 }
 
 /// Jobs button: a spinner while anything runs; opens the jobs popover.
-fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
+fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) -> Option<u64> {
+    let mut retry = None;
     let t = theme::tokens(ui.ctx());
     let running = jobs.running();
     let id = ui.scope_id().with("jobs");
@@ -558,6 +561,12 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
             let bar = Rect::from_min_size(egui::pos2(r.left() + 8.0, r.bottom() - 6.0), Vec2::new(r.width() - 50.0, 3.0));
             p.rect_filled(bar, CornerRadius::same(2), t.raised);
             p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * j.progress, 3.0)), CornerRadius::same(2), if failed(j) { t.danger } else if j.cancelled { t.text_2 } else { t.accent });
+            if can_retry(j) {
+                let br = Rect::from_center_size(egui::pos2(r.right() - 18.0, r.center().y), Vec2::splat(24.0));
+                if IconButton::new(Icon::ArrowCounterClockwise, "Retry").size(24.0, 14.0).show_at(ui, br).clicked() {
+                    retry = Some(j.id);
+                }
+            }
             if !j.done && !j.cancelled {
                 let br = Rect::from_center_size(egui::pos2(r.right() - 18.0, r.center().y), Vec2::splat(24.0));
                 if IconButton::new(Icon::X, "Cancel job").size(24.0, 14.0).show_at(ui, br).clicked() {
@@ -569,7 +578,36 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
             jobs.cancel(id);
         }
     });
+    retry
 }
+
+/// A failed or cancelled export that kept its request can run again.
+fn can_retry(j: &crate::app::Job) -> bool {
+    #[cfg(feature = "render")]
+    return (j.error.is_some() || j.cancelled) && j.request.is_some();
+    #[cfg(not(feature = "render"))]
+    return {
+        let _ = j;
+        false
+    };
+}
+
+/// Retry: the export runs again as a new job with the same request.
+#[cfg(feature = "render")]
+fn retry_job(app: &mut StudioApp, ctx: &egui::Context, id: u64) {
+    let doc = &app.doc;
+    match app.jobs.retry_with(id, |req| crate::export_run::start(doc, req.clone())) {
+        Some(_) => {
+            kit::push(ctx, "Export started again", None, Some(Icon::ArrowCounterClockwise));
+        }
+        None => {
+            kit::push(ctx, "That export can't be run again; start it from Export", None, Some(Icon::Info));
+        }
+    }
+}
+
+#[cfg(not(feature = "render"))]
+fn retry_job(_app: &mut StudioApp, _ctx: &egui::Context, _id: u64) {}
 
 #[cfg(test)]
 mod tests {
@@ -591,7 +629,7 @@ mod tests {
     }
 
     fn job(id: u64, done: bool, cancelled: bool, error: Option<&str>) -> crate::app::Job {
-        crate::app::Job { id, name: format!("Export {id}"), detail: String::new(), progress: 0.5, length: 10.0, done, cancelled, task: None, started: 0.0, error: error.map(str::to_owned), path: None }
+        crate::app::Job { id, name: format!("Export {id}"), detail: String::new(), progress: 0.5, length: 10.0, done, cancelled, task: None, started: 0.0, error: error.map(str::to_owned), path: None, #[cfg(feature = "render")] request: None }
     }
 
     #[test]

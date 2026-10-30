@@ -399,6 +399,16 @@ fn run_then(st: &mut PaintState, label: &str, ops: Vec<Value>, then: Option<Then
     st.jobs.push(Job { label: label.to_owned(), rx, then });
 }
 
+/// After undo, redo or a history jump the animation re-reads its drawings
+/// from the picture: it kept its own count, which a deleted (or brought-back)
+/// drawing leaves stale until the next frame operation. A picture that is
+/// not an animation says so, which is fine here.
+fn resync_animation() {
+    if let Err(e) = crate::paint::apply(&[json!({"op": "flipbook"})]) {
+        eprintln!("animation not re-read after history: {e}");
+    }
+}
+
 fn poll_jobs(st: &mut PaintState, ctx: &egui::Context) {
     let mut done = Vec::new();
     st.jobs.retain(|j| match j.rx.try_recv() {
@@ -422,6 +432,9 @@ fn poll_jobs(st: &mut PaintState, ctx: &egui::Context) {
                     }
                 }
                 st.status = format!("{label} ✓");
+                if matches!(label.as_str(), "Undo" | "Redo" | "History") {
+                    std::thread::spawn(resync_animation);
+                }
             }
             Err(e) => st.status = format!("{label}: {e}"),
         }
@@ -1372,6 +1385,44 @@ fn shortcuts(st: &mut PaintState, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn layer_count() -> usize {
+        crate::paint::canvas().summary().ok().and_then(|s| s["layers"].as_array().map(Vec::len)).unwrap_or(0)
+    }
+
+    /// Delete layer is a history step: Undo brings the layer back, Redo removes it again.
+    #[test]
+    fn deleting_a_layer_can_be_undone() {
+        let _turn = crate::paint::test_lock();
+        crate::paint::apply(&[json!({"op": "new", "name": "Delete test", "width": 64, "height": 64, "background": "white"})]).unwrap();
+        crate::paint::apply(&[json!({"op": "layer", "action": "new"})]).unwrap();
+        let before = layer_count();
+        assert!(before >= 2, "{before}");
+        crate::paint::apply(&[json!({"op": "layer", "action": "delete"})]).unwrap();
+        assert_eq!(layer_count(), before - 1);
+        crate::paint::apply(&[json!({"op": "undo"})]).unwrap();
+        assert_eq!(layer_count(), before, "undo brings the deleted layer back");
+        crate::paint::apply(&[json!({"op": "redo"})]).unwrap();
+        assert_eq!(layer_count(), before - 1);
+    }
+
+    /// Delete drawing, in an animation, is a history step too.
+    #[test]
+    fn deleting_a_drawing_can_be_undone() {
+        let _turn = crate::paint::test_lock();
+        crate::paint::apply(&[json!({"op": "new", "name": "Frame test", "width": 64, "height": 64, "background": "white"})]).unwrap();
+        crate::paint::apply(&[json!({"op": "animate", "drawings": 4, "fps": 12, "hold": 1})]).unwrap();
+        let drawings = || crate::paint::canvas().summary().ok().and_then(|s| s["flipbook"]["drawings"].as_u64().or_else(|| s["flipbook"]["drawings"].as_array().map(|a| a.len() as u64)));
+        let before = drawings();
+        assert!(before.is_some_and(|n| n >= 2), "{before:?}");
+        crate::paint::apply(&[json!({"op": "frame", "action": "delete"})]).unwrap();
+        assert_eq!(drawings().map(|n| n + 1), before);
+        crate::paint::apply(&[json!({"op": "undo"})]).unwrap();
+        // The panel's counts come from the animation, which re-reads the picture after history.
+        assert_eq!(drawings(), Some(before.unwrap() - 1), "stale until it is re-read");
+        resync_animation();
+        assert_eq!(drawings(), before, "undo brings the drawing back");
+    }
 
     #[test]
     fn every_tool_has_an_icon_that_rasterises() {
