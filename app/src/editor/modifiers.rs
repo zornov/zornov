@@ -108,12 +108,6 @@ pub fn take(mc: &mut m::Clip, paths: &[String], kind: &str) {
     }
 }
 
-/// The label column of a [`FieldRow`] at this width: narrow panels give the label less room.
-// TODO(kit): `labeled_row` should take this from the same place as `FieldRow`.
-fn label_col(ui: &egui::Ui) -> f32 {
-    if ui.available_width() < 260.0 { 80.0 } else { kit::label_width(ui.ctx()) }
-}
-
 /// Width of the reset and keyframe slots every `FieldRow` keeps at its end.
 // TODO(kit): a token for the row's end slots.
 const END_SLOTS: f32 = 40.0;
@@ -122,7 +116,7 @@ const END_SLOTS: f32 = 40.0;
 /// content that stops where the value fields stop.
 // TODO(kit): `labeled_row` with the narrow label and end slots.
 fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32) -> R) -> R {
-    let lw = label_col(ui);
+    let lw = super::params::label_col(ui);
     let full = ui.available_width();
     let w = (full - lw - END_SLOTS).max(40.0);
     let t = theme::tokens(ui.ctx());
