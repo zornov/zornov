@@ -454,21 +454,22 @@ pub fn graph_ui(ui: &mut egui::Ui, area: Rect, g: &mut Graph, st: &mut State) ->
             }
             st.drag_from = st.ids().into_iter().filter_map(|i| g.node(i).map(|n| (i, n.pos))).collect();
         }
-        if resp.dragged() && st.wiring.is_none() {
-            if let Some(total) = resp.total_drag_delta() {
-                let d = total / st.scale();
-                let from = st.drag_from.clone();
-                let mut moved = false;
-                for (nid, p0) in from {
-                    let to = st.snap([p0[0] + d.x, p0[1] + d.y]);
-                    if let Some(nm) = g.node_mut(nid).filter(|nm| nm.pos != to) {
-                        nm.pos = to;
-                        moved = true;
-                    }
+        if resp.dragged()
+            && st.wiring.is_none()
+            && let Some(total) = resp.total_drag_delta()
+        {
+            let d = total / st.scale();
+            let from = st.drag_from.clone();
+            let mut moved = false;
+            for (nid, p0) in from {
+                let to = st.snap([p0[0] + d.x, p0[1] + d.y]);
+                if let Some(nm) = g.node_mut(nid).filter(|nm| nm.pos != to) {
+                    nm.pos = to;
+                    moved = true;
                 }
-                if moved {
-                    change = Change::Live("Move nodes");
-                }
+            }
+            if moved {
+                change = Change::Live("Move nodes");
             }
         }
         if resp.drag_stopped() {
@@ -563,13 +564,14 @@ pub fn graph_ui(ui: &mut egui::Ui, area: Rect, g: &mut Graph, st: &mut State) ->
                 }
             }
             let mi = ui.interact(mr, ui.scope_id().with(("comp-mask", id)), Sense::click_and_drag());
-            if mi.drag_started() && st.wiring.is_none() {
-                if let Some(src) = n.mask {
-                    st.wiring = Some(src);
-                    st.pulled = true;
-                    g.disconnect_mask(id);
-                    change = Change::Edit("Disconnect");
-                }
+            if mi.drag_started()
+                && st.wiring.is_none()
+                && let Some(src) = n.mask
+            {
+                st.wiring = Some(src);
+                st.pulled = true;
+                g.disconnect_mask(id);
+                change = Change::Edit("Disconnect");
             }
             if mi.secondary_clicked() && g.disconnect_mask(id) {
                 change = Change::Edit("Disconnect");
@@ -843,7 +845,8 @@ pub(super) fn claim_delete(app: &mut StudioApp, ctx: &egui::Context) {
 }
 
 /// Adds a node of `kind` after the selected node (or the output).
-pub fn add_after(g: &mut Graph, st: &mut State, kind: &str) -> NodeId {
+#[cfg(test)]
+fn add_after(g: &mut Graph, st: &mut State, kind: &str) -> NodeId {
     let after = st.selected.or(g.output_id());
     add_after_node(g, st, kind, after)
 }
