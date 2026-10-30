@@ -489,7 +489,7 @@ impl eframe::App for StudioApp {
                         self.reveal = Some((id, p.clone()));
                     }
                     if job.task.is_some() && self.cli.shot.is_none() {
-                        crate::chime::play();
+                        crate::chime::play_unless(self.prefs.quiet_chime);
                     }
                     id
                 }
@@ -531,9 +531,7 @@ impl eframe::App for StudioApp {
         // (above the transport), never both.
         if !matches!(self.screen, Screen::Editor | Screen::Export | Screen::Settings) {
             if let Some(id) = kit::show_overlay(&ctx) {
-                if let Some((_, path)) = self.reveal.take().filter(|(rid, _)| *rid == id) {
-                    let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
-                }
+                editor::toast_action(self, &ctx, id);
             }
         }
         crate::release::notice(self, &ctx);
