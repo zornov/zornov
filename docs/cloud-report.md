@@ -17,6 +17,7 @@ There are no `Cargo.lock` changes and no dependency changes. The only manifest e
 - The GPU tests ran on Mesa lavapipe, a software Vulkan driver, so they actually ran rather than skipping for lack of an adapter.
 - Tests that talk to a local HTTP server need the sandbox's `HTTPS_PROXY` variables cleared. `studio-update`'s `tests/e2e.rs` and `studio-net`'s localhost tests fail on `main` too when those variables are set, and pass once they are cleared.
 - For every package I read the diff and reran its tests myself before merging.
+- I then ran `cargo test --workspace --no-fail-fast` once on the merged `cloud/integration` (Rust 1.99.1, lavapipe, proxy variables cleared, under `timeout 7000`). Across 213 test binaries: **4044 passed, 0 failed, 62 ignored**.
 
 ## 1. Web fetch guard (`cloud/sec-webfetch`)
 
