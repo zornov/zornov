@@ -50,10 +50,7 @@ pub fn fps(doc: &Doc) -> f32 {
 
 /// A track from timed words, segmented and conformed to `spec`.
 pub fn from_words(words: Vec<Word>, lang: &str, spec: &SubtitleSpec, shots: &[f32]) -> SubTrack {
-    let mut style = CaptionStyle::default();
-    style.max_chars_per_line = spec.max_chars_per_line;
-    style.max_lines = spec.max_lines;
-    style.reading_speed_cps = spec.max_cps;
+    let style = CaptionStyle { max_chars_per_line: spec.max_chars_per_line, max_lines: spec.max_lines, reading_speed_cps: spec.max_cps, ..CaptionStyle::default() };
     let mut ct = CaptionTrack::from_words(words, style, |_| None);
     studio_text::subtitles::conform(&mut ct, spec, shots);
     sub_track(&ct, lang, "subtitles")
