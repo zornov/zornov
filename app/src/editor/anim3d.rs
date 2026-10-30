@@ -72,7 +72,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], _c: &Clip)
             let rig = crate::mesh_store::load(&mc).ok().and_then(|mesh| mesh.rig.clone());
             Section::new("character3d", "Character").icon(Icon::Sparkle).show(ui, |ui| match &rig {
                 None => {
-                    ui.label(egui::RichText::new("Give it bones to animate it: they are fitted to the model and its skin is bound automatically.").font(theme::caption()).color(t.text_2));
+                    ui.label(egui::RichText::new("Add bones to animate it; they fit the model and skin binds itself").font(theme::caption()).color(t.text_2));
                     ui.horizontal_wrapped(|ui| {
                         for (label, template) in [("Rig as person", "humanoid"), ("Rig as animal", "quadruped"), ("Rig as chain", "chain")] {
                             if Button::secondary(label).show(ui).clicked() {
@@ -187,7 +187,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], _c: &Clip)
                 if changed {
                     run(app, &ctx, vec![json!({"op": "render3d", "camera": id, "mode": if path { "path" } else { "raster" }, "samples": samples.round(), "motion_blur": shutter / 360.0})], "Render settings");
                 }
-                ui.label(egui::RichText::new("Path tracing renders models with soft shadows, bounced light, glass and glowing surfaces; previews use fewer samples.").font(theme::caption()).color(t.text_2));
+                ui.label(egui::RichText::new("Path tracing: soft shadows, bounced light, glass, glow; previews use fewer samples").font(theme::caption()).color(t.text_2));
             });
             world_section(app, ui, &ctx);
         }

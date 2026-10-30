@@ -1364,3 +1364,4 @@ dock-move-heading = Mover { $panel } a…
 editorial-panel = Editorial
 pop-out = Abrir en ventana aparte
 dock-back = Volver a acoplar
+feedback = Comentarios

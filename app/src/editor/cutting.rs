@@ -899,7 +899,14 @@ mod tests {
         (app, ctx, eframe::Frame::_new_kittest())
     }
 
-    fn draw(app: &mut StudioApp, ctx: &egui::Context, frame: &mut eframe::Frame, t: f64, events: Vec<egui::Event>) {
+    fn draw(app: &mut StudioApp, ctx: &egui::Context, frame: &mut eframe::Frame, t: f64, mut events: Vec<egui::Event>) {
+        // Each key is let go in the same frame, as a typed key is: a key
+        // that is never released reads as held, so its next press is a repeat.
+        let releases: Vec<egui::Event> = events.iter().filter_map(|e| match e {
+            egui::Event::Key { key, physical_key, modifiers, .. } => Some(egui::Event::Key { key: *key, physical_key: *physical_key, pressed: false, repeat: false, modifiers: *modifiers }),
+            _ => None,
+        }).collect();
+        events.extend(releases);
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), time: Some(t), events, ..Default::default() };
         // One headless frame, finished as a window's backend would.
         let mut out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, frame));

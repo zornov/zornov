@@ -1364,3 +1364,4 @@ dock-move-heading = جابه‌جایی { $panel } به…
 editorial-panel = فهرست تدوین
 pop-out = باز کردن در پنجرهٔ جدا
 dock-back = چسباندن دوباره
+feedback = بازخورد
