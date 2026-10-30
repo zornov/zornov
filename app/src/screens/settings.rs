@@ -278,6 +278,10 @@ fn general(app: &mut StudioApp, ui: &mut egui::Ui) {
             kit::toggle(ui, &mut p.announce, "Spoken updates", None);
         });
         note(ui, "Tell a screen reader what changed: undo, split, selection, export.");
+        kit::labeled_row(ui, "Quiet export chime", |ui| {
+            kit::toggle(ui, &mut p.quiet_chime, "Quiet export chime", None);
+        });
+        note(ui, "Finish an export without the two-note chime.");
         kit::labeled_row(ui, "Tips", |ui| {
             kit::toggle(ui, &mut p.tips_on, "Tips", None);
         });
@@ -847,13 +851,25 @@ fn forget_saved_label(ui: &egui::Ui, account: &str) {
     ui.data_mut(|d| d.remove::<String>(egui::Id::unique(("key-saved-label", account))));
 }
 
+/// A Remove button that asks for a second click: the first arms it ("Click
+/// again to remove"), the second within the window returns true. For what
+/// undo cannot bring back (a saved key, a downloaded model, a team member).
+pub(crate) fn remove_click(ui: &mut egui::Ui, id: egui::Id, min_width: Option<f32>) -> bool {
+    let label = if kit::armed(ui.ctx(), id) { "Click again to remove" } else { "Remove" };
+    let mut b = Button::secondary(label).icon(Icon::Trash);
+    if let Some(w) = min_width {
+        b = b.min_width(w);
+    }
+    b.show(ui).clicked() && kit::confirm_click(ui.ctx(), id)
+}
+
 /// A key's row: saved (with Remove) or a field to paste one into.
 fn key_row(ui: &mut egui::Ui, account: &str, saved: bool, typed: &mut String, note_out: &mut Option<String>, mut set_saved: impl FnMut(bool)) {
     use crate::agent::keychain;
     kit::labeled_row(ui, "API key", |ui| {
         if saved {
             ui.label(egui::RichText::new(crate::i18n::shown(&saved_label(ui, account))).font(theme::body()));
-            if Button::secondary("Remove").icon(Icon::Trash).show(ui).clicked() {
+            if remove_click(ui, egui::Id::unique(("remove-api-key", account)), None) {
                 keychain::remove_api_key(account);
                 forget_saved_label(ui, account);
                 set_saved(false);
@@ -963,7 +979,7 @@ fn models(app: &mut StudioApp, ui: &mut egui::Ui) {
                 m.verify(row.id);
                 ui.ctx().request_repaint();
             }
-            if Button::secondary("Remove").icon(Icon::Trash).min_width(104.0).show(&mut bui).clicked() {
+            if remove_click(&mut bui, egui::Id::unique(("remove-model", row.id)), Some(104.0)) {
                 m.clear_verify(row.id);
                 match m.remove(row.id) {
                     Ok(()) => {
@@ -1041,6 +1057,50 @@ mod no_account_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn click_at(ctx: &egui::Context, time: f64, pos: egui::Pos2, f: &mut dyn FnMut(&mut egui::Ui)) {
+        let mut input = egui::RawInput { time: Some(time), screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() };
+        input.events = vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }, egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }];
+        ctx.run_ui(input, |ui| f(ui)).textures_delta.clear();
+    }
+
+    /// The Remove buttons for keys, models and team members take two clicks.
+    #[test]
+    fn remove_takes_a_second_click() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::unique("test-remove");
+        let at = std::cell::Cell::new(egui::Pos2::ZERO);
+        let removed = std::cell::Cell::new(0);
+        let mut draw = |ui: &mut egui::Ui| {
+            let go = remove_click(ui, id, None);
+            at.set(ui.min_rect().center());
+            if go {
+                removed.set(removed.get() + 1);
+            }
+        };
+        ctx.run_ui(egui::RawInput { time: Some(0.0), screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))), ..Default::default() }, |ui| draw(ui)).textures_delta.clear();
+        let pos = at.get();
+        click_at(&ctx, 0.1, pos, &mut draw);
+        assert_eq!(removed.get(), 0, "one click removes nothing");
+        assert!(kit::armed(&ctx, id), "the button now asks to be clicked again");
+        click_at(&ctx, 0.5, pos, &mut draw);
+        assert_eq!(removed.get(), 1, "the second click removes");
+        assert!(!kit::armed(&ctx, id));
+    }
+
+    /// Settings ▸ General offers the quiet-chime toggle, off by default.
+    #[test]
+    fn general_offers_the_quiet_chime_toggle() {
+        use crate::app::Overlay;
+        use crate::ui_tests::Harness;
+        let _serial = crate::ui_tests::serial();
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Settings;
+        h.app.settings.page = PAGES.iter().position(|p| p.0 == "General").expect("a General page");
+        h.frames(3);
+        assert!(!h.app.prefs.quiet_chime);
+        assert!(h.nodes().iter().any(|(r, l)| *r == egui::accesskit::Role::CheckBox && l == "Quiet export chime"), "{:?}", h.labels());
+    }
 
     /// Esc while a shortcut is being captured cancels the capture and leaves
     /// Settings open; the next Esc closes Settings.

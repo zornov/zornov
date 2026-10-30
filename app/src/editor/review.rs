@@ -674,7 +674,7 @@ fn team_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(&mem.name).color(t.text));
             ui.label(egui::RichText::new(mem.role.name()).font(theme::caption()).color(t.text_2));
-            if role == team::Role::Owner && !mem.name.eq_ignore_ascii_case(&me) && ui.small_button("Remove").clicked() {
+            if role == team::Role::Owner && !mem.name.eq_ignore_ascii_case(&me) && crate::screens::settings::remove_click(ui, egui::Id::unique(("remove-member", &mem.name)), None) {
                 with(|u| {
                     if let Err(e) = u.team.remove_member(&me, &mem.name) {
                         u.status = Some(e);
