@@ -60,7 +60,8 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, key))
 }
 
-/// Every action with keys: the Settings table.
+/// Every action with keys: the Settings table. (⇧⌘P stays Paint's, in
+/// `FIXED`, so the command palette is ⌥⌘P; ⌘K stays the Assistant.)
 fn table() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
     SHORTCUTS.iter()
 }
@@ -386,6 +387,20 @@ mod tests {
         for id in ["agent", "overlays", "all-projects"] {
             assert!(keys(&Prefs::default(), id).and_then(parse).is_some(), "{id} has no default keys");
         }
+    }
+
+    #[test]
+    fn the_palette_has_keys_that_clash_with_nothing() {
+        let p = Prefs::default();
+        let k = parse(keys(&p, "palette").unwrap()).unwrap();
+        assert_eq!(name("palette"), "Command palette");
+        assert!(clashes_with(&p, "palette").is_empty());
+        assert!(FIXED.iter().all(|(f, _, _)| parse(f) != Some(k)), "a fixed key is the palette's");
+        assert!(SHORTCUTS.iter().filter(|(id, _, _)| *id != "palette").all(|(_, _, d)| parse(d) != Some(k)));
+        // A person who gives it ⌘K gets the clash reported with the Assistant.
+        let mut p = Prefs::default();
+        p.shortcuts.push(("palette".into(), "⌘K".into()));
+        assert_eq!(clashes_with(&p, "palette"), vec!["agent"]);
     }
 
     #[test]
