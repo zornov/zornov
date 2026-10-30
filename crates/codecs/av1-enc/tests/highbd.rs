@@ -209,3 +209,28 @@ fn eight_bit_streams_are_byte_identical_to_before() {
 }
 
 const BASELINE_8BIT: [u64; 3] = [0x9142acfe3a118cb2, 0x029a9627b73857dd, 0x172d1c0c06e55976];
+
+/// Crf and Bitrate rate control on 10-bit content: bit-exact, and the bitrate lands in the
+/// neighbourhood of its target (the size model was written for 8-bit content).
+#[test]
+fn ten_bit_rate_control_modes_work() {
+    let frames = sequence10(160, 96, 12, false, 2, 31);
+    let fps = 30.0;
+    for rate in [RateMode::Crf(30), RateMode::Bitrate(200), RateMode::Bitrate(800)] {
+        let mut enc = Encoder::new(Config { rate, bit_depth: 10, ..Config::new(160, 96) }).unwrap();
+        let mut dec = Decoder::new();
+        let mut bytes = 0;
+        for (i, f) in frames.iter().enumerate() {
+            let p = enc.push_frame(f, i as i64).unwrap().remove(0);
+            bytes += p.data.len();
+            let mut pics = dec.decode(&p.data).unwrap();
+            pics.extend(dec.flush_result().unwrap());
+            assert_eq!(pics[0].planes[0], enc.reconstruction().unwrap().planes[0]);
+        }
+        let kbps = bytes as f64 * 8.0 * fps / frames.len() as f64 / 1000.0;
+        eprintln!("{rate:?}: {bytes} B, {kbps:.0} kbit/s");
+        if let RateMode::Bitrate(t) = rate {
+            assert!(kbps > t as f64 * 0.4 && kbps < t as f64 * 2.5, "{kbps:.0} kbit/s for a {t} target");
+        }
+    }
+}
