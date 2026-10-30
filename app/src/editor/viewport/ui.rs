@@ -82,6 +82,9 @@ pub struct Pane {
     pub nav: Nav,
     /// Looking through this camera clip.
     pub camera: Option<u64>,
+    /// How far the pane's name and view gizmo sit lower so the edit bar stays clear of them.
+    pub label_dy: f32,
+    pub gizmo_dy: f32,
 }
 
 impl Pane {
@@ -333,6 +336,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, area: Rect) -> bool
     painter.rect_filled(body, 0, if th.dark { Color32::from_rgb(38, 39, 42) } else { Color32::from_rgb(170, 172, 176) });
     let depth_map = depths(app, time);
     let objs = super::objects(&app.doc, time, ws.cards.then_some(&depth_map), &ws.hidden);
+    BAR.with(|b| b.set(Some(crate::editor::model_edit::menus::bar_rect(&ctx, body))));
     let panes = panes_of(app, &ws, body, time);
     LAST_PANES.with(|p| *p.borrow_mut() = panes.clone());
     for pane in &panes {
@@ -366,6 +370,24 @@ pub fn body_of(r: Rect, area: Rect) -> Rect {
 }
 
 /// The views on screen: one, or four in quad view.
+thread_local! {
+    // The edit bar's rectangle this frame (None when it is not drawn).
+    static BAR: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+fn label_rect(pane: Rect) -> Rect {
+    Rect::from_min_size(pane.left_top() + Vec2::new(10.0, 8.0), Vec2::new(150.0, 16.0))
+}
+
+fn gizmo_rect(pane: Rect) -> Rect {
+    Rect::from_center_size(pane.right_top() + Vec2::new(-GIZMO_R - 14.0, GIZMO_R + 14.0), Vec2::splat(GIZMO_R * 2.0 + 16.0))
+}
+
+/// How far to move `r` down so it no longer meets `bar` (0 when they do not meet).
+fn clear_of(bar: Rect, r: Rect) -> f32 {
+    if r.intersects(bar) { bar.bottom() + 4.0 - r.top() } else { 0.0 }
+}
+
 pub fn panes_of(app: &StudioApp, ws: &Workspace, body: Rect, time: Time) -> Vec<Pane> {
     let rects: Vec<(usize, Rect)> = if ws.quad {
         let c = body.center();
@@ -398,7 +420,11 @@ pub fn panes_of(app: &StudioApp, ws: &Workspace, body: Rect, time: Time) -> Vec<
             cover(rect, aspect)
         };
         let scale = picture.width() / w as f32;
-        panes.push(Pane { index, rect, picture, scale, view, nav, camera });
+        let (label_dy, gizmo_dy) = match BAR.with(std::cell::Cell::get) {
+            Some(bar) => (clear_of(bar, label_rect(rect)), clear_of(bar, gizmo_rect(rect))),
+            None => (0.0, 0.0),
+        };
+        panes.push(Pane { index, rect, picture, scale, view, nav, camera, label_dy, gizmo_dy });
     }
     panes
 }
@@ -508,7 +534,7 @@ fn draw_pane(app: &mut StudioApp, ui: &mut egui::Ui, pane: &Pane, ws: &Workspace
     }
     let name = pane_name(ws, pane, &app.doc);
     let th = theme::tokens(&ctx);
-    p.text(pane.rect.left_top() + Vec2::new(10.0, 8.0), Align2::LEFT_TOP, name, theme::caption(), th.text);
+    p.text(pane.rect.left_top() + Vec2::new(10.0, 8.0 + pane.label_dy), Align2::LEFT_TOP, name, theme::caption(), th.text);
     if let Some(rec) = &ws.rt.recording {
         p.circle_filled(pane.rect.left_top() + Vec2::new(16.0, 34.0), 5.0, Color32::from_rgb(230, 60, 60));
         p.text(pane.rect.left_top() + Vec2::new(26.0, 34.0), Align2::LEFT_CENTER, format!("Recording camera path · {} samples", rec.samples.len()), theme::caption(), th.text);
@@ -698,7 +724,7 @@ fn wireframe(p: &egui::Painter, pane: &Pane, file: &str, mx: &[[f64; 4]; 3], col
 const GIZMO_R: f32 = 38.0;
 
 fn gizmo_centre(pane: &Pane) -> Pos2 {
-    pane.rect.right_top() + Vec2::new(-GIZMO_R - 14.0, GIZMO_R + 14.0)
+    pane.rect.right_top() + Vec2::new(-GIZMO_R - 14.0, GIZMO_R + 14.0 + pane.gizmo_dy)
 }
 
 /// The axis balls of the view gizmo: (screen position, axis index, sign,

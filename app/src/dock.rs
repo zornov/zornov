@@ -54,7 +54,7 @@ impl Panel {
             Panel::Timeline => "Timeline",
             Panel::Sound => "Sound",
             Panel::Scopes => "Scopes",
-            Panel::Review => "Review",
+            Panel::Review => "Feedback",
             Panel::Record => "Record",
             Panel::Editorial => "Editorial",
             Panel::Ai => "Assistant",
@@ -1536,5 +1536,15 @@ mod tests {
         assert_eq!(Panel::parse("agent"), Some(Panel::Ai));
         assert_eq!(Zone::parse("below"), Some(Zone::Bottom));
         assert_eq!(Zone::Left.mirrored(), Zone::Right);
+    }
+
+    #[test]
+    fn no_panel_shares_its_name_with_a_workspace() {
+        let spaces: Vec<String> = crate::workspaces::builtin().into_iter().map(|w| w.name.to_ascii_lowercase()).collect();
+        for p in Panel::ALL {
+            assert!(!spaces.contains(&p.name().to_ascii_lowercase()), "{} is both a panel and a workspace", p.name());
+        }
+        assert_eq!(Panel::Review.name(), "Feedback");
+        assert_eq!(Panel::parse("review"), Some(Panel::Review), "the old name still reaches it");
     }
 }

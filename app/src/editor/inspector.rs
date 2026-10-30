@@ -194,7 +194,7 @@ fn sequence(app: &mut StudioApp, ui: &mut egui::Ui) {
                 p.height = h as u32;
             });
         }
-        kit::labeled_row(ui, "Frame rate", |ui| {
+        super::params::labeled_row(ui, "Frame rate", |ui| {
             let rates = [24.0, 25.0, 30.0, 50.0, 60.0];
             let names = ["24 fps", "25 fps", "30 fps", "50 fps", "60 fps"];
             let cur = rates.iter().position(|r| *r == p.fps).unwrap_or(2);
@@ -202,7 +202,7 @@ fn sequence(app: &mut StudioApp, ui: &mut egui::Ui) {
                 app.doc.edit("Frame rate", |p| p.fps = rates[i]);
             }
         });
-        kit::labeled_row(ui, "Background", |ui| {
+        super::params::labeled_row(ui, "Background", |ui| {
             let mut c = p.background;
             if kit::colour_well(ui, "seq-bg", &mut c, None).changed() {
                 app.doc.edit_gesture("seq-bg", "Background", |p| p.background = c);
@@ -225,7 +225,7 @@ fn cut_section(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
         let items = catalogue::cuts();
         let names: Vec<&str> = items.iter().map(|i| i.name).collect();
         let cur = items.iter().position(|i| i.id == tr.kind).unwrap_or(0);
-        kit::labeled_row(ui, "Style", |ui| {
+        super::params::labeled_row(ui, "Style", |ui| {
             if let Some(i) = kit::menu_button(ui, "cut-kind", cur, &names, ui.available_width() - 40.0, None) {
                 let kind = items[i].id.to_owned();
                 app.doc.edit("Change cut", |p| {
@@ -247,7 +247,7 @@ fn cut_section(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
             });
         }
         ui.horizontal(|ui| {
-            ui.add_space(kit::LABEL_W);
+            ui.add_space(super::params::label_col(ui));
             if Button::ghost("Remove cut").icon(Icon::Trash).compact().show(ui).clicked() {
                 if app.doc.apply("Remove cut", m::Edit::RemoveTransition { seq, id: m::TransitionId(id) }) {
                     app.editor.selected_cut = None;
@@ -363,7 +363,7 @@ fn links(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
     let current = me.parent.as_ref().and_then(|p| candidates.iter().position(|(c, _)| *c == p.clip.0)).map_or(0, |i| i + 1);
     let playhead = app.editor.playhead;
     let mut said: Option<Result<String, String>> = None;
-    kit::labeled_row(ui, "Parent", |ui| {
+    super::params::labeled_row(ui, "Parent", |ui| {
         if let Some(i) = kit::menu_button(ui, "parent", current, &refs, ui.available_width() - 40.0, None) {
             said = Some(layers::set_parent(&mut app.doc, id, (i > 0).then(|| candidates[i - 1].0), playhead));
         }
@@ -372,7 +372,7 @@ fn links(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
     let now = layers::matte_of(&app.doc, id);
     let modes: Vec<&str> = std::iter::once("None").chain(layers::MATTES.iter().map(|m| m.1)).collect();
     let cur = now.and_then(|(mode, _)| layers::MATTES.iter().position(|m| m.0 == mode)).map_or(0, |i| i + 1);
-    kit::labeled_row(ui, "Track matte", |ui| {
+    super::params::labeled_row(ui, "Track matte", |ui| {
         if let Some(i) = kit::menu_button(ui, "track-matte", cur, &modes, ui.available_width() - 40.0, None) {
             said = Some(set_matte(app, id, now, i));
         }
@@ -643,7 +643,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
             if resp.lost_focus() {
                 app.doc.end_gesture();
             }
-            kit::labeled_row(ui, "Colour", |ui| {
+            super::params::labeled_row(ui, "Colour", |ui| {
                 let mut col = c.text_colour;
                 if kit::colour_well(ui, "text-colour", &mut col, None).changed() {
                     let ids2 = ids.to_vec();
@@ -708,7 +708,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
             prop(app, ui, ids, "transform.scale_x", "Scale", |c| c.transform.scale, |c, v| c.transform.scale = v, 1.0..=1000.0, 100.0, "%", 0);
             prop(app, ui, ids, "transform.rotation", "Rotation", |c| c.transform.rotation, |c, v| c.transform.rotation = v, -360.0..=360.0, 0.0, "°", 1);
             prop(app, ui, ids, "transform.opacity", "Opacity", |c| c.transform.opacity, |c, v| c.transform.opacity = v, 0.0..=100.0, 100.0, "%", 0);
-            kit::labeled_row(ui, "Blend", |ui| {
+            super::params::labeled_row(ui, "Blend", |ui| {
                 let names: Vec<&str> = crate::bridge::BLENDS.iter().map(|b| b.1).collect();
                 if let Some(i) = kit::menu_button(ui, "blend", c.extra.blend as usize, &names, ui.available_width() - 40.0, None) {
                     edit_all(app, ids, "Blend mode", |c| c.extra.blend = i as u8);
@@ -733,6 +733,48 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
         super::anim3d::inspector(app, ui, ids, c);
     }
 
+    if kind == ClipKind::Video || kind == ClipKind::Audio {
+        let out = Section::new("speed", "Speed").icon(Icon::Timer).resettable(c.speed != 100.0 || c.extra.reverse).show(ui, |ui| {
+            // Speed as a multiplier, 0.1×–100×, with quick picks.
+            let mut v = c.speed / 100.0;
+            let o = FieldRow::new("Speed", &mut v, 0.1..=100.0).default(1.0).unit("×").decimals(2).step(0.01).scrub(0.01).no_slider().show(ui);
+            let mut pick = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(super::params::label_col(ui));
+                ui.spacing_mut().item_spacing.x = 6.0;
+                for (label, k) in [("0.5×", 0.5), ("1×", 1.0), ("2×", 2.0), ("4×", 4.0)] {
+                    if kit::chip(ui, label, (v - k).abs() < 1e-3, None).clicked() {
+                        pick = Some(k);
+                    }
+                }
+            });
+            if o.changed || pick.is_some() {
+                let v = pick.unwrap_or(v);
+                // Constant speed changes the clip's length; the model
+                // ripples the spine.
+                let seq = app.doc.seq();
+                let edits = ids.iter().map(|id| m::Edit::SetSpeed { seq, clip: m::ClipId(*id as u64), speed: m::Speed::Constant(v as f64) }).collect();
+                if pick.is_some() {
+                    app.doc.apply("Speed", m::Edit::Batch { edits });
+                } else {
+                    app.doc.apply_gesture(&format!("speed-{ids:?}"), "Speed", m::Edit::Batch { edits });
+                }
+            }
+            super::params::labeled_row(ui, "Reverse", |ui| {
+                let mut rev = c.extra.reverse;
+                if kit::toggle(ui, &mut rev, "Reverse", None).changed() {
+                    edit_all(app, ids, "Reverse", |c| c.extra.reverse = rev);
+                }
+            });
+        });
+        if out.reset {
+            let seq = app.doc.seq();
+            let edits = ids.iter().map(|id| m::Edit::SetSpeed { seq, clip: m::ClipId(*id as u64), speed: m::Speed::Constant(1.0) }).collect();
+            app.doc.apply("Reset speed", m::Edit::Batch { edits });
+            edit_all(app, ids, "Reset speed", |c| c.extra.reverse = false);
+        }
+    }
+
     if matches!(kind, ClipKind::Video | ClipKind::Fx | ClipKind::Title) {
         let mut on = c.grade.enabled;
         let out = Section::new("colour", "Colour").icon(Icon::DropHalf).enable(&mut on).resettable(c.grade != view::Grade::default() || c.look.is_some()).show(ui, |ui| {
@@ -741,7 +783,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
             prop(app, ui, ids, "grade.saturation", "Saturation", |c| c.grade.saturation, |c, v| c.grade.saturation = v, -100.0..=100.0, 0.0, "", 0);
             prop(app, ui, ids, "grade.temperature", "Temperature", |c| c.grade.temperature, |c, v| c.grade.temperature = v, -100.0..=100.0, 0.0, "", 0);
             prop(app, ui, ids, "grade.tint", "Tint", |c| c.grade.tint, |c, v| c.grade.tint = v, -100.0..=100.0, 0.0, "", 0);
-            kit::labeled_row(ui, "Look", |ui| match &c.look {
+            super::params::labeled_row(ui, "Look", |ui| match &c.look {
                 Some(l) => {
                     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width() - 34.0, 28.0), Sense::hover());
                     ui.painter().rect_filled(r, CornerRadius::same(6), kit::field_fill(ui));
@@ -768,6 +810,24 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                 c.look = None;
             });
         }
+    }
+
+    if kind == ClipKind::Audio || kind == ClipKind::Video {
+        let mut on = c.audio.enabled;
+        let out = Section::new("audio", "Audio").icon(Icon::SpeakerHigh).enable(&mut on).resettable(c.audio != view::AudioParams::default()).show(ui, |ui| {
+            // Volume reads as 0–200 % (100 % is unchanged, 200 % is +12 dB).
+            prop(app, ui, ids, "audio.volume_db", "Volume", |c| db_to_percent(c.audio.volume), |c, v| c.audio.volume = percent_to_db(v), 0.0..=200.0, 100.0, "%", 0);
+            prop(app, ui, ids, "audio.pan", "Pan", |c| c.audio.pan, |c, v| c.audio.pan = v, -100.0..=100.0, 0.0, "", 0);
+            prop(app, ui, ids, "audio.fade_in", "Fade in", |c| c.audio.fade_in, |c, v| c.audio.fade_in = v, 0.0..=10.0, 0.0, "s", 1);
+            prop(app, ui, ids, "audio.fade_out", "Fade out", |c| c.audio.fade_out, |c, v| c.audio.fade_out = v, 0.0..=10.0, 0.0, "s", 1);
+        });
+        if out.enable_changed {
+            edit_all(app, ids, if on { "Unmute clip" } else { "Mute clip" }, |c| c.audio.enabled = on);
+        }
+        if out.reset {
+            edit_all(app, ids, "Reset audio", |c| c.audio = view::AudioParams::default());
+        }
+        super::audio_fx::section(app, ui, ids);
     }
 
     if kind != ClipKind::Audio {
@@ -820,7 +880,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                                 .unwrap_or(dflt)
                                 .min(options.len().saturating_sub(1));
                             let mut pick = None;
-                            kit::labeled_row(ui, pd.label, |ui| pick = kit::menu_button(ui, &format!("fx-{}-{}", e.id, pd.id), cur, options, ui.available_width() - 40.0, None));
+                            super::params::labeled_row(ui, pd.label, |ui| pick = kit::menu_button(ui, &format!("fx-{}-{}", e.id, pd.id), cur, options, ui.available_width() - 40.0, None));
                             if let (Some(i), Some(mut me)) = (pick, me) {
                                 me.params.insert(pd.id.into(), m::Value::Choice(options[i].into()));
                                 let seq = app.doc.seq();
@@ -837,7 +897,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                             let mut changed = false;
                             if matches!(pd.kind, studio_fx::ParamKind::Colour) {
                                 let mut col = effect_colour(&me, pd);
-                                kit::labeled_row(ui, pd.label, |ui| {
+                                super::params::labeled_row(ui, pd.label, |ui| {
                                     changed = kit::colour_well(ui, &key, &mut col, None).changed();
                                     ui.label(egui::RichText::new(kit::to_hex(col)).font(theme::body()).color(t.text_2));
                                 });
@@ -845,7 +905,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                                 me.params.insert(pd.id.into(), m::Value::Colour(m::Rgba::new(r, g, b, a)));
                             } else {
                                 let mut on = effect_bool(&me, pd);
-                                kit::labeled_row(ui, pd.label, |ui| changed = kit::toggle(ui, &mut on, pd.label, None).changed());
+                                super::params::labeled_row(ui, pd.label, |ui| changed = kit::toggle(ui, &mut on, pd.label, None).changed());
                                 me.params.insert(pd.id.into(), m::Value::Bool(on));
                             }
                             if changed {
@@ -893,69 +953,9 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
         });
     }
 
-    if kind == ClipKind::Audio || kind == ClipKind::Video {
-        let mut on = c.audio.enabled;
-        let out = Section::new("audio", "Audio").icon(Icon::SpeakerHigh).enable(&mut on).resettable(c.audio != view::AudioParams::default()).show(ui, |ui| {
-            // Volume reads as 0–200 % (100 % is unchanged, 200 % is +12 dB).
-            prop(app, ui, ids, "audio.volume_db", "Volume", |c| db_to_percent(c.audio.volume), |c, v| c.audio.volume = percent_to_db(v), 0.0..=200.0, 100.0, "%", 0);
-            prop(app, ui, ids, "audio.pan", "Pan", |c| c.audio.pan, |c, v| c.audio.pan = v, -100.0..=100.0, 0.0, "", 0);
-            prop(app, ui, ids, "audio.fade_in", "Fade in", |c| c.audio.fade_in, |c, v| c.audio.fade_in = v, 0.0..=10.0, 0.0, "s", 1);
-            prop(app, ui, ids, "audio.fade_out", "Fade out", |c| c.audio.fade_out, |c, v| c.audio.fade_out = v, 0.0..=10.0, 0.0, "s", 1);
-        });
-        if out.enable_changed {
-            edit_all(app, ids, if on { "Unmute clip" } else { "Mute clip" }, |c| c.audio.enabled = on);
-        }
-        if out.reset {
-            edit_all(app, ids, "Reset audio", |c| c.audio = view::AudioParams::default());
-        }
-        super::audio_fx::section(app, ui, ids);
-    }
-
-    if kind == ClipKind::Video || kind == ClipKind::Audio {
-        let out = Section::new("speed", "Speed").icon(Icon::Timer).resettable(c.speed != 100.0 || c.extra.reverse).show(ui, |ui| {
-            // Speed as a multiplier, 0.1×–100×, with quick picks.
-            let mut v = c.speed / 100.0;
-            let o = FieldRow::new("Speed", &mut v, 0.1..=100.0).default(1.0).unit("×").decimals(2).step(0.01).scrub(0.01).no_slider().show(ui);
-            let mut pick = None;
-            ui.horizontal_wrapped(|ui| {
-                ui.add_space(kit::LABEL_W);
-                ui.spacing_mut().item_spacing.x = 6.0;
-                for (label, k) in [("0.5×", 0.5), ("1×", 1.0), ("2×", 2.0), ("4×", 4.0)] {
-                    if kit::chip(ui, label, (v - k).abs() < 1e-3, None).clicked() {
-                        pick = Some(k);
-                    }
-                }
-            });
-            if o.changed || pick.is_some() {
-                let v = pick.unwrap_or(v);
-                // Constant speed changes the clip's length; the model
-                // ripples the spine.
-                let seq = app.doc.seq();
-                let edits = ids.iter().map(|id| m::Edit::SetSpeed { seq, clip: m::ClipId(*id as u64), speed: m::Speed::Constant(v as f64) }).collect();
-                if pick.is_some() {
-                    app.doc.apply("Speed", m::Edit::Batch { edits });
-                } else {
-                    app.doc.apply_gesture(&format!("speed-{ids:?}"), "Speed", m::Edit::Batch { edits });
-                }
-            }
-            kit::labeled_row(ui, "Reverse", |ui| {
-                let mut rev = c.extra.reverse;
-                if kit::toggle(ui, &mut rev, "Reverse", None).changed() {
-                    edit_all(app, ids, "Reverse", |c| c.extra.reverse = rev);
-                }
-            });
-        });
-        if out.reset {
-            let seq = app.doc.seq();
-            let edits = ids.iter().map(|id| m::Edit::SetSpeed { seq, clip: m::ClipId(*id as u64), speed: m::Speed::Constant(1.0) }).collect();
-            app.doc.apply("Reset speed", m::Edit::Batch { edits });
-            edit_all(app, ids, "Reset speed", |c| c.extra.reverse = false);
-        }
-    }
-
     if visual {
         Section::new("motion", "Motion").icon(Icon::Path).show(ui, |ui| {
-            kit::labeled_row(ui, "Entry", |ui| {
+            super::params::labeled_row(ui, "Entry", |ui| {
                 let entries: Vec<&catalogue::Item> = catalogue::motions().iter().filter(|m| m.group == 1).collect();
                 let mut names: Vec<&str> = vec!["None"];
                 names.extend(entries.iter().map(|m| m.name));
@@ -989,7 +989,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
             }
             if c.extra.mask != 0 {
                 prop(app, ui, ids, "mask.feather", "Feather", |c| c.extra.feather, |c, v| c.extra.feather = v, 0.0..=100.0, 0.0, "%", 0);
-                kit::labeled_row(ui, "Invert", |ui| {
+                super::params::labeled_row(ui, "Invert", |ui| {
                     let mut inv = c.extra.mask_invert;
                     if kit::toggle(ui, &mut inv, "Invert mask", None).changed() {
                         edit_all(app, ids, "Invert mask", |c| c.extra.mask_invert = inv);

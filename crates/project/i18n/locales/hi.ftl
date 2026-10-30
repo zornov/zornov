@@ -1364,3 +1364,4 @@ dock-move-heading = { $panel } को यहाँ ले जाएँ…
 editorial-panel = एडिटोरियल
 pop-out = अलग विंडो में खोलें
 dock-back = वापस डॉक करें
+feedback = फ़ीडबैक

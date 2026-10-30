@@ -146,7 +146,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
             }
             for st in *settings {
                 let mut v = fx.params.get(st.key).and_then(m::Value::as_f64).map_or(st.default, |x| x as f32);
-                let label = format!("{}", st.label);
+                let label = st.label.to_string();
                 let out = FieldRow::new(&label, &mut v, st.min..=st.max).default(st.default).unit(st.unit).decimals(st.decimals).scrub(((st.max - st.min) / 400.0).max(0.001)).show(ui);
                 if out.changed {
                     let (k, x) = (st.key, v as f64);

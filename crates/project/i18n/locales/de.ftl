@@ -1364,3 +1364,4 @@ dock-move-heading = { $panel } verschieben nach…
 editorial-panel = Schnittlisten
 pop-out = In eigenes Fenster
 dock-back = Wieder andocken
+feedback = Feedback
