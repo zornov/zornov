@@ -12,6 +12,16 @@
 
 use eframe::egui::{Context, Id};
 
+/// The button text for a confirmation: the verb and what it acts on, so the
+/// button says the consequence ("Delete 3 clips"), never "OK".
+pub fn action_label(verb: &str, count: usize, singular: &str, plural: &str) -> String {
+    match count {
+        0 => verb.to_string(),
+        1 => format!("{verb} 1 {singular}"),
+        n => format!("{verb} {n} {plural}"),
+    }
+}
+
 /// Seconds the second click stays valid.
 pub const WINDOW: f64 = 4.0;
 
@@ -65,5 +75,12 @@ mod tests {
         assert!(!check(&mut a, Id::new("b"), 1.0), "another button re-arms");
         assert!(!check(&mut a, Id::new("b"), 1.0 + WINDOW + 1.0), "too late");
         assert!(check(&mut a, Id::new("b"), 1.0 + WINDOW + 2.0));
+    }
+
+    #[test]
+    fn the_action_names_what_it_acts_on() {
+        assert_eq!(action_label("Delete", 3, "clip", "clips"), "Delete 3 clips");
+        assert_eq!(action_label("Delete", 1, "clip", "clips"), "Delete 1 clip");
+        assert_eq!(action_label("Discard", 0, "change", "changes"), "Discard");
     }
 }
