@@ -944,7 +944,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mbps = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::H264 | Format::Hevc10) { s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) } else { bitrate_mbps(s, w, h, fps) };
     let mb = mbps * (len as f32 / SEC as f32) / 8.0;
     let size = if mb > 1024.0 { format!("{:.1} GB", mb / 1024.0) } else { format!("{:.0} MB", mb.max(1.0)) };
-    let sound = if has_sound(&app.doc.project) { "with sound" } else { "no sound" };
+    let sound = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::Gif | Format::Png) { "no sound" } else if has_sound(&app.doc.project) { "with sound" } else { "no sound" };
     let est = crate::i18n::tf(format!("≈ {size} · {} · {w} × {h} · {:.0} Mbps · {}", view::format_duration(len), mbps, sound));
     let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(footer.shrink2(Vec2::new(20.0, 18.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     let job = s.job.and_then(|id| app.jobs.get(id).cloned());
@@ -1186,6 +1186,17 @@ mod tests {
         let labels = h.labels();
         assert!(labels.iter().any(|l| l == "More"), "{labels:?}");
         assert!(h.cut_text().is_empty() && h.overlaps().is_empty());
+    }
+
+    #[test]
+    fn a_gif_estimate_never_says_with_sound() {
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Export;
+        h.app.export.codec = Format::ALL.iter().position(|f| *f == Format::Gif).expect("GIF is a format");
+        h.frames(4);
+        let labels = h.labels();
+        assert!(labels.iter().any(|l| l.contains("no sound")), "{labels:?}");
+        assert!(!labels.iter().any(|l| l.contains("with sound")), "{labels:?}");
     }
 
     #[test]
