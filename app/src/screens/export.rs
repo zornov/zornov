@@ -944,7 +944,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let mbps = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::H264 | Format::Hevc10) { s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) } else { bitrate_mbps(s, w, h, fps) };
     let mb = mbps * (len as f32 / SEC as f32) / 8.0;
     let size = if mb > 1024.0 { format!("{:.1} GB", mb / 1024.0) } else { format!("{:.0} MB", mb.max(1.0)) };
-    let sound = if matches!(Format::ALL[s.codec.min(Format::ALL.len() - 1)], Format::Gif | Format::Png) { "no sound" } else if has_sound(&app.doc.project) { "with sound" } else { "no sound" };
+    let sound = if { let f = Format::ALL[s.codec.min(Format::ALL.len() - 1)]; f == Format::Gif || f.is_sequence() } { "no sound" } else if has_sound(&app.doc.project) { "with sound" } else { "no sound" };
     let est = crate::i18n::tf(format!("≈ {size} · {} · {w} × {h} · {:.0} Mbps · {}", view::format_duration(len), mbps, sound));
     let mut fui = ui.new_child(egui::UiBuilder::new().max_rect(footer.shrink2(Vec2::new(20.0, 18.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     let job = s.job.and_then(|id| app.jobs.get(id).cloned());
