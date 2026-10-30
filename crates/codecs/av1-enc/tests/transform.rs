@@ -221,3 +221,29 @@ fn ten_bit_round_trip() {
         assert!(worst <= 3 * steps(qp).1 as i32 / 8 + 4, "size {sz} type {ty}: {worst}");
     }
 }
+
+/// Full-scale 10-bit residuals (+-1023) stay inside the dequantiser's clamp range and reconstruct
+/// within the quantiser step at a fine quantiser, for every supported size.
+#[test]
+fn ten_bit_full_scale_residuals_stay_in_range() {
+    let qp = QuantParams { base_q_idx: 8, bit_depth: 10, plane: 0 };
+    let lim = 1i32 << 17;
+    for sz in [TX_4X4, TX_8X8, TX_16X16, TX_32X32, TX_64X64, TX_8X16, TX_16X8] {
+        let (w, h) = dims(sz);
+        // 64-point transforms keep only 32x32 coefficients, so the Nyquist checkerboard is lost by design
+        for pattern in 0..if sz == TX_64X64 { 2 } else { 3 } {
+            let r: Vec<i16> = (0..w * h).map(|i| match pattern { 0 => 1023, 1 => -1023, _ => if (i / w + i % w) % 2 == 0 { 1023 } else { -1023 } }).collect();
+            let mut coef = vec![0i32; 4096];
+            forward_transform(&r, sz, DCT_DCT, &mut coef);
+            assert!(coef.iter().all(|&c| c.abs() < 1 << 20), "size {sz} pattern {pattern}: coefficient out of range");
+            let blk = quantize_block(&coef, sz, DCT_DCT, 0, qp);
+            let mut dq = vec![0i32; 4096];
+            dequantize_block(&blk.levels, sz, qp, &mut dq);
+            assert!(dq.iter().all(|&d| (-lim..lim).contains(&d)), "size {sz} pattern {pattern}: dequantised value outside the 10-bit clamp");
+            let mut res = vec![0i32; w * h];
+            inverse_transform_2d(&dq, &mut res, sz, DCT_DCT, false, 10);
+            let worst = res.iter().zip(&r).map(|(&a, &b)| (a - b as i32).abs()).max().unwrap();
+            assert!(worst <= 24, "size {sz} pattern {pattern}: worst error {worst}");
+        }
+    }
+}
