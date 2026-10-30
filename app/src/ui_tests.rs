@@ -1150,3 +1150,21 @@ fn installed_tools_offer_install_from_file_in_scripted_runs() {
     let named = h.last.as_ref().and_then(|o| o.platform_output.accesskit_update.as_ref()).is_some_and(|u| u.nodes.iter().any(|(_, n)| n.label() == Some("Install from file…")));
     assert!(named, "the button is there");
 }
+
+/// Screenshot 180: opening a project from Home while another is open kept
+/// the viewer on the old project's picture, because both counted edits from
+/// zero. A different project starts the viewer's renderer afresh; the same
+/// project does not.
+#[test]
+fn the_viewer_starts_afresh_when_another_project_opens() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor"]).sized(1280.0, 720.0);
+    h.frames(8);
+    let resets = |h: &Harness| h.ctx.data(|d| d.get_temp::<u32>(egui::Id::new("viewer-project-seen").with("resets"))).unwrap_or(0);
+    assert_eq!(resets(&h), 0, "an unchanged project is not reset");
+    h.app.doc = crate::services::project::new_custom("Other", 640, 360, 30.0);
+    h.frames(4);
+    assert_eq!(resets(&h), 1, "a different project resets the viewer once");
+    h.frames(4);
+    assert_eq!(resets(&h), 1);
+}
