@@ -2067,3 +2067,4 @@ check-for-updates-automatically = Check for updates automatically
 update-now = Update now
 restart-now = Restart now
 music-and-sound = Music and sound
+feedback = Feedback

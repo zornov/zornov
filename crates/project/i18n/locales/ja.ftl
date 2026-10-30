@@ -1360,3 +1360,4 @@ dock-move-heading = { $panel }の移動先…
 editorial-panel = エディトリアル
 pop-out = 別ウィンドウで開く
 dock-back = ドッキングに戻す
+feedback = フィードバック
