@@ -165,7 +165,7 @@ fn index(app: &mut StudioApp, ui: &mut egui::Ui) {
 /// The project check of the Export screen, here too: the same service, the same Fix and Accept.
 fn project_checks(app: &mut StudioApp, ui: &mut egui::Ui) {
     use crate::services::export as svc;
-    let id = egui::Id::new("editorial-project-check");
+    let id = ui.scope_id().with("editorial-project-check");
     let mut out: Option<svc::CheckOut> = ui.data(|d| d.get_temp(id));
     ui.horizontal(|ui| {
         ui.label(RichText::new("Project checks").strong());

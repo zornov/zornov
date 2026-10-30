@@ -13,9 +13,9 @@ mod check;
 pub mod spec;
 mod cutdown;
 pub use bundle::{BundleOut, BundleReq, bundle};
-pub use check::{CheckOut, Problem, Severity, FileCheck, accept, check_file, start_file_check, check_project, fix_problem, is_fixable, preflight, profile_for, unaccept};
+pub use check::{CheckOut, FileCheck, Problem, Severity, accept, check_project, fix_problem, start_file_check};
 pub use cutdown::{CutdownOut, CutdownReq, RenderReq, cutdown};
-pub(crate) use cutdown::{free_dir, sanitize};
+pub(crate) use cutdown::sanitize;
 
 use crate::doc::Doc;
 use crate::export_run::{self, Request};

@@ -30,12 +30,7 @@ fn snapshot() -> (Queue, usize) {
     })
 }
 
-/// Add the open project to the render queue with `preset`, saving it first.
-pub fn enqueue(doc: &mut crate::doc::Doc, name: &str, preset: &str, qc: bool) -> Result<u32, String> {
-    enqueue_spec(doc, name, preset, None, qc, None)
-}
-
-/// Like [`enqueue`], for a delivery spec (`youtube`, `broadcast-r128` ...) and an optional size: the job carries them.
+/// Add the open project to the render queue, saving it first, with `preset` or a delivery spec (`youtube`, `broadcast-r128` ...) and an optional size: the job carries them.
 pub fn enqueue_spec(doc: &mut crate::doc::Doc, name: &str, preset: &str, delivery: Option<&str>, qc: bool, size: Option<(u32, u32)>) -> Result<u32, String> {
     let root = doc.folder.as_ref().map(|f| f.root().to_path_buf()).ok_or("Save the project to a folder first: the queue renders the saved project")?;
     crate::services::project::save(doc, None)?;
@@ -74,7 +69,7 @@ pub fn section(ui: &mut egui::Ui) {
                 (Some(_), Some(file)) => format!("{status}\nThe QC report is beside the file: {}.qc.txt", file.display()),
                 _ => status.clone(),
             };
-            ui.interact(Rect::from_min_size(egui::pos2(r.left() + 8.0, r.top() + 22.0), Vec2::new(r.width() - 90.0, 20.0)), egui::Id::new(("queue-status", j.id)), Sense::hover()).on_hover_text(tip);
+            ui.interact(Rect::from_min_size(egui::pos2(r.left() + 8.0, r.top() + 22.0), Vec2::new(r.width() - 90.0, 20.0)), ui.scope_id().with(("queue-status", j.id)), Sense::hover()).on_hover_text(tip);
         }
         let bar = Rect::from_min_size(egui::pos2(r.left() + 8.0, r.bottom() - 6.0), Vec2::new(r.width() - 90.0, 3.0));
         p.rect_filled(bar, CornerRadius::same(2), t.raised);
