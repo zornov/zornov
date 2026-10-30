@@ -39,10 +39,12 @@ pub enum Format {
     DnxHr,
     /// DNxHR 444 (10-bit 4:4:4) in QuickTime.
     DnxHr444,
+    /// AV1 in MP4 from Studio's own encoder (early: constant quality, no rate control).
+    Av1,
 }
 
 impl Format {
-    pub const ALL: [Format; 18] = [
+    pub const ALL: [Format; 19] = [
         Format::H264,
         Format::Clv,
         Format::Png,
@@ -61,6 +63,7 @@ impl Format {
         Format::DnxHrHq,
         Format::DnxHr,
         Format::DnxHr444,
+        Format::Av1,
     ];
 
     /// The mastering formats written by `export_pro` (16-bit pictures).
@@ -85,6 +88,20 @@ impl Format {
     pub fn is_sequence(self) -> bool {
         matches!(self, Format::Png | Format::Exr | Format::Dpx | Format::Tiff16 | Format::Png16)
     }
+    /// A short honest note shown under the format, when it needs one.
+    pub fn note(self) -> Option<&'static str> {
+        match self {
+            Format::Av1 => Some("Early encoder: slower than H.264, no rate control yet."),
+            _ => None,
+        }
+    }
+
+    /// AV1 `base_q_idx` for a 1..=100 quality: 100 is 20 (fine), 1 is 235 (coarse).
+    pub fn av1_base_q_idx(quality: f32) -> u8 {
+        let q = quality.clamp(1.0, 100.0);
+        (235.0 - (q - 1.0) / 99.0 * 215.0).round() as u8
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Format::H264 => "H.264 (MP4)",
@@ -105,6 +122,7 @@ impl Format {
             Format::DnxHrHq => "DNxHR HQ (MOV)",
             Format::DnxHr => "DNxHR HQX 10-bit (MOV)",
             Format::DnxHr444 => "DNxHR 444 10-bit (MOV)",
+            Format::Av1 => "AV1 (MP4)",
         }
     }
     pub fn extension(self) -> &'static str {
@@ -113,7 +131,7 @@ impl Format {
             Format::Clv => ".clv",
             Format::Png => "/",
             Format::Gif => ".gif",
-            Format::Hevc10 => ".mp4",
+            Format::Hevc10 | Format::Av1 => ".mp4",
             Format::M4a => ".m4a",
             Format::ProRes422Hq | Format::ProRes4444 | Format::ProResProxy | Format::DnxHrLb | Format::DnxHrSq | Format::DnxHrHq | Format::DnxHr | Format::DnxHr444 => ".mov",
             Format::Exr | Format::Dpx | Format::Tiff16 | Format::Png16 => "/",
@@ -121,3 +139,55 @@ impl Format {
     }
 }
 
+
+/// How hard the AV1 encoder looks for savings: the Export screen's Fast / Balanced / Small.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Av1Speed {
+    /// No mode search: quickest, largest files.
+    #[default]
+    Fast,
+    Balanced,
+    /// Full mode and motion search. Not offered yet: the encoder's speed-6 path is slowest and
+    /// no smaller than Balanced. Add it to [`Av1Speed::ALL`] to bring it back.
+    #[allow(dead_code)]
+    Small,
+}
+
+impl Av1Speed {
+    /// The speeds the Export screen offers.
+    pub const ALL: [Av1Speed; 2] = [Av1Speed::Fast, Av1Speed::Balanced];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Av1Speed::Fast => "Fast",
+            Av1Speed::Balanced => "Balanced",
+            Av1Speed::Small => "Small",
+        }
+    }
+
+    /// The encoder's `Config.speed` (0 slowest .. 10 fastest; 9 and up skip the mode search).
+    pub fn encoder_speed(self) -> u8 {
+        match self {
+            Av1Speed::Fast => 10,
+            Av1Speed::Balanced => 8,
+            Av1Speed::Small => 6,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn av1_is_an_mp4_format_and_quality_maps_to_a_quantiser() {
+        assert_eq!(Format::Av1.label(), "AV1 (MP4)");
+        assert_eq!(Format::Av1.extension(), ".mp4");
+        assert!(!Format::Av1.is_pro() && !Format::Av1.is_sequence());
+        assert!(Format::ALL.contains(&Format::Av1));
+        assert!(Format::Av1.note().is_some());
+        assert_eq!(Format::av1_base_q_idx(100.0), 20);
+        assert_eq!(Format::av1_base_q_idx(1.0), 235);
+        assert!(Format::av1_base_q_idx(90.0) < Format::av1_base_q_idx(50.0), "higher quality, lower index");
+    }
+}

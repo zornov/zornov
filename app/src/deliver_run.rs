@@ -210,7 +210,7 @@ pub fn render_piece(dir: &Path, task: &ChunkTask, out: &Path, progress: &mut dyn
     let doc = proj::open(dir)?;
     let (t0, t1) = frame_range_micros(task.first, task.last, s.fps);
     let format = if s.kind == "hevc10" { Format::Hevc10 } else { Format::H264 };
-    let req = Request { path: out.to_path_buf(), format, size: (s.w, s.h), fps: s.fps, range: (t0, t1), quality: s.quality, bitrate_kbps: s.bitrate_kbps };
+    let req = Request { path: out.to_path_buf(), format, size: (s.w, s.h), fps: s.fps, range: (t0, t1), quality: s.quality, bitrate_kbps: s.bitrate_kbps, av1_speed: Default::default() };
     let mut opts = RunOptions { audio: false, software: s.software, sink: None };
     let pack = if s.kind == "j2k" || s.kind == "imf" {
         let encode: Box<dyn Fn(&[u8], usize, usize) -> Result<Vec<u8>, String> + Send> = if s.kind == "j2k" {
@@ -592,6 +592,9 @@ fn workers(doc: &Doc, spec: &JobSpec, status: &mut dyn FnMut(&str)) -> Result<(V
 fn run_file(doc: &Doc, spec: &JobSpec, plan: &Plan, watch: &Watch) -> Result<Outcome, String> {
     let (a, b) = frame_range_micros(plan.first, plan.last, plan.fps);
     let fmt = plan.preset.format;
+    // Only H.264 and HEVC are cut into pieces and joined (`merge` copies their samples). AV1 is
+    // deliberately one whole-file render: the encoder is one in-process stream (key frame every
+    // 2 s, no rate control to match across pieces), and `merge` has no AV1 track writer.
     let chunked = matches!(fmt, Format::H264 | Format::Hevc10);
     let mut machines = Vec::new();
     if chunked {
@@ -645,7 +648,7 @@ fn run_file(doc: &Doc, spec: &JobSpec, plan: &Plan, watch: &Watch) -> Result<Out
         watch.progress(1.0, (0.0, 0.95));
     } else {
         // Formats written in one piece: CLV, PNG, GIF, M4A.
-        let req = Request { path: plan.out.clone(), format: fmt, size: plan.size, fps: plan.fps, range: (a, b), quality: plan.preset.quality, bitrate_kbps: plan.bitrate_kbps };
+        let req = Request { path: plan.out.clone(), format: fmt, size: plan.size, fps: plan.fps, range: (a, b), quality: plan.preset.quality, bitrate_kbps: plan.bitrate_kbps, av1_speed: Default::default() };
         let t = export_run::start(doc, req);
         loop {
             if watch.ctl.cancel.load(Ordering::Relaxed) {
