@@ -30,6 +30,7 @@
 mod agent;
 mod convert;
 mod macmenu;
+mod palette;
 mod open_files;
 mod transcode;
 mod psd_import;
