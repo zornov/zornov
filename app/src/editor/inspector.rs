@@ -108,7 +108,7 @@ fn collapsed_key(kind: &str) -> egui::Id {
 /// Puts the sections' remembered state (prefs) into the kit's memory, once
 /// per run, before the first section is drawn.
 fn restore_sections(ctx: &egui::Context, prefs: &crate::prefs::Prefs) {
-    let seeded = egui::Id::new("insp-sections-restored");
+    let seeded = egui::Id::unique("insp-sections-restored");
     if ctx.data(|d| d.get_temp::<bool>(seeded)).is_some() {
         return;
     }
