@@ -20,13 +20,52 @@ pub fn page(st: &mut AccountState, ui: &mut egui::Ui) {
     on::page(&mut st.inner, ui);
 }
 
+/// The longest help line a row carries; the rest is in its tooltip.
+// TODO(kit): a shared one-line help row and status pill for every settings page.
+const HELP_MAX: usize = 64;
+/// One width for every text field on the page.
+const FIELD_W: f32 = 240.0;
+
+/// A status line (the answer to what the person just did), wrapped.
 fn note(ui: &mut egui::Ui, text: &str) {
     let t = theme::tokens(ui.ctx());
     ui.add(egui::Label::new(egui::RichText::new(text).font(theme::caption()).color(t.text_2)).wrap());
 }
 
+/// `text` cut to one help line; the whole of it when it was cut.
+fn one_line(text: &str) -> (String, Option<String>) {
+    if text.chars().count() <= HELP_MAX {
+        return (text.to_owned(), None);
+    }
+    let cut: String = text.chars().take(HELP_MAX - 1).collect();
+    (format!("{}…", cut.trim_end()), Some(text.to_owned()))
+}
+
+/// One line of help under a row, in the control column, the rest on hover.
+fn hint(ui: &mut egui::Ui, text: &str) {
+    let t = theme::tokens(ui.ctx());
+    let (shown, full) = one_line(text);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(kit::label_width(ui.ctx()));
+        let r = ui.add(egui::Label::new(egui::RichText::new(shown).font(theme::caption()).color(t.text_2)).truncate());
+        if let Some(full) = full {
+            r.on_hover_text(full);
+        }
+    });
+}
+
+/// A small status tag: green when `ok`, quiet otherwise.
+fn pill(ui: &mut egui::Ui, text: &str, ok: bool) {
+    let t = theme::tokens(ui.ctx());
+    let (fill, ink) = if ok { (t.ok.gamma_multiply(0.18), t.ok) } else { (t.alt, t.text_2) };
+    egui::Frame::new().fill(fill).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 1)).show(ui, |ui| {
+        ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown(text)).font(theme::caption()).color(ink)).extend());
+    });
+}
+
 mod on {
-    use super::{Button, Icon, Section, kit, note, theme};
+    use super::{Button, FIELD_W, Icon, Section, hint, kit, note, pill, theme};
     use crate::agent::account_tools::on as acct;
     use eframe::egui;
     use serde_json::Value;
@@ -98,11 +137,12 @@ mod on {
                     if let Some(url) = v.get("url").and_then(Value::as_str) {
                         ctx.open_url(egui::OpenUrl::new_tab(url));
                         self.session = v.get("session").and_then(Value::as_str).map(str::to_owned);
-                        self.note = Some("The checkout opened in your browser (Stripe test mode). When you have paid, press Check payment.".into());
+                        self.note = Some("Opened the checkout in your browser. Press Check payment once you have paid".into());
                     } else if let Some(p) = v.get("installed").and_then(Value::as_str) {
-                        self.note = Some(crate::i18n::tf(format!("Installed: {p}")));
+                        let name = std::path::Path::new(p).file_name().map_or_else(|| p.to_owned(), |n| n.to_string_lossy().into_owned());
+                        self.note = Some(crate::i18n::tf(format!("Installed {name}")));
                     } else {
-                        self.note = Some("Done.".into());
+                        self.note = Some("Done".into());
                     }
                 }
                 "confirm" => {
@@ -110,16 +150,16 @@ mod on {
                     if paid {
                         self.session = None;
                     }
-                    self.note = Some(if paid { "Payment received. Your account is up to date.".into() } else { "Not paid yet. Finish the checkout, then check again.".into() });
+                    self.note = Some(if paid { "Payment received".into() } else { "Not paid yet. Finish the checkout, then check again".into() });
                 }
                 "receipts" => self.receipts = v.as_array().cloned(),
                 "packs" => self.packs = v.as_array().cloned(),
                 "market" => self.market = v.as_array().cloned(),
                 "sign_in" => {
                     self.password.clear();
-                    self.note = Some("Signed in.".into());
+                    self.note = Some("Signed in".into());
                 }
-                _ => self.note = Some("Done.".into()),
+                _ => self.note = Some("Done".into()),
             }
         }
     }
@@ -135,14 +175,14 @@ mod on {
     fn standing(v: &Value) -> String {
         match s(v, "state") {
             "active" => match v.get("expires").and_then(Value::as_u64) {
-                Some(e) => crate::i18n::tf(format!("Active, renews or ends in {} days", e.saturating_sub(studio_entitlements::now()) / 86_400)),
+                Some(e) => crate::i18n::tf(format!("Active, {} days left", e.saturating_sub(studio_entitlements::now()) / 86_400)),
                 None => "Active".into(),
             },
-            "grace" => crate::i18n::tf(format!("Expired: still working for {} more days. Renew to keep it.", v.get("days_left").and_then(Value::as_u64).unwrap_or(0))),
-            "expired" => "Expired: back on the free plan until renewed.".into(),
-            "invalid" => crate::i18n::tf(format!("The licence file was not accepted ({}).", s(v, "reason"))),
-            "unknown_plan" => "The licence names a plan this Zornov does not know.".into(),
-            _ => "No licence: the free plan.".into(),
+            "grace" => crate::i18n::tf(format!("Expired, works {} more days", v.get("days_left").and_then(Value::as_u64).unwrap_or(0))),
+            "expired" => "Expired, on the free plan".into(),
+            "invalid" => crate::i18n::tf(format!("Licence not accepted ({})", s(v, "reason"))),
+            "unknown_plan" => "Plan not recognised".into(),
+            _ => "Free plan".into(),
         }
     }
 
@@ -157,43 +197,51 @@ mod on {
         let signed_in = status["signed_in"].as_bool().unwrap_or(false);
 
         Section::new("set-account-plan", "Plan").icon(Icon::Star).fixed().show(ui, |ui| {
-            kit::labeled_row(ui, "Plan", |ui| ui.label(egui::RichText::new(s(&status, "plan_name")).font(theme::body()).strong()));
-            note(ui, &standing(&status["standing"]));
+            kit::labeled_row(ui, "Plan", |ui| {
+                ui.label(egui::RichText::new(s(&status, "plan_name")).font(theme::body()).strong());
+                pill(ui, &standing(&status["standing"]), s(&status["standing"], "state") == "active");
+            });
             let features: Vec<&str> = status["features"].as_array().map(|f| f.iter().filter_map(Value::as_str).map(studio_entitlements::describe).collect()).unwrap_or_default();
-            note(ui, &crate::i18n::tf(format!("Includes: the whole editor, and {}.", features.join(", "))));
+            if !features.is_empty() {
+                hint(ui, &crate::i18n::tf(format!("Also includes {}", features.join(", "))));
+            }
             kit::labeled_row(ui, "Licence file", |ui| {
                 if Button::secondary("Install…").icon(Icon::DownloadSimple).show(ui).clicked() {
                     if let Some(p) = rfd::FileDialog::new().add_filter("Zornov licence", &["json"]).pick_file() {
                         match acct::account().install_licence_file(&p) {
-                            Ok(_) => st.note = Some("Licence installed.".into()),
+                            Ok(_) => st.note = Some("Installed the licence".into()),
                             Err(e) => st.note = Some(e),
                         }
                         st.status = None;
                     }
                 }
             });
-            note(ui, "A licence is checked on this computer, so paid features work offline.");
+            hint(ui, "Checked on this computer, so paid features work offline.");
         });
 
         Section::new("set-account-cloud", "Cloud and sign-in").icon(Icon::LinkSimple).fixed().show(ui, |ui| {
-            note(ui, "Off until you turn it on: nothing is sent anywhere before you connect a server. Use the Zornov cloud or a server you run yourself (studio-cloud-server).");
             kit::labeled_row(ui, "Server", |ui| {
-                ui.add(egui::TextEdit::singleline(&mut st.server).hint_text("https://… or http://localhost:8787").desired_width(240.0));
+                ui.add(egui::TextEdit::singleline(&mut st.server).hint_text("https://… or http://localhost:8787").desired_width(FIELD_W));
                 if cloud_on {
                     if Button::secondary("Turn off").show(ui).clicked() {
                         let _ = acct::account().disconnect();
                         st.status = None;
                     }
+                    pill(ui, "Connected", true);
                 } else if ui.add_enabled(!busy, egui::Button::new("Connect")).clicked() {
                     let (server, trust) = (st.server.clone(), st.trust);
                     st.start("connect", move |a| a.connect(&server, trust));
                 }
             });
-            kit::labeled_row(ui, "", |ui| ui.checkbox(&mut st.trust, "Trust licences this server signs (your own server)"));
+            hint(ui, "Off until you connect a server: nothing is sent before then.");
+            kit::labeled_row(ui, "", |ui| {
+                ui.checkbox(&mut st.trust, "Trust licences it signs").on_hover_text("Only for a server you run yourself.")
+            });
             if cloud_on {
                 if signed_in {
-                    kit::labeled_row(ui, "Signed in as", |ui| {
+                    kit::labeled_row(ui, "Account", |ui| {
                         ui.label(egui::RichText::new(status["email"].as_str().unwrap_or("")).font(theme::body()));
+                        pill(ui, "Signed in", true);
                         if ui.add_enabled(!busy, egui::Button::new("Refresh")).clicked() {
                             st.start("refresh", |a| a.refresh());
                         }
@@ -202,9 +250,9 @@ mod on {
                         }
                     });
                 } else {
-                    kit::labeled_row(ui, "Email", |ui| ui.add(egui::TextEdit::singleline(&mut st.email).desired_width(240.0)));
-                    kit::labeled_row(ui, "Password", |ui| ui.add(egui::TextEdit::singleline(&mut st.password).password(true).desired_width(240.0)));
-                    kit::labeled_row(ui, "Name", |ui| ui.add(egui::TextEdit::singleline(&mut st.name).hint_text("for a new account").desired_width(240.0)));
+                    kit::labeled_row(ui, "Email", |ui| ui.add(egui::TextEdit::singleline(&mut st.email).desired_width(FIELD_W)));
+                    kit::labeled_row(ui, "Password", |ui| ui.add(egui::TextEdit::singleline(&mut st.password).password(true).desired_width(FIELD_W)));
+                    kit::labeled_row(ui, "Name", |ui| ui.add(egui::TextEdit::singleline(&mut st.name).hint_text("for a new account").desired_width(FIELD_W)));
                     kit::labeled_row(ui, "", |ui| {
                         let (e, p, n) = (st.email.clone(), st.password.clone(), st.name.clone());
                         if ui.add_enabled(!busy, egui::Button::new("Sign in")).clicked() {
@@ -224,16 +272,16 @@ mod on {
         Section::new("set-account-upgrade", "Upgrade").icon(Icon::Sparkle).fixed().show(ui, |ui| {
             for p in &catalogue.plans {
                 kit::labeled_row(ui, &p.name, |ui| {
-                    let price = p.prices.first().map(|x| format!("{} / {}", money(x.amount_minor, &x.currency), x.interval)).unwrap_or_else(|| if p.id == "free" { "Free".into() } else { "price from your server".into() });
+                    let price = p.prices.first().map(|x| format!("{} / {}", money(x.amount_minor, &x.currency), x.interval)).unwrap_or_else(|| if p.id == "free" { "Free".into() } else { "Price from your server".into() });
                     ui.label(egui::RichText::new(price).font(theme::body()));
                     if p.id == current {
-                        ui.label(egui::RichText::new(crate::i18n::shown("Current")).font(theme::caption()));
+                        pill(ui, "Current", true);
                     } else if !p.prices.is_empty() && signed_in && ui.add_enabled(!busy, egui::Button::new("Upgrade")).clicked() {
                         let id = p.id.clone();
                         st.start("checkout", move |a| a.checkout("plan", &id));
                     }
                 });
-                note(ui, &format!("{} {} credits a month, {} seat{}.", p.summary, p.monthly_credits, p.seats, if p.seats == 1 { "" } else { "s" }));
+                hint(ui, &format!("{} credits a month, {} seat{}. {}", p.monthly_credits, p.seats, if p.seats == 1 { "" } else { "s" }, p.summary));
             }
             if let Some(sess) = st.session.clone() {
                 kit::labeled_row(ui, "Checkout", |ui| {
@@ -259,16 +307,19 @@ mod on {
                     let mut b = a.ledger().budget();
                     b.monthly_limit = st.budget.trim().parse::<u64>().ok().filter(|l| *l > 0);
                     st.note = Some(match a.ledger().set_budget(&b) {
-                        Ok(()) => "Budget saved. The AI tells you before a task would pass it.".into(),
+                        Ok(()) => "Saved the monthly budget".into(),
                         Err(e) => e,
                     });
                     st.status = None;
                 }
             });
-            note(ui, "AI with your own keys never uses credits. Before a hosted task the AI tells you what it costs.");
+            hint(ui, "The AI tells you what a hosted task costs. Your own keys cost none.");
             let entries = acct::account().ledger().entries();
             for u in entries.iter().rev().take(8) {
-                note(ui, &format!("{} · {} × {:.2} · {}", u.task, if u.byok { "own key" } else { "credits" }, u.units, if u.byok { "no credits".to_owned() } else { format!("{} credits", u.credits) }));
+                kit::labeled_row(ui, &u.task, |ui| {
+                    let cost = if u.byok { "Own key, no credits".to_owned() } else { format!("{} credits", u.credits) };
+                    ui.label(egui::RichText::new(cost).font(theme::body()));
+                });
             }
             if signed_in {
                 kit::labeled_row(ui, "Add credits", |ui| {
@@ -288,11 +339,16 @@ mod on {
 
         if signed_in {
             Section::new("set-account-receipts", "Receipts").icon(Icon::List).fixed().show(ui, |ui| {
-                if ui.add_enabled(!busy, egui::Button::new(if st.receipts.is_some() { "Reload" } else { "Show receipts" })).clicked() {
-                    st.start("receipts", |a| a.receipts());
-                }
+                kit::labeled_row(ui, "Receipts", |ui| {
+                    if ui.add_enabled(!busy, egui::Button::new(if st.receipts.is_some() { "Reload" } else { "Show" })).clicked() {
+                        st.start("receipts", |a| a.receipts());
+                    }
+                });
                 for r in st.receipts.clone().unwrap_or_default() {
-                    note(ui, &format!("{} · {} · order {}", s(&r, "title"), money(r["amount_minor"].as_u64().unwrap_or(0), s(&r, "currency")), s(&r, "order")));
+                    kit::labeled_row(ui, s(&r, "title"), |ui| {
+                        let paid = ui.label(egui::RichText::new(money(r["amount_minor"].as_u64().unwrap_or(0), s(&r, "currency"))).font(theme::body()));
+                        paid.on_hover_text(format!("Order {}", s(&r, "order")));
+                    });
                 }
             });
         }
@@ -301,7 +357,7 @@ mod on {
             Section::new("set-account-market", "Marketplace").icon(Icon::SquaresFour).fixed().show(ui, |ui| {
                 kit::labeled_row(ui, "Find", |ui| {
                     egui::ComboBox::from_id_salt("set-market-kind").selected_text(KINDS[st.market_kind]).show_index(ui, &mut st.market_kind, KINDS.len(), |i| KINDS[i]);
-                    ui.add(egui::TextEdit::singleline(&mut st.market_query).hint_text("templates, LUTs, sounds…").desired_width(180.0));
+                    ui.add(egui::TextEdit::singleline(&mut st.market_query).hint_text("templates, LUTs, sounds…").desired_width(FIELD_W - 70.0));
                     if ui.add_enabled(!busy, egui::Button::new("Search")).clicked() {
                         let kind = (st.market_kind > 0).then(|| KINDS[st.market_kind].to_owned());
                         let q = Some(st.market_query.trim().to_owned()).filter(|q| !q.is_empty());
@@ -318,7 +374,7 @@ mod on {
                         }
                     });
                 }
-                note(ui, &format!("{} items installed in the Zornov folder's Marketplace.", studio_commerce::market::installed(&studio_paths::studio()).len()));
+                hint(ui, &format!("{} installed from the marketplace.", studio_commerce::market::installed(&studio_paths::studio()).len()));
             });
         }
 
@@ -345,6 +401,68 @@ mod on {
             }
             assert!(st.status.is_some());
             assert!(st.job.is_none());
+        }
+
+        /// One frame of the page, drawn on the CPU: its text with where it sits.
+        fn frame() -> (eframe::egui::Context, eframe::egui::FullOutput, Vec<(String, eframe::egui::Rect, f32)>) {
+            use eframe::egui;
+            let ctx = egui::Context::default();
+            let mut st = super::State::default();
+            let mut out = Default::default();
+            for i in 0..2 {
+                let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(760.0, 1400.0))), time: Some(f64::from(i) / 60.0 + 1.0), ..Default::default() };
+                out = ctx.run_ui(input, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| super::page(&mut st, ui));
+                });
+                out.textures_delta.clear();
+            }
+            let mut texts = vec![];
+            fn walk(shape: &egui::epaint::Shape, texts: &mut Vec<(String, egui::Rect, f32)>) {
+                match shape {
+                    egui::epaint::Shape::Text(t) => {
+                        let size = t.galley.job.sections.first().map_or(0.0, |s| s.format.font_id.size);
+                        texts.push((t.galley.text().to_owned(), t.galley.rect.translate(t.pos.to_vec2()), size));
+                    }
+                    egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts)),
+                    _ => {}
+                }
+            }
+            for cs in &out.shapes {
+                walk(&cs.shape, &mut texts);
+            }
+            (ctx, out, texts)
+        }
+
+        /// Every help line is one line of at most `HELP_MAX` characters and
+        /// they all start in the control column, right of where the labels
+        /// start; nothing is cut off and no raw path or id is in the text.
+        #[test]
+        fn the_page_is_a_grid_with_one_line_help() {
+            let (ctx, out, texts) = frame();
+            let caption = crate::theme::caption().size;
+            let label_x = texts.iter().find(|(t, ..)| t == "Licence file").expect("the Licence file row").1.left();
+            let col_x = label_x + crate::kit::label_width(&ctx);
+            let help: Vec<_> = texts.iter().filter(|(t, _, size)| (*size - caption).abs() < 0.1 && t.chars().count() > 20).collect();
+            assert!(!help.is_empty(), "{texts:?}");
+            for (t, r, _) in &help {
+                assert!(t.chars().count() <= super::super::HELP_MAX, "help too long: {t}");
+                assert!((r.left() - col_x).abs() < 1.5, "help {t:?} starts at {} not {col_x}", r.left());
+                assert!(r.height() < 2.0 * caption, "help wraps: {t}");
+            }
+            for (t, ..) in &texts {
+                assert!(!t.contains("studio-cloud-server") && !t.contains("/Users/") && !t.contains("Stripe"), "developer text: {t}");
+            }
+            let cuts = crate::ui_shot::cut_text(&ctx, &out, &[], 1.0);
+            assert!(cuts.is_empty(), "{cuts:?}");
+        }
+
+        #[test]
+        fn one_line_keeps_short_text_and_cuts_long_text_with_the_whole_in_a_tooltip() {
+            assert_eq!(super::super::one_line("Short."), ("Short.".to_owned(), None));
+            let long = "x".repeat(200);
+            let (shown, full) = super::super::one_line(&long);
+            assert!(shown.chars().count() <= super::super::HELP_MAX);
+            assert_eq!(full.as_deref(), Some(long.as_str()));
         }
     }
 }
