@@ -150,3 +150,47 @@ pub fn tile_group(tiles: &[Vec<u8>]) -> Vec<u8> {
     }
     out
 }
+
+/// Copies the mode info of tile `rect` from `src` into `dst`; both cover the whole frame (a tile
+/// coder keeps its mode info in frame coordinates). `sb_px` is the superblock size, 64 or 128.
+pub fn merge_mode_info(dst: &mut studio_av1::frame::MiInfo, src: &studio_av1::frame::MiInfo, rect: TileRect, sb_px: u32) {
+    assert_eq!((dst.cols, dst.rows, dst.stride, dst.ox, dst.oy), (src.cols, src.rows, src.stride, src.ox, src.oy), "mode info of different frames");
+    let (c0, c1, r0, r1) = rect.mi(sb_px, src.cols as u32, src.rows as u32);
+    let (c0, c1) = (c0 as usize, c1 as usize);
+    macro_rules! copy {
+        ($($f:ident)*) => {$(
+            if !src.$f.is_empty() {
+                for r in r0 as usize..r1 as usize {
+                    let i = r * src.stride;
+                    dst.$f[i + c0..i + c1].copy_from_slice(&src.$f[i + c0..i + c1]);
+                }
+            }
+        )*};
+    }
+    copy!(y_mode uv_mode ref_frame mv is_inter skip_mode skip tx_size inter_tx_size mi_size segment_id delta_lf comp_group_idx compound_idx interp_filter motion_mode tx_type written);
+    for k in 0..2 {
+        if !src.palette_size[k].is_empty() {
+            for r in r0 as usize..r1 as usize {
+                let i = r * src.stride;
+                dst.palette_size[k][i + c0..i + c1].copy_from_slice(&src.palette_size[k][i + c0..i + c1]);
+                dst.palette_colors[k][i + c0..i + c1].copy_from_slice(&src.palette_colors[k][i + c0..i + c1]);
+            }
+        }
+    }
+}
+
+/// Copies the samples of tile `rect` (whole superblocks, including the part past the picture edge
+/// that blocks reach) from the tile coder's reconstruction `src` into `dst`; both are buffers of
+/// the whole frame. `sb_px` is the superblock size, 64 or 128.
+pub fn merge_recon(dst: &mut crate::recon::FrameBuf, src: &crate::recon::FrameBuf, rect: TileRect, sb_px: u32) {
+    assert_eq!((dst.width, dst.height), (src.width, src.height), "reconstructions of different frames");
+    for p in 0..3 {
+        let s = if p == 0 { 0 } else { 1 };
+        let (x0, x1) = ((rect.sb_col0 * sb_px) as usize >> s, (rect.sb_col1 * sb_px) as usize >> s);
+        let (y0, y1) = ((rect.sb_row0 * sb_px) as usize >> s, (rect.sb_row1 * sb_px) as usize >> s);
+        let (x1, y1) = (x1.min(dst.planes[p].stride), y1.min(dst.planes[p].rows));
+        for y in y0..y1 {
+            dst.planes[p].row_mut(y)[x0..x1].copy_from_slice(&src.planes[p].row(y)[x0..x1]);
+        }
+    }
+}

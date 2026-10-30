@@ -247,3 +247,42 @@ fn tiled_streams_decode_on_videotoolbox_bit_exactly() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn merging_tile_buffers_copies_exactly_the_tile() {
+    use studio_av1::frame::MiInfo;
+    use studio_av1_enc::tiles::{merge_mode_info, merge_recon};
+    let (w, h) = (330u32, 200u32);
+    let (mi_cols, mi_rows) = (2 * ((w as usize + 7) >> 3), 2 * ((h as usize + 7) >> 3));
+    let layout = TileLayout::uniform(6, 4, 2, 1); // 3 x 2 tiles of 2x2 superblocks (the last column has 1)
+    assert_eq!(layout.count(), 6);
+    // one source per tile, each filled with its own tile number
+    let mut dst_mi = MiInfo::new(mi_cols, mi_rows, false);
+    let mut dst = FrameBuf::new(w, h, 8);
+    for t in 0..layout.count() {
+        let mut mi = MiInfo::new(mi_cols, mi_rows, false);
+        let mut buf = FrameBuf::new(w, h, 8);
+        mi.y_mode.fill(t as u8 + 1);
+        mi.mv.fill([studio_av1::frame::Mv::ZERO; 2]);
+        mi.skip.fill(t % 2 == 0);
+        for p in 0..3 {
+            buf.planes[p].data.fill(t as u16 + 1);
+        }
+        merge_mode_info(&mut dst_mi, &mi, layout.rect(t), 64);
+        merge_recon(&mut dst, &buf, layout.rect(t), 64);
+    }
+    for r in 0..mi_rows {
+        for c in 0..mi_cols {
+            let (tr, tc) = (layout.row_starts.iter().rposition(|&s| s as usize * 16 <= r).unwrap().min(layout.rows() - 1), layout.col_starts.iter().rposition(|&s| s as usize * 16 <= c).unwrap().min(layout.cols() - 1));
+            let t = tr * layout.cols() + tc;
+            assert_eq!(dst_mi.y_mode[dst_mi.idx(r, c)], t as u8 + 1, "mode info ({r},{c})");
+            assert_eq!(dst_mi.skip[dst_mi.idx(r, c)], t % 2 == 0);
+        }
+    }
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            let (tr, tc) = (layout.row_starts.iter().rposition(|&s| s as usize * 64 <= y).unwrap().min(layout.rows() - 1), layout.col_starts.iter().rposition(|&s| s as usize * 64 <= x).unwrap().min(layout.cols() - 1));
+            assert_eq!(dst.planes[0].at(x, y), (tr * layout.cols() + tc) as u16 + 1, "luma ({x},{y})");
+        }
+    }
+}
