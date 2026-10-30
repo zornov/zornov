@@ -192,6 +192,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     toolbar(app, ui, r);
     transport(app, ui, r);
 
+    view_menu(app, ui, area, &placed);
+
     // Drop from the Library onto the canvas: add at the playhead.
     let drop = ui.interact(area, egui::Id::unique("viewer-drop"), Sense::hover());
     if let Some(payload) = drop.dnd_release_payload::<LibDrag>() {
@@ -199,6 +201,52 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         library::add(app, &ctx, payload.rail, payload.index, None, None);
     } else if drop.dnd_hover_payload::<LibDrag>().is_some() {
         ui.painter().rect_stroke(canvas, 0, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+    }
+}
+
+fn view_menu_id() -> egui::Id {
+    egui::Id::new("viewer-menu")
+}
+
+/// Right-click on the picture where no layer sits: the view's own menu
+/// (a layer under the pointer gets the clip menu, from `xform`).
+fn view_menu(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, placed: &[Placed]) {
+    let ctx = ui.ctx().clone();
+    let clicked = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary)).then(|| ui.input(|i| i.pointer.interact_pos())).flatten();
+    if let Some(pos) = clicked.filter(|p| area.contains(*p) && ctx.layer_id_at(*p).is_some_and(|l| l.order == egui::Order::Middle || l.order == egui::Order::Background)) {
+        if !placed.iter().any(|pl| Rect::from_center_size(pl.center, pl.size).contains(pos)) {
+            ctx.data_mut(|d| d.insert_temp(view_menu_id().with("at"), pos));
+            kit::set_open(&ctx, view_menu_id(), true);
+        }
+    }
+    if !kit::is_open(&ctx, view_menu_id()) {
+        return;
+    }
+    let Some(pos) = ctx.data(|d| d.get_temp::<Pos2>(view_menu_id().with("at"))) else { return };
+    let mut done = false;
+    let paste = crate::editor::clip_menu::can_paste(&ctx);
+    kit::popover(&ctx, view_menu_id(), Rect::from_min_size(pos, Vec2::splat(1.0)), kit::Side::Below, 200.0, |ui| {
+        if kit::MenuItem::new("Fit to window").reserve_icon().checked(app.editor.zoom.is_none()).show(ui).clicked() {
+            app.editor.zoom = None;
+            done = true;
+        }
+        if kit::MenuItem::new("Actual size").reserve_icon().checked(app.editor.zoom == Some(1.0)).show(ui).clicked() {
+            app.editor.zoom = Some(1.0);
+            done = true;
+        }
+        kit::menu_separator(ui);
+        if kit::MenuItem::new("Safe areas").reserve_icon().checked(app.editor.safe_area).show(ui).clicked() {
+            app.editor.safe_area = !app.editor.safe_area;
+            done = true;
+        }
+        kit::menu_separator(ui);
+        if kit::MenuItem::new("Paste").reserve_icon().enabled(paste).show(ui).clicked() {
+            crate::editor::clip_menu::paste_selection(app, &ctx);
+            done = true;
+        }
+    });
+    if done {
+        kit::set_open(&ctx, view_menu_id(), false);
     }
 }
 

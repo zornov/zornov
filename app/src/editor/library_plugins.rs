@@ -167,7 +167,8 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
     let list = host().list();
     heading(ui, "Plugins");
     let ctx = ui.ctx().clone();
-    if app.cli.shot.is_none() && Button::ghost("Install from file…").icon(Icon::FolderOpen).show(ui).clicked() {
+    // Always there; a scripted run never opens the file dialog (it would wait for a click nobody makes).
+    if Button::ghost("Install from file…").icon(Icon::FolderOpen).show(ui).clicked() && app.cli.shot.is_none() {
         if let Some(path) = rfd::FileDialog::new().add_filter("Zornov plugin", &["wasm"]).pick_file() {
             match host().install_file(&path) {
                 Ok(p) => kit::push(&ctx, format!("Installed {} ({})", p.manifest.name, p.manifest.summary()), None, Some(Icon::CheckCircle)),

@@ -316,7 +316,7 @@ fn workspaces_switch_with_the_keyboard() {
     h.key(Key::Num2, Modifiers::ALT);
     h.frames(2);
     assert_eq!(h.app.prefs.workspace, "Colour");
-    assert_eq!(h.app.editor.rail, crate::editor::RailItem::Looks);
+    assert_eq!(h.app.editor.rail, crate::editor::library::RailItem::Looks);
     h.key(Key::Num6, Modifiers::ALT);
     h.frames(2);
     assert_eq!(h.app.prefs.workspace, "Review");
@@ -1111,4 +1111,42 @@ mod hooks {
         let src = include_str!("app.rs");
         assert!(src.contains("Couldn't export {}: {e}") && !src.contains("\"{} failed: {e}\""));
     }
+}
+
+/// Right-click on the picture where no layer sits opens the view menu
+/// (screenshot 94: it opened nothing); its rows act on the view.
+#[test]
+fn right_click_on_the_viewer_opens_the_view_menu() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+    h.frames(8);
+    let r = h.app.editor.viewer_rect;
+    // The dark margin above the picture: no layer reaches it.
+    let pos = egui::pos2(r.center().x, r.top() + 34.0 + 16.0);
+    h.with_events(vec![egui::Event::PointerMoved(pos)]);
+    for pressed in [true, false] {
+        h.with_events(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: Modifiers::NONE }]);
+    }
+    h.frames(8);
+    assert!(h.find_text("Fit to window").is_some(), "the view menu is open");
+    assert!(h.find_text("Safe areas").is_some());
+    assert!(h.cut_text().is_empty(), "{:#?}", h.cut_text());
+    let before = h.app.editor.safe_area;
+    assert!(h.click("Safe areas"));
+    assert_ne!(h.app.editor.safe_area, before, "Safe areas toggles");
+    assert!(h.find_text("Fit to window").is_none(), "the menu closes after a choice");
+}
+
+/// Tools ▸ Installed always offers "Install from file…" (screenshot 367 had
+/// it missing in a scripted run, where the file dialog never opens).
+#[test]
+fn installed_tools_offer_install_from_file_in_scripted_runs() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor", "--shot", "x.png"]).sized(1440.0, 900.0);
+    h.app.overlay = crate::app::Overlay::None;
+    h.app.editor.rail = crate::editor::library::RailItem::Ai;
+    h.frames(8);
+    assert!(h.click("Installed"), "the Installed group can be opened");
+    let named = h.last.as_ref().and_then(|o| o.platform_output.accesskit_update.as_ref()).is_some_and(|u| u.nodes.iter().any(|(_, n)| n.label() == Some("Install from file…")));
+    assert!(named, "the button is there");
 }
