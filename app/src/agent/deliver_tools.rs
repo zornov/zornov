@@ -14,11 +14,11 @@ use super::{Session, f, secs};
 use crate::deliver_run as run;
 use crate::doc::Doc;
 use crate::services::project as proj;
-use crate::view::{self, ClipKind, LaneKind};
+use crate::services::export::{self, BundleOut, CutdownReq, RenderReq, sanitize};
+use crate::view;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use studio_deliver::bundle::{self, Cue, Manifest};
-use studio_deliver::cut::{self, Action, Shot};
 use studio_deliver::queue::{JobSpec, QueuePreset};
 use studio_deliver::{qc, specs, wire};
 use studio_model as m;
@@ -266,6 +266,15 @@ impl Session {
 
     /// Checks that need no render: loudness of the mix, captions against speech, the canvas against the spec.
     fn preflight(&mut self, a: &Value, profile: qc::Profile) -> Result<Value, String> {
+        let r = self.preflight_report(profile, flag(a, "safe_area") != Some(false));
+        let mut out = report_json(&r, None);
+        out["preflight"] = json!(true);
+        out["note"] = json!("This looked at the project, not a file; the file QC (picture levels, flashes, black, frozen, dropouts) runs on the export: pass \"path\", or export first.");
+        Ok(out)
+    }
+
+    /// The project-side checks as a report: loudness of the mix, captions against speech, the canvas against the profile, titles at the frame edge.
+    pub(crate) fn preflight_report(&mut self, profile: qc::Profile, safe_area: bool) -> qc::Report {
         let dur = self.doc.project.duration();
         let l = super::quality::loudness(&self.doc.model, 0, dur);
         let cues = run::caption_cues(&self.doc);
@@ -297,7 +306,7 @@ impl Session {
         }
         // Titles cut by the frame edge or under the app buttons of vertical platforms: the same
         // judgement `check` makes on the rendered picture, reported as safe-area findings.
-        if flag(a, "safe_area") != Some(false) {
+        if safe_area {
             let q = self.quality(true);
             for p in q["problems"].as_array().cloned().unwrap_or_default() {
                 if matches!(p["kind"].as_str(), Some("title_cut_off" | "title_under_app_ui")) {
@@ -312,11 +321,7 @@ impl Session {
         r.warnings = r.findings.iter().filter(|f| f.severity == qc::Severity::Warning).count();
         r.passed = r.fails == 0;
         r.verdict = if r.fails > 0 { "FAIL".into() } else if r.warnings > 0 { "PASS with warnings".into() } else { "PASS".into() };
-        let mut out = report_json(&r, None);
-        out["preflight"] = json!(true);
-        out["note"] = json!("This looked at the project, not a file; the file QC (picture levels, flashes, black, frozen, dropouts) runs on the export: pass \"path\", or export first.");
-        let _ = a;
-        Ok(out)
+        r
     }
 
     /// QC for an export just written: the summary the export reply carries.
@@ -376,6 +381,12 @@ impl Session {
 
     fn bundle_tool(&mut self, a: &Value) -> Result<Value, String> {
         let root = self.project_root()?;
+        Ok(self.bundle_at(a, &root)?.to_json())
+    }
+
+    /// The bundle of `bundle_tool`, written for the project saved at `root`.
+    pub(crate) fn bundle_at(&mut self, a: &Value, root: &Path) -> Result<BundleOut, String> {
+        let root = root.to_path_buf();
         let name = st(a, "name").map(str::to_owned).unwrap_or_else(|| self.doc.project.name.clone());
         let folder = match st(a, "out") {
             Some(p) => PathBuf::from(p),
@@ -426,7 +437,7 @@ impl Session {
         }
         self.bundle_rest(a, &root, &folder, &name, &mut man, &mut notes)?;
         man.write(&folder).map_err(|e| e.to_string())?;
-        Ok(json!({"folder": folder.display().to_string(), "files": man.items.len(), "missing": man.missing, "notes": notes, "manifest": folder.join("manifest.json").display().to_string()}))
+        Ok(BundleOut { manifest: folder.join("manifest.json"), folder, files: man.items.len(), missing: man.missing, notes })
     }
 
     /// Everything but the master: proxy, sound, captions, pictures, cutdowns.
@@ -573,197 +584,16 @@ impl Session {
     // -------------------------------------------------------------- cutdown
 
     fn cutdown_tool(&mut self, a: &Value) -> Result<Value, String> {
-        let target = f(a, "seconds").ok_or("cutdown needs \"seconds\": the length to cut to (15, 30, 60...)")?;
-        if target < 2.0 {
+        let seconds = f(a, "seconds").ok_or("cutdown needs \"seconds\": the length to cut to (15, 30, 60...)")?;
+        if seconds < 2.0 {
             return Err("a cutdown needs at least 2 seconds".into());
         }
         let root = self.project_root()?;
-        let vertical = flag(a, "vertical") == Some(true);
-        let base = st(a, "name").map(str::to_owned).unwrap_or_else(|| format!("{} {}s{}", self.doc.project.name, target as u32, if vertical { " vertical" } else { "" }));
-        let p = self.doc.project.clone();
-        let spine: Vec<&view::Lane> = p.lanes.iter().filter(|l| l.kind == LaneKind::Spine).collect();
-        let main = spine.first().ok_or("the project has no main lane")?.id;
-        let mut shots_v: Vec<&view::Clip> = p.clips.iter().filter(|c| c.lane == main).collect();
-        shots_v.sort_by_key(|c| c.start);
-        if shots_v.is_empty() {
-            return Err("the main lane is empty: nothing to cut".into());
-        }
-        let total = secs(p.duration());
-        if target >= total - 0.05 {
-            return Err(format!("the programme is {total:.1} s: a {target:.0} s version would be longer; cutdowns shorten"));
-        }
-        let dur = p.duration();
-        let spans = run::speech_spans(&self.doc, 0, dur);
-        let named = |k: &str| -> Vec<u32> { a.get(k).and_then(Value::as_array).map(|v| v.iter().filter_map(Value::as_u64).map(|x| x as u32).collect()).unwrap_or_default() };
-        let (keep_ids, drop_ids) = (named("keep"), named("drop"));
-        let n = shots_v.len();
-        let shots: Vec<Shot> = shots_v
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                let (s, e) = (secs(c.start), secs(c.start + c.dur));
-                let speech: f64 = spans.iter().map(|sp| (sp.1.min(e) - sp.0.max(s)).max(0.0)).sum::<f64>() / (e - s).max(0.01);
-                let titled = p.clips.iter().filter(|o| o.kind == ClipKind::Title && o.name != "Caption" && secs(o.start) < e && secs(o.start + o.dur) > s).count();
-                let marked = p.markers.iter().filter(|mk| secs(mk.time) >= s && secs(mk.time) < e).count();
-                let position = if i == 0 || i + 1 == n { 1.0 } else { 0.0 };
-                Shot { id: c.id, dur: e - s, score: 1.0 + 3.0 * speech + 1.2 * titled.min(2) as f64 + 1.5 * marked.min(2) as f64 + position, keep: keep_ids.contains(&c.id), drop: drop_ids.contains(&c.id) }
-            })
-            .collect();
-        let plan = cut::plan(&shots, target);
-        let kept_secs = cut::kept(&shots, &plan);
-
-        // Work on a copy; the person's project is never changed.
-        let mut cp = Session::new(Doc::new(self.doc.model.clone()));
-        let mut dropped: Vec<u32> = Vec::new();
-        let mut trimmed: Vec<(u32, f64)> = Vec::new();
-        // Ranges to remove, latest first so earlier times stay true.
-        let mut ranges: Vec<(f64, f64, Option<u32>, Vec<u32>)> = Vec::new(); // (from, to, trim clip, deleted clips)
-        for (c, (id, act)) in shots_v.iter().zip(&plan) {
-            let (s, e) = (secs(c.start), secs(c.start + c.dur));
-            match act {
-                Action::Keep => {}
-                Action::Drop => {
-                    dropped.push(*id);
-                    ranges.push((s, e, None, vec![*id]));
-                }
-                Action::Trim(d) => {
-                    trimmed.push((*id, *d));
-                    ranges.push((s + d, e, Some(*id), vec![]));
-                }
-            }
-        }
-        ranges.sort_by(|x, y| y.0.total_cmp(&x.0));
-        let others: Vec<u32> = p.clips.iter().filter(|c| c.lane != main).map(|c| c.id).collect();
-        for (from, to, trim, del) in &ranges {
-            let l = to - from;
-            let mut ops: Vec<Value> = Vec::new();
-            // Clips on the other lanes, against this range, from the copy's current state.
-            let snapshot: Vec<(u32, f64, f64)> = others.iter().filter_map(|id| cp.doc.project.clip(*id).map(|c| (*id, secs(c.start), secs(c.start + c.dur)))).collect();
-            let (mut gone, mut shift, mut shorten_end, mut cut_start_then_shift, mut end_at_from) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-            for (id, cs, ce) in snapshot {
-                if cs >= *from - 1e-6 && ce <= *to + 1e-6 {
-                    gone.push(id);
-                } else if cs >= *to - 1e-6 {
-                    shift.push(id);
-                } else if cs < *from && ce > *to {
-                    shorten_end.push((id, ce - l));
-                } else if cs < *from && ce > *from {
-                    end_at_from.push((id, *from));
-                } else if cs >= *from && cs < *to && ce > *to {
-                    cut_start_then_shift.push((id, *to));
-                }
-            }
-            if !gone.is_empty() {
-                ops.push(json!({"op": "delete", "clips": gone, "ripple": false}));
-            }
-            for (id, e) in &end_at_from {
-                ops.push(json!({"op": "trim", "clip": id, "end": e}));
-            }
-            for (id, e) in &shorten_end {
-                ops.push(json!({"op": "trim", "clip": id, "end": e}));
-            }
-            for (id, s) in &cut_start_then_shift {
-                ops.push(json!({"op": "trim", "clip": id, "start": s}));
-            }
-            if !del.is_empty() {
-                ops.push(json!({"op": "delete", "clips": del, "ripple": true}));
-            }
-            if let Some(id) = trim {
-                ops.push(json!({"op": "trim", "clip": id, "end": from, "ripple": true}));
-            }
-            let moving: Vec<u32> = shift.iter().copied().chain(cut_start_then_shift.iter().map(|x| x.0)).collect();
-            if !moving.is_empty() {
-                ops.push(json!({"op": "move", "clips": moving, "by": -l}));
-            }
-            if !ops.is_empty() {
-                cp.edit(&ops, "Cutdown", false)?;
-            }
-        }
-        // Sound and overlays end with the picture; sound fades out.
-        let end = secs(cp.doc.project.clips.iter().filter(|c| c.lane == main).map(|c| c.start + c.dur).max().unwrap_or(0));
-        let mut tail: Vec<Value> = Vec::new();
-        let late: Vec<(u32, bool, f64)> = cp.doc.project.clips.iter().filter(|c| c.lane != main && secs(c.start + c.dur) > end + 1e-6).map(|c| (c.id, secs(c.start) >= end - 1e-6, secs(c.start))).collect();
-        let (gone, trim_to): (Vec<_>, Vec<_>) = late.into_iter().partition(|c| c.1);
-        if !gone.is_empty() {
-            tail.push(json!({"op": "delete", "clips": gone.iter().map(|c| c.0).collect::<Vec<_>>(), "ripple": false}));
-        }
-        for c in trim_to {
-            tail.push(json!({"op": "trim", "clip": c.0, "end": end}));
-        }
-        if !tail.is_empty() {
-            cp.edit(&tail, "Cutdown ends", false)?;
-        }
-        let audio_lanes: Vec<u32> = cp.doc.project.lanes.iter().filter(|l| l.kind == LaneKind::Audio).map(|l| l.id).collect();
-        let fades: Vec<Value> = cp.doc.project.clips.iter().filter(|c| audio_lanes.contains(&c.lane) && (secs(c.start + c.dur) - end).abs() < 0.05).map(|c| json!({"op": "set", "clip": c.id, "fade_out": (c.dur as f64 / 1e6).min(1.5)})).collect();
-        if !fades.is_empty() {
-            let _ = cp.edit(&fades, "Cutdown fade", false);
-        }
-        let mut converted = 0;
-        if vertical {
-            let mut st2 = cp.doc.model.settings.clone();
-            let (w, h) = (1080u32, 1920u32);
-            st2.width = w;
-            st2.height = h;
-            let ok = cp.doc.apply("Vertical", m::Edit::SetSettings { settings: Box::new(st2) });
-            if !ok {
-                return Err("could not set the vertical canvas".into());
-            }
-            let vids: Vec<u32> = cp.doc.project.clips.iter().filter(|c| c.lane == main && c.kind == ClipKind::Video).map(|c| c.id).collect();
-            if !vids.is_empty() {
-                cp.edit(&vids.iter().map(|id| json!({"op": "set", "clip": id, "fit": "fill_picture"})).collect::<Vec<_>>(), "Cutdown fill", false)?;
-                // Follow the subject where the footage can be read.
-                match cp.edit(&[json!({"op": "reframe", "clips": vids})], "Cutdown reframe", false) {
-                    Ok(_) => converted = vids.len(),
-                    Err(_) => {}
-                }
-            }
-        }
-        // Save as a project of its own.
-        let out_root = m::file::ProjectFolder::new(&root).export_dir(m::file::ExportKind::Cutdowns);
-        std::fs::create_dir_all(&out_root).map_err(|e| e.to_string())?;
-        let dir = free_dir(&out_root, &sanitize(&base));
-        let seq = cp.doc.seq();
-        cp.doc.apply("Name", m::Edit::RenameSequence { id: seq, name: base.clone() });
-        proj::save(&mut cp.doc, Some(&dir))?;
-        let final_secs = secs(cp.doc.project.duration());
-        let mut reply = json!({
-            "project": dir.display().to_string(), "name": base, "seconds": r1(final_secs), "asked": target, "planned_seconds": r1(kept_secs),
-            "kept": shots.iter().zip(&plan).filter(|(_, (_, a))| *a != Action::Drop).map(|(s, _)| s.id).collect::<Vec<_>>(),
-            "dropped": dropped, "shortened": trimmed.iter().map(|(id, d)| json!({"clip": id, "to": r1(*d)})).collect::<Vec<_>>(),
-            "vertical": vertical, "reframed_clips": converted,
-            "next": "open it, look (contact_sheet), adjust with keep / drop and run again if a shot you need is gone",
-        });
-        if flag(a, "render") == Some(true) {
-            let mut j = JobSpec::new(&base, &dir);
-            j.qc = flag(a, "qc").unwrap_or(true);
-            if let Some(d) = st(a, "spec") {
-                j.delivery = specs::find(d).map(|s| s.id.to_owned()).unwrap_or_default();
-            }
-            if j.delivery.is_empty() {
-                j.preset = if vertical { "Vertical".into() } else { "Social 1080p".into() };
-            }
-            j.size = size_arg(a).map(|(w, h)| if vertical { (w.min(h), w.max(h)) } else { (w, h) });
-            let file_dir = st(a, "out").map(PathBuf::from).unwrap_or_else(|| dir.join("exports"));
-            std::fs::create_dir_all(&file_dir).map_err(|e| e.to_string())?;
-            j.out = file_dir.join(format!("{}.mp4", sanitize(&base)));
-            let o = run::run_spec(&j, &mut |_| {})?;
-            reply["file"] = json!(j.out.display().to_string());
-            if let Some((v, _)) = o.qc {
-                reply["qc"] = json!(v);
-            }
-        }
-        Ok(reply)
+        let ids = |k: &str| -> Vec<u32> { a.get(k).and_then(Value::as_array).map(|v| v.iter().filter_map(Value::as_u64).map(|x| x as u32).collect()).unwrap_or_default() };
+        let render = (flag(a, "render") == Some(true)).then(|| RenderReq { qc: flag(a, "qc").unwrap_or(true), spec: st(a, "spec").map(str::to_owned), size: size_arg(a), out: st(a, "out").map(PathBuf::from) });
+        let req = CutdownReq { seconds, root, vertical: flag(a, "vertical") == Some(true), name: st(a, "name").map(str::to_owned), keep: ids("keep"), drop: ids("drop"), render };
+        Ok(export::cutdown(&self.doc, req)?.to_json())
     }
-}
-
-fn sanitize(s: &str) -> String {
-    let t: String = s.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' }).collect();
-    let t = t.trim().to_string();
-    if t.is_empty() { "Untitled".into() } else { t }
-}
-
-fn free_dir(parent: &Path, stem: &str) -> PathBuf {
-    (1..).map(|n| if n == 1 { parent.join(stem) } else { parent.join(format!("{stem} {n}")) }).find(|p| !p.exists()).expect("a free name")
 }
 
 /// The queue's `bundle` flag: everything but the master, around a master the job made.
@@ -782,4 +612,52 @@ pub(crate) fn bundle_for_job(doc: &Doc, spec: &JobSpec, master: &Path) -> Result
     s.bundle_rest(&json!({}), &spec.project, &folder, &spec.name, &mut man, &mut notes)?;
     man.write(&folder).map_err(|e| e.to_string())?;
     Ok(folder)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::Content;
+
+    fn text(c: Vec<Content>) -> Value {
+        match c.into_iter().next() {
+            Some(Content::Text(t)) => serde_json::from_str(&t).unwrap_or(Value::String(t)),
+            _ => Value::Null,
+        }
+    }
+
+    fn session_in(dir: &Path) -> Session {
+        let mut s = Session::new(Doc::from_view(&crate::view::demo()));
+        s.home = Some(dir.to_path_buf());
+        s
+    }
+
+    #[test]
+    fn the_cutdown_tool_makes_a_shorter_project_beside_the_original() {
+        let dir = std::env::temp_dir().join(format!("zornov-cutdown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = session_in(&dir);
+        let total = secs(s.doc.project.duration());
+        let want = (total / 2.0).floor().max(2.0);
+        let r = text(s.call("cutdown", &json!({"seconds": want})).expect("the cutdown tool runs"));
+        assert_eq!(r["asked"].as_f64(), Some(want), "{r}");
+        let made = r["seconds"].as_f64().expect("a length");
+        assert!(made < total, "{made} is shorter than {total}");
+        assert!(Path::new(r["project"].as_str().expect("a project folder")).is_dir());
+        assert_eq!(secs(s.doc.project.duration()), total, "the person's project is not changed");
+        assert!(s.call("cutdown", &json!({"seconds": 1})).is_err(), "too short a version says why");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_check_service_works_on_the_projects_own_doc() {
+        let mut doc = Doc::from_view(&crate::view::demo());
+        let before = doc.edits;
+        let out = export::check_project(&mut doc, false, false);
+        assert_eq!(doc.edits, before, "looking changes nothing");
+        assert!(out.problems.iter().all(|p| !p.kind.is_empty() && !p.message.is_empty()), "{:?}", out.problems);
+        let agent = text(Session::new(Doc::from_view(&crate::view::demo())).call("check", &json!({"frames": false})).expect("check runs"));
+        assert_eq!(agent["problems"].as_array().map_or(0, Vec::len) + agent["accepted"].as_array().map_or(0, Vec::len), out.problems.len() + out.accepted.len(), "the tool and the service see the same project");
+    }
 }

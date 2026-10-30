@@ -6,7 +6,8 @@
 //!
 //! - **Index**: every clip, marker, transition and effect in time order;
 //!   a row jumps there and selects the clip.
-//! - **Checks**: gaps and the same footage used twice.
+//! - **Checks**: the project check (the Export screen's, with Fix and
+//!   Accept as intended), gaps and the same footage used twice.
 //! - **Takes**: scene, take, camera, circled and rating per file, read
 //!   from names; string-outs of a scene or of the circled takes.
 //! - **Sequences**: every cut, switch, duplicate, new, delete.
@@ -161,7 +162,70 @@ fn index(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
 }
 
+/// The project check of the Export screen, here too: the same service, the same Fix and Accept.
+fn project_checks(app: &mut StudioApp, ui: &mut egui::Ui) {
+    use crate::services::export as svc;
+    let id = ui.scope_id().with("editorial-project-check");
+    let mut out: Option<svc::CheckOut> = ui.data(|d| d.get_temp(id));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Project checks").strong());
+        if crate::kit::Button::secondary("Check project").compact().show(ui).clicked() {
+            let o = svc::check_project(&mut app.doc, false, false);
+            toast(ui.ctx(), if o.is_clear() { "No problems found".to_owned() } else { format!("Found {} to look at", o.problems.len()) });
+            out = Some(o);
+        }
+    });
+    let Some(cur) = out.clone() else {
+        ui.add_space(8.0);
+        return;
+    };
+    if cur.is_clear() {
+        ui.label(RichText::new("No problems found").font(theme::caption()));
+    }
+    let mut act: Option<(usize, bool)> = None;
+    let mut go: Option<f64> = None;
+    for (i, p) in cur.problems.iter().enumerate() {
+        ui.horizontal_wrapped(|ui| {
+            if let Some(at) = p.at {
+                if ui.link(format!("{at:.2}")).clicked() {
+                    go = Some(at);
+                }
+            }
+            ui.label(RichText::new(&p.message).font(theme::caption()).color(if p.severity == svc::Severity::Fail { theme::tokens(ui.ctx()).danger } else { theme::tokens(ui.ctx()).text }));
+            if p.fixable && crate::kit::Button::secondary("Fix").compact().show(ui).clicked() {
+                act = Some((i, true));
+            }
+            if crate::kit::Button::ghost("Accept as intended").compact().show(ui).clicked() {
+                act = Some((i, false));
+            }
+        });
+    }
+    if let Some(at) = go {
+        jump(app, (at * SEC as f64) as Time, None);
+    }
+    if let Some((i, fix)) = act {
+        let p = cur.problems[i].clone();
+        if fix {
+            let n = svc::fix_problem(&mut app.doc, &p.kind, p.clip).len();
+            toast(ui.ctx(), if n == 0 { "Nothing could be fixed automatically".to_owned() } else { "Fixed 1 problem".to_owned() });
+        } else if app.doc.folder.is_none() {
+            toast(ui.ctx(), "Save the project to a folder first: accepted findings are kept with the project".to_owned());
+        } else {
+            match svc::accept(&mut app.doc, &p.kind, p.clip) {
+                Ok(()) => toast(ui.ctx(), "Accepted as intended".to_owned()),
+                Err(e) => toast(ui.ctx(), format!("Could not accept it: {e}")),
+            }
+        }
+        out = Some(svc::check_project(&mut app.doc, false, false));
+    }
+    if let Some(o) = out {
+        ui.data_mut(|d| d.insert_temp(id, o));
+    }
+    ui.add_space(8.0);
+}
+
 fn checks(app: &mut StudioApp, ui: &mut egui::Ui) {
+    project_checks(app, ui);
     let s = app.doc.model.active().clone();
     let gaps = ed::find_gaps(&s, 0);
     let dups = ed::find_duplicates(&s, app.editor.frame_dur(app.doc.project.fps));
@@ -519,5 +583,16 @@ mod tests {
         let s = app.doc.model.active();
         assert_eq!(s.name, "Scene 12 circled takes");
         assert_eq!(s.spine_clips()[0].markers[0].name, "Sc 12 Tk 3 (circled)");
+    }
+
+    #[test]
+    fn the_checks_tab_offers_the_project_check() {
+        let mut h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        h.app.editor.cutting.panel.open = true;
+        h.app.editor.cutting.panel.tab = Tab::Checks;
+        h.frames(4);
+        let labels = h.labels();
+        assert!(labels.iter().any(|l| l == "Check project"), "{labels:?}");
+        assert!(labels.iter().any(|l| l.contains("Project checks")), "{labels:?}");
     }
 }

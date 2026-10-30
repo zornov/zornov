@@ -30,13 +30,17 @@ fn snapshot() -> (Queue, usize) {
     })
 }
 
-/// Add the open project to the render queue with `preset`, saving it first.
-pub fn enqueue(doc: &mut crate::doc::Doc, name: &str, preset: &str, qc: bool) -> Result<u32, String> {
+/// Add the open project to the render queue, saving it first, with `preset` or a delivery spec (`youtube`, `broadcast-r128` ...) and an optional size: the job carries them.
+pub fn enqueue_spec(doc: &mut crate::doc::Doc, name: &str, preset: &str, delivery: Option<&str>, qc: bool, size: Option<(u32, u32)>) -> Result<u32, String> {
     let root = doc.folder.as_ref().map(|f| f.root().to_path_buf()).ok_or("Save the project to a folder first: the queue renders the saved project")?;
     crate::services::project::save(doc, None)?;
     let mut spec = studio_deliver::queue::JobSpec::new(name, &root);
     spec.preset = preset.to_owned();
     spec.qc = qc;
+    if let Some(d) = delivery {
+        spec.delivery = studio_deliver::specs::find(d).map(|s| s.id.to_owned()).ok_or_else(|| format!("No delivery spec \"{d}\""))?;
+    }
+    spec.size = size;
     let store = crate::deliver_run::store();
     let id = store.update(|q| q.add(spec))?;
     SNAP.with(|s| *s.borrow_mut() = None);
@@ -58,7 +62,15 @@ pub fn section(ui: &mut egui::Ui) {
         let p = ui.painter();
         kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 14.0), Align2::LEFT_CENTER, &j.spec.name, theme::control_medium(), t.text, r.width() - 90.0);
         let status = status_line(j);
-        kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 32.0), Align2::LEFT_CENTER, &status, theme::caption(), if j.state == State::Failed { t.danger } else { t.text_2 }, r.width() - 90.0);
+        let colour = if j.state == State::Failed || qc_failed(j) { t.danger } else if qc_warned(j) { t.warn } else { t.text_2 };
+        let cut = kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 32.0), Align2::LEFT_CENTER, &status, theme::caption(), colour, r.width() - 90.0);
+        if cut || j.qc.is_some() {
+            let tip = match (&j.qc, j.outputs.first()) {
+                (Some(_), Some(file)) => format!("{status}\nThe QC report is beside the file: {}.qc.txt", file.display()),
+                _ => status.clone(),
+            };
+            ui.interact(Rect::from_min_size(egui::pos2(r.left() + 8.0, r.top() + 22.0), Vec2::new(r.width() - 90.0, 20.0)), ui.scope_id().with(("queue-status", j.id)), Sense::hover()).on_hover_text(tip);
+        }
         let bar = Rect::from_min_size(egui::pos2(r.left() + 8.0, r.bottom() - 6.0), Vec2::new(r.width() - 90.0, 3.0));
         p.rect_filled(bar, CornerRadius::same(2), t.raised);
         p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * j.progress, 3.0)), CornerRadius::same(2), t.accent);
@@ -97,9 +109,13 @@ pub fn section(ui: &mut egui::Ui) {
         }
         kit::paint_text_clipped(ui.painter(), egui::pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, "Finished jobs stay until cleared", theme::caption(), t.text_2, r.width() - 50.0);
     }
-    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
-    let msg = if nodes == 0 { "No render nodes · run `zornov node` on another Mac and add it with the AI (queue add_node)".to_owned() } else { format!("{nodes} render node(s) set up · jobs marked distributed share their pieces") };
-    kit::paint_text_clipped(ui.painter(), egui::pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, &msg, theme::caption(), t.text_2, r.width() - 12.0);
+    // Render nodes: only when there are some.
+    if nodes > 0 {
+        egui::CollapsingHeader::new(format!("Render nodes ({nodes})")).id_salt("queue-nodes").default_open(false).show(ui, |ui| {
+            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
+            kit::paint_text_clipped(ui.painter(), egui::pos2(r.left() + 8.0, r.center().y), Align2::LEFT_CENTER, "Jobs marked distributed share their pieces with these", theme::caption(), t.text_2, r.width() - 12.0);
+        });
+    }
     if let Some((id, what)) = act {
         let store = crate::deliver_run::store();
         let top = q.jobs.iter().filter(|j| !j.state.finished()).map(|j| j.spec.priority).max().unwrap_or(0);
@@ -151,8 +167,8 @@ fn apply(q: &mut Queue, id: u32, what: &str, top: i32) -> Result<Option<String>,
     let name = q.get(id).map(|j| j.spec.name.clone()).unwrap_or_default();
     match what {
         "cancel" => q.cancel(id).map(|_| Some(format!("Cancelled {name}"))),
-        "pause" => q.pause(id).map(|_| None),
-        "resume" => q.resume(id).map(|_| None),
+        "pause" => q.pause(id).map(|_| Some(format!("Paused {name}"))),
+        "resume" => q.resume(id).map(|_| Some(format!("Resumed {name}"))),
         "retry" => q.retry(id).map(|_| Some(format!("Queued {name} again"))),
         "clear" => {
             let n = q.clear_finished();
@@ -160,6 +176,14 @@ fn apply(q: &mut Queue, id: u32, what: &str, top: i32) -> Result<Option<String>,
         }
         _ => q.set_priority(id, top + 1).map(|_| None),
     }
+}
+
+fn qc_failed(j: &studio_deliver::queue::Job) -> bool {
+    j.qc.as_deref().is_some_and(|v| v.contains("FAIL"))
+}
+
+fn qc_warned(j: &studio_deliver::queue::Job) -> bool {
+    j.qc.as_deref().is_some_and(|v| v.contains("warning"))
 }
 
 /// The second line of a job row: what it is doing, or how it ended.
@@ -226,5 +250,29 @@ mod tests {
         assert!(apply(&mut q, 99, "cancel", 0).is_err());
         apply(&mut q, 1, "cancel", 0).unwrap();
         assert!(apply(&mut q, 1, "pause", 0).is_err());
+    }
+
+    #[test]
+    fn pausing_and_resuming_say_what_happened() {
+        let mut q = q_with(1);
+        q.begin(1).unwrap();
+        assert_eq!(apply(&mut q, 1, "pause", 0).unwrap().as_deref(), Some("Paused Job 0"));
+        assert_eq!(apply(&mut q, 1, "resume", 0).unwrap().as_deref(), Some("Resumed Job 0"));
+    }
+
+    #[test]
+    fn a_failed_qc_is_shown_as_a_problem_and_a_warning_as_a_warning() {
+        let mut q = q_with(1);
+        q.begin(1).unwrap();
+        q.finish(1, Vec::new(), Some(("FAIL".into(), std::path::PathBuf::new())), Vec::new());
+        assert!(qc_failed(q.get(1).unwrap()) && !qc_warned(q.get(1).unwrap()));
+        assert!(status_line(q.get(1).unwrap()).contains("QC FAIL"));
+    }
+
+    #[test]
+    fn a_job_for_a_project_with_no_folder_is_refused_with_a_reason() {
+        let mut doc = crate::doc::Doc::from_view(&crate::view::demo());
+        let e = enqueue_spec(&mut doc, "x", "", Some("youtube"), true, None).unwrap_err();
+        assert!(e.starts_with("Save the project"), "{e}");
     }
 }

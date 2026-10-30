@@ -147,21 +147,29 @@ pub enum Av1Speed {
     #[default]
     Fast,
     Balanced,
-    /// Full mode and motion search. Not offered yet: the encoder's speed-6 path is slowest and
-    /// no smaller than Balanced. Add it to [`Av1Speed::ALL`] to bring it back.
-    #[allow(dead_code)]
+    /// Full mode and motion search: slowest, slightly smaller files (at equal quality it needs at
+    /// most as many bytes as Balanced).
     Small,
 }
 
 impl Av1Speed {
     /// The speeds the Export screen offers.
-    pub const ALL: [Av1Speed; 2] = [Av1Speed::Fast, Av1Speed::Balanced];
+    pub const ALL: [Av1Speed; 3] = [Av1Speed::Fast, Av1Speed::Balanced, Av1Speed::Small];
 
     pub fn label(self) -> &'static str {
         match self {
             Av1Speed::Fast => "Fast",
             Av1Speed::Balanced => "Balanced",
             Av1Speed::Small => "Small",
+        }
+    }
+
+    /// One line under the Speed choice saying what it trades.
+    pub fn help(self) -> &'static str {
+        match self {
+            Av1Speed::Fast => "Quickest, largest files",
+            Av1Speed::Balanced => "Slower, smaller files",
+            Av1Speed::Small => "Slowest, slightly smaller files",
         }
     }
 
@@ -189,5 +197,13 @@ mod tests {
         assert_eq!(Format::av1_base_q_idx(100.0), 20);
         assert_eq!(Format::av1_base_q_idx(1.0), 235);
         assert!(Format::av1_base_q_idx(90.0) < Format::av1_base_q_idx(50.0), "higher quality, lower index");
+    }
+
+    #[test]
+    fn the_export_screen_offers_small_as_the_slowest_av1_speed() {
+        assert_eq!(Av1Speed::ALL, [Av1Speed::Fast, Av1Speed::Balanced, Av1Speed::Small]);
+        assert_eq!(Av1Speed::Small.encoder_speed(), 6);
+        assert!(Av1Speed::ALL.windows(2).all(|w| w[0].encoder_speed() > w[1].encoder_speed()), "slower to the right");
+        assert!(Av1Speed::Small.help().starts_with("Slowest"));
     }
 }

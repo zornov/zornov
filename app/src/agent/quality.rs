@@ -182,6 +182,42 @@ impl Session {
         }
     }
 
+    /// The project check as the `check` tool runs it: with `fix`, what Studio can mend is mended
+    /// in one undo step and the project looked at again; `fixed` lists what was done.
+    pub fn check_project(&mut self, frames: bool, fix: bool) -> Value {
+        let began = std::time::Instant::now();
+        let mut v = self.quality(frames);
+        let took = began.elapsed().as_secs_f64();
+        v["took_seconds"] = json!((took * 10.0).round() / 10.0);
+        if fix {
+            let probs = v["problems"].as_array().cloned().unwrap_or_default();
+            self.doc.begin_batch("Fix");
+            let fixed = self.fix(&probs);
+            self.doc.commit_batch();
+            if !fixed.is_empty() {
+                v = self.quality(frames);
+            }
+            v["fixed"] = json!(fixed);
+        }
+        // What was accepted as intended is listed apart, not as a problem.
+        if self.apply_accepted(&mut v, "problems") {
+            v["ok"] = json!(v["problems"].as_array().is_none_or(|p| p.is_empty()));
+        }
+        v
+    }
+
+    /// Mends one finding (`kind` on `clip`) as one undo step; says what was done, nothing when it cannot.
+    pub fn fix_finding(&mut self, kind: &str, clip: Option<u32>) -> Vec<String> {
+        let mut p = json!({"kind": kind});
+        if let Some(c) = clip {
+            p["clip"] = json!(c);
+        }
+        self.doc.begin_batch("Fix");
+        let done = self.fix(&[p]);
+        self.doc.commit_batch();
+        done
+    }
+
     pub(super) fn quality(&mut self, look: bool) -> Value {
         let p = self.doc.project.clone();
         let mut problems: Vec<Value> = Vec::new();
