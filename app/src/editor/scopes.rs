@@ -319,13 +319,43 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
     draw(app, ui, panel);
 }
 
-/// The scopes docked as a panel in `r`.
+fn tab_id() -> egui::Id {
+    egui::Id::unique("scopes-tab")
+}
+
+/// Whether the docked panel shows the Grade tab instead of the scopes.
+pub fn grade_tab(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| *d.get_persisted_mut_or_default::<usize>(tab_id())) == 1
+}
+
+/// Switches the docked panel between the scopes and the Grade tab.
+pub fn set_grade_tab(ctx: &egui::Context, grade: bool) {
+    ctx.data_mut(|d| d.insert_persisted(tab_id(), grade as usize));
+}
+
+/// The scopes docked as a panel in `r`, with the Grade panel as a tab
+/// beside them.
 pub fn docked(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     #[cfg(feature = "render")]
     if let Some(rv) = app.render.as_mut() {
         rv.keep_pixels = true;
     }
-    draw(app, ui, r.shrink(6.0));
+    let inner = r.shrink(6.0);
+    let mut tab = grade_tab(ui.ctx()) as usize;
+    let strip = Rect::from_min_size(inner.min, Vec2::new(inner.width(), theme::space::CONTROL_H));
+    let mut head = ui.new_child(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::top_down(egui::Align::Min)));
+    let segs = [Segment::text("Scopes"), Segment::text("Grade")];
+    if kit::segmented(&mut head, "scopes-grade-tab", &mut tab, &segs, Some(strip.width()), None).changed() {
+        set_grade_tab(ui.ctx(), tab == 1);
+    }
+    let body = Rect::from_min_max(egui::pos2(inner.left(), strip.bottom() + 4.0), inner.max);
+    if tab == 1 {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
+        child.set_clip_rect(body.intersect(ui.clip_rect()));
+        super::grade::panel(app, &mut child);
+    } else {
+        draw(app, ui, body);
+    }
 }
 
 /// The scope chooser, the plot and the readings in `panel`.
@@ -631,7 +661,7 @@ mod tests {
         let at = |x: usize| red[(x, 0)];
         assert!(at(pane / 2).r() > 150 && at(pane / 2).g() < 100, "{:?}", at(pane / 2));
         assert!(row_lit(&red, 127), "green and blue sit at zero");
-        assert_eq!(red[(pane * 2, 0)].a() == 0 || red[(pane * 2 + 10, 0)].a() == 0, true);
+        assert!(red[(pane * 2, 0)].a() == 0 || red[(pane * 2 + 10, 0)].a() == 0);
         // RGB overlay draws the three on the same width.
         let over = picture_with(&frame(|_, _| [255, 0, 0]), 0, &s, Trace::Rgb);
         assert_eq!(over.size, [256, 128]);

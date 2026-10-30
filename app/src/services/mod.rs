@@ -23,6 +23,7 @@
 //! | `proxies` | proxy files: making them (ProRes 422 LT) and switching between them and the originals |
 //! | `multicam` | multicam clips: syncing angles by sound or timecode, cutting between angles |
 //! | `consolidate` | collecting a project's media into one folder and relinking |
+//! | `grade` | clip grades: validating and applying parameters, nodes, LUTs, CDLs and the project's colour management, for the Grade panel and the agent |
 //! | `grade_stills` | the stills gallery: grades kept with a picture, applied to other shots |
 
 // The UI port wires its panels to these; until then parts are reached
@@ -64,6 +65,8 @@ pub mod proxies;
 #[cfg(feature = "render")]
 pub mod multicam;
 pub mod consolidate;
+#[cfg(feature = "render")]
+pub mod grade;
 #[cfg(feature = "render")]
 pub mod grade_stills;
 
