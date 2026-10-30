@@ -76,9 +76,6 @@ impl Encoder {
         if cfg.fps.0 == 0 || cfg.fps.1 == 0 {
             return Err(Error::Invalid("frame rate must be positive"));
         }
-        if cfg.bit_depth != 8 {
-            return Err(Error::Unsupported("10-bit encoding"));
-        }
         if cfg.tiles != (0, 0) {
             return Err(Error::Unsupported("tiles"));
         }
