@@ -232,6 +232,16 @@ impl<'a> NumberField<'a> {
 
 /// Single-line text field with an optional leading icon (search, names).
 pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, icon: Option<Icon>, width: f32, forced: Option<Forced>) -> Response {
+    text_field_ex(ui, text, hint, icon, width, forced, false)
+}
+
+#[allow(dead_code)] // the owners switch to it this round
+/// A [`text_field`] whose text shows as dots (stream keys, tokens).
+pub fn secret_field(ui: &mut Ui, text: &mut String, hint: &str, width: f32) -> Response {
+    text_field_ex(ui, text, hint, None, width, None, true)
+}
+
+fn text_field_ex(ui: &mut Ui, text: &mut String, hint: &str, icon: Option<Icon>, width: f32, forced: Option<Forced>, masked: bool) -> Response {
     let t = theme::tokens(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width.max(48.0), theme::space::CONTROL_H), Sense::hover());
     let cr = CornerRadius::same(theme::radius::CONTROL);
@@ -245,6 +255,7 @@ pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, icon: Option<Icon>
         .frame(egui::Frame::NONE)
         .margin(egui::Margin::ZERO)
         .align(crate::i18n::start_center())
+        .password(masked)
         .desired_width(rect.width() - (left + right) as f32);
     // Paint the fill first, then the editor on top. The editor gets an
     // inset rect so text clears the icon and the clear button.
@@ -514,15 +525,33 @@ impl<'a> FieldRow<'a> {
     }
 }
 
-/// A row with a label and arbitrary content, aligned with field rows.
+/// The label column of a [`FieldRow`] at this width: a narrow panel gives
+/// the label less room.
+pub fn label_col(ui: &Ui) -> f32 {
+    if ui.available_width() < 260.0 { 80.0 } else { label_width(ui.ctx()) }
+}
+
+#[allow(dead_code)] // the owners switch to it this round
+/// What a row of the inspector keeps at its end for the reset and keyframe
+/// buttons.
+pub const ROW_END_SLOTS: f32 = 40.0;
+
+/// A row with a label and arbitrary content, aligned with field rows (on the
+/// same label column, narrow panels included).
 pub fn labeled_row<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let lw = label_col(ui);
+    labeled_row_in(ui, label, lw, add)
+}
+
+/// [`labeled_row`] with the label column given: a row that keeps slots at its
+/// end passes `label_col(ui) - ROW_END_SLOTS`.
+pub fn labeled_row_in<R>(ui: &mut Ui, label: &str, label_w: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = theme::tokens(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.set_min_height(theme::space::CONTROL_H);
-        let lw = label_width(ui.ctx());
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(lw, theme::space::CONTROL_H), Sense::hover());
-        let cut = paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, lw - 8.0);
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(label_w, theme::space::CONTROL_H), Sense::hover());
+        let cut = paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, label_w - 8.0);
         tip_if_cut(resp, cut, label);
         ui.spacing_mut().item_spacing.x = 6.0;
         add(ui)
@@ -547,5 +576,26 @@ mod tests {
         assert_eq!(e("12 px", 0.0), Some(12.0));
         assert_eq!(e("abc", 1.0), None);
         assert_eq!(e("", 1.0), None);
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+
+    #[test]
+    fn a_labeled_row_takes_the_narrow_label_column_in_a_narrow_panel() {
+        let ctx = egui::Context::default();
+        let mut got = (0.0, 0.0);
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            ui.scope(|ui| {
+                ui.set_max_width(200.0);
+                got.0 = label_col(ui);
+            });
+            got.1 = label_col(ui);
+        });
+        out.textures_delta.clear();
+        assert_eq!(got.0, 80.0);
+        assert_eq!(got.1, LABEL_W);
     }
 }

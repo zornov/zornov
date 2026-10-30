@@ -97,3 +97,51 @@ impl<'a> ListRow<'a> {
         RowOutput { response: resp, action }
     }
 }
+
+#[allow(dead_code)] // the owners switch to it this round
+/// The longest help line a row carries; the rest is in its tooltip.
+pub const HELP_MAX: usize = 64;
+
+#[allow(dead_code)] // the owners switch to it this round
+/// `text` cut to one help line, and the whole of it when it was cut.
+pub fn one_line(text: &str) -> (String, Option<String>) {
+    if text.chars().count() <= HELP_MAX {
+        return (text.to_owned(), None);
+    }
+    let cut: String = text.chars().take(HELP_MAX - 1).collect();
+    (format!("{}…", cut.trim_end()), Some(text.to_owned()))
+}
+
+#[allow(dead_code)] // the owners switch to it this round
+/// One line of help under a row, in the control column. `more` (or the
+/// whole text, when it had to be cut) shows on hover.
+pub fn help_row(ui: &mut Ui, text: &str, more: Option<&str>) {
+    let t = theme::tokens(ui.ctx());
+    let (shown, cut) = one_line(text);
+    let tip = more.map(str::to_owned).or(cut);
+    ui.add_space(-4.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().interact_size.y = 14.0;
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(label_width(ui.ctx()));
+        let r = ui.add(egui::Label::new(egui::RichText::new(shown).font(theme::caption()).color(t.text_2)).truncate());
+        if let Some(tip) = tip {
+            r.on_hover_text(tip);
+        }
+    });
+}
+
+#[cfg(test)]
+mod help_tests {
+    use super::*;
+
+    #[test]
+    fn a_help_line_is_cut_to_one_line_with_the_whole_text_kept() {
+        assert_eq!(one_line("Short."), ("Short.".to_owned(), None));
+        let long = "x".repeat(HELP_MAX + 20);
+        let (shown, whole) = one_line(&long);
+        assert_eq!(shown.chars().count(), HELP_MAX);
+        assert!(shown.ends_with('…'));
+        assert_eq!(whole.as_deref(), Some(long.as_str()));
+    }
+}

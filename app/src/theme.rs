@@ -214,6 +214,15 @@ pub fn tokens(ctx: &egui::Context) -> Tokens {
 }
 
 impl Tokens {
+    /// Mute and solo toggles, on.
+    #[allow(dead_code)] // the mixer switches to it this round
+    pub fn mute(&self) -> Color32 {
+        self.warn
+    }
+    #[allow(dead_code)] // the mixer switches to it this round
+    pub fn solo(&self) -> Color32 {
+        self.accent_fill
+    }
     /// A hover tint over `base`: a slightly lighter (dark theme) or darker
     /// (light theme) version, used for rows and buttons.
     pub fn hover(&self, base: Color32) -> Color32 {
@@ -271,6 +280,62 @@ pub fn alpha(c: Color32, a: f32) -> Color32 {
 }
 
 // --- spacing, radii (spec §1) ---------------------------------------------
+
+#[allow(dead_code)] // the owners switch to it this round
+/// Curve colours of the graph and curve editors, in pick order.
+pub const CURVES: [Color32; 8] = [
+    Color32::from_rgb(240, 98, 88),
+    Color32::from_rgb(98, 200, 120),
+    Color32::from_rgb(96, 150, 250),
+    Color32::from_rgb(240, 190, 70),
+    Color32::from_rgb(190, 120, 240),
+    Color32::from_rgb(70, 210, 210),
+    Color32::from_rgb(250, 140, 200),
+    Color32::from_rgb(200, 200, 200),
+];
+
+#[allow(dead_code)] // the owners switch to it this round
+/// Node colours by category, in the order Input, Merge, Transform, Colour,
+/// Filter, Keyer, Matte, Channel, Lens, Cleanup.
+pub const NODE_CATEGORY: [Color32; 10] = [
+    Color32::from_rgb(110, 160, 110),
+    Color32::from_rgb(90, 130, 200),
+    Color32::from_rgb(150, 120, 200),
+    Color32::from_rgb(210, 160, 80),
+    Color32::from_rgb(120, 170, 190),
+    Color32::from_rgb(90, 190, 120),
+    Color32::from_rgb(200, 200, 200),
+    Color32::from_rgb(190, 110, 150),
+    Color32::from_rgb(220, 120, 90),
+    Color32::from_rgb(160, 150, 110),
+];
+
+#[allow(dead_code)] // the owners switch to it this round
+/// Shot-size badges, wide to tight.
+pub const SHOT_SIZE: [Color32; 4] = [
+    Color32::from_rgb(70, 130, 180),
+    Color32::from_rgb(80, 160, 140),
+    Color32::from_rgb(170, 140, 60),
+    Color32::from_rgb(190, 90, 70),
+];
+
+#[allow(dead_code)] // the owners switch to it this round
+/// What a canvas mark that adds to a pick is drawn in, and its outline.
+pub const MARK_IN: Color32 = Color32::from_rgb(74, 222, 128);
+#[allow(dead_code)] // the owners switch to it this round
+pub const MARK_EDGE: Color32 = Color32::BLACK;
+
+#[allow(dead_code)] // the owners switch to it this round
+/// The surround of a monitor (the cutting and trim views), in both themes.
+pub const MONITOR: Color32 = Color32::from_rgb(12, 12, 14);
+
+#[allow(dead_code)] // the owners switch to it this round
+/// The indent of one nesting level in a layer or tree list.
+pub const INDENT: f32 = 12.0;
+
+#[allow(dead_code)] // the owners switch to it this round
+/// Padding inside a small card.
+pub const CARD_PAD: i8 = 6;
 
 pub mod space {
     // The scale. Every gap and margin is one of these.
