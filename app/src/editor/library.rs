@@ -34,6 +34,16 @@ pub enum RailItem {
 
 impl RailItem {
     pub const ALL: [RailItem; 10] = [RailItem::Media, RailItem::Assets, RailItem::Text, RailItem::Motions, RailItem::Effects, RailItem::Cuts, RailItem::Looks, RailItem::Audio, RailItem::Ai, RailItem::Story];
+    /// The tabs always shown, in order; the rest are in the "…" menu.
+    pub const PRIMARY: [RailItem; 7] = [RailItem::Media, RailItem::Text, RailItem::Motions, RailItem::Effects, RailItem::Cuts, RailItem::Audio, RailItem::Ai];
+    /// The tabs kept in the "…" menu (the least used), after the primary ones.
+    pub const MORE: [RailItem; 3] = [RailItem::Assets, RailItem::Looks, RailItem::Story];
+
+    /// Every tab in the order the rail shows them: primary, then more.
+    pub fn rail_order() -> Vec<RailItem> {
+        Self::PRIMARY.into_iter().chain(Self::MORE).collect()
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             RailItem::Media => "Media",
@@ -139,8 +149,10 @@ fn tabs_that_fit(widths: &[f32], avail: f32) -> usize {
 /// none is ever out of reach.
 pub fn rail(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
-    let widths: Vec<f32> = RailItem::ALL.iter().map(|item| (ui.fonts_mut(|f| f.layout_no_wrap(item.label().to_string(), theme::caption(), t.text).size().x) + 14.0).max(40.0)).collect();
-    let fit = tabs_that_fit(&widths, r.width());
+    let order = RailItem::rail_order();
+    let widths: Vec<f32> = order.iter().map(|item| (ui.fonts_mut(|f| f.layout_no_wrap(item.label().to_string(), theme::caption(), t.text).size().x) + 14.0).max(40.0)).collect();
+    // Seven tabs at most; the rest are always in the "…" menu.
+    let fit = tabs_that_fit(&widths, r.width()).min(RailItem::PRIMARY.len());
     rail_cells(app, ui, r, &widths, fit);
     ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, t.line));
 }
@@ -149,14 +161,15 @@ fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32], f
     let t = theme::tokens(ui.ctx());
     let mut open_tool: Option<RailItem> = None;
     let mut x = r.left() + 6.0;
-    for (item, w) in RailItem::ALL.into_iter().zip(widths.iter().copied()) {
+    let order = RailItem::rail_order();
+    for (pos, (item, w)) in order.iter().copied().zip(widths.iter().copied()).enumerate() {
         // Keys reach every section, shown as a tab or not.
         let key_hit = !ui.ctx().egui_wants_keyboard_input()
             && ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::NONE, [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7, egui::Key::Num8, egui::Key::Num9, egui::Key::Num0][item.index()])));
         if key_hit {
             open_tool = Some(item);
         }
-        if item.index() >= fit {
+        if pos >= fit {
             continue;
         }
         let name = item.label();
@@ -179,11 +192,11 @@ fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32], f
         }
         x += w + 2.0;
     }
-    if fit < RailItem::ALL.len() {
+    if fit < order.len() {
         let cell = Rect::from_min_size(egui::pos2(x, r.top() + 4.0), Vec2::new(MORE_W, r.height() - 8.0));
         let resp = ui.interact(cell, egui::Id::new("rail-more"), Sense::click());
         let st = kit::State::from_response(ui, &resp, None);
-        let hidden_active = app.editor.rail.index() >= fit && app.editor.dock.is_open(crate::dock::Panel::Library);
+        let hidden_active = order.iter().position(|i| *i == app.editor.rail).is_some_and(|p| p >= fit) && app.editor.dock.is_open(crate::dock::Panel::Library);
         let fg = if hidden_active { t.accent } else { theme::mix(t.text, t.text, st.hover) };
         icons::paint(ui.painter(), Rect::from_center_size(cell.center(), Vec2::splat(16.0)), Icon::DotsThree, 16.0, fg);
         if st.focused {
@@ -196,7 +209,7 @@ fn rail_cells(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, widths: &[f32], f
             kit::toggle_open(ui.ctx(), id);
         }
         kit::popover(ui.ctx(), id, cell, kit::Side::BelowRight, 180.0, |ui| {
-            for item in RailItem::ALL.into_iter().filter(|i| i.index() >= fit) {
+            for item in order.iter().copied().skip(fit) {
                 if kit::MenuItem::new(item.label()).icon(item.icon()).shortcut(item.shortcut()).checked(app.editor.rail == item).show(ui).clicked() {
                     open_tool = Some(item);
                     kit::set_open(ui.ctx(), id, false);
@@ -552,6 +565,20 @@ fn items_for(app: &StudioApp, rail: RailItem, chip: usize, q: &str, sort: crate:
     found
 }
 
+/// A tile's aspect and least width in the grid. The effect-like tabs keep
+/// room for a name like "Gaussian blur" under the picture.
+fn tile_shape(rail: RailItem) -> (f32, f32) {
+    match rail {
+        RailItem::Text => (1.6, 78.0),
+        RailItem::Assets => (1.0, 70.0),
+        RailItem::Effects | RailItem::Cuts | RailItem::Looks | RailItem::Motions => (1.0, EFFECT_TILE_W),
+        _ => (1.45, 88.0),
+    }
+}
+
+/// The least width of an effect, transition, look or animation tile.
+const EFFECT_TILE_W: f32 = 108.0;
+
 fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize]) {
     let t = theme::tokens(ui.ctx());
     if rail == RailItem::Media {
@@ -633,12 +660,7 @@ fn grid(app: &mut StudioApp, ui: &mut egui::Ui, rail: RailItem, items: &[usize])
     } else {
         // Text styles as wide tiles, five or so a row; effects, cuts and
         // looks small and square, six a row; media four a row.
-        let (aspect, min) = match rail {
-            RailItem::Text => (1.6, 78.0),
-            RailItem::Assets => (1.0, 70.0),
-            RailItem::Effects | RailItem::Cuts | RailItem::Looks | RailItem::Motions => (1.0, 62.0),
-            _ => (1.45, 88.0),
-        };
+        let (aspect, min) = tile_shape(rail);
         TileGrid::new(rail.name()).aspect(aspect).min_width(min).centred().show(ui, items.len(), info, |k| LibDrag { rail, index: items[k] }, &mut paint)
     };
     let ctx = ui.ctx().clone();
@@ -1500,6 +1522,35 @@ mod tests {
         assert!(kit::is_open(&ctx, egui::Id::new("media-menu")));
     }
 
+    /// A tile name longer than its tile ends in an ellipsis inside the tile;
+    /// one that fits is drawn whole.
+    #[test]
+    fn long_tile_names_end_in_an_ellipsis_inside_the_tile() {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(380.0, 300.0))), ..Default::default() };
+        let names = ["Street ambience at the harbour, evening", "Rain"];
+        let mut out = ctx.run_ui(raw, |ui| {
+            let info = |k: usize| TileInfo { label: names[k], badge: None, sub: None, selected: false, addable: true, progress: None, tip: None, added: false };
+            let mut paint = |_: &Painter, _: Rect, _: usize, _: f32, _: bool| {};
+            TileGrid::new("tile-names").aspect(1.45).min_width(88.0).centred().show(ui, names.len(), info, |k| LibDrag { rail: RailItem::Media, index: k }, &mut paint);
+        });
+        out.textures_delta.clear();
+        let mut galleys = vec![];
+        fn walk(s: &egui::epaint::Shape, out: &mut Vec<(String, f32, bool)>) {
+            match s {
+                egui::epaint::Shape::Text(t) => out.push((t.galley.text().to_owned(), t.galley.size().x, t.galley.elided)),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut galleys));
+        let long = galleys.iter().find(|g| g.0.starts_with("Street")).unwrap_or_else(|| panic!("the long name is drawn: {galleys:?}"));
+        assert!(long.2, "cut with an ellipsis: {long:?}");
+        assert!(long.1 <= 88.0 + 40.0, "and inside its tile: {long:?}");
+        let short = galleys.iter().find(|g| g.0 == "Rain").unwrap_or_else(|| panic!("the short name is whole: {galleys:?}"));
+        assert!(!short.2);
+    }
+
     #[test]
     fn long_media_goes_in_whole() {
         // A 1:30 video and a 3-minute song keep their full length.
@@ -1513,6 +1564,10 @@ mod tests {
         let widths = vec![50.0; RailItem::ALL.len()];
         // Wide enough: every tab shows and there is no "…".
         assert_eq!(tabs_that_fit(&widths, 700.0), RailItem::ALL.len());
+        assert_eq!(RailItem::rail_order().len(), RailItem::ALL.len(), "the rail order has every tab once");
+        for item in RailItem::ALL {
+            assert_eq!(RailItem::rail_order().iter().filter(|i| **i == item).count(), 1, "{item:?}");
+        }
         // The default library width: some tabs, never none, never all, and
         // the tabs plus the "…" cell fit across.
         let n = tabs_that_fit(&widths, 340.0);
@@ -1520,6 +1575,63 @@ mod tests {
         assert!(6.0 + MORE_W + 2.0 + n as f32 * 52.0 <= 340.0);
         // Hopelessly narrow: still one tab and the menu.
         assert_eq!(tabs_that_fit(&widths, 20.0), 1);
+    }
+
+    /// The names of effects, transitions, looks and animations fit their
+    /// tiles; the few that cannot end in an ellipsis and have a tooltip.
+    #[test]
+    fn effect_names_fit_their_tiles() {
+        let ctx = egui::Context::default();
+        let mut cut = vec![];
+        let mut total = 0;
+        let mut names: Vec<String> = vec![];
+        names.extend(catalogue::effects().iter().map(|s| s.name.to_string()));
+        names.extend(catalogue::cuts().iter().map(|s| s.name.to_string()));
+        names.extend(catalogue::looks().iter().map(|s| s.name.to_string()));
+        names.extend(catalogue::motions().iter().map(|s| s.name.to_string()));
+        let (_, min) = tile_shape(RailItem::Effects);
+        assert!(min >= EFFECT_TILE_W);
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(300.0, 100.0))), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| {
+            for n in &names {
+                total += 1;
+                if kit::text_width(ui, n, theme::caption()) > min - 4.0 {
+                    cut.push(n.clone());
+                }
+            }
+        });
+        out.textures_delta.clear();
+        assert!(total > 20);
+        assert!(cut.len() * 6 <= total, "{} of {total} names are wider than a tile: {cut:?}", cut.len());
+    }
+
+    #[test]
+    fn the_rail_shows_seven_tabs_and_keeps_the_rest_in_the_menu() {
+        let _serial = crate::ui_tests::serial();
+        let ctx = egui::Context::default();
+        let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+        let mut app = StudioApp::new(&cc, crate::cli::Cli { screen: Some(crate::cli::Screen::Editor), fresh: true, ..Default::default() });
+        // Wide enough for all ten, yet only seven are tabs.
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1200.0, 200.0))), ..Default::default() };
+        let mut out = ctx.run_ui(raw, |ui| rail(&mut app, ui, Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 48.0))));
+        out.textures_delta.clear();
+        let mut texts = vec![];
+        fn walk(s: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut texts));
+        for item in RailItem::PRIMARY {
+            assert!(texts.iter().any(|t| t == item.label()), "{} is a tab: {texts:?}", item.label());
+        }
+        for item in RailItem::MORE {
+            assert!(!texts.iter().any(|t| t == item.label()), "{} waits in the menu: {texts:?}", item.label());
+        }
+        // Their number keys still reach them.
+        assert_eq!(RailItem::Looks.shortcut(), "7");
     }
 
     #[test]

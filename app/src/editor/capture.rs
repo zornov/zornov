@@ -10,6 +10,7 @@
 
 use crate::agent::{Content, Session};
 use crate::app::StudioApp;
+use super::library_plugins::plain_error;
 use crate::icons::Icon;
 use crate::kit;
 use eframe::egui;
@@ -66,6 +67,13 @@ fn call(app: &mut StudioApp, args: Value) -> Result<Value, String> {
     app.doc = s.doc;
     let parts = r?;
     parts.iter().find_map(|p| if let Content::Text(t) = p { serde_json::from_str(t).ok() } else { None }).ok_or_else(|| "no answer".to_string())
+}
+
+/// Shows a failed call in the panel's message line, in words.
+fn check(p: &mut Panel, what: &str, r: Result<Value, String>) {
+    if let Err(e) = r {
+        p.message = plain_error(what, &e);
+    }
 }
 
 fn access_label(a: Access) -> &'static str {
@@ -199,7 +207,8 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let mut open = p.open;
-    egui::Window::new("Record").open(&mut open).default_width(420.0).resizable(true).show(ctx, |ui| {
+    // TODO(kit): a floating-window helper (title bar, close, grip) until then the theme styles the egui window.
+    egui::Window::new(crate::i18n::visual("Record").into_owned()).id(egui::Id::new("record-window")).open(&mut open).default_width(420.0).min_width(320.0).resizable(true).collapsible(false).show(ctx, |ui| {
         let mut grip = |app: &mut StudioApp, ui: &mut egui::Ui| super::dock_ui::float_grip(app, ui, crate::dock::Panel::Record);
         body(app, ui, ctx, p, Some(&mut grip));
     });
@@ -243,7 +252,7 @@ fn tab_record(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
     pick(ui, "rec-mic", "Microphone", &items(&d.mics), &mut p.mic);
     let mut screens = items(&d.screens);
     screens.extend(items(&d.windows));
-    pick(ui, "rec-screen", "Screen or window", &screens, &mut p.screen);
+    pick(ui, "rec-screen", "Screen", &screens, &mut p.screen);
     if kit::Button::ghost("Refresh devices").icon(Icon::ArrowCounterClockwise).compact().show(ui).clicked() {
         p.devices = None;
     }
@@ -261,7 +270,7 @@ fn tab_record(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
             let at = app.editor.playhead as f64 / 1e6;
             match call(app, json!({"action": "stop", "session": id, "to_timeline": true, "at": at})) {
                 Ok(v) => p.message = format!("Added {} recording(s) to the timeline.", v["recorded"].as_array().map_or(0, Vec::len)),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("stop the recording", &e),
             }
             p.rec = None;
         }
@@ -277,7 +286,7 @@ fn tab_record(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
         }
         match call(app, json!({"action": "record", "inputs": inputs, "user_approved": true, "name": "take"})) {
             Ok(v) => p.rec = v["session"].as_u64().map(|x| x as u32),
-            Err(e) => p.message = e,
+            Err(e) => p.message = plain_error("start recording", &e),
         }
     }
 }
@@ -308,7 +317,7 @@ fn tab_voiceover(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
             app.editor.playing = false;
             match call(app, json!({"action": "stop", "session": id})) {
                 Ok(v) => p.message = format!("Voice-over placed at {:.1} s ({:.1} s). {}", v["starts_at"].as_f64().unwrap_or(0.0), v["seconds"].as_f64().unwrap_or(0.0), v["advice"].as_str().unwrap_or("")),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("place the voice-over", &e),
             }
             p.vo = None;
             p.vo_was_recording = false;
@@ -320,7 +329,7 @@ fn tab_voiceover(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
                 p.vo = v["session"].as_u64().map(|x| x as u32);
                 p.message = if p.count_in > 0 { "Counting in…".into() } else { String::new() };
             }
-            Err(e) => p.message = e,
+            Err(e) => p.message = plain_error("start the voice-over", &e),
         }
     }
 }
@@ -353,11 +362,11 @@ fn tab_prompter(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: 
                     if p.follow {
                         let mic = p.mic.clone().and_then(|m| m.strip_prefix("mic:").map(str::to_owned)).unwrap_or_else(|| "default".into());
                         if let Err(e) = crate::agent::ui_start_follow(&mic) {
-                            p.message = e;
+                            p.message = plain_error("follow your voice", &e);
                         }
                     }
                 }
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("start the prompter", &e),
             }
         }
         return;
@@ -377,20 +386,20 @@ fn tab_prompter(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: 
     ui.horizontal_wrapped(|ui| {
         if kit::Button::secondary("Play or pause").icon(Icon::Play).compact().show(ui).clicked() {
             let running = p.last_status.as_ref().and_then(|s| s["prompter"]["running"].as_bool()).unwrap_or(true);
-            let _ = call(app, json!({"action": "prompter", "do": if running { "pause" } else { "play" }}));
+            check(p, "play or pause the prompter", call(app, json!({"action": "prompter", "do": if running { "pause" } else { "play" }})));
         }
         if kit::Button::secondary("Back").icon(Icon::SkipBack).compact().show(ui).clicked() {
-            let _ = call(app, json!({"action": "prompter", "do": "back"}));
+            check(p, "move the prompter back", call(app, json!({"action": "prompter", "do": "back"})));
         }
         if switch(ui, &mut p.mirror, "Mirror").changed() {
-            let _ = call(app, json!({"action": "prompter", "do": "settings", "mirror": p.mirror}));
+            check(p, "mirror the prompter", call(app, json!({"action": "prompter", "do": "settings", "mirror": p.mirror})));
         }
         if kit::Slider::new("wpm", &mut p.wpm, 60.0..=260.0).default(150.0).step(1.0).with_label().with_value().show(ui).changed() {
-            let _ = call(app, json!({"action": "prompter", "do": "settings", "wpm": p.wpm}));
+            check(p, "change the prompter speed", call(app, json!({"action": "prompter", "do": "settings", "wpm": p.wpm})));
         }
         if kit::Button::ghost("Close").icon(Icon::X).compact().show(ui).clicked() {
             crate::agent::ui_stop_follow();
-            let _ = call(app, json!({"action": "prompter", "do": "unload"}));
+            check(p, "close the prompter", call(app, json!({"action": "prompter", "do": "unload"})));
             p.prompter_on = false;
         }
     });
@@ -404,7 +413,7 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
         pick(ui, "live-cam", "Camera", &items(&d.cameras), &mut p.cam);
         let mut screens = items(&d.screens);
         screens.extend(items(&d.windows));
-        pick(ui, "live-screen", "Screen or window", &screens, &mut p.screen);
+        pick(ui, "live-screen", "Screen", &screens, &mut p.screen);
         pick(ui, "live-mic", "Microphone", &items(&d.mics), &mut p.mic);
         ui.add_space(crate::theme::space::GAP);
         if ui.add_enabled_ui(p.cam.is_some() || p.screen.is_some(), |ui| kit::Button::primary("Open the mixer").icon(Icon::Faders).show(ui)).inner.clicked() {
@@ -417,7 +426,7 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
             }
             match call(app, json!({"action": "live", "do": "open", "sources": sources, "user_approved": true, "realtime": true, "replay_secs": 30, "record_program": true, "iso": true, "width": 1280, "height": 720})) {
                 Ok(v) => p.live = v["session"].as_u64().map(|x| x as u32),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("open the mixer", &e),
             }
         }
         return;
@@ -441,7 +450,7 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
         for (i, name) in sources.iter().enumerate() {
             if kit::Button::secondary(name).compact().show(ui).clicked() {
                 let t = TRANS[p.transition];
-                let _ = call(app, json!({"action": "live", "do": "take", "session": id, "to": i, "transition": t}));
+                check(p, "take that source to program", call(app, json!({"action": "live", "do": "take", "session": id, "to": i, "transition": t})));
             }
         }
         if let Some(i) = kit::menu_button(ui, "live-trans", p.transition, &TRANS_NAMES, 90.0, None) {
@@ -453,11 +462,11 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
     ui.horizontal_wrapped(|ui| {
         kit::text_field(ui, &mut p.title, "Name", None, 120.0, None);
         kit::text_field(ui, &mut p.sub, "Role", None, 120.0, None);
-        if kit::Button::secondary("Title on").compact().show(ui).clicked() {
-            let _ = call(app, json!({"action": "live", "do": "title", "session": id, "kind": "lower", "text": p.title, "sub": p.sub}));
+        if kit::Button::secondary("Show title").compact().show(ui).clicked() {
+            check(p, "show the title", call(app, json!({"action": "live", "do": "title", "session": id, "kind": "lower", "text": p.title, "sub": p.sub})));
         }
-        if kit::Button::ghost("Off").compact().show(ui).clicked() {
-            let _ = call(app, json!({"action": "live", "do": "title_off", "session": id}));
+        if kit::Button::ghost("Hide title").compact().show(ui).clicked() {
+            check(p, "hide the title", call(app, json!({"action": "live", "do": "title_off", "session": id})));
         }
     });
     kit::menu_separator(ui);
@@ -468,11 +477,11 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
         if kit::Button::primary("Go live").compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "stream", "session": id, "url": p.stream_url, "user_approved": true})) {
                 Ok(_) => p.message = "Streaming.".into(),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("go live", &e),
             }
         }
         if kit::Button::secondary("Stop stream").compact().show(ui).clicked() {
-            let _ = call(app, json!({"action": "live", "do": "stop_stream", "session": id}));
+            check(p, "stop the stream", call(app, json!({"action": "live", "do": "stop_stream", "session": id})));
         }
     });
     if let Some(streams) = p.last_status.as_ref().and_then(|s| s["productions"].as_array()).and_then(|a| a.iter().find(|x| x["session"] == id)).and_then(|x| x["streams"].as_array()) {
@@ -486,19 +495,19 @@ fn tab_live(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, p: &mut
         if kit::Button::secondary("Save last 20 s").compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "replay_save", "session": id, "seconds": 20})) {
                 Ok(v) => p.message = format!("Replay saved: {}", v["saved"].as_str().unwrap_or("")),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("save the replay", &e),
             }
         }
         if kit::Button::secondary("Replay at half speed").compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "replay_play", "session": id, "seconds": 10, "speed": 0.5})) {
                 Ok(_) => p.message = "Replay is a new source: take it to program.".into(),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("play the replay", &e),
             }
         }
         if kit::Button::primary("Close and add to timeline").icon(Icon::Square).compact().show(ui).clicked() {
             match call(app, json!({"action": "live", "do": "close", "session": id, "to_timeline": true, "at": app.editor.playhead as f64 / 1e6})) {
                 Ok(v) => p.message = format!("{} file(s) added.", v["files"].as_array().map_or(0, Vec::len)),
-                Err(e) => p.message = e,
+                Err(e) => p.message = plain_error("close the live mixer", &e),
             }
             p.live = None;
             p.live_tex = None;
@@ -516,7 +525,7 @@ fn tab_cards(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
                     p.from = c["path"].as_str().unwrap_or("").to_owned();
                 }
             }
-            Err(e) => p.message = e,
+            Err(e) => p.message = plain_error("look for cards", &e),
         }
     }
     kit::menu_separator(ui);
@@ -529,7 +538,53 @@ fn tab_cards(app: &mut StudioApp, ui: &mut egui::Ui, p: &mut Panel) {
     if ui.add_enabled_ui(!p.from.is_empty() && !p.backup.is_empty(), |ui| kit::Button::primary("Copy, check and add to project").icon(Icon::Copy).show(ui)).inner.clicked() {
         match call(app, json!({"action": "ingest", "from": p.from, "backup": p.backup, "import": true})) {
             Ok(v) => p.message = format!("{} file(s), {} MB copied; {} verified{}", v["files"], v["megabytes"], v["verified"], if v["ok"] == true { ". Every copy matches the card." } else { ". PROBLEMS: see the AI editor's report; do not wipe the card." }),
-            Err(e) => p.message = e,
+            Err(e) => p.message = plain_error("copy the card", &e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_tests::Harness;
+
+    #[test]
+    fn failed_calls_say_what_went_wrong_in_words() {
+        let mut p = Panel::default();
+        check(&mut p, "hide the title", Err("No such file or directory (os error 2)".into()));
+        assert_eq!(p.message, "Couldn't hide the title: the file is not there");
+        p.message.clear();
+        check(&mut p, "hide the title", Ok(json!({})));
+        assert!(p.message.is_empty(), "a good call leaves the line alone");
+    }
+
+    #[test]
+    fn record_window_labels_fit_and_say_screen() {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(900.0, 700.0);
+        {
+            let mut p = panel().lock().unwrap();
+            p.open = true;
+            p.tab = 0;
+            p.devices = Some(Devices::default());
+        }
+        h.frames(4);
+        let mut labels = h.labels();
+        let out = h.last.as_ref().expect("a frame");
+        fn walk(s: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut labels));
+        let _ = panel().lock().map(|mut p| {
+            p.open = false;
+            p.devices = None;
+        });
+        assert!(labels.iter().any(|l| l == "Screen"), "{labels:?}");
+        assert!(!labels.iter().any(|l| l.contains("Screen or window")), "the long label is gone");
+        let cut: Vec<_> = h.cut_text().into_iter().filter(|c| ["Screen", "Camera", "Microphone", "Record"].contains(&c.text.as_str())).collect();
+        assert!(cut.is_empty(), "{cut:?}");
     }
 }
