@@ -53,7 +53,7 @@ fn bad_configurations_are_refused() {
     assert!(matches!(Encoder::new(Config { rate: RateMode::Bitrate(0), ..cfg(64, 64, 0) }), Err(Error::Invalid(_))));
     assert!(Encoder::new(Config { rate: RateMode::Crf(30), ..cfg(64, 64, 0) }).is_ok());
     assert!(Encoder::new(Config { rate: RateMode::Bitrate(2000), ..cfg(64, 64, 0) }).is_ok());
-    assert!(matches!(Encoder::new(Config { tiles: (1, 0), ..cfg(64, 64, 100) }), Err(Error::Unsupported(_))));
+    assert!(Encoder::new(Config { tiles: (1, 0), ..cfg(64, 64, 100) }).is_ok());
 }
 
 #[test]
@@ -196,5 +196,31 @@ fn ten_bit_key_and_inter_frames_decode_to_the_reconstruction() {
             let db = psnr10(&pics[0].planes[0], &src.planes[0]);
             assert!(db > 35.0, "speed {speed} frame {i}: luma PSNR {db:.1} dB");
         }
+    }
+}
+
+/// Tiled streams decode bit-exactly, whatever the number of threads, and the bytes do not depend
+/// on the threads.
+#[test]
+fn tiled_streams_decode_to_the_reconstruction_and_do_not_depend_on_the_thread_count() {
+    let (w, h) = (270u32, 200u32);
+    for (speed, tiles) in [(6u8, (1u8, 1u8)), (8, (1, 0)), (6, (0, 1)), (9, (2, 0))] {
+        let mut streams: Vec<Vec<Vec<u8>>> = Vec::new();
+        for threads in [1usize, 3] {
+            let mut e = Encoder::new(Config { speed, keyint: 4, tiles, threads, ..cfg(w, h, 90) }).unwrap();
+            let mut dec = Decoder::new();
+            let mut packets = Vec::new();
+            for i in 0..5u32 {
+                let src = picture(w, h, 3 * i);
+                let p = e.push_frame(&src, i as i64).unwrap().remove(0);
+                let mut pics = dec.decode_pts(&p.data, p.pts).unwrap();
+                pics.extend(dec.flush());
+                assert_eq!(pics.len(), 1);
+                assert_eq!(pics[0].planes, e.reconstruction().unwrap().planes, "speed {speed} tiles {tiles:?} threads {threads} frame {i}");
+                packets.push(p.data);
+            }
+            streams.push(packets);
+        }
+        assert_eq!(streams[0], streams[1], "speed {speed} tiles {tiles:?}: the bytes depend on the thread count");
     }
 }
