@@ -17,7 +17,7 @@ use studio_av1_enc::mode::{FixedDecider, ModeDecider, PartitionDecider};
 use studio_av1_enc::obu::{ObuType, obu, temporal_delimiter, write_frame_header, write_sequence_header};
 use studio_av1_enc::recon::{FrameBuf, QuantInfo};
 use studio_av1_enc::syntax::TileWriter;
-use studio_av1_enc::types::{Frame, FrameParams, FrameType, SbPos, SeqParams};
+use studio_av1_enc::types::{BlockDecision, Frame, FrameParams, FrameType, SbPos, SeqParams};
 
 struct Rng(u64);
 impl Rng {
@@ -315,4 +315,38 @@ fn lossless_is_rejected() {
     let mut recon = FrameBuf::new(16, 16, 8);
     recon.quant = QuantInfo { base_q_idx: 0, ..Default::default() };
     FixedDecider { base_q_idx: 0 }.decide_sb(&src, &mut recon, SbPos { col: 0, row: 0 });
+}
+
+/// Intra availability stops at the edge of a tile: the first block of an interior tile predicts
+/// from nothing (the base value), as at a picture edge, not from the samples of the tile above and
+/// to the left; without the tile it does see them.
+#[test]
+fn intra_prediction_does_not_cross_an_interior_tile_edge() {
+    let (w, h) = (256u32, 192u32);
+    let predicted = |tile: bool| -> (u16, u16) {
+        let mut recon = FrameBuf::new(w, h, 8);
+        recon.quant = QuantInfo { base_q_idx: 90, ..Default::default() };
+        recon.enable_intra_edge_filter = false;
+        // everything above and left of the block at (64, 64) holds 50
+        for y in 0..64 {
+            for x in 0..256 {
+                recon.planes[0].set(x, y, 50);
+            }
+        }
+        for y in 64..128 {
+            for x in 0..64 {
+                recon.planes[0].set(x, y, 50);
+            }
+        }
+        if tile {
+            // the tile of superblocks (1, 1) .. (2, 3): mode info rows 16..32, columns 16..48
+            recon.set_tile(16, 32, 16, 48);
+        }
+        recon.begin_sb(SbPos { col: 1, row: 1 });
+        let d = BlockDecision { mi_row: 16, mi_col: 16, w4: 16, h4: 16, y_mode: DC_PRED, uv_mode: DC_PRED, tx_size: TX_64X64, skip: true, coefs: vec![] };
+        recon.reconstruct_block(&d);
+        (recon.planes[0].at(64, 64), recon.planes[0].at(127, 127))
+    };
+    assert_eq!(predicted(true), (128, 128), "a tile's first block must predict from the base value");
+    assert_eq!(predicted(false), (50, 50), "without a tile the neighbours are used");
 }
