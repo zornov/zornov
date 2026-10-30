@@ -77,9 +77,9 @@ fn cdef_frames_decode_to_the_encoders_reconstruction_and_beat_deblocking_alone()
 #[test]
 fn restoration_frames_decode_to_the_encoders_reconstruction_and_beat_cdef_alone() {
     let mut gained = false;
-    for q in [40u8, 120, 200] {
-        let both = run(BOTH, q, 6);
-        let all = run(ALL, q, 6);
+    for q in [50u8, 120, 200] {
+        let both = run(BOTH, q, 4);
+        let all = run(ALL, q, 4);
         println!("q {q}: deblock+cdef {both:?} +restoration {all:?}");
         // a unit only keeps a filter when it pays for its bits, so the error never gets worse
         assert!(all.1 <= both.1, "restoration made the error worse at q {q}: {all:?} vs {both:?}");

@@ -179,7 +179,7 @@ struct Result {
 /// Encodes, decodes with the real decoder, checks bit-exactness against the reconstruction.
 fn run(name: &str, src: &Frame, q: u8, search: bool) -> Result {
     let mut fixed = FixedDecider { base_q_idx: q };
-    let mut srch = PartitionDecider { base_q_idx: q };
+    let mut srch = PartitionDecider { base_q_idx: q, min_n4: 2 };
     let decider: &mut dyn ModeDecider = if search { &mut srch } else { &mut fixed };
     let (coded, tu) = encode(src, q, decider);
     // bounded: a frame never costs more than ~3 bytes a sample at these quantisers

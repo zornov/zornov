@@ -142,9 +142,11 @@ impl Encoder {
         buf.enable_intra_edge_filter = false;
         let mut tw = TileWriter::new(&self.seq, q, mi_cols, mi_rows);
         let ref_idx = [0u8; 7];
+        // speeds 7 and 8 stop splitting at 16x16, speed 6 and below go to 8x8
+        let min_n4 = if self.cfg.speed >= 7 { 4 } else { 2 };
         let (mut intra_sbs, mut inter_sbs) = (Vec::new(), Vec::new());
         if key {
-            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(PartitionDecider { base_q_idx: q }) };
+            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(PartitionDecider { base_q_idx: q, min_n4 }) };
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
                     let pos = SbPos { col, row };
@@ -158,7 +160,7 @@ impl Encoder {
             // fast: one block size by quantiser (coarser ones leave less to gain from small blocks,
             // and their mode info costs more); otherwise the size is chosen for every superblock
             let fixed_size = if q >= 160 { 16 } else { 8 };
-            let mut coder = InterFrameCoder::new(frame, &self.refs, ref_idx, if fast { fixed_size } else { 0 }, self.cfg.speed <= 6);
+            let mut coder = InterFrameCoder::new(frame, &self.refs, ref_idx, if fast { fixed_size } else { 0 }, self.cfg.speed <= 6).with_min_block(min_n4);
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
                     let pos = SbPos { col, row };

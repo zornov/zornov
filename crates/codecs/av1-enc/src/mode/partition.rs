@@ -46,9 +46,9 @@ const PARTITION_BITS: f64 = 2.0;
 /// reconstructed there; `blocks` receives them in decode order. Returns the cost.
 ///
 /// A node that reaches past the frame edge follows [`fixed_partition`]'s forced splits, with the
-/// search running inside the pieces. Blocks go down to 8x8.
+/// search running inside the pieces. Blocks go down to `min_n4` (in 4x4 units, at least 2: 8x8).
 #[allow(clippy::too_many_arguments)]
-pub fn search_partition(src: &Frame, recon: &mut FrameBuf, r: usize, c: usize, n4: usize, mi_rows: usize, mi_cols: usize, search_modes: bool, blocks: &mut Vec<BlockDecision>) -> f64 {
+pub fn search_partition(src: &Frame, recon: &mut FrameBuf, r: usize, c: usize, n4: usize, mi_rows: usize, mi_cols: usize, search_modes: bool, min_n4: usize, blocks: &mut Vec<BlockDecision>) -> f64 {
     if r >= mi_rows || c >= mi_cols {
         return 0.0;
     }
@@ -70,14 +70,14 @@ pub fn search_partition(src: &Frame, recon: &mut FrameBuf, r: usize, c: usize, n
             return total;
         }
         for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
-            total += search_partition(src, recon, r + dr, c + dc, half, mi_rows, mi_cols, search_modes, blocks);
+            total += search_partition(src, recon, r + dr, c + dc, half, mi_rows, mi_cols, search_modes, min_n4, blocks);
         }
         return total;
     }
     let base = recon.save_region(r, c, n4);
     let (whole, whole_cost) = code_block_rd(src, recon, (r, c, n4, n4), search_modes);
     let whole_cost = whole_cost + lam * PARTITION_BITS;
-    if n4 <= 2 {
+    if n4 <= min_n4.max(2) {
         blocks.push(whole);
         return whole_cost;
     }
@@ -86,7 +86,7 @@ pub fn search_partition(src: &Frame, recon: &mut FrameBuf, r: usize, c: usize, n
     let mut split = Vec::new();
     let mut split_cost = lam * PARTITION_BITS;
     for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
-        split_cost += search_partition(src, recon, r + dr, c + dc, half, mi_rows, mi_cols, search_modes, &mut split);
+        split_cost += search_partition(src, recon, r + dr, c + dc, half, mi_rows, mi_cols, search_modes, min_n4, &mut split);
     }
     if whole_cost <= split_cost {
         recon.restore_region(&after_whole);
