@@ -15,6 +15,7 @@ use studio_av1::{FrameHeader, PostFilter, SequenceHeader};
 
 use crate::recon::FrameBuf;
 use crate::syntax::uv_aware_tx_size;
+use crate::tiles::par_map;
 use crate::types::{CdefParams, Frame, LrChoice, LrParams, LrUnit};
 use studio_av1::spec_tables::{RESTORE_NONE, RESTORE_SGRPROJ, RESTORE_SWITCHABLE, RESTORE_WIENER, SGR_PARAMS};
 
@@ -29,6 +30,65 @@ pub struct FilterSet {
 impl Default for FilterSet {
     fn default() -> FilterSet {
         FilterSet { deblock: true, cdef: true, restoration: true }
+    }
+}
+
+/// Wall-clock spans of the filter stages, for profiling (`take_profile`).
+pub mod profile {
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::Relaxed};
+    use std::time::Instant;
+
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct Spans {
+        pub deblock_search_ns: u64,
+        pub cdef_search_ns: u64,
+        pub lr_search_ns: u64,
+        /// `apply` calls made outside the searches (the final filtered reconstruction).
+        pub apply_ns: u64,
+    }
+
+    static DEBLOCK: AtomicU64 = AtomicU64::new(0);
+    static CDEF: AtomicU64 = AtomicU64::new(0);
+    static LR: AtomicU64 = AtomicU64::new(0);
+    static APPLY: AtomicU64 = AtomicU64::new(0);
+    /// Searches running (on any thread): `apply` calls inside them are part of the search's span.
+    static DEPTH: AtomicU32 = AtomicU32::new(0);
+
+    pub(super) struct Span {
+        counter: &'static AtomicU64,
+        start: Instant,
+        search: bool,
+        record: bool,
+    }
+
+    pub(super) fn span(which: u8) -> Span {
+        let top = DEPTH.load(Relaxed) == 0;
+        let (counter, search) = match which {
+            0 => (&DEBLOCK, true),
+            1 => (&CDEF, true),
+            2 => (&LR, true),
+            _ => (&APPLY, false),
+        };
+        if search {
+            DEPTH.fetch_add(1, Relaxed);
+        }
+        Span { counter, start: Instant::now(), search, record: search || top }
+    }
+
+    impl Drop for Span {
+        fn drop(&mut self) {
+            if self.search {
+                DEPTH.fetch_sub(1, Relaxed);
+            }
+            if self.record {
+                self.counter.fetch_add(self.start.elapsed().as_nanos() as u64, Relaxed);
+            }
+        }
+    }
+
+    /// The spans since the last call, reset to zero.
+    pub fn take() -> Spans {
+        Spans { deblock_search_ns: DEBLOCK.swap(0, Relaxed), cdef_search_ns: CDEF.swap(0, Relaxed), lr_search_ns: LR.swap(0, Relaxed), apply_ns: APPLY.swap(0, Relaxed) }
     }
 }
 
@@ -120,6 +180,7 @@ fn to_decoder(buf: &FrameBuf) -> DecBuf {
 
 /// `recon` (the reconstruction before filtering) run through the decoder's post-filters.
 pub fn apply(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, p: &FilterParams) -> FrameBuf {
+    let _t = profile::span(3);
     if p.lf_level == [0, 0] && p.cdef.is_none() && p.lr.is_none() {
         return recon.clone();
     }
@@ -160,19 +221,34 @@ pub fn sse(buf: &FrameBuf, src: &Frame) -> u64 {
 /// `src`; 0 when filtering does not help. A ternary search over 0..=63 assumes the error is
 /// unimodal in the level, which holds well enough in practice, and a 0 is always compared.
 pub fn search_deblock(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame) -> [u32; 2] {
-    let eval = |l: u32| sse(&apply(seq, recon, mi, &FilterParams { lf_level: [l, l], cdef: None, lr: None }), src);
+    search_deblock_mt(seq, recon, mi, src, 1)
+}
+
+/// [`search_deblock`] with the two probes of every round (and the final candidates) evaluated on up
+/// to `threads` workers. The levels visited, and so the result, do not depend on `threads`.
+pub fn search_deblock_mt(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame, threads: usize) -> [u32; 2] {
+    let _t = profile::span(0);
+    let mut memo: std::collections::HashMap<u32, u64> = Default::default();
+    let eval = |levels: &[u32], memo: &mut std::collections::HashMap<u32, u64>| {
+        let todo: Vec<u32> = levels.iter().copied().filter(|l| !memo.contains_key(l)).collect();
+        let sses = par_map(todo.len(), threads, |i| sse(&apply(seq, recon, mi, &FilterParams { lf_level: [todo[i]; 2], cdef: None, lr: None }), src));
+        memo.extend(todo.into_iter().zip(sses));
+    };
     let (mut lo, mut hi) = (1u32, 63u32);
     while hi - lo > 2 {
         let a = lo + (hi - lo) / 3;
         let b = hi - (hi - lo) / 3;
-        if eval(a) <= eval(b) {
+        eval(&[a, b], &mut memo);
+        if memo[&a] <= memo[&b] {
             hi = b;
         } else {
             lo = a;
         }
     }
-    let best = (lo..=hi).min_by_key(|&l| eval(l)).unwrap();
-    if eval(best) < sse(recon, src) { [best, best] } else { [0, 0] }
+    let last: Vec<u32> = (lo..=hi).collect();
+    eval(&last, &mut memo);
+    let best = last.iter().copied().min_by_key(|l| memo[l]).unwrap();
+    if memo[&best] < sse(recon, src) { [best, best] } else { [0, 0] }
 }
 
 /// Squared error of every 64x64 block (luma and its chroma) of `buf` against `src`, row-major.
@@ -195,8 +271,8 @@ fn block_sse(buf: &FrameBuf, src: &Frame, cols: usize, rows: usize) -> Vec<u64> 
 
 /// Squared error per bit for the filter decisions: the mode decision's multiplier (a multiple of
 /// 1/4 to 4 of it was tried; the equal-PSNR gate was best at 1).
-fn filter_lambda(base_q_idx: u8) -> f64 {
-    crate::mode::rdcost::lambda(base_q_idx, 8)
+fn filter_lambda(base_q_idx: u8, bit_depth: u8) -> f64 {
+    crate::mode::rdcost::lambda(base_q_idx, bit_depth)
 }
 
 /// Candidate strengths `(pri, sec)`.
@@ -211,6 +287,13 @@ const CDEF_CANDIDATES: [(u8, u8); 20] = [
 /// The CDEF strength sets and per-64x64 indices that minimise squared error plus the cost of
 /// coding the indices, on top of the deblocked `deblocked`; none when it does not pay.
 pub fn search_cdef(seq: &SequenceHeader, deblocked: &FrameBuf, mi: &MiInfo, src: &Frame, base_q_idx: u8) -> Option<CdefChoice> {
+    search_cdef_mt(seq, deblocked, mi, src, base_q_idx, 1)
+}
+
+/// [`search_cdef`] with the candidate strengths evaluated on up to `threads` workers; the result
+/// does not depend on `threads`.
+pub fn search_cdef_mt(seq: &SequenceHeader, deblocked: &FrameBuf, mi: &MiInfo, src: &Frame, base_q_idx: u8, threads: usize) -> Option<CdefChoice> {
+    let _t = profile::span(1);
     let (cols, rows) = (mi.cols.div_ceil(16), mi.rows.div_ceil(16));
     let n = cols * rows;
     let damping = (3 + base_q_idx as u32 / 64).min(6) as u8;
@@ -224,17 +307,15 @@ pub fn search_cdef(seq: &SequenceHeader, deblocked: &FrameBuf, mi: &MiInfo, src:
     if !active.iter().any(|&a| a) {
         return None;
     }
-    let table: Vec<Vec<u64>> = CDEF_CANDIDATES
-        .iter()
-        .map(|&(pri, sec)| {
-            let mut params = CdefParams { damping, ..Default::default() };
-            (params.y_pri[0], params.y_sec[0], params.uv_pri[0], params.uv_sec[0]) = (pri, sec, pri, sec);
-            let choice = CdefChoice { params, idx: vec![0; n], cols };
-            let out = apply(seq, deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(choice), lr: None });
-            block_sse(&out, src, cols, rows)
-        })
-        .collect();
-    let lambda = filter_lambda(base_q_idx);
+    let table: Vec<Vec<u64>> = par_map(CDEF_CANDIDATES.len(), threads, |i| {
+        let (pri, sec) = CDEF_CANDIDATES[i];
+        let mut params = CdefParams { damping, ..Default::default() };
+        (params.y_pri[0], params.y_sec[0], params.uv_pri[0], params.uv_sec[0]) = (pri, sec, pri, sec);
+        let choice = CdefChoice { params, idx: vec![0; n], cols };
+        let out = apply(seq, deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(choice), lr: None });
+        block_sse(&out, src, cols, rows)
+    });
+    let lambda = filter_lambda(base_q_idx, deblocked.bit_depth);
     let n_active = active.iter().filter(|&&a| a).count();
     let total = |best: &[u64]| -> u64 { (0..n).filter(|&b| active[b]).map(|b| best[b]).sum() };
     let mut best_pick: Option<(f64, Vec<usize>, u32)> = None;
@@ -358,14 +439,38 @@ fn candidates() -> Vec<LrUnit> {
     c
 }
 
+/// The probe round runs each candidate on one restoration unit in this many (1 = every unit), see
+/// [`set_probe_sampling`].
+static PROBE_SAMPLING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(DEFAULT_PROBE_SAMPLING);
+const DEFAULT_PROBE_SAMPLING: usize = 4;
+static PROBE_SMALL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Probes with two Wiener filters and two self-guided sets instead of four of each (the default;
+/// `false` is the earlier, wider probe set, for measurements).
+pub fn set_probe_small(small: bool) {
+    PROBE_SMALL.store(small, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Sets the share of restoration units the probe round evaluates (`1` = all, `n` = one in `n`),
+/// for measurements. Process-wide; the default is the shipped setting.
+pub fn set_probe_sampling(n: usize) {
+    PROBE_SAMPLING.store(n.max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether unit `(row, col)` is in the probe sample. Frames with few units are probed whole.
+fn probe_unit(rows: usize, cols: usize, row: usize, col: usize, every: usize) -> bool {
+    every <= 1 || rows * cols <= 2 * every || (row * 2 + col) % every == 0
+}
+
 /// Least share of the frame's squared error restoration has to save (before its bits) to be used.
 const MIN_LR_GAIN: f64 = 0.03;
 
 /// Indices into `candidates()` tried first: four Wiener filters and four self-guided sets.
 fn probe_indices(cands: &[LrUnit]) -> Vec<usize> {
-    let wiener = [0usize, 1, 4, 5];
+    let small = PROBE_SMALL.load(std::sync::atomic::Ordering::Relaxed);
+    let wiener: &[usize] = if small { &[0, 4] } else { &[0, 1, 4, 5] };
     let mut out: Vec<usize> = wiener.to_vec();
-    for set in [1u8, 5, 9, 13] {
+    for &set in if small { &[1u8, 9][..] } else { &[1u8, 5, 9, 13][..] } {
         if let Some(i) = cands.iter().position(|u| u.kind as usize == RESTORE_SGRPROJ && u.sgr_set == set) {
             out.push(i);
         }
@@ -377,6 +482,7 @@ fn probe_indices(cands: &[LrUnit]) -> Vec<usize> {
 /// plane picks none, one of the Wiener filters or a self-guided set by squared error plus an
 /// estimate of its bits. None when no plane gains.
 pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame, lf: [u32; 2], cdef: Option<&CdefChoice>, base_q_idx: u8, threads: usize) -> Option<LrChoice> {
+    let _t = profile::span(2);
     let deblocked = apply(seq, recon, mi, &FilterParams { lf_level: lf, cdef: None, lr: None });
     let cdef_out = match cdef {
         Some(c) => apply(seq, &deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(c.clone()), lr: None }),
@@ -393,8 +499,17 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
     let mut tables: Vec<Option<[Vec<u64>; 3]>> = vec![None; cands.len()];
     // each candidate is run over the whole frame (every unit set to it); they are independent, so
     // they are spread over `threads` workers, each with its own filter state
-    let mut eval = |tables: &mut Vec<Option<[Vec<u64>; 3]>>, todo: Vec<usize>| {
-        let todo: Vec<usize> = todo.into_iter().filter(|&c| tables[c].is_none()).collect();
+    // `sampled`: only the units of the probe sample are filtered (the others stay unrestored and
+    // count their unrestored error), which costs about the sample's share of a full run; those
+    // tables are marked in `partial` and are replaced by the next full evaluation
+    let every = PROBE_SAMPLING.load(std::sync::atomic::Ordering::Relaxed);
+    let in_sample = |p: usize, i: usize| probe_unit(rows[p], cols[p], i / cols[p], i % cols[p], every);
+    let mut partial = vec![false; cands.len()];
+    let eval = |tables: &mut Vec<Option<[Vec<u64>; 3]>>, partial: &mut Vec<bool>, todo: Vec<usize>, sampled: bool| {
+        let todo: Vec<usize> = todo.into_iter().filter(|&c| tables[c].is_none() || (!sampled && partial[c])).collect();
+        for &c in &todo {
+            partial[c] = sampled;
+        }
         let workers = threads.min(todo.len()).max(1);
         let chunks: Vec<Vec<usize>> = (0..workers).map(|w| todo.iter().copied().skip(w).step_by(workers).collect()).collect();
         let run = |chunk: &[usize]| -> Vec<(usize, [Vec<u64>; 3])> {
@@ -402,10 +517,21 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
             chunk
                 .iter()
                 .map(|&c| {
-                    let choice = LrChoice { params, units: std::array::from_fn(|p| vec![cands[c]; rows[p] * cols[p]]), unit_cols: cols, unit_rows: rows };
+                    let units = std::array::from_fn(|p| (0..rows[p] * cols[p]).map(|i| if !sampled || in_sample(p, i) { cands[c] } else { LrUnit::default() }).collect());
+                    let choice = LrChoice { params, units, unit_cols: cols, unit_rows: rows };
                     set_lr_units(&mut pf, &choice);
                     let out = pf.restore(&dec_deblocked, &dec_cdef);
-                    (c, unit_sse(&out.planes, src, &params, rows, cols))
+                    let mut t = unit_sse(&out.planes, src, &params, rows, cols);
+                    if sampled {
+                        for p in 0..3 {
+                            for i in 0..t[p].len() {
+                                if !in_sample(p, i) {
+                                    t[p][i] = none[p][i];
+                                }
+                            }
+                        }
+                    }
+                    (c, t)
                 })
                 .collect()
         };
@@ -424,7 +550,7 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
     // a few well spread candidates first: when the best unit-by-unit choice among them saves under
     // a few percent of the frame's error, restoration is not worth its bits (nor the rest of the
     // search); this is also where nearly all frames stop
-    eval(&mut tables, probe_indices(&cands));
+    eval(&mut tables, &mut partial, probe_indices(&cands), true);
     let gain_of = |tables: &[Option<[Vec<u64>; 3]>]| -> u64 {
         let mut gain = 0u64;
         for p in 0..3 {
@@ -435,7 +561,7 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
         }
         gain
     };
-    let total_none: u64 = none.iter().flatten().sum();
+    let total_none: u64 = (0..3).map(|p| (0..none[p].len()).filter(|&i| in_sample(p, i)).map(|i| none[p][i]).sum::<u64>()).sum();
     if (gain_of(&tables) as f64) < MIN_LR_GAIN * total_none as f64 {
         return None;
     }
@@ -449,9 +575,10 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
         let set = cands[best].sgr_set as i32;
         more.extend((0..cands.len()).filter(|&c| cands[c].kind as usize == RESTORE_SGRPROJ && (cands[c].sgr_set as i32 - set).abs() <= 1));
     }
-    eval(&mut tables, more);
+    more.extend(probe_indices(&cands));
+    eval(&mut tables, &mut partial, more, false);
     let tables: Vec<Option<[Vec<u64>; 3]>> = tables;
-    let lambda = filter_lambda(base_q_idx);
+    let lambda = filter_lambda(base_q_idx, recon.bit_depth);
     let bits = |u: &LrUnit| -> f64 { if u.kind as usize == RESTORE_WIENER { 30.0 } else { 20.0 } };
     let mut choice = LrChoice { params, units: Default::default(), unit_cols: cols, unit_rows: rows };
     let mut any = false;
