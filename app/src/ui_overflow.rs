@@ -275,7 +275,9 @@ const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout"
 /// it, and collect what is cut off.
 pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> {
     let mut report = vec![];
-    for (w, hh) in SIZES {
+    // STUDIO_UI_SIZES=1280x720,1440x900 runs only those sizes (so a long survey can be split).
+    let sizes = std::env::var("STUDIO_UI_SIZES").ok();
+    for (w, hh) in SIZES.into_iter().filter(|(w, hh)| sizes.as_deref().is_none_or(|l| l.split(',').any(|s| s.trim() == format!("{w}x{hh}")))) {
         for s in surfaces() {
             if only.is_some_and(|o| !s.name.starts_with(o)) {
                 continue;

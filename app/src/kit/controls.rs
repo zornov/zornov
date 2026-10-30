@@ -170,6 +170,13 @@ pub fn chip_group(ui: &mut Ui, selected: &mut usize, labels: &[&str]) -> bool {
     changed
 }
 
+#[allow(dead_code)] // the owners switch to it this round
+/// [`menu_button`] as wide as the room left in the row, within `min..=max`.
+pub fn menu_button_fill(ui: &mut Ui, id_salt: &str, selected: usize, options: &[&str], min: f32, max: f32, forced: Option<Forced>) -> Option<usize> {
+    let w = (ui.available_width() - 6.0).clamp(min, max);
+    menu_button(ui, id_salt, selected, options, w, forced)
+}
+
 /// Button showing the current choice with a caret; opens a menu of
 /// options. Returns the newly chosen index, if any.
 pub fn menu_button(
