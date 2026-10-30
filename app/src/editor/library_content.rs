@@ -101,14 +101,16 @@ fn offer_download(ui: &mut egui::Ui, body: Rect) {
             p.text(body.center() + Vec2::new(0.0, 12.0), Align2::CENTER_CENTER, crate::i18n::shown("Unpacking the library…"), theme::body(), t.text_2);
         }
         State::Failed(why) => {
-            let sentence = crate::i18n::tf(format!("The library did not download: {why}"));
+            let sentence = crate::i18n::tf(format!("Could not download the library: {why}"));
             if kit::empty_state(&mut child, Icon::DownloadSimple, &sentence, Some(("Try again", Icon::DownloadSimple))) {
                 dl::start(ui.ctx());
             }
         }
         State::Idle => {
-            let mb = dl::size_mb().unwrap_or(0);
-            let sentence = crate::i18n::tf(format!("Stickers, music and sound effects come in a free download of {mb} MB."));
+            let sentence = match dl::size_mb() {
+                Some(mb) if mb > 0 => crate::i18n::tf(format!("Stickers, music and sound effects come in a free download of {mb} MB.")),
+                _ => crate::i18n::tf("Stickers, music and sound effects come in a free download.".to_owned()),
+            };
             if kit::empty_state(&mut child, Icon::DownloadSimple, &sentence, Some(("Download the library", Icon::DownloadSimple))) {
                 dl::start(ui.ctx());
             }

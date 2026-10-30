@@ -91,16 +91,38 @@ impl<'a> Button<'a> {
         let font = theme::control_medium();
         let h = if self.compact { theme::space::CONTROL_H_COMPACT } else { theme::space::CONTROL_H };
         let pad = if self.compact { 10.0 } else { 12.0 };
-        let has_icon = self.icon.is_some() || self.busy;
-        let text_w = if self.label.is_empty() { 0.0 } else { text_width(ui, self.label, font.clone()) };
-        let mut w = pad * 2.0 + text_w;
-        if has_icon {
-            w += icons::SIZE + if text_w > 0.0 { 6.0 } else { 0.0 };
+        let mut has_icon = self.icon.is_some() || self.busy;
+        let full_w = if self.label.is_empty() { 0.0 } else { text_width(ui, self.label, font.clone()) };
+        let extra = |has_icon: bool, text_w: f32| {
+            let mut e = pad * 2.0;
+            if has_icon {
+                e += icons::SIZE + if text_w > 0.0 { 6.0 } else { 0.0 };
+            }
+            if self.trailing.is_some() {
+                e += icons::SIZE + 4.0;
+            }
+            e
+        };
+        // Never wider than the room it was given: the icon goes first (not
+        // a spinner, which says it is working), then the label ends in an
+        // ellipsis, whole in the tooltip.
+        let room = ui.available_width();
+        let bounded = room.is_finite() && room < 4000.0 && !ui.layout().main_wrap();
+        let mut text_w = full_w;
+        let mut text = std::borrow::Cow::Borrowed(self.label);
+        if bounded && full_w > 0.0 && extra(has_icon, full_w) + full_w > room {
+            if has_icon && !self.busy {
+                has_icon = false;
+            }
+            if extra(has_icon, full_w) + full_w > room {
+                let avail = (room - extra(has_icon, 1.0)).max(16.0);
+                let t = ellipsize(ui, &shown(self.label), &font, avail);
+                text_w = text_width(ui, &t, font.clone());
+                text = std::borrow::Cow::Owned(t);
+            }
         }
-        if self.trailing.is_some() {
-            w += icons::SIZE + 4.0;
-        }
-        let w = w.max(self.min_width).max(h);
+        let cut = text_w < full_w - 0.5;
+        let w = (extra(has_icon, text_w) + text_w).max(self.min_width.min(if bounded { room.max(h) } else { f32::MAX })).max(h);
         let forced_disabled = self.forced == Some(Forced::Disabled);
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -153,22 +175,38 @@ impl<'a> Button<'a> {
         if self.busy {
             spinner(p, egui::pos2(x + icons::SIZE / 2.0, cy), 6.0, fg);
             x += icons::SIZE + if text_w > 0.0 { 6.0 } else { 0.0 };
-        } else if let Some(icon) = self.icon {
+        } else if let Some(icon) = self.icon.filter(|_| has_icon) {
             let r = Rect::from_center_size(egui::pos2(x + icons::SIZE / 2.0, cy), Vec2::splat(icons::SIZE));
             icons::paint(p, r, icon, icons::SIZE, fg);
             x += icons::SIZE + if text_w > 0.0 { 6.0 } else { 0.0 };
         }
         if text_w > 0.0 {
-            p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, shown(self.label), font, fg);
+            p.text(egui::pos2(x, cy), Align2::LEFT_CENTER, shown(&text), font, fg);
             x += text_w;
         }
         if let Some(icon) = self.trailing {
             let r = Rect::from_center_size(egui::pos2(x + 4.0 + icons::SIZE / 2.0, cy), Vec2::splat(icons::SIZE));
             icons::paint(p, r, icon, icons::SIZE, if enabled { t.text_2 } else { fg });
         }
-        let resp = if let Some(s) = self.shortcut { tip(resp, self.label, Some(s)) } else { resp };
+        let resp = if let Some(s) = self.shortcut { tip(resp, self.label, Some(s)) } else if cut { resp.on_hover_text(shown(self.label)) } else { resp };
         if enabled { resp } else { resp.on_disabled_hover_text(shown("Not available right now")) }
     }
+}
+
+/// `text` cut to fit `max_w` across, ending in an ellipsis.
+pub fn ellipsize(ui: &Ui, text: &str, font: &egui::FontId, max_w: f32) -> String {
+    let fits = |s: &str| text_width(ui, s, font.clone()) <= max_w;
+    if fits(text) {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        let cand: String = chars[..mid].iter().collect::<String>().trim_end().to_owned() + "…";
+        if fits(&cand) { lo = mid } else { hi = mid - 1 }
+    }
+    chars[..lo].iter().collect::<String>().trim_end().to_owned() + "…"
 }
 
 /// Icon-only button: 28 px square (24 compact), ghost until hovered. `active`

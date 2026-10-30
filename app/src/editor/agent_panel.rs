@@ -500,8 +500,8 @@ impl AgentUi {
                     let (tx, rx) = mpsc::channel();
                     a.live.push(ToolCall { tool: "make_playable".into(), args: serde_json::json!({ "media": need }), reply: tx, epoch: 0 });
                     let what = if need.len() == 1 { "a video".to_owned() } else { format!("{} videos", need.len()) };
-                    a.downloads.push((format!("converted {what} to H.264 so it plays"), rx));
-                    kit::push(ctx, crate::i18n::tf(format!("Converting {what} Zornov can't play yet to H.264…")), None, Some(Icon::FilmStrip));
+                    a.downloads.push((format!("converted {what} so it plays"), rx));
+                    kit::push(ctx, crate::i18n::tf(format!("Converting {what} to a format Zornov plays…")), None, Some(Icon::FilmStrip));
                 }
             }
         }
@@ -1185,9 +1185,9 @@ const USAGE_H: f32 = 18.0;
 fn usage_line(ui: &mut egui::Ui, r: Rect, request: Usage, session: Usage) {
     let t = theme::tokens(ui.ctx());
     let text = if request.is_empty() {
-        crate::i18n::tf(format!("{} tokens", usage::short(session.total())))
+        crate::i18n::tf(format!("{} used", usage::short(session.total())))
     } else {
-        crate::i18n::tf(format!("{} tokens · {} total", usage::short(request.total()), usage::short(session.total())))
+        crate::i18n::tf(format!("{} this reply · {} this chat", usage::short(request.total()), usage::short(session.total())))
     };
     ui.painter().text(egui::pos2(r.right() - 2.0, r.center().y), Align2::RIGHT_CENTER, text, theme::caption(), t.text_2);
 }
@@ -1689,7 +1689,7 @@ fn step_name(tool: &str) -> String {
         "import" => w("Importing media"),
         "download" => w("Downloading"),
         "generate" => w("Generating"),
-        "make_playable" => w("Converting media to H.264"),
+        "make_playable" => w("Converting media so it plays"),
         "save" => w("Saving"),
         "open" | "new_project" => w("Opening"),
         "save_move" | "save_design" => w("Saving to your library"),
@@ -1754,7 +1754,7 @@ fn summary_card(ui: &mut egui::Ui, entries: &[Entry], idx: &[usize], enlarged: &
             thumb_strip(ui, &looked, enlarged, rw, t);
         }
         if d.rows.is_empty() && looked.is_empty() && made.is_empty() {
-            result_row_ui(ui, rw, Icon::Info, &crate::i18n::t("Getting oriented"), false, t);
+            result_row_ui(ui, rw, Icon::Info, &crate::i18n::t("Reading the project"), false, t);
         }
         ui.add_space(2.0);
         let label = format!("{} {}", if show_steps { "▾" } else { "▸" }, crate::i18n::t(if show_steps { "Hide steps" } else { "Show steps" }));
@@ -1813,7 +1813,7 @@ fn thumb_strip(ui: &mut egui::Ui, pictures: &[egui::TextureHandle], enlarged: &m
     if fit < pictures.len() {
         ui.add_space(-2.0);
         let (r, _) = ui.allocate_exact_size(Vec2::new(rw, theme::caption().size * 1.6), Sense::hover());
-        ui.painter().text(egui::pos2(r.left() + indent, r.center().y), Align2::LEFT_CENTER, format!("+{}", pictures.len() - fit), theme::caption(), t.text_2);
+        ui.painter().text(egui::pos2(r.left() + indent, r.center().y), Align2::LEFT_CENTER, format!("+{} more", pictures.len() - fit), theme::caption(), t.text_2);
     }
 }
 
@@ -2089,7 +2089,7 @@ fn plan_card(ui: &mut egui::Ui, plan: &Plan, w: f32, t: &Tokens) {
     let tokens: u64 = plan.steps.iter().map(|s| s.tokens).sum();
     let mut right = plan_status_text(plan);
     if let Some(e) = plan.estimate {
-        right.push_str(&format!(" · {} / ~{} tokens", tokens_short(tokens), tokens_short(e.tokens)));
+        right.push_str(&format!(" · {} of about {} used", tokens_short(tokens), tokens_short(e.tokens)));
     }
     if plan.round > 0 && plan.crew {
         right.push_str(&format!(" · review {}", plan.round));

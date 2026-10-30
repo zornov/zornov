@@ -39,6 +39,7 @@ pub(super) struct Placed {
 pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
     app.editor.viewer_rect = r;
+    forget_replaced_project(app, ui.ctx());
     let p = ui.painter().with_clip_rect(r);
     // Header and bottom bar are separated from the picture by hairlines.
     p.hline(r.x_range(), r.top() + TOOLBAR_H - 0.5, Stroke::new(1.0, t.line));
@@ -192,6 +193,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     toolbar(app, ui, r);
     transport(app, ui, r);
 
+    view_menu(app, ui, area, &placed);
+
     // Drop from the Library onto the canvas: add at the playhead.
     let drop = ui.interact(area, egui::Id::unique("viewer-drop"), Sense::hover());
     if let Some(payload) = drop.dnd_release_payload::<LibDrag>() {
@@ -199,6 +202,92 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         library::add(app, &ctx, payload.rail, payload.index, None, None);
     } else if drop.dnd_hover_payload::<LibDrag>().is_some() {
         ui.painter().rect_stroke(canvas, 0, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+    }
+}
+
+/// What tells one open project from another when their edit counts agree:
+/// the clips' ids, places and lengths, and the picture's size.
+fn project_fingerprint(proj: &Project) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (proj.width, proj.height, proj.clips.len()).hash(&mut h);
+    for c in &proj.clips {
+        (c.id, c.start, c.dur, c.lane).hash(&mut h);
+    }
+    h.finish()
+}
+
+/// Whether the project now open is not the one drawn last frame: a new
+/// project starts counting edits from nothing, so the same count with other
+/// clips, or a lower one, is a different project.
+pub(crate) fn project_replaced(before: Option<(u64, u64)>, edits: u64, fingerprint: u64) -> bool {
+    before.is_some_and(|(e, f)| edits < e || (edits == e && fingerprint != f))
+}
+
+/// The renderer keeps the scene it was given until the project's edit count
+/// moves; a project opened from Home counts from zero too, so the viewer
+/// kept showing the previous project's picture. A different project starts
+/// the renderer afresh.
+fn forget_replaced_project(app: &mut StudioApp, ctx: &egui::Context) {
+    let key = egui::Id::new("viewer-project-seen");
+    let now = (app.doc.edits, project_fingerprint(&app.doc.project));
+    let before = ctx.data(|d| d.get_temp::<(u64, u64)>(key));
+    if project_replaced(before, now.0, now.1) {
+        #[cfg(feature = "render")]
+        {
+            app.render = None;
+        }
+        ctx.data_mut(|d| {
+            let n = d.get_temp::<u32>(key.with("resets")).unwrap_or(0);
+            d.insert_temp(key.with("resets"), n + 1);
+        });
+    }
+    ctx.data_mut(|d| d.insert_temp(key, now));
+}
+
+fn view_menu_id() -> egui::Id {
+    egui::Id::new("viewer-menu")
+}
+
+/// Right-click on the picture where no layer sits: the view's own menu
+/// (a layer under the pointer gets the clip menu, from `xform`).
+fn view_menu(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, placed: &[Placed]) {
+    let ctx = ui.ctx().clone();
+    let clicked = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary)).then(|| ui.input(|i| i.pointer.interact_pos())).flatten();
+    if let Some(pos) = clicked.filter(|p| area.contains(*p) && ctx.layer_id_at(*p).is_some_and(|l| l.order == egui::Order::Middle || l.order == egui::Order::Background)) {
+        if !placed.iter().any(|pl| Rect::from_center_size(pl.center, pl.size).contains(pos)) {
+            ctx.data_mut(|d| d.insert_temp(view_menu_id().with("at"), pos));
+            kit::set_open(&ctx, view_menu_id(), true);
+        }
+    }
+    if !kit::is_open(&ctx, view_menu_id()) {
+        return;
+    }
+    let Some(pos) = ctx.data(|d| d.get_temp::<Pos2>(view_menu_id().with("at"))) else { return };
+    let mut done = false;
+    let paste = crate::editor::clip_menu::can_paste(&ctx);
+    kit::popover(&ctx, view_menu_id(), Rect::from_min_size(pos, Vec2::splat(1.0)), kit::Side::Below, 200.0, |ui| {
+        if kit::MenuItem::new("Fit to window").reserve_icon().checked(app.editor.zoom.is_none()).show(ui).clicked() {
+            app.editor.zoom = None;
+            done = true;
+        }
+        if kit::MenuItem::new("Actual size").reserve_icon().checked(app.editor.zoom == Some(1.0)).show(ui).clicked() {
+            app.editor.zoom = Some(1.0);
+            done = true;
+        }
+        kit::menu_separator(ui);
+        if kit::MenuItem::new("Safe areas").reserve_icon().checked(app.editor.safe_area).show(ui).clicked() {
+            app.editor.safe_area = !app.editor.safe_area;
+            done = true;
+        }
+        kit::menu_separator(ui);
+        if kit::MenuItem::new("Paste").reserve_icon().enabled(paste).show(ui).clicked() {
+            crate::editor::clip_menu::paste_selection(app, &ctx);
+            done = true;
+        }
+    });
+    if done {
+        kit::set_open(&ctx, view_menu_id(), false);
     }
 }
 
@@ -483,7 +572,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     // hold them) and the tools scroll sideways beside the always-visible Add.
     let show_info = bui.available_width() >= 600.0;
     let info_w = if show_info { kit::text_width(&bui, &info, theme::caption()) + 8.0 } else { 0.0 };
-    let add_w = 76.0;
+    let add_w = 76.0 + if bui.ctx().content_rect().width() < super::NARROW { 32.0 } else { 0.0 };
     let strip_w = (bui.available_width() - info_w - add_w - 16.0).max(48.0);
     egui::ScrollArea::horizontal().id_salt("viewer-tools").max_width(strip_w).auto_shrink([true, true]).show_h(&mut bui, |ui| {
         ui.horizontal(|bui| {
@@ -547,7 +636,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
             #[cfg(feature = "render")]
             if app.render.as_ref().is_some_and(|r| r.dropping > 2) && app.editor.quality < 2 {
                 let id = egui::Id::unique("dropped-frames");
-                let resp = kit::Button::ghost("Dropping frames").icon(Icon::Warning).compact().show(bui);
+                let resp = kit::Button::ghost("Playback is lagging").icon(Icon::Warning).compact().show(bui);
                 if resp.clicked() {
                     kit::toggle_open(bui.ctx(), id);
                 }
@@ -562,7 +651,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
                     ui.horizontal(|ui| {
                         ui.add_space(6.0);
                         let next = ["Half", "Quarter"][ed.quality.min(1)];
-                        if kit::Button::primary(&crate::i18n::tf(format!("Switch to {next}"))).compact().show(ui).clicked() {
+                        if kit::Button::primary(&crate::i18n::tf(format!("Switch to {} resolution", next.to_lowercase()))).compact().show(ui).clicked() {
                             ed.quality += 1;
                             kit::set_open(ui.ctx(), id, false);
                         }
@@ -576,6 +665,16 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         ui.add_space(4.0);
         if show_info {
             kit::label_trunc(ui, egui::RichText::new(info).font(theme::caption()).color(t.text_2));
+        }
+        // A narrow window has no Inspector tile: this opens its sheet. It sits
+        // beside Add, which never scrolls away.
+        if ui.ctx().content_rect().width() < super::NARROW {
+            let keys = crate::keymap::hint(&app.prefs, "panel-inspector");
+            let on = app.editor.sheet_open;
+            if IconButton::new(Icon::SidebarSimple, "Inspector").shortcut(&keys).active(on).show(ui).clicked() {
+                let ctx = ui.ctx().clone();
+                super::dock_ui::toggle_panel(app, &ctx, crate::dock::Panel::Inspector, true);
+            }
         }
         add_menu(app, ui);
     });
@@ -729,5 +828,19 @@ mod add_menu_tests {
         assert!(!add_matches("cu", "3D model", "Torus"));
         assert!(add_matches("particles", "Particles", "Snow"), "naming a section keeps all of it");
         assert!(!add_matches("snow", "Chart from data", "Bar chart"));
+    }
+}
+
+#[cfg(test)]
+mod replaced_tests {
+    use super::project_replaced;
+
+    #[test]
+    fn another_project_is_told_from_the_same_one() {
+        assert!(!project_replaced(None, 0, 7));
+        assert!(!project_replaced(Some((3, 7)), 3, 7), "same project, same count");
+        assert!(!project_replaced(Some((3, 7)), 4, 9), "an edit moves the count on");
+        assert!(project_replaced(Some((3, 7)), 3, 9), "same count, other clips");
+        assert!(project_replaced(Some((3, 7)), 0, 7), "a lower count");
     }
 }
