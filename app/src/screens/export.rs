@@ -908,6 +908,10 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                         s.av1_speed = crate::formats::Av1Speed::ALL[sel];
                     }
                 });
+                ui.horizontal(|ui| {
+                    ui.add_space(kit::LABEL_W);
+                    ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown(s.av1_speed.help())).font(theme::caption()).color(t.text_2)).wrap());
+                });
             }
             Format::Png | Format::Gif | Format::M4a => {}
             // Masters are full quality.
@@ -1052,7 +1056,8 @@ mod tests {
         assert!(labels.iter().any(|l| l.contains("Early encoder: slower than H.264, no rate control yet.")), "the note is shown: {labels:?}");
         assert!(labels.iter().any(|l| l.contains("Quality")), "AV1 has a quality control");
         assert!(labels.iter().any(|l| l.contains("Balanced")), "AV1 has a speed control: {labels:?}");
-        assert!(!labels.iter().any(|l| l == "Small"), "Small is not offered yet: {labels:?}");
+        assert!(labels.iter().any(|l| l == "Small"), "Small is offered: {labels:?}");
+        assert!(labels.iter().any(|l| l == "Quickest, largest files"), "the chosen speed says what it trades: {labels:?}");
         assert!(h.cut_text().is_empty(), "nothing is cut off: {:?}", h.cut_text());
         assert!(h.overlaps().is_empty(), "nothing is drawn over: {:?}", h.overlaps());
     }
