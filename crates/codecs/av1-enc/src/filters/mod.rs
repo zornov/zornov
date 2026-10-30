@@ -15,6 +15,7 @@ use studio_av1::{FrameHeader, PostFilter, SequenceHeader};
 
 use crate::recon::FrameBuf;
 use crate::syntax::uv_aware_tx_size;
+use crate::tiles::par_map;
 use crate::types::{CdefParams, Frame, LrChoice, LrParams, LrUnit};
 use studio_av1::spec_tables::{RESTORE_NONE, RESTORE_SGRPROJ, RESTORE_SWITCHABLE, RESTORE_WIENER, SGR_PARAMS};
 
@@ -89,38 +90,6 @@ pub mod profile {
     pub fn take() -> Spans {
         Spans { deblock_search_ns: DEBLOCK.swap(0, Relaxed), cdef_search_ns: CDEF.swap(0, Relaxed), lr_search_ns: LR.swap(0, Relaxed), apply_ns: APPLY.swap(0, Relaxed) }
     }
-}
-
-/// `f(0..n)` in index order, spread over up to `threads` workers. The result does not depend on the
-/// worker count.
-pub(crate) fn par_map<T: Send>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
-    let workers = threads.min(n);
-    if workers <= 1 {
-        return (0..n).map(f).collect();
-    }
-    let next = std::sync::atomic::AtomicUsize::new(0);
-    let parts: Vec<Vec<(usize, T)>> = std::thread::scope(|sc| {
-        let hs: Vec<_> = (0..workers)
-            .map(|_| {
-                sc.spawn(|| {
-                    let mut out = Vec::new();
-                    loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if i >= n {
-                            return out;
-                        }
-                        out.push((i, f(i)));
-                    }
-                })
-            })
-            .collect();
-        hs.into_iter().map(|h| h.join().expect("filter worker")).collect()
-    });
-    let mut slots: Vec<Option<T>> = (0..n).map(|_| None).collect();
-    for (i, t) in parts.into_iter().flatten() {
-        slots[i] = Some(t);
-    }
-    slots.into_iter().map(|t| t.expect("every index was evaluated")).collect()
 }
 
 /// The decoder-side view of the sequence header the encoder writes.
@@ -506,7 +475,7 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
     let mut tables: Vec<Option<[Vec<u64>; 3]>> = vec![None; cands.len()];
     // each candidate is run over the whole frame (every unit set to it); they are independent, so
     // they are spread over `threads` workers, each with its own filter state
-    let mut eval = |tables: &mut Vec<Option<[Vec<u64>; 3]>>, todo: Vec<usize>| {
+    let eval = |tables: &mut Vec<Option<[Vec<u64>; 3]>>, todo: Vec<usize>| {
         let todo: Vec<usize> = todo.into_iter().filter(|&c| tables[c].is_none()).collect();
         let workers = threads.min(todo.len()).max(1);
         let chunks: Vec<Vec<usize>> = (0..workers).map(|w| todo.iter().copied().skip(w).step_by(workers).collect()).collect();
