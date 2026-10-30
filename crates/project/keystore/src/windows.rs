@@ -30,8 +30,14 @@ pub fn get(service: &str, account: &str) -> Result<Option<String>, Fail> {
         let err = unsafe { GetLastError() };
         return if err == ERROR_NOT_FOUND { Ok(None) } else { Err(Fail::Unavailable(format!("Windows Credential Manager could not be read (error {err})"))) };
     }
-    // SAFETY: `cred` is a valid credential; its blob is `CredentialBlobSize`
-    // bytes long (or null when empty). Copied out before it is freed.
+    if cred.is_null() {
+        // CredReadW promises a credential on success; treat anything else as not found.
+        return Ok(None);
+    }
+    // SAFETY: `cred` is non-null (checked above) and was allocated by a
+    // successful CredReadW, so it points at a valid CREDENTIALW whose blob is
+    // `CredentialBlobSize` bytes long (or null when empty). The blob is copied
+    // out before `cred` is freed, and neither is used afterwards.
     let bytes = unsafe {
         let c = &*cred;
         let b = if c.CredentialBlob.is_null() { Vec::new() } else { std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize).to_vec() };

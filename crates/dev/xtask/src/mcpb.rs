@@ -140,7 +140,7 @@ mod tests {
         write_bundle(&root(), "9.8.7", &b).unwrap();
         assert_eq!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap(), "the same sources give the same bundle");
         let mut z = zip::ZipArchive::new(std::fs::File::open(&a).unwrap()).unwrap();
-        let names: Vec<String> = z.file_names().map(str::to_owned).collect();
+        let names: Vec<String> = z.file_names().map(|n| n.expect("a readable entry name").into_owned()).collect();
         assert_eq!(names, ["icon.png", "manifest.json"]);
         let mut text = String::new();
         z.by_name("manifest.json").unwrap().read_to_string(&mut text).unwrap();

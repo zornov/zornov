@@ -45,7 +45,12 @@ const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 pub fn docx_text(bytes: &[u8]) -> Result<String, String> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("not a Word document: {e}"))?;
     let mut xml = String::new();
-    zip.by_name("word/document.xml").map_err(|_| "not a Word document: no word/document.xml".to_owned())?.take(64 << 20).read_to_string(&mut xml).map_err(|e| format!("could not read the document: {e}"))?;
+    let entry = zip.by_name("word/document.xml").map_err(|_| "not a Word document: no word/document.xml".to_owned())?;
+    // A link is never followed: a document whose text is a link entry is refused.
+    if entry.is_symlink() {
+        return Err("not a Word document: word/document.xml is a link".to_owned());
+    }
+    entry.take(64 << 20).read_to_string(&mut xml).map_err(|e| format!("could not read the document: {e}"))?;
     let doc = roxmltree::Document::parse_with_options(&xml, roxmltree::ParsingOptions { allow_dtd: false, ..Default::default() }).map_err(|e| format!("could not read the document: {e}"))?;
     let is = |n: &roxmltree::Node, name: &str| n.is_element() && n.tag_name().name() == name && n.tag_name().namespace() == Some(W);
     let style_of = |p: &roxmltree::Node| -> String {
@@ -135,6 +140,47 @@ mod tests {
         assert_eq!(st.scenes.len(), 1);
         assert_eq!(st.scenes[0].lines[0].start, Some(0));
         assert!(docx_text(b"not a zip").is_err());
+    }
+
+    /// A document with `entries` added before the real text.
+    fn docx_with(entries: impl FnOnce(&mut zip::ZipWriter<std::io::Cursor<&mut Vec<u8>>>)) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut z = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            entries(&mut z);
+            z.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            write!(z, "<?xml version=\"1.0\"?><w:document xmlns:w=\"{W}\"><w:body>{}</w:body></w:document>", p("", "Safe text")).unwrap();
+            z.finish().unwrap();
+        }
+        buf
+    }
+
+    #[test]
+    fn a_path_that_escapes_is_never_written() {
+        let dir = std::env::temp_dir().join(format!("zornov-docx-escape-{}", std::process::id()));
+        let inner = dir.join("inner");
+        std::fs::create_dir_all(&inner).unwrap();
+        let bytes = docx_with(|z| {
+            z.start_file("../escaped.txt", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(b"escaped").unwrap();
+        });
+        std::fs::write(inner.join("a.docx"), &bytes).unwrap();
+        // Only the one named entry is read; nothing is extracted anywhere.
+        assert_eq!(read_file(&inner.join("a.docx")).unwrap(), "Safe text\n");
+        assert!(!dir.join("escaped.txt").exists() && !inner.join("escaped.txt").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_link_in_place_of_the_document_is_refused() {
+        let mut buf = Vec::new();
+        {
+            let mut z = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            z.add_symlink("word/document.xml", "/etc/passwd", zip::write::SimpleFileOptions::default()).unwrap();
+            z.finish().unwrap();
+        }
+        let err = docx_text(&buf).unwrap_err();
+        assert!(err.contains("is a link"), "{err}");
     }
 
     #[test]
