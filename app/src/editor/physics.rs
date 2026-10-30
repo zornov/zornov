@@ -11,6 +11,14 @@ use crate::theme;
 use eframe::egui;
 use serde_json::json;
 
+// Shared by the panels this branch looks after (body3d, bones, pins,
+// scissor, sculpt, slowmo, match_colour, generate, canvas_text, air).
+#[path = "cloud_feedback.rs"]
+pub(crate) mod cloud_feedback;
+#[cfg(test)]
+#[path = "cloud_ui_check.rs"]
+pub(crate) mod cloud_ui_check;
+
 #[derive(Clone, Copy)]
 struct Settings {
     bounce: f32,
@@ -35,6 +43,11 @@ fn op(ids: &[u32], at: f64, s: Settings) -> serde_json::Value {
     o
 }
 
+/// What a drop tells the person.
+fn dropped(n: usize) -> String {
+    if n > 1 { crate::i18n::tf(format!("Dropped {n} layers; undo puts them back")) } else { "Dropped; undo puts it back".to_owned() }
+}
+
 pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
     let key = egui::Id::unique("physics-settings");
     let mut s = ui.data(|d| d.get_temp::<Settings>(key)).unwrap_or_default();
@@ -49,15 +62,16 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
         kit::labeled_row(ui, "Round", |ui| {
             kit::toggle(ui, &mut s.round, "Roll like balls", None);
         });
-        let label = if ids.len() > 1 { crate::i18n::tf(format!("Drop {} layers from the playhead", ids.len())) } else { "Drop from the playhead".to_owned() };
+        let label = if ids.len() > 1 { crate::i18n::tf(format!("Drop {} layers", ids.len())) } else { "Drop from the playhead".to_owned() };
         if Button::secondary(&label).show(ui).clicked() {
             let at = app.editor.playhead as f64 / 1e6;
             // One undo step; nothing changes when it can't run.
-            if let Err(e) = crate::agent::physics::run(&mut app.doc, &op(ids, at, s)) {
-                app.doc.error = Some(e);
+            match crate::agent::physics::run(&mut app.doc, &op(ids, at, s)) {
+                Ok(_) => cloud_feedback::done(ui.ctx(), dropped(ids.len())),
+                Err(e) => cloud_feedback::failed(ui.ctx(), &app.doc, &e),
             }
         }
-        ui.label(egui::RichText::new(crate::i18n::shown("Place the layers where they start (above the frame, tilted), then drop: they fall to the bottom edge and settle. The result is ordinary keys.")).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::shown("Start them above the frame; they land as keys")).font(theme::caption()).color(t.text_2));
     });
     ui.data_mut(|d| d.insert_temp(key, s));
 }
@@ -72,5 +86,21 @@ mod tests {
         assert_eq!(o["clips"], json!([3, 4]));
         assert_eq!(o["shape"], "circle");
         assert!((o["bounce"].as_f64().unwrap() - 0.35).abs() < 1e-6);
+    }
+
+    /// The section drawn at the Inspector's width reads cleanly, and a
+    /// drop says what it did.
+    #[test]
+    fn the_section_reads_cleanly_and_a_drop_reports() {
+        let _serial = crate::ui_tests::serial();
+        let (ctx, mut app) = cloud_ui_check::editor();
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Drop", 640, 360, 30.0));
+        s.edit(&[json!({"op": "card", "colour": "#ffcc00", "at": 0, "duration": 2, "width": 120, "height": 80})], "card", false).unwrap();
+        let id = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        app.doc = s.doc;
+        let drawn = cloud_ui_check::draw(&ctx, 3, |ui| inspector(&mut app, ui, &[id]));
+        drawn.assert_tidy("physics", &[]);
+        assert!(drawn.shows("Drop from the playhead"));
+        assert_eq!(dropped(3), "Dropped 3 layers; undo puts them back");
     }
 }
