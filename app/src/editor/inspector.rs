@@ -21,36 +21,26 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     body(app, &mut child, r, None);
 }
 
-/// Narrow windows: the Inspector floats as a sheet from the right.
+/// Narrow windows: the Inspector floats as a sheet from the right (the
+/// kit's sheet: Esc, its close button or a click outside closes it).
 pub fn sheet(app: &mut StudioApp, ui: &mut egui::Ui, over: Rect) {
-    let ctx = ui.ctx().clone();
-    let id = egui::Id::unique("inspector-sheet");
-    let k = kit::panel_t(&ctx, id, app.editor.sheet_open);
-    if k <= 0.001 {
+    if !app.editor.sheet_open {
         return;
     }
-    let t = theme::tokens(&ctx);
+    let ctx = ui.ctx().clone();
     let w = super::INSPECTOR_DEFAULT.min(over.width() - 24.0);
-    let r = Rect::from_min_size(egui::pos2(over.right() - w * k, over.top()), Vec2::new(w, over.height()));
-    egui::Area::new(id.with("area")).order(egui::Order::Foreground).fixed_pos(r.min).show(&ctx, |ui| {
-        ui.set_opacity(k.min(1.0));
-        let (rr, _) = ui.allocate_exact_size(r.size(), Sense::click());
-        let p = ui.painter();
-        p.add(theme::popover_shadow().as_shape(rr, CornerRadius::same(theme::radius::PANEL)));
-        p.rect(rr, CornerRadius::same(theme::radius::PANEL), t.panel, egui::Stroke::new(1.0, t.line), egui::StrokeKind::Inside);
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rr));
-        child.set_clip_rect(rr);
-        let close = body(app, &mut child, rr, Some(()));
-        if close {
-            app.editor.sheet_open = false;
-        }
-    });
+    let r = Rect::from_min_size(egui::pos2(over.right() - w, over.top()), Vec2::new(w, over.height()));
+    let out = kit::sheet(&ctx, egui::Id::unique("inspector-sheet"), r, |ui| body(app, ui, r, Some(())));
+    if out.close {
+        app.editor.sheet_open = false;
+    }
 }
 
-/// Returns true when the sheet's close button was clicked.
-fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> bool {
+/// `sheet` is set when the kit's sheet hosts it: the title leaves room for its close button.
+fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) {
     let t = theme::tokens(ui.ctx());
     let pad = theme::space::PANEL_PAD;
+    restore_sections(ui.ctx(), &app.prefs);
     let sel: Vec<u32> = app.editor.selection.iter().copied().filter(|id| app.doc.project.clip(*id).is_some()).collect();
     let first = sel.first().and_then(|id| app.doc.project.clip(*id)).cloned();
 
@@ -72,7 +62,6 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
         (Some(c), 1) => (c.name.clone(), format!("{} · {}", kind_label(app, c), view::format_short(c.dur))),
         (Some(_), n) => (format!("{n} clips"), "Changes apply to all of them".to_owned()),
     };
-    let mut close = false;
     let right_pad = if sheet.is_some() { 32.0 } else { 0.0 };
     if let Some(c) = &first {
         let chip = Rect::from_min_size(header.left_center() - Vec2::new(0.0, 5.0), Vec2::splat(10.0));
@@ -83,10 +72,6 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
     let truncated = kit::paint_text_clipped(ui.painter(), egui::pos2(tx, header.center().y), Align2::LEFT_CENTER, &title, theme::section_title(), title_c, header.right() - tx - right_pad);
     if truncated {
         ui.interact(header, egui::Id::unique("insp-title"), Sense::hover()).on_hover_text(&title);
-    }
-    if sheet.is_some() {
-        let br = Rect::from_center_size(egui::pos2(header.right() - 12.0, header.center().y), Vec2::splat(24.0));
-        close = IconButton::new(Icon::X, "Close inspector").shortcut("Esc").size(24.0, 14.0).show_at(ui, br).clicked();
     }
     let body_top = if sub.is_empty() {
         header.bottom() + 6.0
@@ -111,7 +96,49 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, sheet: Option<()>) -> b
             }
         });
     });
-    close
+    let ctx = ui.ctx().clone();
+    remember_sections(&ctx, &mut app.prefs);
+}
+
+/// The kit stores a section's collapsed flag under this key.
+fn collapsed_key(kind: &str) -> egui::Id {
+    egui::Id::unique(("section-collapsed", kind))
+}
+
+/// Puts the sections' remembered state (prefs) into the kit's memory, once
+/// per run, before the first section is drawn.
+fn restore_sections(ctx: &egui::Context, prefs: &crate::prefs::Prefs) {
+    let seeded = egui::Id::new("insp-sections-restored");
+    if ctx.data(|d| d.get_temp::<bool>(seeded)).is_some() {
+        return;
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(seeded, true);
+        for (kind, closed) in &prefs.collapsed_sections {
+            d.insert_persisted(collapsed_key(kind), *closed);
+        }
+    });
+}
+
+/// Copies what the person opened or collapsed into prefs; true if prefs changed.
+fn remember_sections(ctx: &egui::Context, prefs: &mut crate::prefs::Prefs) -> bool {
+    let mut changed = false;
+    static KINDS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    for kind in KINDS.get_or_init(all_tab_kinds).iter().copied() {
+        let Some(closed) = ctx.data_mut(|d| d.get_persisted::<bool>(collapsed_key(kind))) else { continue };
+        match prefs.collapsed_sections.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, was)) if *was == closed => {}
+            Some((_, was)) => {
+                *was = closed;
+                changed = true;
+            }
+            None => {
+                prefs.collapsed_sections.push((kind.to_owned(), closed));
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 /// What the clip is, in the person's words: a 3D model is not "Text" and a
@@ -221,7 +248,9 @@ fn cut_section(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
     };
     let seq = app.doc.seq();
     let limit = app.doc.model.max_transition_duration(seq, m::ClipId(tr.left as u64), m::TransitionAlign::default()).unwrap_or(tr.dur).max(view::SEC / 10);
-    Section::new("cut", "Cut").icon(Icon::Intersect).show(ui, |ui| {
+    let default_dur = (view::SEC / 2).min(limit);
+    let first = catalogue::cuts().first().map(|i| i.id);
+    let out = Section::new("cut", "Cut").icon(Icon::Intersect).resettable(first.is_some_and(|k| tr.kind != k) || tr.dur != default_dur).show(ui, |ui| {
         let items = catalogue::cuts();
         let names: Vec<&str> = items.iter().map(|i| i.name).collect();
         let cur = items.iter().position(|i| i.id == tr.kind).unwrap_or(0);
@@ -255,6 +284,16 @@ fn cut_section(app: &mut StudioApp, ui: &mut egui::Ui, id: u64) {
             }
         });
     });
+    if out.reset {
+        if let Some(kind) = first {
+            app.doc.edit("Reset cut", |p| {
+                if let Some(t) = p.transitions.iter_mut().find(|t| t.id == id) {
+                    t.kind = kind.to_owned();
+                    t.dur = default_dur;
+                }
+            });
+        }
+    }
     hint(ui, Icon::Info, "Longer cuts need more media past the clips' edges.");
 }
 
@@ -831,7 +870,7 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
     }
 
     if kind != ClipKind::Audio {
-        Section::new("effects", "Effects").icon(Icon::MagicWand).show(ui, |ui| {
+        let out = Section::new("effects", "Effects").icon(Icon::MagicWand).resettable(!c.effects.is_empty()).show(ui, |ui| {
             if c.effects.is_empty() {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
                 ui.painter().text(r.left_center(), Align2::LEFT_CENTER, crate::i18n::shown("No effects on this clip."), theme::body(), t.text_2);
@@ -951,10 +990,13 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                 app.editor.open_panel(crate::dock::Panel::Library);
             }
         });
+        if out.reset {
+            edit_all(app, ids, "Remove effects", |c| c.effects.clear());
+        }
     }
 
     if visual {
-        Section::new("motion", "Motion").icon(Icon::Path).show(ui, |ui| {
+        let out = Section::new("motion", "Motion").icon(Icon::Path).resettable(c.motion_in.is_some()).show(ui, |ui| {
             super::params::labeled_row(ui, "Entry", |ui| {
                 let entries: Vec<&catalogue::Item> = catalogue::motions().iter().filter(|m| m.group == 1).collect();
                 let mut names: Vec<&str> = vec!["None"];
@@ -981,6 +1023,12 @@ fn clip_sections_inner(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], c: &
                 }
             }
         });
+        if out.reset {
+            edit_all(app, ids, "Remove entry motion", |c| {
+                c.motion_in = None;
+                c.extra.motion_dur = 0.5;
+            });
+        }
         let out = Section::new("mask", "Mask").icon(Icon::Selection).resettable(c.extra.mask != 0).show(ui, |ui| {
             let mut m = c.extra.mask as usize;
             let w = ui.available_width();
@@ -1185,5 +1233,74 @@ mod tests {
         for k in &kinds {
             assert!(shown.contains(&k.as_str()), "model clip section \"{k}\" is in no tab of a model clip, so it never shows");
         }
+    }
+
+    /// The order the sections are drawn in is the order the person learns:
+    /// what the clip is, where it sits, how it plays, how it looks, what
+    /// happens to it.
+    #[test]
+    fn sections_are_drawn_in_a_fixed_order() {
+        let src = include_str!("inspector.rs");
+        let from = src.find("fn clip_sections_inner").unwrap();
+        let to = src.find("/// Volume in dB").unwrap();
+        let drawn = section_kinds(&src[from..to]);
+        assert_eq!(drawn, ["text", "transform", "speed", "colour", "audio", "effects", "motion", "mask"], "the Inspector's own sections");
+        // A tab lists "clip" first, and the settings no tab has room for last.
+        for kind in [ClipKind::Video, ClipKind::Audio, ClipKind::Title, ClipKind::Fx] {
+            let tabs = clip_tabs(kind, None, false);
+            for (i, t) in tabs.iter().enumerate() {
+                if let Some(at) = t.1.iter().position(|k| *k == "clip") {
+                    assert_eq!(at, 0, "{kind:?} tab {}: \"clip\" leads", t.0);
+                }
+                let tail = &t.1[t.1.len().saturating_sub(2)..];
+                assert_eq!(tail == ["generator", "data"], i + 1 == tabs.len(), "{kind:?} tab {}: generator and data end the last tab only", t.0);
+            }
+        }
+    }
+
+    /// What was collapsed comes back after a restart, and settings saved
+    /// before this option existed load as they did.
+    #[test]
+    fn collapsed_sections_are_remembered_through_prefs() {
+        let ctx = egui::Context::default();
+        let mut prefs = crate::prefs::Prefs { collapsed_sections: vec![("transform".into(), true)], ..Default::default() };
+        restore_sections(&ctx, &prefs);
+        assert_eq!(ctx.data_mut(|d| d.get_persisted::<bool>(collapsed_key("transform"))), Some(true), "Transform stays collapsed after a restart");
+        assert!(!remember_sections(&ctx, &mut prefs), "nothing changed yet");
+        // The person opens Transform and collapses Crop.
+        ctx.data_mut(|d| {
+            d.insert_persisted(collapsed_key("transform"), false);
+            d.insert_persisted(collapsed_key("crop"), true);
+        });
+        assert!(remember_sections(&ctx, &mut prefs));
+        assert!(prefs.collapsed_sections.contains(&("transform".to_owned(), false)) && prefs.collapsed_sections.contains(&("crop".to_owned(), true)), "{:?}", prefs.collapsed_sections);
+        assert_eq!(prefs.collapsed_sections.len(), 2);
+        assert!(!remember_sections(&ctx, &mut prefs), "unchanged state is not rewritten");
+    }
+
+    /// Reset on the Effects and Motion sections is one undo step.
+    #[test]
+    fn effects_and_motion_resets_undo() {
+        use crate::agent::Session;
+        use crate::ui_tests::Harness;
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.frames(3);
+        let doc = std::mem::replace(&mut h.app.doc, Session::default().doc);
+        let mut s = Session::new(doc);
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#1030e0", "at": 0.0, "duration": 3.0, "lane": "overlay"})], "card", false).expect("a card");
+        let id = s.doc.model.active().clips.iter().map(|c| c.id.0).max().unwrap();
+        s.edit(&[serde_json::json!({"op": "apply", "item": "chroma key", "clips": [id]})], "key", false).expect("a key");
+        h.app.doc = s.doc;
+        let ids = [id as u32];
+        edit_all(&mut h.app, &ids, "Entry motion", |c| c.motion_in = Some("fade".into()));
+        assert_eq!(h.app.doc.project.clip(ids[0]).unwrap().effects.len(), 1);
+        edit_all(&mut h.app, &ids, "Remove effects", |c| c.effects.clear());
+        assert!(h.app.doc.project.clip(ids[0]).unwrap().effects.is_empty());
+        assert_eq!(h.app.doc.undo_label(), Some("Remove effects"));
+        h.app.doc.undo();
+        assert_eq!(h.app.doc.project.clip(ids[0]).unwrap().effects.len(), 1, "undo brings the effect back");
+        edit_all(&mut h.app, &ids, "Remove entry motion", |c| c.motion_in = None);
+        h.app.doc.undo();
+        assert!(h.app.doc.project.clip(ids[0]).unwrap().motion_in.is_some(), "undo brings the entry motion back");
     }
 }
