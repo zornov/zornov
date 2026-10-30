@@ -115,6 +115,14 @@ impl Encoder {
         self
     }
 
+    /// Workers for the filter searches: `Config::threads`, 0 meaning all cores.
+    fn threads(&self) -> usize {
+        match self.cfg.threads {
+            0 => std::thread::available_parallelism().map_or(1, |n| n.get()),
+            n => n,
+        }
+    }
+
     /// The `av1C` record for the MP4 track.
     pub fn av1c(&self) -> Vec<u8> {
         av1c(&self.seq)
@@ -165,7 +173,7 @@ impl Encoder {
         let lf = if fast || !self.filters.deblock { [0, 0] } else { filters::search_deblock(&self.dseq, &buf, tw.mode_info(), frame) };
         let deblocked = filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf, cdef: None, lr: None });
         let cdef = if fast || !self.filters.cdef { None } else { filters::search_cdef(&self.dseq, &deblocked, tw.mode_info(), frame, q) };
-        let lr = if fast || !self.filters.restoration || self.cfg.speed > 6 { None } else { filters::search_lr(&self.dseq, &buf, tw.mode_info(), frame, lf, cdef.as_ref(), q) };
+        let lr = if fast || !self.filters.restoration || self.cfg.speed > 6 { None } else { filters::search_lr(&self.dseq, &buf, tw.mode_info(), frame, lf, cdef.as_ref(), q, self.threads()) };
         let buf = if cdef.is_none() && lr.is_none() {
             deblocked
         } else {

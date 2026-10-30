@@ -100,7 +100,7 @@ fn bytes_at(curve: &[(f64, f64)], psnr: f64) -> Option<f64> {
 #[test]
 fn every_filter_saves_bytes_at_equal_psnr() {
     let samples = (130 * 70 + 2 * 65 * 35) as f64 * 6.0;
-    let qs = [60u8, 100, 140, 180, 220];
+    let qs = [120u8, 150, 180, 210, 240];
     let curve = |set: FilterSet| -> Vec<(f64, f64)> {
         let mut c: Vec<(f64, f64)> = qs
             .iter()

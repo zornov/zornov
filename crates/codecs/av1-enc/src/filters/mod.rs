@@ -311,8 +311,8 @@ fn unit_counts(params: &LrParams, width: u32, height: u32) -> ([usize; 3], [usiz
     (rows, cols)
 }
 
-/// Squared error of every restoration unit of every plane of `buf` against `src`.
-fn unit_sse(buf: &FrameBuf, src: &Frame, params: &LrParams, rows: [usize; 3], cols: [usize; 3]) -> [Vec<u64>; 3] {
+/// Squared error of every restoration unit of every plane against `src`.
+fn unit_sse(planes: &[studio_av1::frame::Plane; 3], src: &Frame, params: &LrParams, rows: [usize; 3], cols: [usize; 3]) -> [Vec<u64>; 3] {
     let mut out: [Vec<u64>; 3] = std::array::from_fn(|p| vec![0; rows[p] * cols[p]]);
     for p in 0..3 {
         let sub = if p == 0 { 0 } else { 1 };
@@ -321,7 +321,7 @@ fn unit_sse(buf: &FrameBuf, src: &Frame, params: &LrParams, rows: [usize; 3], co
         for y in 0..h {
             let luma_y = ((y << sub) >> 2) << 2;
             let ur = (rows[p] - 1).min(((luma_y + 8) >> sub) / unit);
-            let a = &buf.planes[p].row(y)[..w];
+            let a = &planes[p].row(y)[..w];
             let b = &src.planes[p][y * src.stride[p]..y * src.stride[p] + w];
             for x in 0..w {
                 let luma_x = ((x << sub) >> 2) << 2;
@@ -359,10 +359,25 @@ fn candidates() -> Vec<LrUnit> {
     c
 }
 
+/// Least share of the frame's squared error restoration has to save (before its bits) to be used.
+const MIN_LR_GAIN: f64 = 0.03;
+
+/// Indices into `candidates()` tried first: four Wiener filters and four self-guided sets.
+fn probe_indices(cands: &[LrUnit]) -> Vec<usize> {
+    let wiener = [0usize, 1, 4, 5];
+    let mut out: Vec<usize> = wiener.to_vec();
+    for set in [1u8, 5, 9, 13] {
+        if let Some(i) = cands.iter().position(|u| u.kind as usize == RESTORE_SGRPROJ && u.sgr_set == set) {
+            out.push(i);
+        }
+    }
+    out
+}
+
 /// Loop restoration for the frame after deblocking (`lf`) and CDEF (`cdef`): every unit of every
 /// plane picks none, one of the Wiener filters or a self-guided set by squared error plus an
 /// estimate of its bits. None when no plane gains.
-pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame, lf: [u32; 2], cdef: Option<&CdefChoice>, base_q_idx: u8) -> Option<LrChoice> {
+pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Frame, lf: [u32; 2], cdef: Option<&CdefChoice>, base_q_idx: u8, threads: usize) -> Option<LrChoice> {
     let deblocked = apply(seq, recon, mi, &FilterParams { lf_level: lf, cdef: None, lr: None });
     let cdef_out = match cdef {
         Some(c) => apply(seq, &deblocked, mi, &FilterParams { lf_level: [0, 0], cdef: Some(c.clone()), lr: None }),
@@ -373,18 +388,70 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
     let params = LrParams { switchable: [true; 3], unit_shift, uv_shift: 0 };
     let (rows, cols) = unit_counts(&params, src.width, src.height);
     let fh = frame_header(src.width, src.height, &FilterParams { lf_level: [0, 0], cdef: None, lr: Some(LrChoice { params, units: Default::default(), unit_cols: cols, unit_rows: rows }) });
-    let none = unit_sse(&cdef_out, src, &params, rows, cols);
+    let none = unit_sse(&cdef_out.planes, src, &params, rows, cols);
     let cands = candidates();
-    let mut tables: Vec<[Vec<u64>; 3]> = Vec::new();
-    for cand in &cands {
-        let choice = LrChoice { params, units: std::array::from_fn(|p| vec![*cand; rows[p] * cols[p]]), unit_cols: cols, unit_rows: rows };
-        let mut pf = PostFilter::new(seq, &fh, to_decoder(recon), mi.clone());
-        set_lr_units(&mut pf, &choice);
-        let out = pf.restore(&to_decoder(&deblocked), &to_decoder(&cdef_out));
-        let mut filtered = recon.clone();
-        filtered.planes = out.planes;
-        tables.push(unit_sse(&filtered, src, &params, rows, cols));
+    let (dec_deblocked, dec_cdef) = (to_decoder(&deblocked), to_decoder(&cdef_out));
+    let mut tables: Vec<Option<[Vec<u64>; 3]>> = vec![None; cands.len()];
+    // each candidate is run over the whole frame (every unit set to it); they are independent, so
+    // they are spread over `threads` workers, each with its own filter state
+    let mut eval = |tables: &mut Vec<Option<[Vec<u64>; 3]>>, todo: Vec<usize>| {
+        let todo: Vec<usize> = todo.into_iter().filter(|&c| tables[c].is_none()).collect();
+        let workers = threads.min(todo.len()).max(1);
+        let chunks: Vec<Vec<usize>> = (0..workers).map(|w| todo.iter().copied().skip(w).step_by(workers).collect()).collect();
+        let run = |chunk: &[usize]| -> Vec<(usize, [Vec<u64>; 3])> {
+            let mut pf = PostFilter::new(seq, &fh, to_decoder(recon), mi.clone());
+            chunk
+                .iter()
+                .map(|&c| {
+                    let choice = LrChoice { params, units: std::array::from_fn(|p| vec![cands[c]; rows[p] * cols[p]]), unit_cols: cols, unit_rows: rows };
+                    set_lr_units(&mut pf, &choice);
+                    let out = pf.restore(&dec_deblocked, &dec_cdef);
+                    (c, unit_sse(&out.planes, src, &params, rows, cols))
+                })
+                .collect()
+        };
+        let done: Vec<Vec<(usize, [Vec<u64>; 3])>> = if workers == 1 {
+            chunks.iter().map(|c| run(c)).collect()
+        } else {
+            std::thread::scope(|sc| {
+                let hs: Vec<_> = chunks.iter().map(|c| sc.spawn(|| run(c))).collect();
+                hs.into_iter().map(|h| h.join().expect("restoration worker")).collect()
+            })
+        };
+        for (c, t) in done.into_iter().flatten() {
+            tables[c] = Some(t);
+        }
+    };
+    // a few well spread candidates first: when the best unit-by-unit choice among them saves under
+    // a few percent of the frame's error, restoration is not worth its bits (nor the rest of the
+    // search); this is also where nearly all frames stop
+    eval(&mut tables, probe_indices(&cands));
+    let gain_of = |tables: &[Option<[Vec<u64>; 3]>]| -> u64 {
+        let mut gain = 0u64;
+        for p in 0..3 {
+            for i in 0..rows[p] * cols[p] {
+                let best = tables.iter().flatten().map(|t| t[p][i]).min().unwrap_or(u64::MAX);
+                gain += none[p][i].saturating_sub(best);
+            }
+        }
+        gain
+    };
+    let total_none: u64 = none.iter().flatten().sum();
+    if (gain_of(&tables) as f64) < MIN_LR_GAIN * total_none as f64 {
+        return None;
     }
+    // refine around the probes that did best: the other Wiener filters, and the weight variants
+    // and neighbouring sets of the two best self-guided sets
+    let total = |c: usize| -> u64 { tables[c].as_ref().map_or(u64::MAX, |t| (0..3).map(|p| (0..rows[p] * cols[p]).map(|i| t[p][i].min(none[p][i])).sum::<u64>()).sum()) };
+    let mut sgr: Vec<usize> = probe_indices(&cands).into_iter().filter(|&c| cands[c].kind as usize == RESTORE_SGRPROJ).collect();
+    sgr.sort_by_key(|&c| total(c));
+    let mut more: Vec<usize> = (0..cands.len()).filter(|&c| cands[c].kind as usize == RESTORE_WIENER).collect();
+    for &best in sgr.iter().take(2) {
+        let set = cands[best].sgr_set as i32;
+        more.extend((0..cands.len()).filter(|&c| cands[c].kind as usize == RESTORE_SGRPROJ && (cands[c].sgr_set as i32 - set).abs() <= 1));
+    }
+    eval(&mut tables, more);
+    let tables: Vec<Option<[Vec<u64>; 3]>> = tables;
     let lambda = filter_lambda(base_q_idx);
     let bits = |u: &LrUnit| -> f64 { if u.kind as usize == RESTORE_WIENER { 30.0 } else { 20.0 } };
     let mut choice = LrChoice { params, units: Default::default(), unit_cols: cols, unit_rows: rows };
@@ -396,7 +463,8 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
             let n = none[p][i] as f64;
             let (mut best, mut best_cost) = (LrUnit::default(), n + lambda * 1.5);
             for (c, cand) in cands.iter().enumerate() {
-                let cost = tables[c][p][i] as f64 + lambda * (1.5 + bits(cand));
+                let Some(t) = &tables[c] else { continue };
+                let cost = t[p][i] as f64 + lambda * (1.5 + bits(cand));
                 if cost < best_cost {
                     (best, best_cost) = (*cand, cost);
                 }
@@ -406,7 +474,8 @@ pub fn search_lr(seq: &SequenceHeader, recon: &FrameBuf, mi: &MiInfo, src: &Fram
             total_best += best_cost;
         }
         // a plane that keeps its units pays for the header and the unit symbols
-        if total_best + lambda * 6.0 < total_none {
+        // and a plane keeps restoration only when it saves a clear share of its error
+        if total_best + lambda * 6.0 < total_none && (total_none - total_best) >= MIN_LR_GAIN * none[p].iter().sum::<u64>() as f64 {
             choice.params.switchable[p] = true;
             choice.units[p] = units;
             any = true;
