@@ -1686,11 +1686,7 @@ fn status_bar(st: &mut PaintState, ui: &mut egui::Ui, r: Rect) {
 /// Every engine command, searchable by name.
 fn palette(st: &mut PaintState, ctx: &egui::Context) {
     let t = theme::tokens(ctx);
-    let mut open = st.palette_open;
-    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        open = false;
-    }
-    egui::Window::new("More tools").open(&mut open).default_width(520.0).default_height(460.0).collapsible(false).show(ctx, |ui| kit::scroll_panel(ui, "paint-commands", |ui| {
+    let out = kit::modal(ctx, egui::Id::new("paint-palette"), Vec2::new(560.0, 480.0), "More tools", |ui| kit::scroll_panel(ui, "paint-commands", |ui| {
         ui.add(egui::TextEdit::singleline(&mut st.palette_query).hint_text("liquify, puppet, HDR, panorama, blur, camera raw").desired_width(f32::INFINITY));
         let found = studio_canvas::Canvas::commands(&st.palette_query);
         if found.is_empty() {
@@ -1733,7 +1729,9 @@ fn palette(st: &mut PaintState, ctx: &egui::Context) {
             }
         }
     }));
-    st.palette_open = open;
+    if out.close {
+        st.palette_open = false;
+    }
 }
 
 fn shortcuts(st: &mut PaintState, ctx: &egui::Context) {
