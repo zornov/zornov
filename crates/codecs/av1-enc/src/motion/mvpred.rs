@@ -34,9 +34,16 @@ pub fn frame_info(mi_rows: usize, mi_cols: usize) -> MvFrame {
 /// The motion vector stack of the block `shape = (mi_row, mi_col, w4, h4)` predicting from
 /// `ref_frame`, given the mode info of the blocks coded before it (one tile covering the frame).
 pub fn find_stack(mi: &MiInfo, frame: &MvFrame, shape: (usize, usize, usize, usize), ref_frame: u8) -> MvStack {
+    find_stack_in_tile(mi, frame, shape, ref_frame, [0, frame.mi_rows as usize, 0, frame.mi_cols as usize])
+}
+
+/// [`find_stack`] for a block of the tile `[mi_row_start, mi_row_end, mi_col_start, mi_col_end]`:
+/// the neighbour scan and the availability of the blocks above and to the left stop at its edges
+/// (the frame's size still limits the vectors).
+pub fn find_stack_in_tile(mi: &MiInfo, frame: &MvFrame, shape: (usize, usize, usize, usize), ref_frame: u8, tile: [usize; 4]) -> MvStack {
     let (r, c, w4, h4) = shape;
     let mi_size = (0..BLOCK_SIZES).find(|&b| NUM_4X4_BLOCKS_WIDE[b] as usize == w4 && NUM_4X4_BLOCKS_HIGH[b] as usize == h4).unwrap_or_else(|| panic!("no block size {w4}x{h4}"));
-    let blk = MvBlock { mi_row: r, mi_col: c, mi_size, bw4: w4, bh4: h4, ref_frame: [ref_frame as i8, -1], avail_u: r > 0, avail_l: c > 0, mv_i: [[0; 2]; 2] };
+    let blk = MvBlock { mi_row: r, mi_col: c, mi_size, bw4: w4, bh4: h4, ref_frame: [ref_frame as i8, -1], avail_u: r > tile[0], avail_l: c > tile[2], mv_i: [[0; 2]; 2] };
     let motion_field: [Vec<[i32; 2]>; 8] = Default::default();
     let mut stack = MvStack::default();
     let mut p = MvPredictor {
@@ -44,10 +51,10 @@ pub fn find_stack(mi: &MiInfo, frame: &MvFrame, shape: (usize, usize, usize, usi
         fh: frame,
         mi,
         motion_field: &motion_field,
-        mi_row_start: 0,
-        mi_row_end: frame.mi_rows as usize,
-        mi_col_start: 0,
-        mi_col_end: frame.mi_cols as usize,
+        mi_row_start: tile[0],
+        mi_row_end: tile[1],
+        mi_col_start: tile[2],
+        mi_col_end: tile[3],
         mvs: &mut stack,
     };
     p.find_mv_stack(false);

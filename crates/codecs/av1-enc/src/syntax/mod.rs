@@ -22,7 +22,7 @@ use studio_av1::mvpred::MvFrame;
 
 use crate::entropy::SymbolEncoder;
 use crate::entropy::cdf_ctx::CdfContext;
-use crate::motion::mvpred::{find_stack, frame_info};
+use crate::motion::mvpred::{find_stack_in_tile, frame_info};
 use crate::recon::IntraExtra;
 use crate::types::{BlockDecision, BlockMode, CoefBlock, InterDecision, InterSbDecision, SbDecision, SbPos, SeqParams};
 
@@ -78,6 +78,16 @@ impl TileWriter {
             mv_frame: frame_info(mi_rows as usize, mi_cols as usize),
             lr: None,
         }
+    }
+
+    /// Writes one tile of the frame, `[mi_row_start, mi_row_end)` x `[mi_col_start, mi_col_end)` in
+    /// mode info units (superblock aligned): the blocks above and to the left outside it are not
+    /// available to any context, and the left context is cleared at its first superblock column.
+    /// Call it before writing anything; a fresh writer already has the tile's fresh CDFs and above
+    /// context. Positions stay frame coordinates.
+    pub fn with_tile(mut self, mi_row0: usize, mi_row1: usize, mi_col0: usize, mi_col1: usize) -> TileWriter {
+        self.ctx.tile = [mi_row0, mi_row1.min(self.mi_rows), mi_col0, mi_col1.min(self.mi_cols)];
+        self
     }
 
     /// Codes the restoration units of `choice` in front of the superblocks.
@@ -264,7 +274,7 @@ impl TileWriter {
         let (bw4, bh4) = (d.w4 as usize, d.h4 as usize);
         let ms = block_size_of(bw4, bh4).unwrap_or_else(|| panic!("no block size {bw4}x{bh4}"));
         assert!(r < self.mi_rows && c < self.mi_cols, "block outside the frame");
-        let stack = find_stack(&self.ctx.mi, &self.mv_frame, (r, c, bw4, bh4), d.ref_frame);
+        let stack = find_stack_in_tile(&self.ctx.mi, &self.mv_frame, (r, c, bw4, bh4), d.ref_frame, self.ctx.tile);
         write_inter_block_mode_info(&mut self.enc, &mut self.cdfs.cdfs, &self.ctx, d, &stack);
         // TX_MODE_LARGEST: the transform size is not coded
         let tx = if self.frame.lossless { TX_4X4 } else { MAX_TX_SIZE_RECT[ms] as usize };
@@ -305,7 +315,7 @@ impl TileWriter {
     /// Writes one superblock of an inter frame, blocks in decode order; see
     /// [`write_sb`](Self::write_sb).
     pub fn write_inter_sb(&mut self, sb: SbPos, dec: &InterSbDecision) {
-        if sb.col == 0 {
+        if sb.col as usize * NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize == self.ctx.tile[2] {
             self.ctx.clear_left();
         }
         self.write_lr(sb);
@@ -333,7 +343,7 @@ impl TileWriter {
     /// Like [`write_sb`](Self::write_sb), with the angle deltas of each block (blocks past the
     /// end of `extras` have none).
     pub fn write_sb_ex(&mut self, sb: SbPos, dec: &SbDecision, extras: &[IntraExtra]) {
-        if sb.col == 0 {
+        if sb.col as usize * NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize == self.ctx.tile[2] {
             self.ctx.clear_left();
         }
         self.write_lr(sb);

@@ -30,7 +30,7 @@ use crate::syntax::ctx::ContextState;
 use crate::transform::forward_transform;
 use crate::transform::quant::quantize_block;
 use crate::types::{BlockMode, CoefBlock, Frame, InterDecision, InterSbDecision, QuantParams, SbPos};
-use mvpred::{find_stack, frame_info, predicted_mv};
+use mvpred::{find_stack_in_tile, frame_info, predicted_mv};
 use search::{Matcher, mv_bits};
 
 /// Bits charged for a partition symbol when comparing a block with its split.
@@ -173,6 +173,14 @@ impl<'a> InterFrameCoder<'a> {
         }
     }
 
+    /// Codes the tile `[mi_row_start, mi_row_end)` x `[mi_col_start, mi_col_end)` only: neighbour
+    /// availability and the vector candidate scan stop at its edges (positions stay frame
+    /// coordinates; the caller visits the tile's superblocks).
+    pub fn with_tile(mut self, mi_row0: usize, mi_row1: usize, mi_col0: usize, mi_col1: usize) -> Self {
+        self.ctx.tile = [mi_row0, mi_row1.min(self.mi_rows), mi_col0, mi_col1.min(self.mi_cols)];
+        self
+    }
+
     /// Limits the partition search to blocks of at least `min_n4` x `min_n4` (4x4 units).
     pub fn with_min_block(mut self, min_n4: usize) -> Self {
         self.min_n4 = min_n4.max(2);
@@ -196,7 +204,7 @@ impl<'a> InterFrameCoder<'a> {
 
     fn decide_block(&mut self, recon: &mut FrameBuf, shape: Shape) -> (BlockMode, f64) {
         let (r, c, w4, h4) = shape;
-        let stack = find_stack(&self.ctx.mi, &self.mv_frame, shape, 1);
+        let stack = find_stack_in_tile(&self.ctx.mi, &self.mv_frame, shape, 1, self.ctx.tile);
         let lam = lambda(recon.quant.base_q_idx, recon.bit_depth);
         // motion search in SAD units: one bit is worth about lambda / (SSE per SAD unit)
         let lam_sad = lam.sqrt() * 0.5;
