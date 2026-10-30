@@ -377,12 +377,56 @@ fn toasts(app: &mut StudioApp, ctx: &egui::Context) {
             app.editor.set_tree(before);
         } else if Some(id) == app.editor.undo_toast {
             undo_step(&mut app.editor, &mut app.doc, ctx);
-        } else if let Some((_, path)) = app.reveal.take().filter(|(rid, _)| *rid == id) {
-            let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
         } else if Some(id) == app.editor.redo_toast {
             redo_step(&mut app.editor, &mut app.doc, ctx);
+        } else {
+            toast_action(app, ctx, id);
         }
     }
+}
+
+/// The toast actions that are not about the edit history: "Show in Finder"
+/// for a finished export, and "Save now" / "Save as…" on a save that
+/// failed. Returns whether `id` was one of them. Every screen's toast
+/// layer can call this (the app's overlay layer too).
+pub fn toast_action(app: &mut StudioApp, ctx: &egui::Context, id: u64) -> bool {
+    if let Some(r) = reveal_action(&mut app.reveal, id) {
+        if let Err(e) = r {
+            kit::push_error(ctx, crate::i18n::tf(format!("Could not show it in Finder: {e}")));
+        }
+        return true;
+    }
+    let action = kit::recent(ctx).into_iter().find(|t| t.id == id).and_then(|t| t.action);
+    match action.as_deref().and_then(save_route) {
+        Some(save_as) => {
+            app.save(ctx, save_as);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Which save a toast action asks for: `Some(false)` "Save now" (to the
+/// project's folder), `Some(true)` "Save as…" (somewhere else).
+pub fn save_route(action: &str) -> Option<bool> {
+    match action {
+        "Save now" => Some(false),
+        "Save as…" => Some(true),
+        _ => None,
+    }
+}
+
+/// The path of the export reveal toast when `id` is that toast (taking it
+/// off, so it answers once).
+pub fn take_reveal(reveal: &mut Option<(u64, std::path::PathBuf)>, id: u64) -> Option<std::path::PathBuf> {
+    reveal.take_if(|(rid, _)| *rid == id).map(|(_, p)| p)
+}
+
+/// Run the reveal toast's action: show the file in Finder. `None` when
+/// `id` is not the reveal toast; otherwise how opening Finder went.
+pub fn reveal_action(reveal: &mut Option<(u64, std::path::PathBuf)>, id: u64) -> Option<Result<(), String>> {
+    let path = take_reveal(reveal, id)?;
+    Some(std::process::Command::new("open").arg("-R").arg(&path).spawn().map(drop).map_err(|e| e.to_string()))
 }
 
 /// Advance the playhead while playing.
@@ -503,8 +547,10 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             let clips = (!ed.selection.is_empty()).then(|| ed.selection.iter().map(|id| m::ClipId(*id as u64)).collect());
             let seq = doc.seq();
             doc.apply("Split", m::Edit::Split { seq, at: t, clips });
-            if doc.project.clips.len() == before && doc.error.is_none() {
-                kit::push(ctx, if ed.selection.is_empty() { "No clip under the playhead to split" } else { "The playhead is not inside the selected clip" }, None, Some(Icon::Info));
+            // The model says "nothing to split at that time"; say which case
+            // it is. The editor's frame shows `doc.error` as a warning.
+            if doc.project.clips.len() == before && doc.error.as_deref().is_none_or(|e| e.starts_with("nothing to split")) {
+                doc.error = Some(if ed.selection.is_empty() { "No clip under the playhead to split" } else { "The playhead is not inside the selected clip" }.to_owned());
             }
             if doc.project.clips.len() > before {
                 toast_undo(ed, ctx, crate::i18n::tf(format!("Split at {}", view::timecode(t, doc.project.fps))), Icon::Scissors);
@@ -1012,12 +1058,45 @@ mod edit_flow_tests {
         let _serial = crate::ui_tests::serial();
         let (mut app, ctx) = editor_app();
         let ids = two_cards(&mut app);
+        let (clips, steps) = (app.doc.project.clips.clone(), app.doc.history_len());
+        // A selected clip, the playhead not inside it (inside the other one).
         app.editor.selection = vec![ids[0]];
         app.editor.playhead = 5 * SEC;
-        let before = app.doc.project.clips.len();
         run(&mut app, &ctx, Action::Split);
-        assert_eq!(app.doc.project.clips.len(), before);
-        assert!(!said(&ctx).is_empty() || app.doc.error.is_some());
+        assert_eq!(app.doc.error.take().as_deref(), Some("The playhead is not inside the selected clip"));
+        // Nothing selected and nothing under the playhead.
+        app.editor.selection.clear();
+        app.editor.playhead = 20 * SEC;
+        run(&mut app, &ctx, Action::Split);
+        assert_eq!(app.doc.error.take().as_deref(), Some("No clip under the playhead to split"));
+        // Neither refusal changed the project or the history, or offered an Undo.
+        assert_eq!(app.doc.project.clips, clips);
+        assert_eq!(app.doc.history_len(), steps);
+        assert!(said(&ctx).is_empty(), "{:?}", said(&ctx));
+    }
+
+    /// "Save now" and "Save as…" on a failed-save toast reach the save
+    /// functions; other actions are left to their own handlers. The reveal
+    /// toast answers once, for its own id only.
+    #[test]
+    fn toast_actions_are_routed() {
+        assert_eq!(save_route("Save now"), Some(false));
+        assert_eq!(save_route("Save as…"), Some(true));
+        assert_eq!(save_route("Undo"), None);
+        let mut reveal = Some((7, std::path::PathBuf::from("/nonexistent/zornov-test.mp4")));
+        assert_eq!(take_reveal(&mut reveal, 8), None);
+        assert!(reveal.is_some(), "another toast's click leaves it");
+        assert!(reveal_action(&mut reveal, 9).is_none());
+        assert_eq!(take_reveal(&mut reveal, 7), Some(std::path::PathBuf::from("/nonexistent/zornov-test.mp4")));
+        assert!(reveal.is_none() && take_reveal(&mut reveal, 7).is_none(), "once");
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        let undo = kit::push(&ctx, "Split at 0:01", Some("Undo"), Some(Icon::Scissors));
+        assert!(!toast_action(&mut app, &ctx, undo), "history actions are not this handler's");
+        assert!(!toast_action(&mut app, &ctx, 12345));
+        app.reveal = Some((undo + 1, std::path::PathBuf::from("/nonexistent/zornov-test.mp4")));
+        assert!(toast_action(&mut app, &ctx, undo + 1), "the reveal toast is handled");
+        assert!(app.reveal.is_none());
     }
 
     #[test]
