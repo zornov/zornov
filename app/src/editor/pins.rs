@@ -21,6 +21,7 @@ use crate::app::StudioApp;
 use crate::editor::xform::{self, Geo};
 use crate::theme;
 use crate::kit::FieldRow;
+use super::physics::cloud_feedback as feedback;
 use crate::view::{Project, SEC, Time};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use studio_model as m;
@@ -351,7 +352,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
         if body.clicked() && !alt && !on_handle {
             if let Some(pos) = body.interact_pointer_pos() {
                 if let Some(at) = map.layer(from_screen(pos)) {
-                    add_pin(app, id, tool, at, kind(ui.ctx()));
+                    add_pin(app, ui.ctx(), id, tool, at, kind(ui.ctx()));
                 }
             }
         }
@@ -475,12 +476,15 @@ fn bend(_: &m::Mask, _: &mut [[f32; 2]], _: &LayerMap) {}
 
 /// Adds a pin of `kind` at `at` (layer coordinates) with the tool's
 /// target: the puppet, or a mask (turned into a path first).
-fn add_pin(app: &mut StudioApp, id: u32, tool: PinTool, at: m::Vec2, kind: m::PinKind) {
+fn add_pin(app: &mut StudioApp, ctx: &egui::Context, id: u32, tool: PinTool, at: m::Vec2, kind: m::PinKind) {
     let Some(mut mc) = app.doc.model.active().clip(m::ClipId(id as u64)).cloned() else { return };
     let label = match tool {
         PinTool::Mask(n) => {
             let Some(mk) = mc.masks.get(n).cloned() else { return };
-            let Some(mut path_mask) = as_path(&mut mc, &mk) else { return };
+            let Some(mut path_mask) = as_path(&mut mc, &mk) else {
+                feedback::hint(ctx, "A line or mirror mask has no outline to pin");
+                return;
+            };
             let pid = path_mask.pins.iter().map(|p| p.id).max().map_or(1, |x| x + 1);
             path_mask.pins.push(m::Pin::new(pid, kind, at));
             mc.masks[n] = path_mask;
@@ -624,6 +628,15 @@ pub(crate) fn model_row(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, path: &
     }
 }
 
+/// The notes under the pin tool.
+const PUPPET_HOW: &str = "Click the layer to add a pin. Drag to move, ⌥-click to remove";
+const CORNERS_HOW: &str = "Drag a corner. Shift-drag to skew";
+
+/// A pin's row title: its name, or its place in the list.
+fn pin_title(what: &str, n: usize, pin: &m::Pin) -> String {
+    if pin.name.is_empty() { crate::i18n::tf(format!("{what} {} · {}", n + 1, kind_label(pin.kind))) } else { format!("{} · {}", feedback::shown_name(&pin.name), kind_label(pin.kind)) }
+}
+
 fn kind_label(k: m::PinKind) -> &'static str {
     match k {
         m::PinKind::Position => "Position",
@@ -704,9 +717,9 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             if crate::kit::segmented(ui, "pin-kind", &mut k, &segs, Some(w), None).changed() {
                 set_kind(&ctx, KINDS[k]);
             }
-            ui.label(egui::RichText::new(crate::i18n::shown("Click the layer to place a pin; drag one to move it (a key at the playhead once it is animated); ⌥-click removes it. Two pins or more bend; one moves the whole layer.")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown(PUPPET_HOW)).font(theme::caption()).color(t.text_2));
         } else if tool == PinTool::Corners {
-            ui.label(egui::RichText::new(crate::i18n::shown("Drag a corner; shift-drag skews (the corner beside it moves along).")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown(CORNERS_HOW)).font(theme::caption()).color(t.text_2));
         }
 
         // The puppet's pins.
@@ -723,7 +736,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 }
             });
             let mut density = pp.density as f32;
-            if FieldRow::new("Mesh", &mut density, 4.0..=64.0).default(24.0).decimals(0).step(1.0).show(ui).changed {
+            if FieldRow::new("Mesh detail", &mut density, 4.0..=64.0).default(24.0).decimals(0).step(1.0).show(ui).changed {
                 let mut c = mc.clone();
                 if let Some(p) = &mut c.puppet {
                     p.density = density as f64;
@@ -731,8 +744,8 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 let seq = app.doc.seq();
                 app.doc.apply_gesture(&format!("pin-density-{id}"), "Puppet mesh", m::Edit::SetClip { seq, clip: Box::new(c) });
             }
-            for pin in &pp.pins {
-                let name = if pin.name.is_empty() { crate::i18n::tf(format!("Pin {} · {}", pin.id, kind_label(pin.kind))) } else { format!("{} · {}", pin.name, kind_label(pin.kind)) };
+            for (n, pin) in pp.pins.iter().enumerate() {
+                let name = pin_title("Pin", n, pin);
                 crate::kit::name_row(ui, egui::RichText::new(name).font(theme::body_medium()).color(t.text), |ui| {
                     if Button::ghost("Remove").icon(Icon::Trash).show(ui).clicked() {
                         let mut c = mc.clone();
@@ -774,8 +787,8 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             if !mk.pins.is_empty() || mk.shape == m::MaskShape::Path {
                 ui.label(egui::RichText::new(crate::i18n::shown("Mask")).font(theme::body_medium()).color(t.text));
             }
-            for pin in &mk.pins {
-                crate::kit::name_row(ui, egui::RichText::new(crate::i18n::tf(format!("Mask pin {} · {}", pin.id, kind_label(pin.kind)))).font(theme::body()).color(t.text_2), |ui| {
+            for (n, pin) in mk.pins.iter().enumerate() {
+                crate::kit::name_row(ui, egui::RichText::new(pin_title("Mask pin", n, pin)).font(theme::body()).color(t.text_2), |ui| {
                     if Button::ghost("Remove").icon(Icon::Trash).show(ui).clicked() {
                         remove(app, id, Grab::MaskPin(pin.id));
                     }
@@ -933,5 +946,18 @@ mod tests {
         let mc = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap();
         assert_eq!(mc.puppet.as_ref().unwrap().pins.len(), 3);
         assert!(mc.corner_pin.is_some() && mc.masks[0].pins.len() == 2);
+        // The section alone at the Inspector's width, with each tool.
+        for (k, tool_on) in [PinTool::Off, PinTool::Puppet, PinTool::Corners, PinTool::Mask(0)].into_iter().enumerate() {
+            set_tool(&ctx, tool_on);
+            let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| inspector(&mut app, ui, id));
+            drawn.assert_tidy(&format!("pins-{k}"), &[]);
+            assert!(drawn.shows("Pin 1 · Position") && drawn.shows("Mesh detail"), "{:?}", drawn.texts);
+            match tool_on {
+                PinTool::Puppet | PinTool::Mask(_) => assert!(drawn.shows(PUPPET_HOW)),
+                PinTool::Corners => assert!(drawn.shows(CORNERS_HOW)),
+                _ => {}
+            }
+        }
+        set_tool(&ctx, PinTool::Off);
     }
 }

@@ -34,6 +34,9 @@ impl Default for Settings {
     }
 }
 
+/// How the tool works, under its rows while it is on.
+const HOW: &str = "Drag on the model in the viewer. [ and ] resize, Esc stops";
+
 pub const BRUSHES: [&str; 7] = ["Inflate", "Deflate", "Grab", "Smooth", "Flatten", "Pinch", "Crease"];
 
 fn settings_id() -> egui::Id {
@@ -171,9 +174,14 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, scale: f32) 
         let Some(mc) = app.doc.model.active().clip(m::ClipId(id as u64)).cloned() else { return true };
         match (crate::mesh_store::load(&mc), placed(app, id)) {
             (Ok(mesh), Some((world, camera))) => {
-                if let Some(inverse) = invert(&world) {
-                    let unit = studio_mesh::length(apply(&world, [1.0, 0.0, 0.0], 0.0)).max(1e-6);
-                    stroke = Some(Stroke3 { id, mesh: Arc::new(mesh), world, inverse, camera, last: None, dabs: 0, unit });
+                match invert(&world) {
+                    Some(inverse) => {
+                        let unit = studio_mesh::length(apply(&world, [1.0, 0.0, 0.0], 0.0)).max(1e-6);
+                        stroke = Some(Stroke3 { id, mesh: Arc::new(mesh), world, inverse, camera, last: None, dabs: 0, unit });
+                    }
+                    None => {
+                        kit::push(&ctx, "The model is scaled flat at the playhead, so it can't be sculpted", None, Some(Icon::Warning));
+                    }
                 }
             }
             (Err(e), _) => {
@@ -282,9 +290,11 @@ pub fn settings_rows(ui: &mut egui::Ui) {
                 s.strength = pct / 100.0;
             }
         });
-        kit::labeled_row(ui, "Symmetry (X)", |ui| {
-            kit::toggle(ui, &mut s.symmetry, "Symmetry", None);
+        kit::labeled_row(ui, "Symmetry", |ui| {
+            kit::toggle(ui, &mut s.symmetry, "Mirror across X", None);
         });
+        let t = crate::theme::tokens(&ctx);
+        ui.label(egui::RichText::new(crate::i18n::shown(HOW)).font(crate::theme::caption()).color(t.text_2));
     }
     if s != before {
         set_settings(&ctx, s);
@@ -304,5 +314,20 @@ mod tests {
         let inv = invert(&m).unwrap();
         let q = apply(&inv, apply(&m, [1.0, 2.0, 3.0], 1.0), 1.0);
         assert!((q[0] - 1.0).abs() < 1e-4 && (q[1] - 2.0).abs() < 1e-4 && (q[2] - 3.0).abs() < 1e-4, "{q:?}");
+    }
+
+    /// The brush rows at the Inspector's width: one label column, each
+    /// value shown, nothing cut, and a line on how to use it.
+    #[test]
+    fn the_brush_rows_read_cleanly() {
+        let _serial = crate::ui_tests::serial();
+        let (ctx, _app) = crate::editor::physics::cloud_ui_check::editor();
+        set_settings(&ctx, Settings { on: true, ..Default::default() });
+        let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, settings_rows);
+        drawn.assert_tidy("sculpt", &[]);
+        assert!(drawn.shows(HOW) && drawn.shows("Symmetry"));
+        // Labels share one column.
+        let xs: Vec<f32> = ["Sculpt", "Brush", "Size", "Strength", "Symmetry"].iter().map(|l| drawn.rect_of(l).unwrap_or_else(|| panic!("{l}")).left()).collect();
+        assert!(xs.iter().all(|x| (x - xs[0]).abs() < 0.5), "{xs:?}");
     }
 }

@@ -12,6 +12,7 @@
 use crate::app::StudioApp;
 use crate::icons::Icon;
 use crate::kit::{self, Button, FieldRow, Section};
+use super::physics::cloud_feedback as feedback;
 use crate::physics3d::{BodyType, Props};
 use crate::theme;
 use eframe::egui;
@@ -20,6 +21,7 @@ use studio_model as m;
 use studio_sim::dynamics::decompose::Fit;
 use studio_sim::dynamics::material::TABLE;
 
+/// Runs `ops` as one undo step; says why when they can't run.
 fn run(app: &mut StudioApp, ctx: &egui::Context, ops: Vec<Value>, label: &str) -> Option<String> {
     let doc = std::mem::replace(&mut app.doc, crate::agent::Session::default().doc);
     let mut s = crate::agent::Session::new(doc);
@@ -28,14 +30,44 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ops: Vec<Value>, label: &str) -
     match r {
         Ok(v) => Some(v.to_string()),
         Err(e) => {
-            kit::push(ctx, format!("{label}: {e}"), None, Some(Icon::Warning));
+            feedback::failed(ctx, &app.doc, &e);
             None
         }
     }
 }
 
-const BODIES: [&str; 5] = ["Auto", "Moves (dynamic)", "Fixed (static)", "Animated (kinematic)", "Not physical"];
-const FITS: [(&str, Fit); 7] = [("Auto", Fit::Auto), ("Box", Fit::Box), ("Ball", Fit::Sphere), ("Capsule", Fit::Capsule), ("Convex hull", Fit::Hull), ("Convex parts", Fit::Parts(16)), ("Exact triangles", Fit::Mesh)];
+/// Runs an action and says what it did.
+fn act(app: &mut StudioApp, ctx: &egui::Context, op: Value, label: &str, said: &str) {
+    if run(app, ctx, vec![op], label).is_some() {
+        feedback::done(ctx, said);
+    }
+}
+
+const BODIES: [&str; 5] = ["Auto", "Moves", "Fixed", "Animated", "Not physical"];
+const FITS: [(&str, Fit); 7] = [("Auto", Fit::Auto), ("Box", Fit::Box), ("Ball", Fit::Sphere), ("Capsule", Fit::Capsule), ("Convex hull", Fit::Hull), ("Convex parts", Fit::Parts(16)), ("Exact mesh", Fit::Mesh)];
+
+/// The joints as a person reads them: "Hinge to the world, rope to “Lamp”".
+fn joints_said(app: &StudioApp, p: &Props) -> String {
+    let list: Vec<String> = p
+        .joints
+        .iter()
+        .map(|j| {
+            let to = j.to.map_or("the world".to_owned(), |t| app.doc.project.clip(t as u32).map(|c| c.name.trim().to_owned()).filter(|n| !n.is_empty()).map_or("another clip".to_owned(), |n| format!("“{n}”")));
+            format!("{} to {to}", j.kind)
+        })
+        .collect();
+    let s = list.join(", ");
+    let mut c = s.chars();
+    c.next().map_or(s.clone(), |f| f.to_uppercase().chain(c).collect())
+}
+
+/// The note under the section: what simulating does, or what was baked.
+fn baked_note(baked: Option<&str>) -> String {
+    match baked {
+        Some(r) => crate::i18n::tf(format!("Baked {} s. Simulate again to redo", r.replace(',', " to "))),
+        None => crate::i18n::shown("Simulations bake into keys you can scrub").into_owned(),
+    }
+}
 
 pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
     let Some(mc) = app.doc.model.sequences.iter().find_map(|q| q.clip(m::ClipId(id as u64))).cloned() else { return };
@@ -61,10 +93,18 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         names.extend(TABLE.iter().map(|s| s.name));
         let cur = p.material.as_deref().and_then(|m| names.iter().position(|n| *n == m)).unwrap_or(0);
         kit::labeled_row(ui, "Material", |ui| {
-            if let Some(i) = kit::menu_button(ui, "physics-material", cur, &names, w, None)
-                && i > 0
-            {
-                run(app, &ctx, vec![json!({"op": "body", "clip": id, "material": names[i]})], "Physical material");
+            if let Some(i) = kit::menu_button(ui, "physics-material", cur, &names, w, None) {
+                if i > 0 {
+                    run(app, &ctx, vec![json!({"op": "body", "clip": id, "material": names[i]})], "Physical material");
+                } else if p.material.is_some() {
+                    // Back to the material its look suggests (the op only sets one).
+                    let mut c = mc.clone();
+                    let mut q = Props::of(&c);
+                    q.material = None;
+                    q.write(&mut c);
+                    let seq = app.doc.seq();
+                    app.doc.apply("Physical material", m::Edit::SetClip { seq, clip: Box::new(c) });
+                }
             }
         });
         let mut mass = p.mass.unwrap_or(0.0);
@@ -98,40 +138,41 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         });
         // Joints.
         if !p.joints.is_empty() {
-            let list: Vec<String> = p.joints.iter().map(|j| format!("{} to {}", j.kind, j.to.map_or("the world".to_string(), |t| format!("clip {t}")))).collect();
-            ui.label(egui::RichText::new(format!("Joints: {}", list.join(", "))).font(theme::caption()).color(t.text_2));
+            kit::labeled_row(ui, "Joints", |ui| {
+                ui.label(egui::RichText::new(joints_said(app, &p)).font(theme::body()).color(t.text));
+            });
         }
         ui.horizontal_wrapped(|ui| {
             if Button::secondary("Hinge at top").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "joint", "clip": id, "kind": "hinge", "axis": [1, 0, 0]})], "Hinge");
+                act(app, &ctx, json!({"op": "joint", "clip": id, "kind": "hinge", "axis": [1, 0, 0]}), "Hinge", "Hinged at the top");
             }
             if Button::secondary("Hang on a rope").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "joint", "clip": id, "kind": "rope"})], "Rope");
+                act(app, &ctx, json!({"op": "joint", "clip": id, "kind": "rope"}), "Rope", "Hung on a rope");
             }
             if !p.joints.is_empty() && Button::ghost("Remove joints").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "joint", "clip": id, "remove": true})], "Remove joints");
+                act(app, &ctx, json!({"op": "joint", "clip": id, "remove": true}), "Remove joints", "Joints removed");
             }
         });
         kit::menu_separator(ui);
         // Actions from the playhead.
         ui.horizontal_wrapped(|ui| {
             if Button::secondary("Drop").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "drop", "clip": id, "at": playhead})], "Drop");
+                act(app, &ctx, json!({"op": "drop", "clip": id, "at": playhead}), "Drop", "Dropped from the playhead");
             }
             if Button::secondary("Settle").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "settle", "clip": id, "at": playhead})], "Settle");
+                act(app, &ctx, json!({"op": "settle", "clip": id, "at": playhead}), "Settle", "Settled at the playhead");
             }
             if Button::secondary("Push").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "push", "clip": id, "at": playhead, "direction": [1, 0, 0]})], "Push");
+                act(app, &ctx, json!({"op": "push", "clip": id, "at": playhead, "direction": [1, 0, 0]}), "Push", "Pushed from the playhead");
             }
             if Button::secondary("Break here").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "break", "clip": id, "at": playhead})], "Break");
+                act(app, &ctx, json!({"op": "break", "clip": id, "at": playhead}), "Break", "Broken at the playhead");
             }
             if rigged && Button::secondary("Ragdoll").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "ragdoll", "clip": id, "at": playhead})], "Ragdoll");
+                act(app, &ctx, json!({"op": "ragdoll", "clip": id, "at": playhead}), "Ragdoll", "Ragdoll from the playhead");
             }
             if rigged && Button::secondary("Secondary motion").compact().show(ui).clicked() {
-                run(app, &ctx, vec![json!({"op": "jiggle", "clip": id})], "Secondary motion");
+                act(app, &ctx, json!({"op": "jiggle", "clip": id}), "Secondary motion", "Secondary motion added");
             }
         });
         let key = egui::Id::new(("physics-scene-len", id));
@@ -141,10 +182,8 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             ui.data_mut(|d| d.insert_temp(key, secs));
         }
         ui.horizontal(|ui| {
-            if Button::primary("Simulate scene").icon(Icon::Play).compact().show(ui).clicked()
-                && let Some(said) = run(app, &ctx, vec![json!({"op": "bake_physics", "at": playhead, "duration": secs})], "Bake physics")
-            {
-                kit::push(&ctx, said.trim_matches('"').to_string(), None, Some(Icon::Check));
+            if Button::primary("Simulate scene").icon(Icon::Play).compact().show(ui).clicked() && run(app, &ctx, vec![json!({"op": "bake_physics", "at": playhead, "duration": secs})], "Bake physics").is_some() {
+                feedback::done(&ctx, simulated(secs as f64));
             }
         });
         let baked = match &mc.source {
@@ -154,14 +193,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             },
             _ => None,
         };
-        ui.label(
-            egui::RichText::new(match baked {
-                Some(r) => format!("Baked to keys {} s: scrub freely; simulate again to redo it.", r.replace(',', " to ")),
-                None => "Simulations bake into keys (and pieces for breaks): they play and scrub without simulating again, and the same scene always gives the same result.".into(),
-            })
-            .font(theme::caption())
-            .color(t.text_2),
-        );
+        ui.label(egui::RichText::new(baked_note(baked.as_deref())).font(theme::caption()).color(t.text_2));
     });
 }
 
@@ -175,7 +207,29 @@ pub fn scene_has_bodies(app: &StudioApp) -> bool {
 pub fn bake_scene(app: &mut StudioApp, ctx: &egui::Context) {
     let at = app.editor.playhead.max(0) as f64 / 1e6;
     let end = app.doc.project.clips.iter().map(|c| (c.start + c.dur) as f64 / 1e6).fold(at + 1.0, f64::max);
-    if let Some(said) = run(app, ctx, vec![json!({"op": "bake_physics", "at": at, "duration": (end - at).clamp(0.5, 60.0)})], "Bake physics") {
-        kit::push(ctx, said.trim_matches('"').to_string(), None, Some(Icon::Check));
+    let secs = (end - at).clamp(0.5, 60.0);
+    if run(app, ctx, vec![json!({"op": "bake_physics", "at": at, "duration": secs})], "Bake physics").is_some() {
+        feedback::done(ctx, simulated(secs));
+    }
+}
+
+/// What a finished simulation tells the person.
+fn simulated(secs: f64) -> String {
+    crate::i18n::tf(format!("Simulated {secs:.1} s from the playhead, baked into keys"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_physics_notes_read_plainly() {
+        assert_eq!(baked_note(Some("1.5,6.5")), "Baked 1.5 to 6.5 s. Simulate again to redo");
+        for s in [baked_note(None), simulated(5.0), BODIES.join(" "), FITS.iter().map(|f| f.0).collect::<Vec<_>>().join(" ")] {
+            assert!(!s.ends_with('.') && !s.contains('('), "{s}");
+        }
+        for b in BODIES.iter().chain(FITS.iter().map(|f| &f.0)) {
+            assert_eq!(crate::editor::physics::cloud_ui_check::problem(b), None, "{b}");
+        }
     }
 }

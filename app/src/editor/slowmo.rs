@@ -36,7 +36,7 @@ pub fn busy() -> bool {
 /// Starts smoothing clip `id`; returns what to tell the person.
 pub fn start(app: &StudioApp, ctx: &egui::Context, id: u32, method: Method) -> Result<String, String> {
     if busy() {
-        return Err("smooth slow motion is already running".into());
+        return Err("Smooth slow motion is already running".into());
     }
     let job = slowmo::plan(&app.doc, id, method, false)?;
     let est = job.estimate_secs();
@@ -97,11 +97,12 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
     Section::new("slow-motion", "Slow motion").icon(Icon::Timer).show(ui, |ui| {
         let t = theme::tokens(ui.ctx());
         if let Some(said) = &smoothed {
-            ui.label(egui::RichText::new(said).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(super::physics::cloud_feedback::plain(&app.doc, said)).font(theme::caption()).color(t.text_2));
             if Button::ghost("Remove").icon(Icon::X).compact().show(ui).clicked()
                 && let Some(c) = slowmo::restored(&mc)
+                && app.doc.apply("Remove smooth slow motion", m::Edit::SetClip { seq, clip: Box::new(c) })
             {
-                app.doc.apply("Remove smooth slow motion", m::Edit::SetClip { seq, clip: Box::new(c) });
+                kit::push(&ctx, "Smooth slow motion removed", None, Some(Icon::Check));
             }
             return;
         }
@@ -113,14 +114,15 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                     && let Some((_, h, _)) = r.as_ref()
                 {
                     h.cancel();
+                    kit::push(&ctx, "Stopping…", None, Some(Icon::Info));
                 }
             });
             return;
         }
-        ui.label(egui::RichText::new(crate::i18n::shown("Slowed footage repeats frames. Make the in-betweens: optical flow is sharp, a cross-fade is instant.")).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::shown("Slowed footage repeats frames. Fill in new ones")).font(theme::caption()).color(t.text_2));
         ui.horizontal_wrapped(|ui| {
-            for (label, method) in [("Optical flow", Method::Flow), ("Cross-fade", Method::Blend)] {
-                if Button::secondary(label).icon(Icon::Sparkle).compact().show(ui).clicked() {
+            for (label, method, tip) in [("Optical flow", Method::Flow, "Sharp; takes a while"), ("Cross-fade", Method::Blend, "Instant; softer")] {
+                if Button::secondary(label).icon(Icon::Sparkle).compact().show(ui).on_hover_text(crate::i18n::shown(tip)).clicked() {
                     match start(app, &ctx, id, method) {
                         Ok(msg) => {
                             kit::push(&ctx, msg, None, Some(Icon::Sparkle));
@@ -177,5 +179,24 @@ mod tests {
         let mc = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap();
         assert!(slowmo::describe(mc).is_some(), "smoothed");
         draw(&mut app, 20.0);
+        // The row, alone at the Inspector's width, before and after.
+        let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| inspector(&mut app, ui, id));
+        drawn.assert_tidy("slow-motion-smoothed", &[]);
+        assert!(drawn.shows("Remove"));
+    }
+
+    #[test]
+    fn the_slow_motion_row_offers_both_ways_tidily() {
+        let _guard = test_movie::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _serial = crate::ui_tests::serial();
+        let (ctx, mut app) = crate::editor::physics::cloud_ui_check::editor();
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Slow", W, H, FPS as f32));
+        s.run("import", &json!({"paths": [test_movie::movie().to_string_lossy()], "to_timeline": true})).unwrap();
+        let id = s.doc.project.clips.iter().find(|c| c.media.is_some()).unwrap().id;
+        s.edit(&[json!({"op": "set", "clip": id, "speed": 0.5})], "slow", false).unwrap();
+        app.doc = s.doc;
+        let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| inspector(&mut app, ui, id));
+        drawn.assert_tidy("slow-motion", &[]);
+        assert!(drawn.shows("Optical flow") && drawn.shows("Cross-fade"));
     }
 }

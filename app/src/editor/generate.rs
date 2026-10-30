@@ -18,6 +18,7 @@ use crate::icons::Icon;
 use crate::kit::{self, Button, Segment};
 use crate::theme;
 use crate::view::Time;
+use super::physics::cloud_feedback as feedback;
 
 #[cfg(feature = "render")]
 #[path = "generate_tasks.rs"]
@@ -65,14 +66,14 @@ fn land(app: &mut StudioApp, ctx: &egui::Context, files: Vec<PathBuf>, kind: Kin
         .unwrap_or_default();
     let secs = at as f64 / 1e6;
     let ops: Vec<serde_json::Value> = media.iter().map(|m| serde_json::json!({"op": "place", "media": m, "at": secs})).collect();
-    let placed = if ops.is_empty() { Err("nothing came back to import".to_owned()) } else { s.edit(&ops, "Place generated media", false).map(|_| ()) };
+    let placed = if ops.is_empty() { Err("Nothing came back to import".to_owned()) } else { s.edit(&ops, "Place generated media", false).map(|_| ()) };
     app.doc = s.doc;
     match placed {
         Ok(()) => {
             kit::push(ctx, crate::i18n::tf(format!("Generated {} placed at {:.1}s", kind.name(), secs)), None, Some(Icon::Sparkle));
         }
         Err(e) => {
-            kit::push(ctx, crate::i18n::tf(format!("Generated, but not placed: {e}")), None, Some(Icon::Warning));
+            kit::push(ctx, crate::i18n::tf(format!("Generated, but not placed: {}", feedback::plain(&app.doc, &e))), None, Some(Icon::Warning));
         }
     }
 }
@@ -92,7 +93,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
             if let Ok(mut g) = run().lock() {
                 *g = None;
             }
-            kit::push(ctx, crate::i18n::tf(format!("Generating failed: {e}")), None, Some(Icon::Warning));
+            kit::push(ctx, crate::i18n::tf(format!("Generating failed: {}", feedback::plain(&app.doc, &e))), None, Some(Icon::Warning));
         }
         _ => ctx.request_repaint_after(std::time::Duration::from_millis(300)),
     }
@@ -104,11 +105,14 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
 fn elsewhere(kind: Kind) -> Option<&'static str> {
     match kind {
         Kind::Picture => None,
-        Kind::Video => Some("Video from words is not available yet. Animate a still under Change instead."),
-        Kind::Music => Some("Ask the AI editor for music in words (a genre, a mood, a length): it composes an original piece on this computer, or scores from Zornov's library."),
-        Kind::Sound => Some("Ask the AI editor for a sound in words: it makes it on this computer from physical models (risers, whooshes, booms, hits, footsteps, rain…), or with ElevenLabs when its key is saved."),
+        Kind::Video => Some("Video from words is not available yet. Use “Animate a still” under “Change”"),
+        Kind::Music => Some("Ask the AI editor for music: a genre, a mood, a length"),
+        Kind::Sound => Some("Ask the AI editor for a sound, such as a whoosh or rain"),
     }
 }
+
+/// What the card says when Codex, which paints the pictures, is missing.
+const NO_CODEX: &str = "Pictures come from the Codex app on your ChatGPT plan. Install it to start";
 
 /// The card.
 pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
@@ -138,7 +142,7 @@ pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
         }
         let codex = crate::agent::brain::find_codex().is_some();
         if !codex && !cfg!(test) {
-            ui.label(egui::RichText::new(crate::i18n::shown("Pictures from words are made by the Codex app's image generation, on your ChatGPT plan. Codex is not on this Mac yet.")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown(NO_CODEX)).font(theme::caption()).color(t.text_2));
             return;
         }
         ui.add(egui::TextEdit::multiline(&mut f.prompt).hint_text("What to see: subject, setting, light, style").desired_rows(2).desired_width(f32::INFINITY));
@@ -146,8 +150,12 @@ pub fn card(app: &mut StudioApp, ui: &mut egui::Ui) {
         if let Some(status) = busy {
             ui.label(egui::RichText::new(format!("{status}…")).font(theme::body()).color(t.text_2));
             ctx.request_repaint_after(std::time::Duration::from_millis(300));
-        } else if !f.prompt.trim().is_empty() && Button::primary("Generate").icon(Icon::Sparkle).show(ui).clicked() {
-            start(app, &f.prompt);
+        } else if Button::primary("Generate").icon(Icon::Sparkle).show(ui).clicked() {
+            if f.prompt.trim().is_empty() {
+                feedback::hint(&ctx, "Describe the picture first");
+            } else {
+                start(app, &f.prompt);
+            }
         }
     });
     ctx.data_mut(|d| d.insert_temp(form_id(), f));
@@ -224,5 +232,21 @@ mod tests {
         assert_eq!(c.start, 2_000_000);
         assert!(matches!(c.kind, crate::view::ClipKind::Audio));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Each kind of the Make side at the Inspector's width: short notes,
+    /// nothing cut, and the Generate button there even before any words
+    /// (it then says what to do).
+    #[test]
+    fn the_make_side_reads_cleanly() {
+        let _serial = crate::ui_tests::serial();
+        let (ctx, mut app) = crate::editor::physics::cloud_ui_check::editor();
+        for k in 0..4 {
+            ctx.data_mut(|d| d.insert_temp(form_id(), Form { kind: k, prompt: String::new() }));
+            let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| card(&mut app, ui));
+            drawn.assert_tidy(&format!("generate-make-{k}"), &[]);
+            assert_eq!(drawn.shows("Generate"), true);
+        }
+        assert_eq!(crate::editor::physics::cloud_ui_check::problem(NO_CODEX), None);
     }
 }

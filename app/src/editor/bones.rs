@@ -18,6 +18,7 @@
 use crate::app::StudioApp;
 use super::pins::LayerMap;
 use crate::kit::FieldRow;
+use super::physics::cloud_feedback as feedback;
 use crate::services::{character as ch, rigging as rg};
 use crate::theme;
 use crate::view::{SEC, Time};
@@ -176,8 +177,8 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
         }
         if hot {
             let name = match g {
-                Grab::Tip(b) | Grab::Reach(b) | Grab::Root(b) => posed.as_ref().and_then(|(_, s)| s.bone(*b)).map(|b| b.name.clone()),
-                Grab::Target(h) => posed.as_ref().and_then(|(_, s)| s.handle(*h)).map(|h| crate::i18n::tf(format!("IK {}", h.name))),
+                Grab::Tip(b) | Grab::Reach(b) | Grab::Root(b) => posed.as_ref().and_then(|(_, s)| s.bone(*b)).map(|b| feedback::shown_name(&b.name)),
+                Grab::Target(h) => posed.as_ref().and_then(|(_, s)| s.handle(*h)).map(|h| crate::i18n::tf(format!("IK {}", feedback::shown_name(&h.name).to_lowercase()))),
                 Grab::New(..) => None,
             };
             if let Some(n) = name.filter(|n| !n.is_empty()) {
@@ -261,7 +262,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
                             let px = map.pixels();
                             let sk = mc.skeleton.get_or_insert_with(|| m::Skeleton { aspect: (px.x / px.y.max(1.0)) as f64, ..m::Skeleton::default() });
                             let n = sk.bones.len() + 1;
-                            let b = sk.add(format!("bone.{n}"), parent, m::Vec2::new(from[0], from[1]), to);
+                            let b = sk.add(crate::i18n::tf(format!("Bone {n}")), parent, m::Vec2::new(from[0], from[1]), to);
                             pick(ui.ctx(), Some(b));
                             let seq = app.doc.seq();
                             app.doc.apply("Draw bone", m::Edit::SetClip { seq, clip: Box::new(mc.clone()) });
@@ -289,22 +290,43 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
 
 const KINDS: [&str; 7] = ["biped", "quadruped", "bird", "fish", "snake", "plant", "object"];
 const MOTIONS: [&str; 16] = ["idle", "walk", "run", "sneak", "hop", "jump", "wave", "point", "talk", "nod", "look", "sad", "celebrate", "wag", "swim", "sway"];
+/// What the menus show for [`KINDS`] and [`MOTIONS`] (the ops take those).
+const KIND_NAMES: [&str; 7] = ["Biped", "Quadruped", "Bird", "Fish", "Snake", "Plant", "Object"];
+const MOTION_NAMES: [&str; 16] = ["Idle", "Walk", "Run", "Sneak", "Hop", "Jump", "Wave", "Point", "Talk", "Nod", "Look around", "Sad", "Celebrate", "Wag", "Swim", "Sway"];
+
+/// The notes under the bone tool.
+const POSE_HOW: &str = "Drag a tip to turn a bone. ⌘-drag a hand or foot to reach";
+const DRAW_HOW: &str = "Drag on the layer to draw a bone. Start on a tip to chain";
+const NO_BONES: &str = "No bones yet. Build them from the silhouette or draw them";
+
+/// Says what a pose change did, or why it could not.
+fn report(ctx: &egui::Context, doc: &crate::doc::Doc, r: Result<(), String>, said: &str) {
+    match r {
+        Ok(()) => feedback::done(ctx, said),
+        Err(e) => feedback::failed(ctx, doc, &e),
+    }
+}
 
 fn set_clip(app: &mut StudioApp, label: &str, mc: m::Clip) {
     let seq = app.doc.seq();
     app.doc.apply(label, m::Edit::SetClip { seq, clip: Box::new(mc) });
 }
 
-/// A slider that edits one number of the skeleton: `set` writes the new
-/// value into a copy of the clip when it changes.
-fn skeleton_slider(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, label: &str, value: f32, range: std::ops::RangeInclusive<f32>, unit: &str, set: impl FnOnce(&mut m::Skeleton, f32)) {
+/// A labelled row that edits one number of the skeleton: `set` writes the
+/// new value into a copy of the clip when it changes; a drag is one undo
+/// step.
+#[allow(clippy::too_many_arguments)]
+fn skeleton_slider(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, label: &str, value: f32, range: std::ops::RangeInclusive<f32>, default: f32, unit: &str, set: impl FnOnce(&mut m::Skeleton, f32)) {
     let mut v = value;
-    if crate::kit::Slider::new(label, &mut v, range).unit(unit).default(value).show(ui).changed() {
+    let whole = unit.is_empty();
+    let row = FieldRow::new(label, &mut v, range).unit(unit).default(default).decimals(if whole { 0 } else { 1 });
+    if (if whole { row.step(1.0) } else { row }).show(ui).changed {
         let mut c = mc.clone();
         if let Some(sk) = c.skeleton.as_mut() {
             set(sk, v);
         }
-        set_clip(app, "Skeleton", c);
+        let seq = app.doc.seq();
+        app.doc.apply_gesture(&format!("skeleton-{}-{label}", mc.id.0), label, m::Edit::SetClip { seq, clip: Box::new(c) });
     }
 }
 
@@ -312,17 +334,17 @@ fn skeleton_slider(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, label: 
 fn ik_settings(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, posed: &m::Skeleton, h: &m::IkHandle) {
     let hid = h.id;
     let longest = mc.skeleton.as_ref().map_or(2, |s| s.chain_up(h.bone).len()).clamp(1, 8) as f32;
-    skeleton_slider(app, ui, mc, "Chain bones", h.chain as f32, 1.0..=longest.max(2.0), "", move |s, v| {
+    skeleton_slider(app, ui, mc, "Chain bones", h.chain as f32, 1.0..=longest.max(2.0), 2.0, "", move |s, v| {
         if let Some(x) = s.handle_mut(hid) {
             x.chain = v.round().max(1.0) as u32;
         }
     });
-    skeleton_slider(app, ui, mc, "Stretch", (h.stretch * 100.0) as f32, 100.0..=300.0, "%", move |s, v| {
+    skeleton_slider(app, ui, mc, "Stretch", (h.stretch * 100.0) as f32, 100.0..=300.0, 100.0, "%", move |s, v| {
         if let Some(x) = s.handle_mut(hid) {
             x.stretch = f64::from(v) / 100.0;
         }
     });
-    skeleton_slider(app, ui, mc, "Soft reach", (h.soft * 100.0) as f32, 0.0..=50.0, "%", move |s, v| {
+    skeleton_slider(app, ui, mc, "Soft reach", (h.soft * 100.0) as f32, 0.0..=50.0, 0.0, "%", move |s, v| {
         if let Some(x) = s.handle_mut(hid) {
             x.soft = f64::from(v) / 100.0;
         }
@@ -342,12 +364,12 @@ fn ik_settings(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, posed: &m::
         }
     });
     if let Some(p) = h.pole {
-        skeleton_slider(app, ui, mc, "Pole X", (p.x * 100.0) as f32, -50.0..=150.0, "%", move |s, v| {
+        skeleton_slider(app, ui, mc, "Pole X", (p.x * 100.0) as f32, -50.0..=150.0, (p.x * 100.0) as f32, "%", move |s, v| {
             if let Some(x) = s.handle_mut(hid) {
                 x.pole = x.pole.map(|p| m::Vec2::new(f64::from(v) / 100.0, p.y));
             }
         });
-        skeleton_slider(app, ui, mc, "Pole Y", (p.y * 100.0) as f32, -50.0..=150.0, "%", move |s, v| {
+        skeleton_slider(app, ui, mc, "Pole Y", (p.y * 100.0) as f32, -50.0..=150.0, (p.y * 100.0) as f32, "%", move |s, v| {
             if let Some(x) = s.handle_mut(hid) {
                 x.pole = x.pole.map(|p| m::Vec2::new(p.x, f64::from(v) / 100.0));
             }
@@ -360,6 +382,7 @@ fn ik_settings(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, posed: &m::
         }
         c.keyframes.remove(&format!("ik.{hid}.target"));
         set_clip(app, "Pin", c);
+        feedback::done(ui.ctx(), "Pinned where it is now");
     }
 }
 
@@ -377,12 +400,12 @@ fn joint_limits(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, b: &m::Bon
         }
     });
     if limited {
-        skeleton_slider(app, ui, mc, "Lowest", b.min.unwrap_or(-360.0) as f32, -360.0..=360.0, "°", move |s, v| {
+        skeleton_slider(app, ui, mc, "Lowest", b.min.unwrap_or(-360.0) as f32, -360.0..=360.0, -90.0, "°", move |s, v| {
             if let Some(x) = s.bone_mut(bid) {
                 x.min = Some(f64::from(v));
             }
         });
-        skeleton_slider(app, ui, mc, "Highest", b.max.unwrap_or(360.0) as f32, -360.0..=360.0, "°", move |s, v| {
+        skeleton_slider(app, ui, mc, "Highest", b.max.unwrap_or(360.0) as f32, -360.0..=360.0, 90.0, "°", move |s, v| {
             if let Some(x) = s.bone_mut(bid) {
                 x.max = Some(f64::from(v));
             }
@@ -410,12 +433,9 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         let kind_id = egui::Id::unique(("skeleton-kind", id));
         let mut kind: usize = ui.data(|d| d.get_temp(kind_id)).unwrap_or(0);
         crate::kit::labeled_row(ui, "Body", |ui| {
-            egui::ComboBox::from_id_salt(("skeleton-kind-box", id)).selected_text(KINDS[kind]).width(120.0).show_ui(ui, |ui| {
-                crate::kit::note_list(ui);
-                for (i, k) in KINDS.iter().enumerate() {
-                    ui.selectable_value(&mut kind, i, *k);
-                }
-            });
+            if let Some(i) = crate::kit::menu_button(ui, "skeleton-kind", kind, &KIND_NAMES, ui.available_width(), None) {
+                kind = i;
+            }
         });
         ui.data_mut(|d| d.insert_temp(kind_id, kind));
         // Which way it faces as the picture shows it.
@@ -423,12 +443,9 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         let facing_id = egui::Id::unique(("skeleton-facing", id));
         let mut facing: usize = ui.data(|d| d.get_temp(facing_id)).unwrap_or(0);
         crate::kit::labeled_row(ui, "Facing", |ui| {
-            egui::ComboBox::from_id_salt(("skeleton-facing-box", id)).selected_text(FACING[facing]).width(120.0).show_ui(ui, |ui| {
-                crate::kit::note_list(ui);
-                for (i, k) in FACING.iter().enumerate() {
-                    ui.selectable_value(&mut facing, i, *k);
-                }
-            });
+            if let Some(i) = crate::kit::menu_button(ui, "skeleton-facing", facing, &FACING, ui.available_width(), None) {
+                facing = i;
+            }
         });
         ui.data_mut(|d| d.insert_temp(facing_id, facing));
         let label = if mc.skeleton.is_some() { "Rebuild from silhouette" } else { "Build from silhouette" };
@@ -439,8 +456,12 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             match ch::build(&mut app.doc, id, KINDS[kind], faces, at) {
                 // A rigged character gets the cuts that let its legs, arms
                 // and mouth move apart.
-                Ok(_) => super::scissor::after_build(app, &ctx, id, KINDS[kind]),
-                Err(e) => app.doc.error = Some(e),
+                Ok(_) => {
+                    super::scissor::after_build(app, &ctx, id, KINDS[kind]);
+                    let n = app.doc.model.active().clip(m::ClipId(id as u64)).and_then(|c| c.skeleton.as_ref()).map_or(0, |s| s.bones.len());
+                    feedback::done(&ctx, crate::i18n::tf(format!("{} skeleton built: {n} bones", KIND_NAMES[kind])));
+                }
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
             }
         }
         // The canvas tool.
@@ -456,12 +477,12 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             }
         }
         match tool(&ctx) {
-            BoneTool::Pose => note(ui, "Drag a bone's tip to turn it; ⌘-drag a hand or foot to place it (the limb follows); drag the white square to move the body; drag a blue diamond to move an IK target. Keys go in at the playhead once a bone is animated."),
-            BoneTool::Draw => note(ui, "Drag on the layer to draw a bone; start on a bone's tip to hang the new one from it."),
+            BoneTool::Pose => note(ui, POSE_HOW),
+            BoneTool::Draw => note(ui, DRAW_HOW),
             BoneTool::Off => {}
         }
         let Some(sk) = mc.skeleton.clone() else {
-            note(ui, "Bones bend the picture like a puppet's mesh, carry part layers and take motions, poses and motion capture.");
+            note(ui, NO_BONES);
             return;
         };
         let local = (at - mc.start).clamp(0, mc.duration);
@@ -488,35 +509,36 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         // Motions.
         let act_id = egui::Id::unique(("skeleton-act", id));
         let mut act: usize = ui.data(|d| d.get_temp(act_id)).unwrap_or(1);
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt(("skeleton-act-box", id)).selected_text(MOTIONS[act]).width(100.0).show_ui(ui, |ui| {
-                crate::kit::note_list(ui);
-                for (i, k) in MOTIONS.iter().enumerate() {
-                    ui.selectable_value(&mut act, i, *k);
-                }
-            });
-            if Button::secondary("Act from playhead").icon(Icon::Play).show(ui).clicked() {
-                let from = (local as f64 / SEC as f64).min((mc.duration as f64 / SEC as f64 - 0.5).max(0.0));
-                let dur = mc.duration as f64 / SEC as f64 - from;
-                if let Err(e) = ch::act(&mut app.doc, id, &[MOTIONS[act].to_owned()], from, dur, 1.0) {
-                    app.doc.error = Some(e);
-                }
+        crate::kit::labeled_row(ui, "Motion", |ui| {
+            if let Some(i) = crate::kit::menu_button(ui, "skeleton-act", act, &MOTION_NAMES, ui.available_width(), None) {
+                act = i;
             }
         });
+        if Button::secondary("Act from the playhead").icon(Icon::Play).show(ui).clicked() {
+            let from = (local as f64 / SEC as f64).min((mc.duration as f64 / SEC as f64 - 0.5).max(0.0));
+            let dur = mc.duration as f64 / SEC as f64 - from;
+            match ch::act(&mut app.doc, id, &[MOTIONS[act].to_owned()], from, dur, 1.0) {
+                Ok(_) => feedback::done(&ctx, crate::i18n::tf(format!("{} keyed from the playhead", MOTION_NAMES[act]))),
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
+            }
+        }
         ui.data_mut(|d| d.insert_temp(act_id, act));
         // Poses.
         ui.horizontal_wrapped(|ui| {
             if Button::ghost("Copy pose").icon(Icon::Copy).show(ui).clicked() {
                 set_clipboard(&ctx, &posed.pose_now("copied"));
+                feedback::done(&ctx, "Pose copied");
             }
             if Button::ghost("Paste pose").show(ui).clicked() {
-                if let Some(p) = clipboard(&ctx) {
-                    let targets = sk.pose_targets(&p);
-                    let rot: Vec<(u32, f64)> = targets.iter().map(|x| (x.0, x.1)).collect();
-                    let off: Vec<(u32, m::Vec2)> = targets.iter().filter_map(|x| x.2.map(|o| (x.0, o))).collect();
-                    if let Err(e) = ch::pose(&mut app.doc, id, &rot, &off, at, false) {
-                        app.doc.error = Some(e);
+                match clipboard(&ctx) {
+                    Some(p) => {
+                        let targets = sk.pose_targets(&p);
+                        let rot: Vec<(u32, f64)> = targets.iter().map(|x| (x.0, x.1)).collect();
+                        let off: Vec<(u32, m::Vec2)> = targets.iter().filter_map(|x| x.2.map(|o| (x.0, o))).collect();
+                        let r = ch::pose(&mut app.doc, id, &rot, &off, at, false);
+                        report(&ctx, &app.doc, r, "Pose pasted at the playhead");
                     }
+                    None => feedback::hint(&ctx, "Copy a pose first"),
                 }
             }
             if Button::ghost("Mirror").show(ui).clicked() {
@@ -528,26 +550,37 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         posed.named(&other).map(|o| (b.id, o.rotation))
                     })
                     .collect();
-                let _ = ch::pose(&mut app.doc, id, &rot, &[], at, false);
+                if rot.is_empty() {
+                    feedback::hint(&ctx, "Nothing to mirror: no front and back bones");
+                } else {
+                    let r = ch::pose(&mut app.doc, id, &rot, &[], at, false);
+                    report(&ctx, &app.doc, r, "Pose mirrored at the playhead");
+                }
             }
             if Button::ghost("Rest").show(ui).clicked() {
                 let rot: Vec<(u32, f64)> = sk.bones.iter().map(|b| (b.id, 0.0)).collect();
                 let off: Vec<(u32, m::Vec2)> = sk.bones.iter().filter(|b| b.offset != m::Vec2::ZERO).map(|b| (b.id, m::Vec2::ZERO)).collect();
-                let _ = ch::pose(&mut app.doc, id, &rot, &off, at, false);
+                let r = ch::pose(&mut app.doc, id, &rot, &off, at, false);
+                report(&ctx, &app.doc, r, "Back to the rest pose");
             }
         });
         let name_id = egui::Id::unique(("pose-name", id));
         let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
         ui.horizontal_wrapped(|ui| {
             crate::kit::text_field(ui, &mut name, "Pose name", None, (w - 90.0).max(80.0), None);
-            if Button::ghost("Save pose").show(ui).clicked() && !name.trim().is_empty() {
-                let mut c = mc.clone();
-                if let Some(s) = &mut c.skeleton {
-                    s.poses.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
-                    s.poses.push(posed.pose_now(name.trim()));
+            if Button::ghost("Save pose").show(ui).clicked() {
+                if name.trim().is_empty() {
+                    feedback::hint(&ctx, "Name the pose first");
+                } else {
+                    let mut c = mc.clone();
+                    if let Some(s) = &mut c.skeleton {
+                        s.poses.retain(|p| !p.name.eq_ignore_ascii_case(name.trim()));
+                        s.poses.push(posed.pose_now(name.trim()));
+                    }
+                    set_clip(app, "Save pose", c);
+                    feedback::done(&ctx, crate::i18n::tf(format!("Saved pose “{}”", name.trim())));
+                    name.clear();
                 }
-                set_clip(app, "Save pose", c);
-                name.clear();
             }
         });
         ui.data_mut(|d| d.insert_temp(name_id, name));
@@ -558,7 +591,8 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         let targets = sk.pose_targets(p);
                         let rot: Vec<(u32, f64)> = targets.iter().map(|x| (x.0, x.1)).collect();
                         let off: Vec<(u32, m::Vec2)> = targets.iter().filter_map(|x| x.2.map(|o| (x.0, o))).collect();
-                        let _ = ch::pose(&mut app.doc, id, &rot, &off, at, true);
+                        let r = ch::pose(&mut app.doc, id, &rot, &off, at, true);
+                        report(&ctx, &app.doc, r, &crate::i18n::tf(format!("“{}” keyed at the playhead", p.name)));
                     }
                 }
             });
@@ -566,24 +600,27 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         // Parts and swap sets.
         let split = app.doc.model.active().clips.iter().any(|c| c.meta.get("part").and_then(|p| p.get("rig")).and_then(|r| r.as_u64()) == Some(id as u64));
         if !split && Button::secondary("Split into parts").icon(Icon::Intersect).show(ui).on_hover_text(crate::i18n::shown("Head, torso, arms, legs, tail, eyes and mouth onto their own layers, each following its bone")).clicked() {
-            if let Err(e) = ch::split_layers(&mut app.doc, id, at, true) {
-                app.doc.error = Some(e);
+            match ch::split_layers(&mut app.doc, id, at, true) {
+                Ok(parts) => feedback::done(&ctx, crate::i18n::tf(format!("Split into {} part layers", parts.len()))),
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
             }
         }
         for (set, options) in ch::swap_sets(&app.doc, id) {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&set).font(theme::body()).color(t.text_2));
-                for o in &options {
-                    if Button::ghost(o).compact().show(ui).on_hover_text(crate::i18n::shown("Show from the playhead")).clicked() {
-                        let _ = ch::swap(&mut app.doc, id, &set, &[(at as f64 / SEC as f64, o.clone())]);
+            crate::kit::labeled_row(ui, &feedback::shown_name(&set), |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for o in &options {
+                        if Button::ghost(&feedback::shown_name(o)).compact().show(ui).on_hover_text(crate::i18n::shown("Show from the playhead")).clicked() {
+                            let r = ch::swap(&mut app.doc, id, &set, &[(at as f64 / SEC as f64, o.clone())]);
+                            report(&ctx, &app.doc, r, &crate::i18n::tf(format!("{} from the playhead", feedback::shown_name(o))));
+                        }
                     }
-                }
+                });
             });
         }
         // IK handles.
-        for h in &sk.ik {
+        for (n, h) in sk.ik.iter().enumerate() {
             let mut live = h.enabled;
-            crate::kit::labeled_row(ui, &crate::i18n::tf(format!("IK {}", if h.name.is_empty() { h.id.to_string() } else { h.name.clone() })), |ui| {
+            crate::kit::labeled_row(ui, &crate::i18n::tf(format!("IK {}", if h.name.is_empty() { (n + 1).to_string() } else { feedback::shown_name(&h.name).to_lowercase() })), |ui| {
                 if crate::kit::toggle(ui, &mut live, "Live IK", None).changed() {
                     let mut c = mc.clone();
                     if let Some(x) = c.skeleton.as_mut().and_then(|s| s.handle_mut(h.id)) {
@@ -610,7 +647,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         let mut order: Vec<&m::Bone> = sk.bones.iter().collect();
         order.sort_by_key(|b| Some(b.id) != sel);
         for b in order {
-            let label = if b.name.is_empty() { crate::i18n::tf(format!("Bone {}", b.id)) } else { b.name.clone() };
+            let label = if b.name.is_empty() { crate::i18n::tf(format!("Bone {}", b.id)) } else { feedback::shown_name(&b.name) };
             let strong = Some(b.id) == sel;
             crate::kit::name_row(ui, egui::RichText::new(&label).font(if strong { theme::body_medium() } else { theme::body() }).color(if strong { t.text } else { t.text_2 }), |ui| {
                 {
@@ -678,5 +715,41 @@ mod tests {
         }
         // Drawing changed nothing.
         assert_eq!(app.doc.model.active().clip(m::ClipId(id as u64)).cloned(), before);
+    }
+
+    /// The Skeleton section at the Inspector's width, before and after a
+    /// build, with each tool: short notes, menus with names (not op words),
+    /// every number row labelled, nothing cut or drawn over something else.
+    #[test]
+    fn the_skeleton_section_reads_cleanly() {
+        let _serial = crate::ui_tests::serial();
+        let (ctx, mut app) = crate::editor::physics::cloud_ui_check::editor();
+        let (doc, id) = crate::services::character::tests::figure_doc();
+        app.doc = doc;
+        let draw = |app: &mut StudioApp, name: &str| {
+            let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| inspector(app, ui, id));
+            drawn.assert_tidy(name, &[]);
+            drawn
+        };
+        set_tool(&ctx, BoneTool::Off);
+        let empty = draw(&mut app, "skeleton-empty");
+        assert!(empty.shows(NO_BONES) && empty.shows("Biped"), "{:?}", empty.texts);
+        let start = app.doc.project.clip(id).unwrap().start;
+        ch::build(&mut app.doc, id, "biped", Some(Some(true)), start).unwrap();
+        for (tool, note) in [(BoneTool::Pose, POSE_HOW), (BoneTool::Draw, DRAW_HOW)] {
+            set_tool(&ctx, tool);
+            let built = draw(&mut app, &format!("skeleton-{tool:?}"));
+            assert!(built.shows(note) && built.shows("Walk") && built.shows("Motion"));
+        }
+        set_tool(&ctx, BoneTool::Off);
+    }
+
+    #[test]
+    fn the_menus_show_names_not_op_words() {
+        assert_eq!(KINDS.len(), KIND_NAMES.len());
+        assert_eq!(MOTIONS.len(), MOTION_NAMES.len());
+        for n in KIND_NAMES.iter().chain(&MOTION_NAMES).chain([&POSE_HOW, &DRAW_HOW, &NO_BONES]) {
+            assert_eq!(crate::editor::physics::cloud_ui_check::problem(n), None, "{n}");
+        }
     }
 }
