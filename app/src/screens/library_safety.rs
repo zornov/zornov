@@ -68,7 +68,7 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     let mut st: State = ctx.data_mut(|d| d.get_temp(id)).unwrap_or_default();
     let screen = ctx.content_rect();
     let size = Vec2::new((screen.width() * 0.6).clamp(640.0, 980.0), (screen.height() * 0.86).clamp(420.0, 760.0));
-    let out = kit::modal(ctx, egui::Id::new("library-safety"), size, "Project", |ui| body(app, ui, &mut st));
+    let out = kit::modal(ctx, egui::Id::new("library-safety"), size, "Project media, health and rights", |ui| body(app, ui, &mut st));
     if st.busy {
         if let Some(done) = st.work.lock().unwrap_or_else(|e| e.into_inner()).take() {
             st.note = done;

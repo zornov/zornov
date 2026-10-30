@@ -219,7 +219,7 @@ pub fn show(app: &mut StudioApp, ctx: &Context) {
     }
     let hits = search(&st.query, lang);
     let mut close = false;
-    let out = kit::modal(ctx, Id::new("help-modal"), Vec2::new(860.0, 580.0), "Help", |ui| {
+    let out = kit::modal_sized(ctx, Id::new("help-modal"), kit::DialogSize::Large, "Help", |ui| {
         ui.add_space(theme::space::SM);
         ui.horizontal(|ui| {
             ui.add_space(theme::space::LG);
