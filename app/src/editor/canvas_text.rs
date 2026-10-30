@@ -16,6 +16,7 @@ use super::viewer::Placed;
 use crate::app::StudioApp;
 use crate::kit;
 use crate::theme;
+use super::physics::cloud_feedback as feedback;
 use eframe::egui::{self, Align2, CornerRadius, Key, Modifiers, Pos2, Rect, Vec2};
 use serde_json::{Map, Value, json};
 use studio_model as m;
@@ -140,7 +141,11 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, scale: f32
     }
     let Some(mut ed) = app.editor.text_edit.take() else { return };
     let Some(spot) = spots(app, canvas, scale, placed).into_iter().find(|s| (s.clip, s.target) == ed.target()) else {
-        // The words moved off the picture (or the clip went): nothing to edit.
+        // The words moved off the picture (or the clip went): nothing to
+        // edit, and what was typed is not kept.
+        if ed.text != ed.original {
+            feedback::hint(&ctx, "Text editing stopped: the words left the picture");
+        }
         return;
     };
     let t = theme::tokens(&ctx);
@@ -207,9 +212,19 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, scale: f32
     app.editor.text_edit = Some(ed);
 }
 
+/// Why words can't be written back, if they can't: a title left with no
+/// words would vanish from the picture, with nothing left to double-click.
+fn refused(ed: &Editing) -> Option<&'static str> {
+    (ed.target == Target::Title && ed.text.trim().is_empty()).then_some("A title needs words. The old ones are kept")
+}
+
 /// Writes the words back as one undo step, when they changed.
 fn commit(app: &mut StudioApp, ctx: &egui::Context, ed: &Editing) {
     if ed.text == ed.original {
+        return;
+    }
+    if let Some(why) = refused(ed) {
+        feedback::hint(ctx, why);
         return;
     }
     match ed.target {
@@ -224,13 +239,13 @@ fn commit(app: &mut StudioApp, ctx: &egui::Context, ed: &Editing) {
         Target::Template(control) => {
             let r = super::mograph::run(app, "Edit text", vec![json!({"op": "template", "clip": ed.clip, "controls": {control: ed.text}})]);
             if let Err(e) = r {
-                kit::push(ctx, e, None, Some(crate::icons::Icon::Warning));
+                feedback::failed(ctx, &app.doc, &e);
             }
         }
         Target::Solid3d => {
             let r = super::mograph::run(app, "Edit text", vec![json!({"op": "text_3d", "clip": ed.clip, "text": ed.text})]);
             if let Err(e) = r {
-                kit::push(ctx, e, None, Some(crate::icons::Icon::Warning));
+                feedback::failed(ctx, &app.doc, &e);
             }
         }
     }
@@ -326,6 +341,28 @@ mod tests {
         assert!(before);
         d.h.app.doc.undo();
         assert_eq!(d.control(clip, "name").as_deref(), Some("Jordan Rivers"));
+    }
+
+    /// Emptying a title's words keeps the old ones (the title would vanish
+    /// from the picture, with nothing left to double-click), and says so;
+    /// other words go in as one undo step.
+    #[test]
+    fn an_emptied_title_keeps_its_words() {
+        let mut d = Drive::new();
+        let mut s = crate::agent::Session::new(std::mem::replace(&mut d.h.app.doc, crate::agent::Session::default().doc));
+        s.edit(&[json!({"op": "text", "text": "Hello", "at": 0, "duration": 2})], "title", false).unwrap();
+        d.h.app.doc = s.doc;
+        let id = d.h.app.doc.project.clips.iter().filter(|c| c.kind == crate::view::ClipKind::Title).map(|c| c.id).max().expect("a title");
+        let text = |d: &Drive| d.h.app.doc.project.clip(id).unwrap().text.clone();
+        let ed = |words: &str| Editing { clip: id, target: Target::Title, text: words.into(), original: "Hello".into(), click: None, placed_caret: true };
+        commit(&mut d.h.app, &d.h.ctx.clone(), &ed("   "));
+        assert_eq!(text(&d), "Hello");
+        assert_eq!(crate::a11y::last_announcement(&d.h.ctx), "A title needs words. The old ones are kept");
+        commit(&mut d.h.app, &d.h.ctx.clone(), &ed("Goodbye"));
+        assert_eq!(text(&d), "Goodbye");
+        d.h.app.doc.undo();
+        assert_eq!(text(&d), "Hello");
+        assert_eq!(refused(&Editing { target: Target::Template("name"), ..ed("") }), None);
     }
 
     #[test]
