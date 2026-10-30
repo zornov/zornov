@@ -60,29 +60,9 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, key))
 }
 
-/// Editing keys that have an id (so they can be rebound, and show in
-/// menus) but no row in Settings ▸ Shortcuts yet: (id, name, default).
-// TODO(settings): move these rows into `SHORTCUTS` and delete this table.
-pub const EXTRA: &[(&str, &str, &str)] = &[
-    ("second-back", "Back one second", "⇧←"),
-    ("second-fwd", "Forward one second", "⇧→"),
-    ("to-start", "Go to start", "Home"),
-    ("to-end", "Go to end", "End"),
-    ("delete-fwd", "Delete (forward delete key)", "⌦"),
-    ("zoom-in-plus", "Zoom in (plus key)", "⌘+"),
-    ("group", "Group clips", "⌘G"),
-    ("ungroup", "Ungroup clips", "⇧⌘G"),
-    ("link", "Link clips", "⇧⌘L"),
-    ("unlink", "Unlink clips", "⌥⇧⌘L"),
-    ("freeze", "Freeze frame at playhead", "⌥F"),
-    ("reverse", "Reverse clip", "⌃R"),
-    ("copy-look", "Copy look", "⌥⌘C"),
-    ("paste-look", "Paste look", "⌥⌘V"),
-];
-
-/// Every action with keys: the Settings table, then [`EXTRA`].
+/// Every action with keys: the Settings table.
 fn table() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
-    SHORTCUTS.iter().chain(EXTRA.iter())
+    SHORTCUTS.iter()
 }
 
 /// The keys of an action: the person's, or the default.
@@ -104,13 +84,20 @@ pub fn pressed(ctx: &egui::Context, prefs: &Prefs, ids: &[&str]) -> Vec<&'static
     let mut out = Vec::new();
     ctx.input_mut(|i| {
         for (id, k) in table {
-            if i.consume_shortcut(&k) {
+            // A held key repeats; only stepping actions follow the repeats.
+            // A toggle (play, snap, fullscreen…) fires once per press, so
+            // holding Space doesn't flip playback on and off.
+            let fresh = i.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } if *key == k.logical_key && modifiers.matches_logically(k.modifiers)));
+            if i.consume_shortcut(&k) && (fresh || REPEATS.contains(&id)) {
                 out.push(id);
             }
         }
     });
     out
 }
+
+/// Actions a held key repeats: stepping through time, zoom, and undo/redo.
+const REPEATS: &[&str] = &["frame-back", "frame-fwd", "second-back", "second-fwd", "zoom-in", "zoom-out", "zoom-in-plus", "undo", "redo"];
 
 /// Whether one action's shortcut was pressed (consumed if so).
 pub fn hit(ctx: &egui::Context, prefs: &Prefs, id: &str) -> bool {
@@ -249,15 +236,36 @@ pub fn name(id: &str) -> &'static str {
 mod tests {
     use super::*;
 
+    fn frame(ctx: &egui::Context, key: Key, repeat: bool) -> Vec<&'static str> {
+        let ev = egui::Event::Key { key, physical_key: None, pressed: true, repeat, modifiers: Modifiers::NONE };
+        let mut got = Vec::new();
+        let mut out = ctx.run_ui(egui::RawInput { events: vec![ev], ..Default::default() }, |ui| got = pressed(ui.ctx(), &Prefs::default(), &["play", "frame-fwd"]));
+        out.textures_delta.clear();
+        got
+    }
+
+    #[test]
+    fn holding_space_plays_once_but_held_arrows_keep_stepping() {
+        let ctx = egui::Context::default();
+        assert_eq!(frame(&ctx, Key::Space, false), ["play"]);
+        // The key repeats while held: playback is not toggled again.
+        assert!(frame(&ctx, Key::Space, true).is_empty());
+        assert!(frame(&ctx, Key::Space, true).is_empty());
+        // A held arrow keeps stepping frames.
+        assert_eq!(frame(&ctx, Key::ArrowRight, false), ["frame-fwd"]);
+        assert_eq!(frame(&ctx, Key::ArrowRight, true), ["frame-fwd"]);
+    }
+
     #[test]
     fn extra_keys_parse_and_clash_with_nothing() {
         let prefs = Prefs::default();
-        for (id, _, d) in EXTRA {
+        let ids = ["second-back", "second-fwd", "to-start", "to-end", "delete-fwd", "zoom-in-plus", "group", "ungroup", "link", "unlink", "freeze", "reverse", "copy-look", "paste-look"];
+        for id in ids {
+            let (_, _, d) = SHORTCUTS.iter().find(|(o, _, _)| *o == id).unwrap_or_else(|| panic!("{id} has no row"));
             assert!(parse(d).is_some(), "{id}: {d}");
-            assert!(SHORTCUTS.iter().all(|(o, _, _)| o != id), "{id} is listed twice");
             assert_eq!(keys(&prefs, id), Some(*d));
         }
-        let clash: Vec<_> = conflicts(&prefs).into_iter().filter(|(_, ids)| ids.iter().any(|i| EXTRA.iter().any(|e| e.0 == *i))).collect();
+        let clash: Vec<_> = conflicts(&prefs).into_iter().filter(|(_, ids2)| ids.iter().any(|e| ids2.iter().any(|i| i == e))).collect();
         assert!(clash.is_empty(), "{clash:?}");
         assert_eq!(name("group"), "Group clips");
     }

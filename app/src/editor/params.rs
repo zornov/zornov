@@ -127,6 +127,29 @@ fn owned_elsewhere(key: &str) -> bool {
 
 /// Name, on/off and label (any clip), then the fill or shape of a solid,
 /// gradient or shape layer.
+/// The label column of a `FieldRow` at this width: panels under 260 px give the label less room.
+// TODO(kit): `kit::labeled_row` should take its column from the same place as `FieldRow`.
+pub(crate) fn label_col(ui: &egui::Ui) -> f32 {
+    if ui.available_width() < 260.0 { 80.0 } else { kit::label_width(ui.ctx()) }
+}
+
+/// A row with a label and arbitrary content, on the same label column as `FieldRow`.
+// TODO(kit): replace with `kit::labeled_row` once it uses the narrow label column.
+pub(crate) fn labeled_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let t = theme::tokens(ui.ctx());
+    let lw = label_col(ui);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.set_min_height(theme::space::CONTROL_H);
+        let (r, resp) = ui.allocate_exact_size(egui::Vec2::new(lw, theme::space::CONTROL_H), egui::Sense::hover());
+        let cut = kit::paint_text_clipped(ui.painter(), egui::pos2(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, lw - 8.0);
+        kit::tip_if_cut(resp, cut, label);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        add(ui)
+    })
+    .inner
+}
+
 pub fn top(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
     clip_section(app, ui, ids);
     if let [id] = ids
@@ -166,9 +189,10 @@ fn clip_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
         if ids.len() == 1 {
             let key = egui::Id::new(("clip-name", mc.id.0));
             let mut name: String = ui.data(|d| d.get_temp(key)).unwrap_or_else(|| mc.name.clone());
-            let w = ui.available_width();
-            kit::labeled_row(ui, "Name", |ui| {
-                let r = kit::text_field(ui, &mut name, "Clip name", None, w - kit::LABEL_W - 6.0, None);
+            // Ends where the value fields and menus end: the reset and keyframe slots stay free.
+            let w = ui.available_width() - label_col(ui) - 6.0 - 40.0;
+            labeled_row(ui, "Name", |ui| {
+                let r = kit::text_field(ui, &mut name, "Clip name", None, w, None);
                 if r.changed() {
                     ui.data_mut(|d| d.insert_temp(key, name.clone()));
                 }
@@ -180,12 +204,12 @@ fn clip_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
             });
         }
         let mut on = mc.enabled;
-        kit::labeled_row(ui, "Enabled", |ui| {
+        labeled_row(ui, "Enabled", |ui| {
             if kit::toggle(ui, &mut on, "Enabled", None).changed() {
                 put(app, ids, "enabled", if on { "Enable clip" } else { "Disable clip" }, |c| c.enabled = on);
             }
         });
-        kit::labeled_row(ui, "Label", |ui| {
+        labeled_row(ui, "Label", |ui| {
             let mut col = mc.label.as_ref().map_or(Color32::TRANSPARENT, crate::bridge::color32);
             let had = mc.label.is_some();
             if kit::colour_well(ui, "clip-label", &mut col, None).changed() {
@@ -210,7 +234,7 @@ fn crop_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Cli
             three_d::row(app, ui, ids, path, label, 0.0..=100.0, 0.0, "%", 1, three_d::pct, three_d::from_pct);
         }
         let (mut a, mut b) = (fx, fy);
-        kit::labeled_row(ui, "Flip", |ui| {
+        labeled_row(ui, "Flip", |ui| {
             let x = kit::toggle(ui, &mut a, "Flip horizontally", None).changed();
             ui.label(egui::RichText::new("Horizontal").font(theme::caption()).color(theme::tokens(ui.ctx()).text_2));
             let y = kit::toggle(ui, &mut b, "Flip vertically", None).changed();
@@ -244,7 +268,7 @@ fn colour_of(g: &m::Generator, key: &str, default: Color32) -> Color32 {
 
 fn colour_row(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], g: &m::Generator, key: &'static str, label: &str, default: Color32) {
     let mut col = colour_of(g, key, default);
-    kit::labeled_row(ui, label, |ui| {
+    labeled_row(ui, label, |ui| {
         let r = kit::colour_well(ui, &format!("shape-{key}"), &mut col, None);
         ui.label(egui::RichText::new(kit::to_hex(col)).font(theme::body()).color(theme::tokens(ui.ctx()).text_2));
         if r.changed() {
@@ -260,8 +284,11 @@ fn choice_row(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], g: &m::Genera
         _ => default,
     };
     let at = options.iter().position(|o| *o == cur).unwrap_or(0);
-    kit::labeled_row(ui, label, |ui| {
-        if let Some(i) = kit::menu_button(ui, key, at, options, ui.available_width() - 40.0, None) {
+    // The stored words are ids (`as_typed`): show them as words.
+    let shown: Vec<String> = options.iter().map(|o| humanise(o)).collect();
+    let shown: Vec<&str> = shown.iter().map(String::as_str).collect();
+    labeled_row(ui, label, |ui| {
+        if let Some(i) = kit::menu_button(ui, key, at, &shown, ui.available_width() - 40.0, None) {
             let v = m::Value::Choice(options[i].to_owned());
             put(app, ids, key, label, |c| three_d::set_param(c, key, v.clone()));
         }
@@ -294,7 +321,7 @@ fn shape_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Cl
             three_d::row(app, ui, ids, "generator.angle", "Angle", -360.0..=360.0, 90.0, "°", 0, same, same);
             let radial = matches!(g.params.get("radial"), Some(m::Value::Bool(true)));
             let mut r = radial;
-            kit::labeled_row(ui, "Radial", |ui| {
+            labeled_row(ui, "Radial", |ui| {
                 if kit::toggle(ui, &mut r, "Radial", None).changed() {
                     put(app, ids, "radial", "Radial gradient", |c| three_d::set_param(c, "radial", m::Value::Bool(r)));
                 }
@@ -312,7 +339,7 @@ fn shape_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Cl
             colour_row(app, ui, ids, g, "fill", "Fill", Color32::WHITE);
             let size = g.params.get("size").and_then(m::Value::as_point).unwrap_or(m::Vec2 { x: 1.0, y: 1.0 });
             let (mut w, mut h) = ((size.x * 100.0) as f32, (size.y * 100.0) as f32);
-            kit::labeled_row(ui, "Size", |ui| {
+            labeled_row(ui, "Size", |ui| {
                 let a = NumberField::new("Width", &mut w).range(0.0..=400.0).decimals(0).unit("%").width(72.0).show(ui).changed();
                 let b = NumberField::new("Height", &mut h).range(0.0..=400.0).decimals(0).unit("%").width(72.0).show(ui).changed();
                 if a || b {
@@ -323,7 +350,7 @@ fn shape_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Cl
             three_d::row(app, ui, ids, "generator.roundness", "Roundness", 0.0..=100.0, 0.0, "%", 0, three_d::pct, three_d::from_pct);
             let has_stroke = g.params.contains_key("stroke");
             let mut on = has_stroke;
-            kit::labeled_row(ui, "Outline", |ui| {
+            labeled_row(ui, "Outline", |ui| {
                 if kit::toggle(ui, &mut on, "Outline", None).changed() {
                     put(app, ids, "stroke-on", "Outline", |c| {
                         if on {
@@ -366,7 +393,7 @@ pub fn text_style_rows(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
         Some(m::Value::Choice(f) | m::Value::Text(f)) => families.iter().position(|x| x == f).map_or(0, |i| i + 1),
         _ => 0,
     };
-    kit::labeled_row(ui, "Font", |ui| {
+    labeled_row(ui, "Font", |ui| {
         if let Some(i) = kit::menu_button(ui, "text-font", cur, &names, ui.available_width() - 40.0, None) {
             let pick = (i > 0).then(|| families[i - 1].clone());
             put(app, ids, "font", "Font", |c| match &pick {
@@ -381,7 +408,7 @@ pub fn text_style_rows(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
     });
     three_d::row(app, ui, ids, "generator.weight", "Weight", 100.0..=900.0, 700.0, "", 0, same, same);
     let mut italic = matches!(g.params.get("italic"), Some(m::Value::Bool(true)));
-    kit::labeled_row(ui, "Italic", |ui| {
+    labeled_row(ui, "Italic", |ui| {
         if kit::toggle(ui, &mut italic, "Italic", None).changed() {
             put(app, ids, "italic", "Italic", |c| three_d::set_param(c, "italic", m::Value::Bool(italic)));
         }
@@ -391,7 +418,7 @@ pub fn text_style_rows(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
 
     // Outline.
     let mut on = has("outline");
-    kit::labeled_row(ui, "Outline", |ui| {
+    labeled_row(ui, "Outline", |ui| {
         if kit::toggle(ui, &mut on, "Outline", None).changed() {
             put(app, ids, "outline-on", "Outline", |c| {
                 if on {
@@ -410,7 +437,7 @@ pub fn text_style_rows(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
     }
     // Shadow.
     let mut on = has("shadow");
-    kit::labeled_row(ui, "Shadow", |ui| {
+    labeled_row(ui, "Shadow", |ui| {
         if kit::toggle(ui, &mut on, "Shadow", None).changed() {
             put(app, ids, "shadow-on", "Shadow", |c| {
                 if on {
@@ -461,12 +488,12 @@ pub fn value_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut m::Value) -> 
     let mut changed = false;
     let angle = matches!(v, m::Value::Angle(_));
     match v {
-        m::Value::Bool(b) => kit::labeled_row(ui, &label, |ui| changed = kit::toggle(ui, b, &label, None).changed()),
+        m::Value::Bool(b) => labeled_row(ui, &label, |ui| changed = kit::toggle(ui, b, &label, None).changed()),
         m::Value::Scalar(x) | m::Value::Angle(x) => {
             let (range, speed, dec) = scalar_hint(key, *x);
             let mut f = *x as f32;
-            kit::labeled_row(ui, &label, |ui| {
-                let r = NumberField::new(&label, &mut f).range(range).decimals(dec).drag_speed(speed).unit(if angle { "°" } else { "" }).width(110.0).show(ui);
+            labeled_row(ui, &label, |ui| {
+                let r = NumberField::new(&label, &mut f).range(range).decimals(dec).drag_speed(speed).unit(if angle { "°" } else { "" }).width(72.0).show(ui);
                 if r.changed() {
                     *x = f as f64;
                     changed = true;
@@ -475,7 +502,7 @@ pub fn value_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut m::Value) -> 
         }
         m::Value::Point(p) => {
             let (mut a, mut b) = (p.x as f32, p.y as f32);
-            kit::labeled_row(ui, &label, |ui| {
+            labeled_row(ui, &label, |ui| {
                 let (_, sp, dec) = scalar_hint(key, p.x.abs().max(p.y.abs()));
                 let x = NumberField::new("X", &mut a).decimals(dec).drag_speed(sp).width(72.0).show(ui).changed();
                 let y = NumberField::new("Y", &mut b).decimals(dec).drag_speed(sp).width(72.0).show(ui).changed();
@@ -488,7 +515,7 @@ pub fn value_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut m::Value) -> 
         }
         m::Value::Colour(c) => {
             let mut col = crate::bridge::color32(c);
-            kit::labeled_row(ui, &label, |ui| {
+            labeled_row(ui, &label, |ui| {
                 if kit::colour_well(ui, &format!("{salt}-{key}"), &mut col, None).changed() {
                     *c = crate::bridge::rgba(col);
                     changed = true;
@@ -499,7 +526,7 @@ pub fn value_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut m::Value) -> 
         m::Value::Choice(s) | m::Value::Text(s) => {
             if let Some(options) = choices_of(key) {
                 let at = options.iter().position(|o| *o == s.as_str()).unwrap_or(0);
-                kit::labeled_row(ui, &label, |ui| {
+                labeled_row(ui, &label, |ui| {
                     if let Some(i) = kit::menu_button(ui, &format!("{salt}-{key}"), at, options, ui.available_width() - 40.0, None) {
                         *s = options[i].to_owned();
                         changed = true;
@@ -517,7 +544,7 @@ pub fn value_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut m::Value) -> 
             } else {
                 let tk = egui::Id::new(("param-text", salt, key));
                 let mut edit: String = ui.data(|d| d.get_temp(tk)).unwrap_or_else(|| s.clone());
-                kit::labeled_row(ui, &label, |ui| {
+                labeled_row(ui, &label, |ui| {
                     let w = ui.available_width();
                     let r = kit::text_field(ui, &mut edit, &label, None, w, None);
                     if r.changed() {
@@ -534,7 +561,7 @@ pub fn value_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut m::Value) -> 
             }
         }
         m::Value::Curve(points) => {
-            kit::labeled_row(ui, &label, |ui| {
+            labeled_row(ui, &label, |ui| {
                 ui.label(egui::RichText::new(crate::i18n::tf(format!("Curve, {} points", points.len()))).font(theme::body()).color(theme::tokens(ui.ctx()).text_2));
             });
         }
@@ -571,7 +598,7 @@ fn settings_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m:
                 ui.label(egui::RichText::new(crate::i18n::tf(format!("Text run {}: {head}", i + 1))).font(theme::caption()).color(tk.text_2));
                 let tkey = egui::Id::new(("run-text", mc.id.0, i));
                 let mut edit: String = ui.data(|d| d.get_temp(tkey)).unwrap_or_else(|| run.text.clone());
-                kit::labeled_row(ui, "Text", |ui| {
+                labeled_row(ui, "Text", |ui| {
                     let w = ui.available_width();
                     let r = kit::text_field(ui, &mut edit, "Text of this run", None, w, None);
                     if r.changed() {
@@ -665,7 +692,7 @@ fn json_row(ui: &mut egui::Ui, salt: &str, key: &str, v: &mut Value, depth: usiz
         }
         Value::Array(_) => {
             let mut changed = false;
-            kit::labeled_row(ui, &label, |ui| changed = json_value(ui, salt, v, depth));
+            labeled_row(ui, &label, |ui| changed = json_value(ui, salt, v, depth));
             changed
         }
         _ => json_leaf(ui, salt, &label, v),
@@ -695,9 +722,9 @@ pub fn set_json_choices(ui: &egui::Ui, f: Option<ChoiceFn>) {
 fn json_leaf(ui: &mut egui::Ui, salt: &str, label: &str, v: &mut Value) -> bool {
     let tk = theme::tokens(ui.ctx());
     let mut changed = false;
-    kit::labeled_row(ui, label, |ui| match v {
+    labeled_row(ui, label, |ui| match v {
         Value::Null => {
-            ui.label(egui::RichText::new("none").font(theme::body()).color(tk.text_2));
+            ui.label(egui::RichText::new("Not set").font(theme::body()).color(tk.text_2));
             // An optional setting that is not set: give it a value to edit.
             if Button::ghost("Set").compact().show(ui).clicked() {
                 let key = salt.rsplit('/').next().unwrap_or("");
@@ -724,7 +751,7 @@ fn json_leaf(ui: &mut egui::Ui, salt: &str, label: &str, v: &mut Value) -> bool 
             let int = n.is_i64() || n.is_u64();
             let mut f = n.as_f64().unwrap_or(0.0) as f32;
             let speed = (f.abs() / 200.0).max(if int { 0.1 } else { 0.01 });
-            let r = NumberField::new(label, &mut f).decimals(if int { 0 } else { 2 }).drag_speed(speed).width(110.0).show(ui);
+            let r = NumberField::new(label, &mut f).decimals(if int { 0 } else { 2 }).drag_speed(speed).width(72.0).show(ui);
             if r.changed() {
                 *v = if int { serde_json::json!(f.round() as i64) } else { serde_json::json!(f) };
                 changed = true;
@@ -983,4 +1010,79 @@ mod tests {
             assert!(text.contains(w), "\"{w}\" is in the Text section:\n{text}");
         }
     }
+    /// Draws `rows` field rows and menu rows in a column `width` wide; returns
+    /// (content x of each labelled row, right edge of each menu, right edge
+    /// of each field, the column's right edge) and what is cut or overlapped.
+    fn grid(width: f32) -> (Vec<f32>, Vec<f32>, Vec<f32>, f32, usize, usize) {
+        let _serial = crate::ui_tests::serial();
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::theme::install_fonts(&ctx);
+        let mut starts = vec![];
+        let mut menus = vec![];
+        let mut right = 0.0;
+        let mut out = None;
+        for frame in 0..3 {
+            starts.clear();
+            menus.clear();
+            let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 400.0))), time: Some(frame as f64 / 60.0), ..Default::default() };
+            let mut frame_out = ctx.run_ui(raw, |ui| {
+                let col = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 400.0));
+                let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(col));
+                let ui = &mut ui;
+                right = ui.max_rect().right();
+                let (mut a, mut b, mut c) = (0.0f32, 12.5f32, 100.0f32);
+                kit::FieldRow::new("Position X", &mut a, -100.0..=100.0).unit("px").show(ui);
+                kit::FieldRow::new("Rotation", &mut b, -360.0..=360.0).unit("°").decimals(1).show(ui);
+                for (label, id) in [("Blend", "g-blend"), ("Style", "g-style")] {
+                    labeled_row(ui, label, |ui| {
+                        starts.push(ui.cursor().min.x);
+                        let w = ui.available_width() - 40.0;
+                        kit::menu_button(ui, id, 0, &["Normal", "Multiply"], w, None);
+                        menus.push(ui.min_rect().right());
+                    });
+                }
+                kit::FieldRow::new("Opacity", &mut c, 0.0..=100.0).unit("%").show(ui);
+            });
+            // Taken as a renderer takes them; dropping them unhandled would panic.
+            frame_out.textures_delta.clear();
+            out = Some(frame_out);
+        }
+        let out = out.unwrap();
+        let names: std::collections::HashMap<u64, String> = out.platform_output.accesskit_update.as_ref().map(|u| u.nodes.iter().map(|(id, n)| (id.0, n.label().or(n.value()).unwrap_or("").to_owned())).collect()).unwrap_or_default();
+        // A field row's value box is named by its value, so find it by the row
+        // its label opens: the rightmost draggable widget on that row.
+        let fields: Vec<f32> = ["Position X", "Rotation", "Opacity"]
+            .iter()
+            .map(|want| {
+                ctx.viewport(|v| {
+                    let all: Vec<_> = v.this_pass.widgets.layers().flat_map(|(_, l)| l.iter()).collect();
+                    let top = all.iter().find(|w| w.interact_rect.left() == 0.0 && names.get(&w.id.value()).is_some_and(|n| n == want)).map(|w| w.interact_rect.top()).expect("the row's label");
+                    all.iter().filter(|w| w.sense.is_focusable() && (w.interact_rect.top() - top).abs() < 0.5).map(|w| w.interact_rect.right()).fold(f32::MIN, f32::max)
+                })
+            })
+            .collect();
+        let cuts = crate::ui_shot::cut_text(&ctx, &out, &[], 1.0).len();
+        let over = crate::ui_shot::overlaps(&ctx, &names, 0.2).len();
+        (starts, menus, fields, right, cuts, over)
+    }
+
+    #[test]
+    fn labels_share_a_column_and_values_a_right_edge_at_narrow_and_wide_widths() {
+        for width in [240.0f32, 280.0, 480.0] {
+            let (starts, menus, fields, right, cuts, over) = grid(width);
+            let want_x = if width < 260.0 { 80.0 } else { kit::label_width(&egui::Context::default()) };
+            assert!(starts.iter().all(|x| (x - starts[0]).abs() < 0.5), "{width}: labelled rows start together: {starts:?}");
+            assert!((starts[0] - want_x).abs() < 1.0, "{width}: content starts after the label column ({want_x}): {starts:?}");
+            for m in &menus {
+                assert!((m - (right - 40.0)).abs() < 1.5, "{width}: menu ends at the value edge {}: {menus:?}", right - 40.0);
+            }
+            for f in &fields {
+                assert!((f - (right - 40.0)).abs() < 1.5, "{width}: field ends at the value edge {}: {fields:?}", right - 40.0);
+            }
+            assert_eq!(cuts, 0, "{width}: text cut off");
+            assert_eq!(over, 0, "{width}: widgets overlap");
+        }
+    }
+
 }

@@ -13,6 +13,7 @@ use crate::files::SaveState;
 use crate::dock::Panel;
 use crate::icons::{self, Icon};
 use crate::kit::{self, Button, IconButton, MenuItem};
+use crate::macmenu::{Do, Item, Menu, Row};
 use crate::theme;
 use crate::workspaces::Workspace;
 use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Vec2};
@@ -26,6 +27,7 @@ const PAINT: &str = "Paint";
 
 pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     let ctx = ui.ctx().clone();
+    crate::macmenu::register(|app, ctx| model(app, ctx, ctx.content_rect().width() < super::NARROW), |app, ctx, what| perform(app, ctx, ctx.content_rect().width() < super::NARROW, what));
     crate::screens::start::window_drag_area(ui, r);
     let inner = Rect::from_min_max(egui::pos2(r.left() + WINDOW_BUTTONS_W, r.top()), egui::pos2(r.right() - 8.0, r.bottom()));
     // Right (laid out first, so the left side knows its room): Export, then Jobs.
@@ -38,7 +40,9 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     if export_btn.clicked() {
         run(app, &ctx, Action::Export);
     }
-    jobs_button(&mut app.jobs, &mut right);
+    if let Some(id) = jobs_button(&mut app.jobs, &mut right) {
+        retry_job(app, &ctx, id);
+    }
     let right_start = right.min_rect().left();
 
     let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -48,19 +52,16 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     }
     bar.add_space(2.0);
 
-    // Every panel that can be docked, checked when it is open.
-    let panels: Vec<(Panel, bool, String)> = Panel::ALL
-        .into_iter()
-        .filter(|p| p.closable())
-        .map(|p| (p, super::dock_ui::panel_shown(app, &ctx, p, narrow), crate::keymap::keys(&app.prefs, &format!("panel-{}", p.key())).unwrap_or("").to_owned()))
-        .collect();
     let spaces = crate::workspaces::all();
     let current = crate::workspaces::saved(app).and_then(|w| spaces.iter().position(|s| s.name.eq_ignore_ascii_case(&w.name)));
-    let space_keys: Vec<String> = crate::workspaces::ACTIONS.iter().map(|(id, _)| crate::keymap::keys(&app.prefs, id).unwrap_or("").to_owned()).collect();
-    let view = ViewMenu { spaces: &spaces, current, space_keys: &space_keys, panels: &panels, maximised: app.editor.maximised.is_some(), max_h: (ctx.content_rect().bottom() - r.bottom() - 24.0).max(160.0) };
     let mut out = Picked::default();
-    for (name, items) in menus(app) {
-        menu(&mut bar, name, &items, Some(&view).filter(|_| name == "View"), &mut out);
+    // On macOS the menus are in the menu bar (see `macmenu`); elsewhere they are this row.
+    if !crate::macmenu::installed() {
+        let max_h = (ctx.content_rect().bottom() - r.bottom() - 24.0).max(160.0);
+        for m in model(app, &ctx, narrow) {
+            let scroll = (m.title == "View").then_some(max_h);
+            menu(&mut bar, m.title, &m.rows, scroll, &mut out);
+        }
     }
 
     // The workspace tabs when they leave the project's name its room,
@@ -94,12 +95,6 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
         project_name(app, &mut cui, w - status_w, status_w > 0.0);
     }
 
-    if let Some(p) = out.panel {
-        super::dock_ui::toggle_panel(app, &ctx, p, narrow);
-    }
-    if out.reset {
-        super::dock_ui::reset(app, &ctx);
-    }
     if let Some(w) = out.workspace {
         crate::workspaces::switch(app, &ctx, &w);
     }
@@ -113,34 +108,18 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
             Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
         };
     }
-    if let Some(a) = out.action {
-        run(app, &ctx, a);
-    }
-    if let Some(op) = out.clip_op {
-        run_clip_op(app, &ctx, op);
+    if let Some(d) = out.pick {
+        perform(app, &ctx, narrow, d);
     }
 }
 
 /// What the top bar's controls asked for this frame.
 #[derive(Default)]
 struct Picked {
-    action: Option<Action>,
-    clip_op: Option<ClipOp>,
-    panel: Option<Panel>,
+    pick: Option<Do>,
     workspace: Option<Workspace>,
     paint: bool,
     save_as: Option<String>,
-    reset: bool,
-}
-
-/// What the View menu lists besides its own commands.
-struct ViewMenu<'a> {
-    spaces: &'a [Workspace],
-    current: Option<usize>,
-    space_keys: &'a [String],
-    panels: &'a [(Panel, bool, String)],
-    maximised: bool,
-    max_h: f32,
 }
 
 /// The name a workspace tab shows (the short form of a long name).
@@ -282,115 +261,132 @@ fn save_click(state: &SaveState) -> Option<Action> {
     }
 }
 
-/// A menu row that works on the selected clips (the clip menu's rows).
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum ClipOp {
-    Copy,
-    Cut,
-    Paste,
-    /// Group, ungroup, link, unlink, freeze, reverse, copy-look, paste-look.
-    Key(&'static str),
-}
-
-/// Runs a clip row; each says why when the selection does not fit.
-fn run_clip_op(app: &mut StudioApp, ctx: &egui::Context, op: ClipOp) {
-    match op {
-        ClipOp::Copy => super::clip_menu::copy_selection(app, ctx, false),
-        ClipOp::Cut => super::clip_menu::copy_selection(app, ctx, true),
-        ClipOp::Paste => super::clip_menu::paste_selection(app, ctx),
-        ClipOp::Key(id) => super::clip_menu::key_action(app, ctx, id),
+/// Runs a menu row, from the in-window menu or the macOS menu bar. `narrow` is
+/// whether the window is too narrow for docked panels.
+fn perform(app: &mut StudioApp, ctx: &egui::Context, narrow: bool, what: Do) {
+    match what {
+        Do::Act(f) => {
+            if let Some(a) = f() {
+                run(app, ctx, a);
+            }
+        }
+        // Each clip row says why when the selection does not fit.
+        Do::Copy => super::clip_menu::copy_selection(app, ctx, false),
+        Do::Cut => super::clip_menu::copy_selection(app, ctx, true),
+        Do::Paste => super::clip_menu::paste_selection(app, ctx),
+        Do::ClipKey(id) => super::clip_menu::key_action(app, ctx, id),
+        Do::Panel(p) => super::dock_ui::toggle_panel(app, ctx, p, narrow),
+        Do::Space(name) => {
+            if let Some(w) = crate::workspaces::find(&name) {
+                crate::workspaces::switch(app, ctx, &w);
+            }
+        }
+        Do::ResetLayout => super::dock_ui::reset(app, ctx),
     }
 }
 
-struct Item {
-    /// Set for a clip row: it is run instead of `action`.
-    op: Option<ClipOp>,
-    label: &'static str,
-    /// Its keys: an action's from the keymap, or a fixed key.
-    shortcut: String,
-    icon: Option<Icon>,
-    enabled: bool,
-    action: fn() -> Option<Action>,
+fn item(label: &str, shortcut: &str, icon: Option<Icon>, enabled: bool, action: fn() -> Option<Action>) -> Row {
+    Row::Item(Item { what: Do::Act(action), label: label.to_owned(), shortcut: shortcut.to_owned(), icon, enabled, checked: None })
 }
 
-fn item(label: &'static str, shortcut: &str, icon: Option<Icon>, enabled: bool, action: fn() -> Option<Action>) -> Option<Item> {
-    Some(Item { op: None, label, shortcut: shortcut.to_owned(), icon, enabled, action })
+fn clip_item(label: &str, shortcut: &str, icon: Option<Icon>, what: Do) -> Row {
+    Row::Item(Item { what, label: label.to_owned(), shortcut: shortcut.to_owned(), icon, enabled: true, checked: None })
 }
 
-fn clip_item(label: &'static str, shortcut: &str, icon: Option<Icon>, op: ClipOp) -> Option<Item> {
-    Some(Item { op: Some(op), label, shortcut: shortcut.to_owned(), icon, enabled: true, action: || None })
-}
-
-fn menus(app: &StudioApp) -> Vec<(&'static str, Vec<Option<Item>>)> {
+/// Every menu and its rows: the one list the in-window menus and the macOS menu bar are built from.
+fn model(app: &StudioApp, ctx: &egui::Context, narrow: bool) -> Vec<Menu> {
     let sel = !app.editor.selection.is_empty();
     let d = &app.doc;
     let k = |id: &str| crate::keymap::hint(&app.prefs, id);
-    vec![
-        ("File", vec![
+    let mut menus = vec![
+        Menu { title: "File", rows: vec![
             item("Open…", "⌘O", Some(Icon::FolderOpen), true, || Some(Action::Open)),
             item("Save", "⌘S", None, true, || Some(Action::Save)),
             item("Save as…", "⇧⌘S", None, true, || Some(Action::SaveAs)),
-            None,
+            Row::Sep,
             item("Import media…", "⌘I", Some(Icon::DownloadSimple), true, || Some(Action::ImportMedia)),
             item("Add sample media", "", None, true, || Some(Action::SampleMedia)),
             item("Import timeline…", "", None, true, || Some(Action::ImportTimeline)),
             item("Import script…", "", None, true, || Some(Action::ImportScript)),
-            None,
+            Row::Sep,
             item("Project settings…", "", Some(Icon::Faders), true, || Some(Action::ProjectSettings)),
-            None,
+            Row::Sep,
             item("Export OpenTimelineIO…", "", None, true, || Some(Action::ExportOtio)),
             item("Export…", &k("export"), Some(Icon::Export), true, || Some(Action::Export)),
-            None,
+            Row::Sep,
             item("Settings…", &k("settings"), Some(Icon::GearSix), true, || Some(Action::Settings)),
-        ]),
-        ("Edit", vec![
+        ] },
+        Menu { title: "Edit", rows: vec![
             item("Undo", &k("undo"), Some(Icon::ArrowUUpLeft), d.can_undo(), || Some(Action::Undo)),
             item("Redo", &k("redo"), Some(Icon::ArrowUUpRight), d.can_redo(), || Some(Action::Redo)),
-            None,
-            clip_item("Cut", &k("cut"), Some(Icon::Scissors), ClipOp::Cut),
-            clip_item("Copy", &k("copy"), Some(Icon::Copy), ClipOp::Copy),
-            clip_item("Paste", &k("paste"), None, ClipOp::Paste),
-            None,
+            Row::Sep,
+            clip_item("Cut", &k("cut"), Some(Icon::Scissors), Do::Cut),
+            clip_item("Copy", &k("copy"), Some(Icon::Copy), Do::Copy),
+            clip_item("Paste", &k("paste"), None, Do::Paste),
+            Row::Sep,
             item("Select all", &k("select-all"), None, true, || Some(Action::SelectAll)),
             item("Duplicate", &k("duplicate"), Some(Icon::Copy), sel, || Some(Action::Duplicate)),
             item("Delete", &k("delete"), Some(Icon::Trash), sel, || Some(Action::Delete)),
-        ]),
-        ("Clip", vec![
+        ] },
+        Menu { title: "Clip", rows: vec![
             item("Split at playhead", &k("split"), Some(Icon::Scissors), true, || Some(Action::Split)),
             item("Add marker", &k("marker"), Some(Icon::Flag), true, || Some(Action::Marker)),
-            None,
-            clip_item("Group", &k("group"), None, ClipOp::Key("group")),
-            clip_item("Ungroup", &k("ungroup"), None, ClipOp::Key("ungroup")),
-            clip_item("Link", &k("link"), None, ClipOp::Key("link")),
-            clip_item("Unlink", &k("unlink"), None, ClipOp::Key("unlink")),
-            None,
-            clip_item("Freeze frame at playhead", &k("freeze"), None, ClipOp::Key("freeze")),
-            clip_item("Reverse", &k("reverse"), None, ClipOp::Key("reverse")),
-            clip_item("Copy look", &k("copy-look"), None, ClipOp::Key("copy-look")),
-            clip_item("Paste look", &k("paste-look"), None, ClipOp::Key("paste-look")),
-            None,
+            Row::Sep,
+            clip_item("Group", &k("group"), None, Do::ClipKey("group")),
+            clip_item("Ungroup", &k("ungroup"), None, Do::ClipKey("ungroup")),
+            clip_item("Link", &k("link"), None, Do::ClipKey("link")),
+            clip_item("Unlink", &k("unlink"), None, Do::ClipKey("unlink")),
+            Row::Sep,
+            clip_item("Freeze frame at playhead", &k("freeze"), None, Do::ClipKey("freeze")),
+            clip_item("Reverse", &k("reverse"), None, Do::ClipKey("reverse")),
+            clip_item("Copy look", &k("copy-look"), None, Do::ClipKey("copy-look")),
+            clip_item("Paste look", &k("paste-look"), None, Do::ClipKey("paste-look")),
+            Row::Sep,
             item("Set in point", &k("in"), None, true, || Some(Action::RangeIn)),
             item("Set out point", &k("out"), None, true, || Some(Action::RangeOut)),
             item("Clear range", &k("clear-range"), None, d.project.range.is_some(), || Some(Action::ClearRange)),
-        ]),
+        ] },
         // What used to be the Production and Library buttons.
-        ("Project", vec![
+        Menu { title: "Project", rows: vec![
             item("Production…", "", Some(Icon::FilmSlate), true, || Some(Action::Production)),
             item("Project health…", "", Some(Icon::LockSimple), true, || Some(Action::ProjectHealth)),
-        ]),
-        ("View", vec![
+        ] },
+        Menu { title: "View", rows: vec![
             item("Zoom in", &k("zoom-in"), Some(Icon::MagnifyingGlassPlus), true, || Some(Action::ZoomIn)),
             item("Zoom out", &k("zoom-out"), Some(Icon::MagnifyingGlassMinus), true, || Some(Action::ZoomOut)),
             item("Fit sequence", &k("fit"), Some(Icon::ArrowsOutLineHorizontal), true, || Some(Action::Fit)),
-        ]),
-        ("Help", vec![
+        ] },
+        Menu { title: "Help", rows: vec![
             item("Search help", "F1", Some(Icon::Question), true, || Some(Action::Help)),
             item("Welcome tour", "", Some(Icon::Sparkle), true, || Some(Action::Tour)),
             item("Keyboard shortcuts", "", Some(Icon::Keyboard), true, || Some(Action::Shortcuts)),
-            None,
+            Row::Sep,
             item("Check for updates…", "", Some(Icon::DownloadSimple), true, || Some(Action::CheckUpdates)),
-        ]),
-    ]
+        ] },
+    ];
+    // The View menu goes on with the workspaces, the panels (checked when
+    // open) and the layout commands: the one place that lists them all (the
+    // tabs are the quick way to the built-in workspaces).
+    let spaces = crate::workspaces::all();
+    let current = crate::workspaces::saved(app).and_then(|w| spaces.iter().position(|s| s.name.eq_ignore_ascii_case(&w.name)));
+    let view = &mut menus[4].rows;
+    view.push(Row::Sep);
+    view.push(Row::Heading("Workspaces"));
+    for (i, w) in spaces.iter().enumerate() {
+        let keys = crate::workspaces::ACTIONS.get(i).map_or("", |(id, _)| crate::keymap::keys(&app.prefs, id).unwrap_or(""));
+        view.push(Row::Item(Item { what: Do::Space(w.name.clone()), label: w.name.clone(), shortcut: keys.to_owned(), icon: None, enabled: true, checked: Some(current == Some(i)) }));
+    }
+    view.push(Row::Heading("Panels"));
+    for p in Panel::ALL.into_iter().filter(|p| p.closable()) {
+        let keys = crate::keymap::keys(&app.prefs, &format!("panel-{}", p.key())).unwrap_or("");
+        let on = super::dock_ui::panel_shown(app, ctx, p, narrow);
+        view.push(Row::Item(Item { what: Do::Panel(p), label: p.name().to_owned(), shortcut: keys.to_owned(), icon: None, enabled: true, checked: Some(on) }));
+    }
+    view.push(Row::Heading("Layout"));
+    view.push(Row::Item(Item { what: Do::Act(|| Some(Action::Maximise)), label: "Maximise panel".into(), shortcut: "⌘\\".into(), icon: Some(Icon::CornersOut), enabled: true, checked: Some(app.editor.maximised.is_some()) }));
+    view.push(Row::SaveLayout);
+    view.push(Row::Item(Item { what: Do::ResetLayout, label: "Reset layout".into(), shortcut: String::new(), icon: Some(Icon::ArrowCounterClockwise), enabled: true, checked: None }));
+    menus
 }
 
 /// Where the menu button `name` was drawn last frame.
@@ -398,9 +394,8 @@ pub(crate) fn menu_rect_id(name: &str) -> egui::Id {
     egui::Id::new(("topbar-menu-rect", name.to_owned()))
 }
 
-/// A menu of `items`. The View menu goes on with the workspaces, the panels
-/// (checked when open) and the layout commands (`view`); what is chosen goes in `out`.
-fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], view: Option<&ViewMenu>, out: &mut Picked) {
+/// A menu of `rows`; what is chosen goes in `out`. `scroll` is the most height it takes before it scrolls.
+fn menu(ui: &mut egui::Ui, name: &str, rows: &[Row], scroll: Option<f32>, out: &mut Picked) {
     let t = theme::tokens(ui.ctx());
     let id = ui.scope_id().with(("menu", name));
     let w = kit::text_width(ui, name, theme::control()) + 20.0;
@@ -417,59 +412,39 @@ fn menu(ui: &mut egui::Ui, name: &str, items: &[Option<Item>], view: Option<&Vie
         kit::toggle_open(ui.ctx(), id);
     }
     kit::popover(ui.ctx(), id, r, kit::Side::Below, 248.0, |ui| {
-        let scroll = view.map_or(f32::INFINITY, |v| v.max_h);
-        egui::ScrollArea::vertical().id_salt(("menu-scroll", name)).max_height(scroll).show(ui, |ui| {
-            for it in items {
-                match it {
-                    None => kit::menu_separator(ui),
-                    Some(it) => {
-                        let mut m = MenuItem::new(it.label).enabled(it.enabled);
+        egui::ScrollArea::vertical().id_salt(("menu-scroll", name)).max_height(scroll.unwrap_or(f32::INFINITY)).show(ui, |ui| {
+            for row in rows {
+                match row {
+                    Row::Sep => kit::menu_separator(ui),
+                    Row::Heading(h) => kit::menu_heading(ui, h),
+                    Row::SaveLayout => save_layout_field(ui, id, out),
+                    Row::Item(it) => {
+                        let mut m = MenuItem::new(&it.label).enabled(it.enabled);
                         if !it.shortcut.is_empty() {
                             m = m.shortcut(&it.shortcut);
+                        }
+                        if let Some(on) = it.checked {
+                            m = m.checked(on);
                         }
                         m = match it.icon {
                             Some(i) => m.icon(i),
                             // Keep labels aligned with rows that have icons.
-                            None => m.reserve_icon(),
+                            None if it.checked.is_none() => m.reserve_icon(),
+                            None => m,
                         };
                         if m.show(ui).clicked() {
-                            out.action = (it.action)();
-                            out.clip_op = it.op;
+                            out.pick = Some(it.what.clone());
                             kit::set_open(ui.ctx(), id, false);
                         }
                     }
                 }
             }
-            if let Some(v) = view {
-                view_sections(ui, id, v, out);
-            }
         });
     });
 }
 
-/// The View menu's workspaces, panels and layout: the one place that lists
-/// them all (the tabs are the quick way to the built-in workspaces).
-fn view_sections(ui: &mut egui::Ui, menu_id: egui::Id, v: &ViewMenu, out: &mut Picked) {
-    kit::menu_separator(ui);
-    kit::menu_heading(ui, "Workspaces");
-    for (i, w) in v.spaces.iter().enumerate() {
-        if MenuItem::new(&w.name).checked(v.current == Some(i)).shortcut(v.space_keys.get(i).map_or("", String::as_str)).show(ui).clicked() {
-            out.workspace = Some(w.clone());
-            kit::set_open(ui.ctx(), menu_id, false);
-        }
-    }
-    kit::menu_heading(ui, "Panels");
-    for (p, on, keys) in v.panels {
-        if MenuItem::new(p.name()).checked(*on).shortcut(keys).show(ui).clicked() {
-            out.panel = Some(*p);
-            kit::set_open(ui.ctx(), menu_id, false);
-        }
-    }
-    kit::menu_heading(ui, "Layout");
-    if MenuItem::new("Maximise panel").checked(v.maximised).shortcut("⌘\\").icon(Icon::CornersOut).show(ui).clicked() {
-        out.action = Some(Action::Maximise);
-        kit::set_open(ui.ctx(), menu_id, false);
-    }
+/// The View menu's "Save layout as…" field.
+fn save_layout_field(ui: &mut egui::Ui, menu_id: egui::Id, out: &mut Picked) {
     let id = egui::Id::unique("save-workspace-name");
     let mut name: String = ui.ctx().data(|d| d.get_temp(id)).unwrap_or_default();
     let resp = kit::text_field(ui, &mut name, "Save layout as…", None, 196.0, None);
@@ -478,14 +453,47 @@ fn view_sections(ui: &mut egui::Ui, menu_id: egui::Id, v: &ViewMenu, out: &mut P
         kit::set_open(ui.ctx(), menu_id, false);
     }
     ui.ctx().data_mut(|d| d.insert_temp(id, name));
-    if MenuItem::new("Reset layout").icon(Icon::ArrowCounterClockwise).show(ui).clicked() {
-        out.reset = true;
-        kit::set_open(ui.ctx(), menu_id, false);
+}
+
+/// A job that stopped on an error (a cancelled one stopped on request).
+fn failed(j: &crate::app::Job) -> bool {
+    j.error.is_some()
+}
+
+/// What the popover says under a job's name.
+fn job_status(j: &crate::app::Job) -> String {
+    if failed(j) {
+        "Failed · export again from File ▸ Export".to_owned()
+    } else if j.cancelled {
+        "Cancelled".to_owned()
+    } else if j.done {
+        "Done".to_owned()
+    } else {
+        format!("{} · {}%  ·  {}", j.detail, (j.progress * 100.0) as u32, Jobs::eta(j))
     }
 }
 
+/// How many finished jobs the popover keeps listed.
+const KEPT_FINISHED: usize = Jobs::KEPT_FINISHED;
+
+/// Every running job and the last few finished ones, newest first.
+fn shown_jobs(list: &[crate::app::Job]) -> Vec<&crate::app::Job> {
+    let mut finished = 0;
+    list.iter()
+        .rev()
+        .filter(|j| {
+            if !j.done && !j.cancelled {
+                return true;
+            }
+            finished += 1;
+            finished <= KEPT_FINISHED
+        })
+        .collect()
+}
+
 /// Jobs button: a spinner while anything runs; opens the jobs popover.
-fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
+fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) -> Option<u64> {
+    let mut retry = None;
     let t = theme::tokens(ui.ctx());
     let running = jobs.running();
     let id = ui.scope_id().with("jobs");
@@ -510,15 +518,24 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
             return;
         }
         let mut cancel = None;
-        for j in jobs.list.iter().rev().take(6) {
-            let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.0), Sense::hover());
+        for j in shown_jobs(&jobs.list) {
+            let (r, row) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 52.0), Sense::hover());
+            if let Some(e) = &j.error {
+                row.on_hover_text(e);
+            }
             let p = ui.painter();
             kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 14.0), Align2::LEFT_CENTER, &j.name, theme::control_medium(), t.text, r.width() - 50.0);
-            let status = if j.cancelled { "Cancelled".to_owned() } else if j.done { "Done".to_owned() } else { format!("{} · {}%  ·  {}", j.detail, (j.progress * 100.0) as u32, Jobs::eta(j)) };
-            kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 32.0), Align2::LEFT_CENTER, &status, theme::caption(), t.text_2, r.width() - 50.0);
+            let status = job_status(j);
+            kit::paint_text_clipped(p, egui::pos2(r.left() + 8.0, r.top() + 32.0), Align2::LEFT_CENTER, &status, theme::caption(), if failed(j) { t.danger } else { t.text_2 }, r.width() - 50.0);
             let bar = Rect::from_min_size(egui::pos2(r.left() + 8.0, r.bottom() - 6.0), Vec2::new(r.width() - 50.0, 3.0));
             p.rect_filled(bar, CornerRadius::same(2), t.raised);
-            p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * j.progress, 3.0)), CornerRadius::same(2), if j.cancelled { t.text_2 } else { t.accent });
+            p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(bar.width() * j.progress, 3.0)), CornerRadius::same(2), if failed(j) { t.danger } else if j.cancelled { t.text_2 } else { t.accent });
+            if can_retry(j) {
+                let br = Rect::from_center_size(egui::pos2(r.right() - 18.0, r.center().y), Vec2::splat(24.0));
+                if IconButton::new(Icon::ArrowCounterClockwise, "Retry").size(24.0, 14.0).show_at(ui, br).clicked() {
+                    retry = Some(j.id);
+                }
+            }
             if !j.done && !j.cancelled {
                 let br = Rect::from_center_size(egui::pos2(r.right() - 18.0, r.center().y), Vec2::splat(24.0));
                 if IconButton::new(Icon::X, "Cancel job").size(24.0, 14.0).show_at(ui, br).clicked() {
@@ -530,25 +547,185 @@ fn jobs_button(jobs: &mut Jobs, ui: &mut egui::Ui) {
             jobs.cancel(id);
         }
     });
+    retry
 }
+
+/// A failed or cancelled export that kept its request can run again.
+fn can_retry(j: &crate::app::Job) -> bool {
+    #[cfg(feature = "render")]
+    return (j.error.is_some() || j.cancelled) && j.request.is_some();
+    #[cfg(not(feature = "render"))]
+    return {
+        let _ = j;
+        false
+    };
+}
+
+/// Retry: the export runs again as a new job with the same request.
+#[cfg(feature = "render")]
+fn retry_job(app: &mut StudioApp, ctx: &egui::Context, id: u64) {
+    let doc = &app.doc;
+    match app.jobs.retry_with(id, |req| crate::export_run::start(doc, req.clone())) {
+        Some(_) => {
+            kit::push(ctx, "Export started again", None, Some(Icon::ArrowCounterClockwise));
+        }
+        None => {
+            kit::push(ctx, "That export can't be run again; start it from Export", None, Some(Icon::Info));
+        }
+    }
+}
+
+#[cfg(not(feature = "render"))]
+fn retry_job(_app: &mut StudioApp, _ctx: &egui::Context, _id: u64) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn menus_of(h: &crate::ui_tests::Harness) -> Vec<Menu> {
+        model(&h.app, &h.ctx, false)
+    }
+
+    fn items(all: &[Menu]) -> Vec<(&'static str, &Item)> {
+        all.iter().flat_map(|m| m.items().map(move |i| (m.title, i))).collect()
+    }
+
+    fn action_of(i: &Item) -> Option<std::mem::Discriminant<Action>> {
+        match &i.what {
+            Do::Act(f) => f().map(|a| std::mem::discriminant(&a)),
+            _ => None,
+        }
+    }
 
     /// Every Edit and Clip row that works on the selection has an item with
     /// its keys, and the menus list them once.
     #[test]
     fn the_clip_rows_are_in_the_menus_once_with_their_keys() {
         let h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
-        let all = menus(&h.app);
-        let rows: Vec<(&str, Option<ClipOp>, String)> = all.iter().flat_map(|(_, v)| v.iter().flatten()).filter(|i| i.op.is_some()).map(|i| (i.label, i.op, i.shortcut.clone())).collect();
+        let all = menus_of(&h);
+        let rows: Vec<(&str, String)> = items(&all).into_iter().filter(|(_, i)| matches!(i.what, Do::Cut | Do::Copy | Do::Paste | Do::ClipKey(_))).map(|(_, i)| (i.label.as_str(), i.shortcut.clone())).collect();
         assert_eq!(rows.len(), 11);
         for want in ["Cut", "Copy", "Paste", "Group", "Ungroup", "Link", "Unlink", "Freeze frame at playhead", "Reverse", "Copy look", "Paste look"] {
             assert_eq!(rows.iter().filter(|r| r.0 == want).count(), 1, "{want}");
         }
-        assert_eq!(rows.iter().find(|r| r.0 == "Copy").unwrap().2, "⌘C");
-        assert_eq!(rows.iter().find(|r| r.0 == "Group").unwrap().2, "⌘G");
+        assert_eq!(rows.iter().find(|r| r.0 == "Copy").unwrap().1, "⌘C");
+        assert_eq!(rows.iter().find(|r| r.0 == "Group").unwrap().1, "⌘G");
+    }
+
+    /// The menus the window and the menu bar are built from: these titles in
+    /// this order, each row doing the action it names.
+    #[test]
+    fn every_menu_row_is_in_the_model_with_its_action() {
+        let h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        let all = menus_of(&h);
+        assert_eq!(all.iter().map(|m| m.title).collect::<Vec<_>>(), ["File", "Edit", "Clip", "Project", "View", "Help"]);
+        let d = |a: Action| Some(std::mem::discriminant(&a));
+        let want: Vec<(&str, &str, Option<std::mem::Discriminant<Action>>)> = vec![
+            ("File", "Open…", d(Action::Open)),
+            ("File", "Save", d(Action::Save)),
+            ("File", "Save as…", d(Action::SaveAs)),
+            ("File", "Import media…", d(Action::ImportMedia)),
+            ("File", "Add sample media", d(Action::SampleMedia)),
+            ("File", "Import timeline…", d(Action::ImportTimeline)),
+            ("File", "Import script…", d(Action::ImportScript)),
+            ("File", "Project settings…", d(Action::ProjectSettings)),
+            ("File", "Export OpenTimelineIO…", d(Action::ExportOtio)),
+            ("File", "Export…", d(Action::Export)),
+            ("File", "Settings…", d(Action::Settings)),
+            ("Edit", "Undo", d(Action::Undo)),
+            ("Edit", "Redo", d(Action::Redo)),
+            ("Edit", "Select all", d(Action::SelectAll)),
+            ("Edit", "Duplicate", d(Action::Duplicate)),
+            ("Edit", "Delete", d(Action::Delete)),
+            ("Clip", "Split at playhead", d(Action::Split)),
+            ("Clip", "Add marker", d(Action::Marker)),
+            ("Clip", "Set in point", d(Action::RangeIn)),
+            ("Clip", "Set out point", d(Action::RangeOut)),
+            ("Clip", "Clear range", d(Action::ClearRange)),
+            ("Project", "Production…", d(Action::Production)),
+            ("Project", "Project health…", d(Action::ProjectHealth)),
+            ("View", "Zoom in", d(Action::ZoomIn)),
+            ("View", "Zoom out", d(Action::ZoomOut)),
+            ("View", "Fit sequence", d(Action::Fit)),
+            ("View", "Maximise panel", d(Action::Maximise)),
+            ("Help", "Search help", d(Action::Help)),
+            ("Help", "Welcome tour", d(Action::Tour)),
+            ("Help", "Keyboard shortcuts", d(Action::Shortcuts)),
+            ("Help", "Check for updates…", d(Action::CheckUpdates)),
+        ];
+        let got = items(&all);
+        for (menu, label, action) in want {
+            let hits: Vec<_> = got.iter().filter(|(m, i)| *m == menu && i.label == label).collect();
+            assert_eq!(hits.len(), 1, "{menu} ▸ {label}");
+            assert!(action_of(hits[0].1) == action, "{menu} ▸ {label} runs another action");
+        }
+        // The View menu lists the workspaces and every closable panel, and resets the layout.
+        let view = got.iter().filter(|(m, _)| *m == "View").count();
+        assert!(view >= 3 + 1 + crate::workspaces::all().len() + 1, "{view} View rows");
+        assert!(got.iter().any(|(m, i)| *m == "View" && matches!(i.what, Do::ResetLayout)));
+        assert!(got.iter().any(|(m, i)| *m == "View" && matches!(&i.what, Do::Space(n) if n == "Edit")));
+        assert!(got.iter().any(|(m, i)| *m == "View" && matches!(i.what, Do::Panel(Panel::Inspector)) && i.checked.is_some()));
+    }
+
+    #[test]
+    fn rows_are_disabled_when_they_cannot_run() {
+        let h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        let all = menus_of(&h);
+        let row = |label: &str| items(&all).into_iter().find(|(_, i)| i.label == label).map(|(_, i)| i.enabled).unwrap();
+        // A fresh project: nothing to undo or redo, nothing selected.
+        for label in ["Undo", "Redo", "Duplicate", "Delete"] {
+            assert!(!row(label), "{label}");
+        }
+        assert_eq!(row("Clear range"), h.app.doc.project.range.is_some());
+        for label in ["Save", "Export…", "Split at playhead", "Zoom in"] {
+            assert!(row(label), "{label}");
+        }
+    }
+
+    /// Two rows with the same ⌘ key would race for it in the menu bar.
+    #[test]
+    fn no_command_key_belongs_to_two_rows() {
+        let h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        let all = menus_of(&h);
+        let mut seen: Vec<(String, &str)> = Vec::new();
+        for (_, i) in items(&all) {
+            if crate::macmenu::native_key(&i.shortcut).is_some() {
+                assert!(!seen.iter().any(|(k, _)| *k == i.shortcut), "{} shares {}", i.label, i.shortcut);
+                seen.push((i.shortcut.clone(), &i.label));
+            }
+        }
+        // And the menu bar binds each of them once.
+        let flat: Vec<&Item> = all.iter().flat_map(Menu::items).collect();
+        let owned = crate::macmenu::owned_keys(flat.iter().copied(), &[]);
+        let bound: Vec<_> = owned.iter().flatten().collect();
+        for (n, k) in bound.iter().enumerate() {
+            assert!(!bound[n + 1..].contains(k), "{k:?} bound twice");
+        }
+    }
+
+    fn job(id: u64, done: bool, cancelled: bool, error: Option<&str>) -> crate::app::Job {
+        crate::app::Job { id, name: format!("Export {id}"), detail: String::new(), progress: 0.5, length: 10.0, done, cancelled, task: None, started: 0.0, error: error.map(str::to_owned), path: None, #[cfg(feature = "render")] request: None }
+    }
+
+    #[test]
+    fn a_failed_job_says_failed_and_a_cancelled_one_says_cancelled() {
+        // The task loop marks a failed export cancelled and records why.
+        let failed_job = job(1, false, true, Some("No space left on disk"));
+        assert!(job_status(&failed_job).starts_with("Failed"));
+        assert!(job_status(&job(2, false, true, None)).starts_with("Cancelled"));
+        assert_eq!(job_status(&job(3, true, false, None)), "Done");
+        assert!(job_status(&job(4, false, false, None)).contains('%'));
+    }
+
+    #[test]
+    fn the_popover_lists_running_jobs_and_the_last_six_finished() {
+        let mut list: Vec<_> = (1..=9).map(|i| job(i, true, false, None)).collect();
+        list.insert(0, job(100, false, false, None)); // the oldest, still running
+        let ids: Vec<u64> = shown_jobs(&list).iter().map(|j| j.id).collect();
+        assert_eq!(ids.len(), 7, "{ids:?}");
+        assert!(ids.contains(&100), "a running job is never dropped");
+        assert_eq!(&ids[..6], &[9, 8, 7, 6, 5, 4]);
+        assert!(!ids.contains(&3));
     }
 
     #[test]

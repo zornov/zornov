@@ -650,17 +650,9 @@ pub fn viewer(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         dual_up(app, ui, area, frames);
     } else if app.editor.cutting.show_source && app.editor.cutting.source.is_some() {
         source_monitor(app, ui, area);
-    } else if app.editor.cutting.source.is_some() {
-        // A way back to the loaded source.
-        let b = Rect::from_min_size(egui::pos2(area.left() + 8.0, area.top() + 6.0), Vec2::new(86.0, 22.0));
-        let resp = ui.interact(b, egui::Id::unique("cut-source-tab"), Sense::click());
-        let t = theme::tokens(ui.ctx());
-        ui.painter().rect_filled(b, 6, Color32::from_black_alpha(if resp.hovered() { 170 } else { 110 }));
-        ui.painter().text(b.center(), Align2::CENTER_CENTER, crate::i18n::shown("Source ⇧2"), theme::caption(), t.text);
-        if resp.clicked() {
-            app.editor.cutting.show_source = true;
-        }
     }
+    // The way back to a loaded source is the viewer header's Program/Source
+    // switch (and ⇧2); nothing floats over the viewer's own toolbars.
 }
 
 fn fit(area: Rect, w: f32, h: f32) -> Rect {
@@ -907,7 +899,14 @@ mod tests {
         (app, ctx, eframe::Frame::_new_kittest())
     }
 
-    fn draw(app: &mut StudioApp, ctx: &egui::Context, frame: &mut eframe::Frame, t: f64, events: Vec<egui::Event>) {
+    fn draw(app: &mut StudioApp, ctx: &egui::Context, frame: &mut eframe::Frame, t: f64, mut events: Vec<egui::Event>) {
+        // Each key is let go in the same frame, as a typed key is: a key
+        // that is never released reads as held, so its next press is a repeat.
+        let releases: Vec<egui::Event> = events.iter().filter_map(|e| match e {
+            egui::Event::Key { key, physical_key, modifiers, .. } => Some(egui::Event::Key { key: *key, physical_key: *physical_key, pressed: false, repeat: false, modifiers: *modifiers }),
+            _ => None,
+        }).collect();
+        events.extend(releases);
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), time: Some(t), events, ..Default::default() };
         // One headless frame, finished as a window's backend would.
         let mut out = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, frame));
@@ -950,6 +949,21 @@ mod tests {
         // Undo brings it back.
         app.doc.undo();
         assert_eq!(spine(&app).len(), 3);
+    }
+
+    #[test]
+    fn no_floating_source_chip_over_the_viewer_toolbars() {
+        let _guard = test_movie::LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut app, ctx, mut fr) = app_with_cut();
+        draw(&mut app, &ctx, &mut fr, 0.0, vec![]);
+        // Load a source, then go back to the program (⇧4).
+        app.editor.playhead = 700_000;
+        draw(&mut app, &ctx, &mut fr, 0.1, vec![key(egui::Key::F, true)]);
+        app.editor.cutting.show_source = false;
+        draw(&mut app, &ctx, &mut fr, 0.2, vec![]);
+        draw(&mut app, &ctx, &mut fr, 0.3, vec![]);
+        assert!(app.editor.cutting.source.is_some(), "the source stays loaded");
+        assert!(ctx.read_response(egui::Id::unique("cut-source-tab")).is_none(), "no chip drawn over the viewer");
     }
 
     #[test]

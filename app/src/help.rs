@@ -336,6 +336,18 @@ mod tests {
     }
 
     #[test]
+    fn bracket_keys_and_region_cycling_are_described_as_they_work() {
+        let en = include_str!("../../crates/project/i18n/locales/en.ftl");
+        let line = |key: &str| en.lines().find(|l| l.starts_with(&format!("{key} ="))).unwrap_or_else(|| panic!("{key} missing"));
+        for key in ["help-shortcuts-body", "help-split-trim-body"] {
+            let l = line(key);
+            assert!(l.contains("[ and ]") && l.contains("trim point"), "{key} must explain [ and ]");
+        }
+        assert!(line("help-keyboard-nav-body").contains("the panels on screen"));
+        assert!(line("workspace-production-blurb").contains("Assistant") && !line("workspace-production-blurb").contains("AI editor"));
+    }
+
+    #[test]
     fn empty_query_lists_everything() {
         assert_eq!(search("", Lang::En).len(), TOPICS.len());
     }

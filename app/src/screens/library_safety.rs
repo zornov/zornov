@@ -31,6 +31,12 @@ struct Row {
     licence: String,
 }
 
+/// A file reached through two paths (a copy and its original) is one item in the list.
+fn one_per_file(rows: Vec<Row>) -> Vec<Row> {
+    let mut seen = std::collections::HashSet::new();
+    rows.into_iter().filter(|r| seen.insert((r.name.clone(), r.kind.clone(), r.seconds.to_bits()))).collect()
+}
+
 #[derive(Clone, Default)]
 struct State {
     tab: usize,
@@ -42,11 +48,12 @@ struct State {
     rows: Vec<Row>,
     selected: Option<i64>,
     label: String,
-    total: i64,
     health: Option<Value>,
     history: Vec<(String, u64, String)>,
     rights: Option<Value>,
     clean: Option<Value>,
+    /// The plan `clean` was made from: "Clean now" applies exactly this.
+    clean_plan: Option<safety::Plan>,
     note: String,
     /// Long work (backup, collect) reports here.
     work: Arc<Mutex<Option<String>>>,
@@ -206,7 +213,7 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         if let Some(root) = root(app) {
             let _ = store.sync_model(&root, &app.doc.model);
         }
-        st.rows = store
+        let rows: Vec<Row> = store
             .find(&q)
             .unwrap_or_default()
             .into_iter()
@@ -222,10 +229,10 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
                 licence: rights::get(store, h.asset.id).ok().flatten().map(|r| r.licence).unwrap_or_else(|| "unknown".into()),
             })
             .collect();
-        st.total = store.counts().ok().and_then(|c| c["assets"].as_i64()).unwrap_or(0);
+        st.rows = one_per_file(rows);
         st.asked = Some(ask);
     }
-    ui.label(egui::RichText::new(format!("{} shown of {} in the library", st.rows.len(), st.total)).font(theme::caption()).color(t.text_2));
+    ui.label(egui::RichText::new(crate::i18n::tf(format!("{} items", st.rows.len()))).font(theme::caption()).color(t.text_2));
     let avail = ui.available_height() - 52.0;
     let mut change = false;
     let mut more_like: Option<i64> = None;
@@ -405,7 +412,9 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         }
         Some(Act::Clean) => {
             let o = safety::CleanOptions::default();
-            st.clean = Some(safety::clean_plan(&root, &o).json(5));
+            let plan = safety::clean_plan(&root, &o);
+            st.clean = Some(plan.json(5));
+            st.clean_plan = Some(plan);
         }
         None => {}
     }
@@ -413,12 +422,7 @@ fn safety_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(crate::i18n::tf(format!("Would free {} ({} files). Never media, never anything a project uses.", c["would_free"].as_str().unwrap_or("0"), c["files"]))).font(theme::caption()).color(t.text_2));
             if c["files"].as_u64().unwrap_or(0) > 0 && Button::secondary("Clean now").compact().show(ui).clicked() {
-                let o = safety::CleanOptions::default();
-                let plan = safety::clean_plan(&root, &o);
-                st.note = match safety::clean_apply(&root, &o, &plan) {
-                    Ok(freed) => crate::i18n::tf(format!("Freed {}.", safety::human(freed))),
-                    Err(e) => e,
-                };
+                st.note = clean_previewed(&root, &safety::CleanOptions::default(), st.clean_plan.take());
                 st.clean = None;
                 st.health = None;
             }
@@ -519,6 +523,22 @@ fn rights_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     ui.label(egui::RichText::new(hint).font(theme::caption()).color(t.text_2));
 }
 
+/// What the first click on "Clean up cache" says.
+fn clean_prompt(plan: &safety::Plan) -> String {
+    let n = plan.items.len();
+    crate::i18n::tf(format!("Clean up would free {} from {n} file{}; click Clean up cache again to do it", safety::human(plan.bytes()), if n == 1 { "" } else { "s" }))
+}
+
+/// Applies the plan the person was shown (never a fresh one, which could
+/// hold other files); `clean_apply` still re-checks each file before removing it.
+fn clean_previewed(root: &std::path::Path, o: &safety::CleanOptions, plan: Option<safety::Plan>) -> String {
+    let Some(plan) = plan else { return crate::i18n::tf("Nothing to clean; preview again".to_owned()) };
+    match safety::clean_apply(root, o, &plan) {
+        Ok(freed) => crate::i18n::tf(format!("Freed {}.", safety::human(freed))),
+        Err(e) => e,
+    }
+}
+
 /// Saves the project to its folder, quietly (before a backup or restore).
 fn save_now(app: &mut StudioApp) {
     if let Some(f) = app.doc.folder.clone() {
@@ -537,6 +557,11 @@ pub fn clean_for(app: &mut StudioApp, ctx: &egui::Context) {
     let mut o = safety::CleanOptions::default();
     o.other_projects = std::fs::read_dir(studio_paths::studio().join("Projects")).map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("project.json").is_file() && *p != root).collect()).unwrap_or_default();
     let plan = safety::clean_plan(&root, &o);
+    // Removed files do not come back: the first click says what would go, the second does it.
+    if !kit::confirm_click(ctx, egui::Id::new("clean-up-cache")) {
+        kit::push(ctx, clean_prompt(&plan), None, Some(Icon::Info));
+        return;
+    }
     match safety::clean_apply(&root, &o, &plan) {
         Ok(freed) => kit::push(ctx, crate::i18n::tf(format!("Cleaned up {}", safety::human(freed))), None, Some(Icon::CheckCircle)),
         Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
@@ -556,7 +581,49 @@ pub fn export_block(doc: &crate::doc::Doc) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_file_listed_twice_shows_once() {
+        let row = |id: i64, name: &str| super::Row { id, name: name.into(), kind: "video".into(), seconds: 4.0, ..Default::default() };
+        let rows = super::one_per_file(vec![row(1, "a.mp4"), row(2, "a.mp4"), row(3, "b.mp4"), row(4, "b.mp4")]);
+        assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), [1, 3], "first of each, in order");
+    }
+
     use super::*;
+
+    #[test]
+    fn clean_up_cache_says_what_would_go_before_removing_anything() {
+        let plan = safety::Plan { items: vec![safety::Doomed { path: "x".into(), bytes: 2048, why: "project cache" }], kept_in_use: 0 };
+        let said = clean_prompt(&plan);
+        assert!(said.contains("1 file;") && said.contains("again"), "{said}");
+        assert!(clean_prompt(&safety::Plan::default()).contains("0 files"));
+    }
+
+    #[test]
+    fn clean_now_applies_the_plan_that_was_previewed() {
+        let d = std::env::temp_dir().join(format!("zornov-clean-now-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let root = d.join("proj");
+        let pf = studio_model::file::ProjectFolder::create(&root).unwrap();
+        pf.save(&studio_model::Project::new(Default::default())).unwrap();
+        let shared = d.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::create_dir_all(pf.cache_dir()).unwrap();
+        let (shown, later) = (pf.cache_dir().join("shown.png"), pf.cache_dir().join("made-after-preview.png"));
+        std::fs::write(&shown, vec![1u8; 2000]).unwrap();
+        let o = safety::CleanOptions { shared_cache: shared, ..Default::default() };
+        let plan = safety::clean_plan(&root, &o);
+        assert_eq!(plan.items.len(), 1);
+        // A file that appears after the preview was never shown, so it stays.
+        std::fs::write(&later, vec![2u8; 2000]).unwrap();
+        let note = clean_previewed(&root, &o, Some(plan));
+        assert!(note.starts_with("Freed"), "{note}");
+        assert!(!shown.exists(), "the previewed file is gone");
+        assert!(later.exists(), "a file that was not in the preview is not removed");
+        // No preview, nothing removed.
+        assert!(clean_previewed(&root, &o, None).contains("preview"));
+        assert!(later.exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn ages_are_words_not_timestamps() {

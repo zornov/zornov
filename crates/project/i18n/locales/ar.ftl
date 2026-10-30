@@ -1380,3 +1380,4 @@ dock-move-heading = نقل { $panel } إلى…
 editorial-panel = قوائم المونتاج
 pop-out = فتح في نافذة مستقلة
 dock-back = إعادة التثبيت
+feedback = ملاحظات

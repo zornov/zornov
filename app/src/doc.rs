@@ -31,6 +31,15 @@ pub struct Doc {
     gesture: Option<String>,
     /// The clips the last undo or redo changed (for restoring selection).
     history_touched: Vec<u32>,
+    /// The selection before and after each undo step, in step order
+    /// (see [`Self::track_selection`]); `redo_marks` is the same for the
+    /// undone steps.
+    marks: Vec<(Vec<u32>, Vec<u32>)>,
+    redo_marks: Vec<(Vec<u32>, Vec<u32>)>,
+    /// The selection as the editor last said it was.
+    live_selection: Vec<u32>,
+    /// The selection the last undo or redo should restore.
+    restore: Option<Vec<u32>>,
     /// Bumped whenever the view is rebuilt.
     pub revision: u64,
     /// Bumped when the project itself changes (not when the view only
@@ -67,7 +76,7 @@ pub struct Synced {
 impl Doc {
     pub fn new(model: m::Project) -> Self {
         let project = std::sync::Arc::new(bridge::view_of(&model, 0));
-        let mut d = Self { model, history: m::History::new(), project, view_time: 0, gesture: None, history_touched: Vec::new(), revision: 0, edits: 0, error: None, folder: None, slot: Default::default(), keyed: Vec::new(), guard: None, synced: None, open_hold: None };
+        let mut d = Self { model, history: m::History::new(), project, view_time: 0, gesture: None, history_touched: Vec::new(), marks: Vec::new(), redo_marks: Vec::new(), live_selection: Vec::new(), restore: None, revision: 0, edits: 0, error: None, folder: None, slot: Default::default(), keyed: Vec::new(), guard: None, synced: None, open_hold: None };
         d.index();
         d
     }
@@ -347,6 +356,51 @@ impl Doc {
         std::mem::take(&mut self.history_touched)
     }
 
+    /// The editor tells the document its selection once a frame, before it
+    /// edits. A step that appeared since the last call was made with the
+    /// previous selection selected and left this one: both are kept so undo
+    /// can put back exactly what was selected before the edit, and redo what
+    /// was selected after it.
+    pub fn track_selection(&mut self, selection: &[u32]) {
+        self.reconcile_marks(selection);
+        self.live_selection = selection.to_vec();
+    }
+
+    fn reconcile_marks(&mut self, now: &[u32]) {
+        let n = self.history.undo_steps().len();
+        if n > self.marks.len() {
+            self.redo_marks.clear();
+            while self.marks.len() < n {
+                self.marks.push((self.live_selection.clone(), now.to_vec()));
+            }
+        } else if self.marks.len() > n {
+            // Steps fell off the far end (the history's cap) or were cleared.
+            let drop = self.marks.len() - n;
+            self.marks.drain(..drop);
+        }
+    }
+
+    /// The selection the last undo or redo should leave, once.
+    pub fn take_selection_restore(&mut self) -> Option<Vec<u32>> {
+        self.restore.take()
+    }
+
+    fn undone_mark(&mut self, i: usize, undo: bool) {
+        let live = self.live_selection.clone();
+        self.reconcile_marks(&live);
+        if undo {
+            if i < self.marks.len() {
+                let m = self.marks.remove(i);
+                self.restore = Some(m.0.clone());
+                self.redo_marks.push(m);
+            }
+        } else if self.redo_marks.len() == self.history.redo_steps().len() {
+            let Some(m) = self.redo_marks.pop() else { return };
+            self.restore = Some(m.1.clone());
+            self.marks.push(m);
+        }
+    }
+
     /// Close the open gesture (pointer released).
     pub fn end_gesture(&mut self) {
         if self.gesture.take().is_some() && self.history.in_transaction() {
@@ -467,6 +521,8 @@ impl Doc {
         self.end_gesture();
         let steps = self.history.undo_steps();
         let Some(i) = steps.iter().rposition(|s| mine(&s.author)) else { return Ok(None) };
+        self.undone_mark(i, true);
+        let steps = self.history.undo_steps();
         if i + 1 == steps.len() && !self.history.in_transaction() {
             let r = self.history.undo(&mut self.model).map_err(|e| e.to_string());
             let done = self.history.last_redo().cloned();
@@ -535,6 +591,8 @@ impl Doc {
         self.end_gesture();
         let steps = self.history.redo_steps();
         let Some(i) = steps.iter().rposition(|s| mine(&s.author)) else { return Ok(None) };
+        self.undone_mark(i, false);
+        let steps = self.history.redo_steps();
         if i + 1 == steps.len() && !self.history.in_transaction() {
             let r = self.history.redo(&mut self.model).map_err(|e| e.to_string());
             let done = self.history.last_undo().cloned();

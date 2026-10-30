@@ -259,9 +259,14 @@ fn openers(h: &Harness) -> Vec<(accesskit::Role, String)> {
         .filter(|(_, n)| matches!(n.role(), Tab | ComboBox) || (n.role() == Button && (n.is_selected().is_some() || n.toggled().is_some())))
         .map(|(_, n)| (n.role(), n.label().or(n.value()).unwrap_or("").to_owned()))
         .filter(|(_, l)| !l.is_empty())
+        // Controls that open a file dialog, which no test can answer.
+        .filter(|(_, l)| !DIALOG_OPENERS.contains(&l.as_str()))
         .filter(|x| seen.insert(x.clone()))
         .collect()
 }
+
+/// Home's side-rail entries that open the system's folder chooser.
+const DIALOG_OPENERS: &[&str] = &["Open project", "Open…", "Open folder…"];
 
 /// Named buttons that open a menu or popover.
 const MENU_BUTTONS: &[&str] = &["File", "Edit", "Clip", "View", "Help", "Layout", "Background jobs", "Overlays", "Add", "More", "Safety", "Rights"];
@@ -449,4 +454,33 @@ fn a_narrow_timeline_toolbar_scrolls_instead_of_clipping() {
     // Scrolled out of the strip's left edge, or at least moved along.
     let moved = h.find(None, "Select (drag empty space to box-select)");
     assert!(moved.is_none_or(|m| m.left() < first.left() - 20.0), "wheeling scrolls the tools: {first:?} -> {moved:?}");
+}
+
+/// A button never grows past the room it is given: it drops its icon first,
+/// then ends its label in an ellipsis; with room it is its natural size.
+#[test]
+fn a_button_fits_its_room_or_shortens_its_label() {
+    use crate::icons::Icon;
+    let ctx = egui::Context::default();
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0));
+    let widths = |room: f32, label: &str| {
+        let mut w = 0.0;
+        for frame in 0..4 {
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(frame as f64 / 60.0), ..Default::default() };
+            crate::editor::test_frame(&ctx, input, |ui| {
+                ui.allocate_ui(egui::vec2(room, 40.0), |ui| {
+                    w = crate::kit::Button::secondary(label).icon(Icon::PlayFill).compact().show(ui).rect.width();
+                });
+            });
+        }
+        w
+    };
+    let natural = widths(400.0, "Needs model");
+    assert!(natural > 80.0 && natural < 200.0, "natural width {natural}");
+    for room in [natural - 20.0, 70.0, 50.0] {
+        let w = widths(room, "Needs model");
+        assert!(w <= room.max(28.0) + 0.5, "Needs model in {room} wide takes {w}");
+    }
+    let w = widths(120.0, "Remove the background from the whole clip");
+    assert!(w <= 120.5, "a long label in 120 wide takes {w}");
 }

@@ -1360,3 +1360,4 @@ dock-move-heading = 将{ $panel }移到…
 editorial-panel = 剪辑清单
 pop-out = 在独立窗口中打开
 dock-back = 停靠回去
+feedback = 反馈

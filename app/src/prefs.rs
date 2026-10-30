@@ -108,6 +108,8 @@ pub struct Prefs {
     pub tips_seen: Vec<String>,
     /// The workspace last used (see `workspace.rs`); empty is Edit.
     pub workspace: String,
+    /// No chime when an export finishes (`chime::play_unless`).
+    pub quiet_chime: bool,
 }
 
 impl Default for Prefs {
@@ -146,6 +148,7 @@ impl Default for Prefs {
             tips_on: true,
             tips_seen: Vec::new(),
             workspace: String::new(),
+            quiet_chime: false,
         }
     }
 }
@@ -209,6 +212,15 @@ impl Prefs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quiet_chime_is_off_by_default_and_old_settings_still_read() {
+        assert!(!Prefs::default().quiet_chime, "the chime plays unless asked to be quiet");
+        let (p, note) = read_in(Some(r#"{"tour_done":true}"#.into()), &std::env::temp_dir().join("zornov-prefs-quiet"));
+        assert!(note.is_none() && !p.quiet_chime && p.tour_done, "settings saved before the option exist read as before");
+        let quiet = serde_json::to_string(&Prefs { quiet_chime: true, ..Prefs::default() }).unwrap();
+        assert!(read_in(Some(quiet), &std::env::temp_dir()).0.quiet_chime, "the choice survives a save");
+    }
 
     #[test]
     fn unreadable_settings_keep_what_still_reads_and_are_reported() {

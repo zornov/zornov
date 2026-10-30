@@ -916,7 +916,7 @@ pub struct Doomed {
     pub why: &'static str,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Plan {
     pub items: Vec<Doomed>,
     /// Things that looked removable but a project needs.

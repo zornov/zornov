@@ -184,6 +184,39 @@ pub fn cut_text(ctx: &egui::Context, out: &egui::FullOutput, extra: &[(Rect, boo
     cuts
 }
 
+/// A control's label drawn wider than the control: clipped by nothing, but
+/// half outside its own button, chip or tab. `named` is each control's
+/// accessible name and where it sits.
+pub fn spilled_text(ctx: &egui::Context, out: &egui::FullOutput, named: &[(String, Rect)], slack: f32) -> Vec<Cut> {
+    let screen = ctx.content_rect();
+    let mut spilled = vec![];
+    fn walk(shape: &epaint::Shape, f: &mut impl FnMut(&epaint::TextShape)) {
+        match shape {
+            epaint::Shape::Text(t) => f(t),
+            epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, f)),
+            _ => {}
+        }
+    }
+    for cs in &out.shapes {
+        walk(&cs.shape, &mut |t| {
+            if t.angle != 0.0 || t.galley.is_empty() {
+                return;
+            }
+            let rect = t.galley.rect.translate(t.pos.to_vec2());
+            if !rect.intersects(screen) {
+                return;
+            }
+            let text = t.galley.text();
+            let start = egui::pos2(rect.left() + 1.0, rect.center().y);
+            let Some((_, home)) = named.iter().filter(|(n, r)| n.trim() == text.trim() && r.contains(start)).min_by(|a, b| a.1.area().total_cmp(&b.1.area())) else { return };
+            if rect.right() > home.right() + slack {
+                spilled.push(Cut { text: text.to_owned(), rect, clip: *home });
+            }
+        });
+    }
+    spilled
+}
+
 /// Two widgets on the same layer drawn over each other: neither holds the
 /// other, and they share more than a sliver (`min_share` of the smaller).
 #[derive(Debug, Clone)]

@@ -102,7 +102,15 @@ impl Harness {
 
     /// Text in the last frame cut off with no way to see the rest.
     pub fn cut_text(&self) -> Vec<crate::ui_shot::Cut> {
-        crate::ui_shot::cut_text(&self.ctx, self.last.as_ref().expect("a frame"), &[], 1.0)
+        let out = self.last.as_ref().expect("a frame");
+        let mut cuts = crate::ui_shot::cut_text(&self.ctx, out, &[], 1.0);
+        // Timeline clip names run past their clip: editor/timeline.rs (listed
+        // in the R3-4 report, not this package's file).
+        let named: Vec<(String, Rect)> = out.platform_output.accesskit_update.as_ref().map(|u| u.nodes.iter().filter_map(|(_, n)| n.bounds().map(|b| (n.label().unwrap_or("").to_owned(), Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))))).collect()).unwrap_or_default();
+        let clips: Vec<Rect> = out.platform_output.accesskit_update.as_ref().map(|u| u.nodes.iter().filter(|(_, n)| n.label().is_some_and(|l| l.contains(" clip on "))).filter_map(|(_, n)| n.bounds()).map(|b| Rect::from_min_max(egui::pos2(b.x0 as f32, b.y0 as f32), egui::pos2(b.x1 as f32, b.y1 as f32))).collect()).unwrap_or_default();
+        let close = |a: Rect, b: Rect| (a.min - b.min).abs().max_elem() < 2.0 && (a.max - b.max).abs().max_elem() < 2.0;
+        cuts.extend(crate::ui_shot::spilled_text(&self.ctx, out, &named, 1.5).into_iter().filter(|c| !clips.iter().any(|r| close(*r, c.clip))));
+        cuts
     }
 
     /// Widgets in the last frame drawn over each other.
@@ -308,7 +316,7 @@ fn workspaces_switch_with_the_keyboard() {
     h.key(Key::Num2, Modifiers::ALT);
     h.frames(2);
     assert_eq!(h.app.prefs.workspace, "Colour");
-    assert_eq!(h.app.editor.rail, crate::editor::RailItem::Looks);
+    assert_eq!(h.app.editor.rail, crate::editor::library::RailItem::Looks);
     h.key(Key::Num6, Modifiers::ALT);
     h.frames(2);
     assert_eq!(h.app.prefs.workspace, "Review");
@@ -444,6 +452,15 @@ fn f1_opens_help_and_search_finds_articles() {
 #[test]
 fn start_screen_offers_the_seven_templates() {
     let mut h = Harness::new(&[]);
+    h.frames(4);
+    // Home shows the first five and a way to the rest.
+    let labels = h.labels();
+    for name in ["YouTube video", "Short film", "Music video", "Animated story", "Documentary"] {
+        assert!(labels.iter().any(|l| l == name), "Home shows {name}: {labels:?}");
+    }
+    assert!(labels.iter().any(|l| l == "See all"), "Home offers See all: {labels:?}");
+    // The Templates section lists all seven.
+    assert!(h.click("Templates"), "Templates in the side rail");
     h.frames(4);
     let labels = h.labels();
     for name in ["YouTube video", "Short film", "Music video", "Animated story", "Documentary", "Podcast", "Ad"] {
@@ -1103,4 +1120,82 @@ mod hooks {
         let src = include_str!("app.rs");
         assert!(src.contains("Couldn't export {}: {e}") && !src.contains("\"{} failed: {e}\""));
     }
+}
+
+/// Right-click on the picture where no layer sits opens the view menu
+/// (screenshot 94: it opened nothing); its rows act on the view.
+#[test]
+fn right_click_on_the_viewer_opens_the_view_menu() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+    h.frames(8);
+    let r = h.app.editor.viewer_rect;
+    // The dark margin above the picture: no layer reaches it.
+    let pos = egui::pos2(r.center().x, r.top() + 34.0 + 16.0);
+    h.with_events(vec![egui::Event::PointerMoved(pos)]);
+    for pressed in [true, false] {
+        h.with_events(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: Modifiers::NONE }]);
+    }
+    h.frames(8);
+    assert!(h.find_text("Fit to window").is_some(), "the view menu is open");
+    assert!(h.find_text("Safe areas").is_some());
+    assert!(h.cut_text().is_empty(), "{:#?}", h.cut_text());
+    let before = h.app.editor.safe_area;
+    assert!(h.click("Safe areas"));
+    assert_ne!(h.app.editor.safe_area, before, "Safe areas toggles");
+    assert!(h.find_text("Fit to window").is_none(), "the menu closes after a choice");
+}
+
+/// Tools ▸ Installed always offers "Install from file…" (screenshot 367 had
+/// it missing in a scripted run, where the file dialog never opens).
+#[test]
+fn installed_tools_offer_install_from_file_in_scripted_runs() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor", "--shot", "x.png"]).sized(1440.0, 900.0);
+    h.app.overlay = crate::app::Overlay::None;
+    h.app.editor.rail = crate::editor::library::RailItem::Ai;
+    h.frames(8);
+    assert!(h.click("Installed"), "the Installed group can be opened");
+    let named = h.last.as_ref().and_then(|o| o.platform_output.accesskit_update.as_ref()).is_some_and(|u| u.nodes.iter().any(|(_, n)| n.label() == Some("Install from file…")));
+    assert!(named, "the button is there");
+}
+
+/// Screenshot 180: opening a project from Home while another is open kept
+/// the viewer on the old project's picture, because both counted edits from
+/// zero. A different project starts the viewer's renderer afresh; the same
+/// project does not.
+#[test]
+fn the_viewer_starts_afresh_when_another_project_opens() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor"]).sized(1280.0, 720.0);
+    h.frames(8);
+    let resets = |h: &Harness| h.ctx.data(|d| d.get_temp::<u32>(egui::Id::new("viewer-project-seen").with("resets"))).unwrap_or(0);
+    assert_eq!(resets(&h), 0, "an unchanged project is not reset");
+    h.app.doc = crate::services::project::new_custom("Other", 640, 360, 30.0);
+    h.frames(4);
+    assert_eq!(resets(&h), 1, "a different project resets the viewer once");
+    h.frames(4);
+    assert_eq!(resets(&h), 1);
+}
+
+/// Screenshot 442: at a narrow width a selected clip had no Inspector and
+/// nothing to open one with. The viewer's toolbar has an Inspector button
+/// there (not in a wide window, where the Inspector is a tile).
+#[test]
+fn a_narrow_window_has_a_button_that_opens_the_inspector_sheet() {
+    let _viewport = crate::editor::viewport::test_lock();
+    let mut h = Harness::new(&["--screen", "editor"]).sized(960.0, 640.0);
+    h.frames(6);
+    if let Some(c) = h.app.doc.project.clips.iter().find(|c| c.kind == crate::view::ClipKind::Video) {
+        h.app.editor.selection = vec![c.id];
+    }
+    h.frames(6);
+    assert!(!h.app.editor.sheet_open, "the sheet starts closed");
+    let button = h.find(Some(accesskit::Role::Button), "Inspector").expect("an Inspector button in the narrow viewer toolbar");
+    h.click_at(button);
+    assert!(h.app.editor.sheet_open, "the button opens the sheet");
+    assert!(h.cut_text().is_empty(), "{:#?}", h.cut_text());
+    let mut wide = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+    wide.frames(6);
+    assert!(wide.find(Some(accesskit::Role::Button), "Inspector").is_none(), "wide windows have the tile instead");
 }

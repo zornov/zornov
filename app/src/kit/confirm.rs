@@ -12,6 +12,17 @@
 
 use eframe::egui::{Context, Id};
 
+/// The button text for a confirmation: the verb and what it acts on, so the
+/// button says the consequence ("Delete 3 clips"), never "OK".
+#[allow(dead_code)] // the dialog owners adopt it this round
+pub fn action_label(verb: &str, count: usize, singular: &str, plural: &str) -> String {
+    match count {
+        0 => verb.to_string(),
+        1 => format!("{verb} 1 {singular}"),
+        n => format!("{verb} {n} {plural}"),
+    }
+}
+
 /// Seconds the second click stays valid.
 pub const WINDOW: f64 = 4.0;
 
@@ -36,13 +47,13 @@ fn check(a: &mut Armed, id: Id, now: f64) -> bool {
 pub fn confirm_click(ctx: &Context, id: Id) -> bool {
     let now = ctx.input(|i| i.time);
     ctx.request_repaint_after(std::time::Duration::from_secs_f64(WINDOW + 0.1));
-    ctx.data_mut(|d| check(d.get_temp_mut_or_default::<Armed>(Id::new("kit-confirm")), id, now))
+    ctx.data_mut(|d| check(d.get_temp_mut_or_default::<Armed>(Id::unique("kit-confirm")), id, now))
 }
 
 /// Whether `id` is waiting for its second click (draw the "click again" label).
 pub fn armed(ctx: &Context, id: Id) -> bool {
     let now = ctx.input(|i| i.time);
-    ctx.data(|d| d.get_temp::<Armed>(Id::new("kit-confirm")).and_then(|a| a.0)).is_some_and(|(who, at)| who == id && now - at < WINDOW)
+    ctx.data(|d| d.get_temp::<Armed>(Id::unique("kit-confirm")).and_then(|a| a.0)).is_some_and(|(who, at)| who == id && now - at < WINDOW)
 }
 
 #[cfg(test)]
@@ -52,7 +63,7 @@ mod tests {
     #[test]
     fn second_click_confirms_within_the_window() {
         let mut a = Armed::default();
-        let id = Id::new("x");
+        let id = Id::unique("x");
         assert!(!check(&mut a, id, 0.0));
         assert!(check(&mut a, id, 1.0));
         assert!(!check(&mut a, id, 1.5), "confirming disarms");
@@ -61,9 +72,16 @@ mod tests {
     #[test]
     fn late_or_other_clicks_only_arm() {
         let mut a = Armed::default();
-        assert!(!check(&mut a, Id::new("a"), 0.0));
-        assert!(!check(&mut a, Id::new("b"), 1.0), "another button re-arms");
-        assert!(!check(&mut a, Id::new("b"), 1.0 + WINDOW + 1.0), "too late");
-        assert!(check(&mut a, Id::new("b"), 1.0 + WINDOW + 2.0));
+        assert!(!check(&mut a, Id::unique("a"), 0.0));
+        assert!(!check(&mut a, Id::unique("b"), 1.0), "another button re-arms");
+        assert!(!check(&mut a, Id::unique("b"), 1.0 + WINDOW + 1.0), "too late");
+        assert!(check(&mut a, Id::unique("b"), 1.0 + WINDOW + 2.0));
+    }
+
+    #[test]
+    fn the_action_names_what_it_acts_on() {
+        assert_eq!(action_label("Delete", 3, "clip", "clips"), "Delete 3 clips");
+        assert_eq!(action_label("Delete", 1, "clip", "clips"), "Delete 1 clip");
+        assert_eq!(action_label("Discard", 0, "change", "changes"), "Discard");
     }
 }
