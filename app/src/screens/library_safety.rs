@@ -518,6 +518,12 @@ fn rights_tab(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     ui.label(egui::RichText::new(hint).font(theme::caption()).color(t.text_2));
 }
 
+/// What the first click on "Clean up cache" says.
+fn clean_prompt(plan: &safety::Plan) -> String {
+    let n = plan.items.len();
+    crate::i18n::tf(format!("Clean up would free {} from {n} file{}; click Clean up cache again to do it", safety::human(plan.bytes()), if n == 1 { "" } else { "s" }))
+}
+
 /// Applies the plan the person was shown (never a fresh one, which could
 /// hold other files); `clean_apply` still re-checks each file before removing it.
 fn clean_previewed(root: &std::path::Path, o: &safety::CleanOptions, plan: Option<safety::Plan>) -> String {
@@ -546,6 +552,11 @@ pub fn clean_for(app: &mut StudioApp, ctx: &egui::Context) {
     let mut o = safety::CleanOptions::default();
     o.other_projects = std::fs::read_dir(studio_paths::studio().join("Projects")).map(|r| r.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("project.json").is_file() && *p != root).collect()).unwrap_or_default();
     let plan = safety::clean_plan(&root, &o);
+    // Removed files do not come back: the first click says what would go, the second does it.
+    if !kit::confirm_click(ctx, egui::Id::new("clean-up-cache")) {
+        kit::push(ctx, clean_prompt(&plan), None, Some(Icon::Info));
+        return;
+    }
     match safety::clean_apply(&root, &o, &plan) {
         Ok(freed) => kit::push(ctx, crate::i18n::tf(format!("Cleaned up {}", safety::human(freed))), None, Some(Icon::CheckCircle)),
         Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
@@ -566,6 +577,14 @@ pub fn export_block(doc: &crate::doc::Doc) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_up_cache_says_what_would_go_before_removing_anything() {
+        let plan = safety::Plan { items: vec![safety::Doomed { path: "x".into(), bytes: 2048, why: "project cache" }], kept_in_use: 0 };
+        let said = clean_prompt(&plan);
+        assert!(said.contains("1 file;") && said.contains("again"), "{said}");
+        assert!(clean_prompt(&safety::Plan::default()).contains("0 files"));
+    }
 
     #[test]
     fn clean_now_applies_the_plan_that_was_previewed() {
