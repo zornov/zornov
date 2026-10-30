@@ -220,4 +220,31 @@ mod tests {
         // Reverb's other setting is its room.
         assert!(!studio_sound::reverb::ROOMS.is_empty());
     }
+
+    /// Removing an effect is one undo step and undo brings it back with its settings.
+    #[test]
+    fn removing_an_effect_is_undoable() {
+        let mut h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        let app = &mut h.app;
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Fx", 320, 180, 24.0));
+        s.edit(&[serde_json::json!({"op": "card", "colour": "#ff0000", "at": 0.0, "duration": 3.0})], "card", false).unwrap();
+        app.doc = s.doc;
+        let id = app.doc.project.clips[0].id;
+        let ids = [id];
+        let eff = app.doc.alloc_id();
+        put(app, &ids, "fx-add", "Add sound effect", |c| c.audio.effects.push(m::Effect::new(m::EffectId(eff), "compressor")));
+        put(app, &ids, "compressor-ratio", "Sound effect setting", |c| {
+            if let Some(e) = c.audio.effects.iter_mut().find(|e| e.kind == "compressor") {
+                e.params.insert("ratio".into(), m::Value::Scalar(6.0));
+            }
+        });
+        put(app, &ids, "compressor-rm", "Remove sound effect", |c| c.audio.effects.retain(|e| e.kind != "compressor"));
+        assert!(mclip(app, id).unwrap().audio.effects.is_empty(), "removed");
+        assert_eq!(app.doc.undo().as_deref(), Some("Remove sound effect"), "the removal is its own undo step");
+        let back = mclip(app, id).unwrap().audio.effects;
+        assert_eq!(back.len(), 1, "undo brings the effect back");
+        assert_eq!(back[0].params.get("ratio").and_then(m::Value::as_f64), Some(6.0), "with its settings");
+        assert_eq!(app.doc.redo().as_deref(), Some("Remove sound effect"));
+        assert!(mclip(app, id).unwrap().audio.effects.is_empty(), "redo removes it again");
+    }
 }

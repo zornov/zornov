@@ -657,6 +657,8 @@ fn toolbar(ui: &mut egui::Ui, e: &mut Editor, host: &mut dyn Host) {
             if IconButton::new(Icon::Trash, "Delete").compact().show(ui).clicked() {
                 ops_to_run.push(json!({"op": "delete", "ids": sel}));
                 clear = true;
+                let n = sel.len();
+                kit::push(ui.ctx(), crate::i18n::tf(format!("Deleted {n} {}", if n == 1 { "shape" } else { "shapes" })), None, Some(Icon::Trash));
             }
         });
         ui.add_space(gap);
@@ -1138,7 +1140,10 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
         // No bigger than the window it opens in.
         let screen = ctx.content_rect();
         let size = [1100.0f32.min(screen.width() - 2.0 * kit::EDGE), 760.0f32.min(screen.height() - 2.0 * kit::EDGE - 40.0)];
-        egui::Window::new(title).id(egui::Id::new("vector-art-window")).open(&mut open).default_size(size).resizable(true).show(ctx, |ui| body(ui, &mut e, &mut host));
+        let out = kit::modal(ctx, egui::Id::unique("vector-art-window"), egui::vec2(size[0], size[1]), &title, |ui| body(ui, &mut e, &mut host));
+        if out.close {
+            open = false;
+        }
         e.open = open;
     });
 }
