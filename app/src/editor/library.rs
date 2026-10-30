@@ -408,6 +408,22 @@ fn media_menu_anchor(ctx: &egui::Context) -> egui::Pos2 {
     ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("media-menu-at"))).unwrap_or_default()
 }
 
+/// The Name and Folder fields of the media menu, each under a caption (the
+/// placeholder hint is gone once a field holds text). Returns whether Enter
+/// was pressed in the name / the folder.
+fn media_menu_fields(ui: &mut egui::Ui, name: &mut String, folder: &mut String) -> (bool, bool) {
+    let t = theme::tokens(ui.ctx());
+    let caption = |ui: &mut egui::Ui, text: &str| {
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new(crate::i18n::tf(text.to_owned())).font(theme::caption()).color(t.text_2));
+    };
+    caption(ui, "Name");
+    let renamed = kit::text_field(ui, name, "Name", Some(Icon::FilmStrip), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    caption(ui, "Folder");
+    let filed = kit::text_field(ui, folder, "No folder", Some(Icon::Folder), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    (renamed, filed)
+}
+
 /// Right-click on a bin item: add it, or (when its file is gone) relink it.
 fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collections::HashSet<u32>) {
     let id = egui::Id::new("media-menu");
@@ -435,8 +451,7 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
             proxy_it = kit::MenuItem::new("Make proxy").show(ui).clicked();
         }
         kit::menu_separator(ui);
-        renamed = kit::text_field(ui, &mut name, "Name", Some(Icon::FilmStrip), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        filed = kit::text_field(ui, &mut folder, "Folder", Some(Icon::Folder), 200.0, None).lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        (renamed, filed) = media_menu_fields(ui, &mut name, &mut folder);
     });
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("media-menu-fields"), (name.clone(), folder.clone())));
     if renamed || filed {
@@ -1321,6 +1336,30 @@ pub fn apply_to(app: &mut StudioApp, ctx: &egui::Context, d: LibDrag, clip: u32)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_menu_name_and_folder_rows_are_labelled() {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(300.0, 200.0))), ..Default::default() };
+        let (mut name, mut folder) = ("clip_b.mp4".to_owned(), String::new());
+        let mut out = ctx.run_ui(raw, |ui| {
+            media_menu_fields(ui, &mut name, &mut folder);
+        });
+        out.textures_delta.clear();
+        let mut texts = vec![];
+        fn walk(s: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        out.shapes.iter().for_each(|c| walk(&c.shape, &mut texts));
+        assert!(texts.iter().any(|t| t == "Name"), "a Name caption: {texts:?}");
+        assert!(texts.iter().any(|t| t == "Folder"), "a Folder caption: {texts:?}");
+        assert!(texts.iter().any(|t| t == "clip_b.mp4"), "the name is the field's text");
+        assert!(texts.iter().any(|t| t == "No folder"), "an empty folder says so: {texts:?}");
+    }
 
     /// A tile drawn on the CPU, no window: RGBA of `w`×`h` points.
     fn tile_frame(wave: Option<&crate::services::library::Wave>, clock: Option<f64>, hover: f32, dark: bool) -> (Vec<u8>, usize, usize, theme::Tokens) {
