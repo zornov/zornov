@@ -26,83 +26,11 @@ fn s<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
-/// JSON number / string / list / object → model parameter value.
-fn to_value(v: &Value) -> Option<m::Value> {
-    Some(match v {
-        Value::Bool(b) => m::Value::Bool(*b),
-        Value::Number(n) => m::Value::Scalar(n.as_f64()?),
-        Value::String(t) => m::Value::Text(t.clone()),
-        Value::Array(a) if a.iter().all(|p| p.is_array()) => m::Value::Curve(a.iter().filter_map(|p| Some([p.get(0)?.as_f64()?, p.get(1)?.as_f64()?])).collect()),
-        Value::Array(a) if a.len() == 2 => m::Value::Point(m::Vec2::new(a[0].as_f64()?, a[1].as_f64()?)),
-        _ => return None,
-    })
-}
+use services::grade::{GRADE_KEYS, params_json};
 
-fn from_value(v: &m::Value) -> Value {
-    match v {
-        m::Value::Bool(b) => json!(b),
-        m::Value::Scalar(x) | m::Value::Angle(x) => json!((x * 1000.0).round() / 1000.0),
-        m::Value::Point(p) => json!([p.x, p.y]),
-        m::Value::Text(t) | m::Value::Choice(t) => json!(t),
-        m::Value::Curve(c) => json!(c),
-        m::Value::Colour(c) => json!([c.r, c.g, c.b, c.a]),
-    }
-}
-
-fn params_json(p: &m::ParamMap) -> Value {
-    Value::Object(p.iter().map(|(k, v)| (k.clone(), from_value(v))).collect())
-}
-
-/// Grade parameter names this tool accepts (besides `cdl_*`, curves and
-/// `hsl_*` patterns).
-const GRADE_KEYS: &[&str] = &[
-    "exposure", "temperature", "tint", "contrast", "highlights", "shadows", "whites", "blacks", "saturation", "vibrance", "clarity", "dehaze", "fade", "sharpen", "vignette", "grain",
-    "wheel_mode", "wheel_intensity", "look", "look_intensity", "lut_intensity", "lut_skin_protect",
-    "curve_master", "curve_red", "curve_green", "curve_blue", "hue_vs_hue", "hue_vs_sat", "hue_vs_lum", "lum_vs_sat", "sat_vs_sat",
-];
-
-fn grade_key_ok(k: &str) -> bool {
-    GRADE_KEYS.contains(&k)
-        || k.starts_with("cdl_")
-        || k.starts_with("hsl_")
-        || ["lift", "gamma", "gain", "offset", "shadows", "midtones", "highlights"].iter().any(|w| k.starts_with(&format!("{w}_")) && ["hue", "amount", "luma"].iter().any(|x| k.ends_with(x)))
-}
-
-/// Other names for grade parameters agents reach for (`curve_r` failed a
-/// whole colour task).
-fn grade_alias(k: &str) -> Option<&'static str> {
-    Some(match k {
-        "curve" | "curves" | "curve_rgb" | "curve_luma" | "curve_y" | "master_curve" => "curve_master",
-        "curve_r" | "red_curve" => "curve_red",
-        "curve_g" | "green_curve" => "curve_green",
-        "curve_b" | "blue_curve" => "curve_blue",
-        "white_balance" | "warmth" => "temperature",
-        "sat" => "saturation",
-        _ => return None,
-    })
-}
-
-/// Merges `{name: value | null}` into a parameter map.
-fn merge_params(into: &mut m::ParamMap, given: &Value, check: bool) -> Result<Vec<String>, String> {
-    let obj = given.as_object().ok_or("params is an object of name: value")?;
-    let mut changed = Vec::new();
-    for (k, v) in obj {
-        let k = &grade_alias(k).map_or_else(|| k.clone(), str::to_owned);
-        if check && !grade_key_ok(k) {
-            let hint = super::args::closest(k, GRADE_KEYS).map(|c| format!(" (did you mean \"{c}\"?)")).unwrap_or_default();
-            return Err(format!(
-                "no grade parameter \"{k}\"{hint}; it takes: {}, cdl_slope / cdl_offset / cdl_power / cdl_sat, hsl_<colour>_<hue|sat|lum>, and wheels as lift_ / gamma_ / gain_ / offset_ / shadows_ / midtones_ / highlights_ + hue | amount | luma. Curves are lists of [in, out] points 0..1, e.g. {{\"curve_red\": [[0, 0], [0.5, 0.45], [1, 1]]}}",
-                GRADE_KEYS.join(", ")
-            ));
-        }
-        if v.is_null() {
-            into.remove(k);
-        } else {
-            into.insert(k.clone(), to_value(v).ok_or_else(|| format!("\"{k}\": a number, text, [x, y] or a list of [x, y] points"))?);
-        }
-        changed.push(k.clone());
-    }
-    Ok(changed)
+/// The grade parameter nearest a misspelt `k`.
+fn closest(k: &str) -> Option<String> {
+    super::args::closest(k, GRADE_KEYS).map(str::to_owned)
 }
 
 impl Session {
@@ -124,7 +52,7 @@ impl Session {
     }
 
     fn seq_of(&self, clip: u32) -> Option<m::SequenceId> {
-        self.doc.model.sequences.iter().find(|s| s.clip(m::ClipId(clip as u64)).is_some()).map(|s| s.id)
+        services::grade::seq_of(&self.doc, clip)
     }
 
     fn ocio_path(&self) -> Option<PathBuf> {
@@ -167,42 +95,24 @@ impl Session {
             "view" => {
                 let view = s(a, "view").or_else(|| s(a, "space")).ok_or("view needs \"view\": none, aces, aces:<peak nits> or ocio:<display>/<view>")?;
                 let mut st = self.doc.model.settings.clone();
-                if let Some(p) = f(a, "hdr_peak") {
-                    st.colour.hdr_peak = Some(p.round() as u32);
-                }
-                let cfg = self.ocio_path();
-                studio_render::view::ViewTransform::parse(view, cfg.as_deref(), st.colour.hdr_peak)?;
-                st.colour.view = if view.eq_ignore_ascii_case("none") { String::new() } else { view.trim().to_string() };
+                services::grade::set_view(&mut st, view, f(a, "hdr_peak"))?;
                 self.apply_edit("View transform", m::Edit::SetSettings { settings: Box::new(st) })?;
                 text(json!({ "view": view, "hdr_peak": self.doc.model.settings.colour.hdr_peak.unwrap_or(1000) }))
             }
             "output" => {
                 let space = s(a, "space").ok_or("output needs \"space\": rec709, p3, rec2020_pq or rec2020_hlg")?;
-                let cs = match space.to_ascii_lowercase().replace(['.', ' ', '-'], "_").as_str() {
-                    "rec709" | "rec_709" | "bt709" | "sdr" => m::ColourSpace::Rec709,
-                    "p3" | "displayp3" | "display_p3" | "p3_d65" => m::ColourSpace::DisplayP3,
-                    "rec2020_pq" | "pq" | "hdr10" | "rec2100_pq" => m::ColourSpace::Rec2020Pq,
-                    "rec2020_hlg" | "hlg" | "rec2100_hlg" => m::ColourSpace::Rec2020Hlg,
-                    o => return Err(format!("no output space \"{o}\"; rec709, p3, rec2020_pq, rec2020_hlg")),
-                };
                 let mut st = self.doc.model.settings.clone();
-                st.colour_space = cs;
-                if let Some(p) = f(a, "hdr_peak") {
-                    st.colour.hdr_peak = Some(p.round() as u32);
-                }
+                let cs = services::grade::set_output(&mut st, space, f(a, "hdr_peak"))?;
                 self.apply_edit("Output colour space", m::Edit::SetSettings { settings: Box::new(st) })?;
                 text(json!({ "output": format!("{cs:?}") }))
             }
             "ocio" => {
                 let path = s(a, "config").or_else(|| s(a, "path")).unwrap_or("");
                 let mut st = self.doc.model.settings.clone();
-                if path.is_empty() {
-                    st.colour.ocio_config = None;
+                let Some(cfg) = services::grade::set_ocio(&mut st, path)? else {
                     self.apply_edit("OCIO config", m::Edit::SetSettings { settings: Box::new(st) })?;
                     return text(json!({ "ocio": null }));
-                }
-                let cfg = studio_render::colour_space::ocio_config(Path::new(path))?;
-                st.colour.ocio_config = Some(path.to_string());
+                };
                 self.apply_edit("OCIO config", m::Edit::SetSettings { settings: Box::new(st) })?;
                 let unusable: Vec<String> = cfg.spaces.iter().filter(|c| cfg.to_working(&c.name).is_err()).map(|c| c.name.clone()).collect();
                 text(json!({
@@ -251,10 +161,7 @@ impl Session {
 
     /// The clip's model grade, made if missing.
     fn model_grade(&self, id: u32) -> Result<(m::SequenceId, m::Clip, m::Grade), String> {
-        let c = self.model_clip(id).ok_or_else(|| format!("no clip {id}"))?;
-        let seq = self.seq_of(id).ok_or("clip not in a sequence")?;
-        let g = c.grade.clone().unwrap_or(m::Grade { enabled: true, ..Default::default() });
-        Ok((seq, c, g))
+        services::grade::clip_grade(&self.doc, id)
     }
 
     fn grade_set(&mut self, a: &Value) -> Result<Vec<Content>, String> {
@@ -267,23 +174,7 @@ impl Session {
         let mut out = Vec::new();
         for id in &ids {
             let (seq, mut c, mut g) = self.model_grade(*id)?;
-            if let Some(p) = a.get("params") {
-                merge_params(&mut g.params, p, true)?;
-            }
-            if let Some(l) = a.get("lut") {
-                g.lut = l.as_str().filter(|x| !x.is_empty()).map(|x| {
-                    let p = Path::new(x);
-                    studio_colour::read_lut(p).map(|_| x.to_string())
-                }).transpose()?;
-            }
-            if a.get("reset").and_then(Value::as_bool) == Some(true) {
-                g.params.clear();
-                g.lut = None;
-                g.set_nodes(&[]);
-            }
-            if let Some(e) = a.get("enabled").and_then(Value::as_bool) {
-                g.enabled = e;
-            }
+            services::grade::grade_args(&mut g, a, closest)?;
             out.push(json!({ "clip": id, "params": params_json(&g.params), "lut": g.lut, "nodes": g.nodes().len(), "enabled": g.enabled }));
             c.grade = Some(g);
             edits.push(m::Edit::SetClip { seq, clip: Box::new(c) });
@@ -297,107 +188,8 @@ impl Session {
     fn grade_node(&mut self, a: &Value) -> Result<Vec<Content>, String> {
         let id = a.get("clip").and_then(Value::as_u64).ok_or("node needs \"clip\"")? as u32;
         let (seq, mut c, mut g) = self.model_grade(id)?;
-        let mut nodes = g.nodes();
-        let index = a.get("node").and_then(Value::as_u64).map(|n| n as usize);
-        if a.get("remove").and_then(Value::as_bool) == Some(true) {
-            let i = index.ok_or("remove needs \"node\" (1-based)")?;
-            if i == 0 || i > nodes.len() {
-                return Err(format!("no node {i}; the clip has {}", nodes.len()));
-            }
-            let n = nodes.remove(i - 1);
-            if let Some(w) = n.window {
-                c.masks.retain(|mk| mk.id != w);
-            }
-        } else if a.get("params").is_some() || a.get("qualifier").is_some() || a.get("window").is_some() || a.get("mix").is_some() || a.get("name").is_some() || a.get("key_blur").is_some() || a.get("enabled").is_some() || a.get("lut").is_some() || a.get("window_invert").is_some() {
-            let i = match index {
-                Some(i) if i >= 1 && i <= nodes.len() => i - 1,
-                Some(i) => return Err(format!("no node {i}; the clip has {} (leave \"node\" out to add one)", nodes.len())),
-                None => {
-                    nodes.push(m::GradeNode::default());
-                    nodes.len() - 1
-                }
-            };
-            let n = &mut nodes[i];
-            if let Some(p) = a.get("params") {
-                merge_params(&mut n.params, p, true)?;
-            }
-            match a.get("qualifier") {
-                Some(Value::String(preset)) => {
-                    studio_colour::Qualifier::preset(preset).ok_or_else(|| format!("no qualifier preset \"{preset}\"; skin, sky, foliage, red, orange, yellow, green, cyan, blue, magenta, highlights, midtones, shadows"))?;
-                    n.qualifier.clear();
-                    n.qualifier.insert("preset".into(), m::Value::Text(preset.clone()));
-                }
-                Some(Value::Null) => n.qualifier.clear(),
-                Some(q @ Value::Object(_)) => {
-                    merge_params(&mut n.qualifier, q, false)?;
-                }
-                _ => {}
-            }
-            if let Some(name) = s(a, "name") {
-                n.name = name.to_string();
-            }
-            if let Some(v) = f(a, "mix") {
-                n.mix = if v > 1.0 { v / 100.0 } else { v }.clamp(0.0, 1.0);
-            }
-            if let Some(v) = f(a, "key_blur") {
-                n.key_blur = v.max(0.0);
-            }
-            if let Some(v) = a.get("enabled").and_then(Value::as_bool) {
-                n.enabled = v;
-            }
-            if let Some(v) = a.get("window_invert").and_then(Value::as_bool) {
-                n.window_invert = v;
-            }
-            if let Some(l) = a.get("lut") {
-                n.lut = l.as_str().filter(|x| !x.is_empty()).map(str::to_owned);
-            }
-            match a.get("window") {
-                Some(Value::Null) => {
-                    if let Some(w) = n.window.take() {
-                        c.masks.retain(|mk| mk.id != w);
-                    }
-                }
-                Some(Value::Number(mid)) => {
-                    let mid = m::MaskId(mid.as_u64().unwrap_or(0));
-                    if !c.masks.iter().any(|mk| mk.id == mid) {
-                        return Err(format!("clip {id} has no mask {}", mid.0));
-                    }
-                    n.window = Some(mid);
-                }
-                Some(Value::Object(o)) => {
-                    let shape = match o.get("shape").and_then(Value::as_str).unwrap_or("ellipse") {
-                        "rectangle" | "rect" | "box" => m::MaskShape::Rectangle,
-                        "ellipse" | "circle" | "oval" => m::MaskShape::Ellipse,
-                        "gradient" | "line" => m::MaskShape::Line,
-                        o => return Err(format!("window shape \"{o}\": ellipse, rectangle or gradient (or a mask id)")),
-                    };
-                    let mut mask = match n.window.and_then(|w| c.masks.iter().find(|mk| mk.id == w).cloned()) {
-                        Some(mk) => mk,
-                        None => m::Mask::new(m::MaskId(self.doc.alloc_id()), shape),
-                    };
-                    mask.shape = shape;
-                    let g = |k: &str| o.get(k).and_then(Value::as_f64);
-                    if let (Some(x), Some(y)) = (g("x"), g("y")) {
-                        mask.params.insert("position".into(), m::Value::Point(m::Vec2::new(x, y)));
-                    }
-                    if let (Some(w), Some(h)) = (g("width"), g("height")) {
-                        mask.params.insert("size".into(), m::Value::Point(m::Vec2::new(w, h)));
-                    }
-                    for k in ["feather", "rotation", "roundness", "expansion"] {
-                        if let Some(v) = g(k) {
-                            mask.params.insert(k.into(), m::Value::Scalar(v));
-                        }
-                    }
-                    mask.extra.insert("role".into(), json!("grade_window"));
-                    let mid = mask.id;
-                    c.masks.retain(|mk| mk.id != mid);
-                    c.masks.push(mask);
-                    n.window = Some(mid);
-                }
-                _ => {}
-            }
-        }
-        g.set_nodes(&nodes);
+        let mut next = || self.doc.alloc_id();
+        let nodes = services::grade::node_args(&mut c, &mut g, a, id, &mut next, closest)?;
         c.grade = Some(g);
         let windows: Vec<Value> = nodes.iter().enumerate().filter_map(|(i, n)| n.window.map(|w| json!({ "node": i + 1, "mask": w.0 }))).collect();
         let list: Vec<Value> = nodes
@@ -415,33 +207,8 @@ impl Session {
             let size = a.get("size").and_then(Value::as_u64).unwrap_or(33).clamp(2, 129) as usize;
             let c = self.model_clip(id).ok_or_else(|| format!("no clip {id}"))?;
             let g = c.grade.clone().unwrap_or_default();
-            let desc = studio_render::scene::GradeDesc { params: studio_render::model_scene::convert_params(&g.params), lut: g.lut.clone() };
-            let grade = studio_render::effects::grade_from_desc(&desc);
-            let proc = grade.prepare();
-            // Nodes keyed by colour only bake too; windows cannot.
-            let nodes: Vec<(studio_colour::GradeProcessor, Option<studio_colour::Qualifier>, f32)> = g
-                .nodes()
-                .iter()
-                .filter(|n| n.enabled && n.window.is_none())
-                .map(|n| {
-                    let d = studio_render::scene::GradeDesc { params: studio_render::model_scene::convert_params(&n.params), lut: n.lut.clone() };
-                    (studio_render::effects::grade_from_desc(&d).prepare(), studio_render::nodes::qualifier_from(&studio_render::model_scene::convert_params(&n.qualifier)), n.mix as f32)
-                })
-                .collect();
-            let skipped = g.nodes().iter().filter(|n| n.window.is_some()).count();
-            let bt = studio_colour::Transfer::Bt1886;
-            let lut = studio_colour::lut::Lut3d::from_fn(size, |enc| {
-                let mut lin = proc.apply_rgb(bt.decode_rgb(enc));
-                for (p, q, mix) in &nodes {
-                    let k = q.as_ref().map_or(1.0, |q| q.key(lin)) * mix;
-                    let out = p.apply_rgb(lin);
-                    lin = [0, 1, 2].map(|i| lin[i] + k * (out[i] - lin[i]));
-                }
-                bt.encode_rgb(lin).map(|v| v.clamp(0.0, 1.0))
-            });
-            studio_colour::write_lut(Path::new(path), &lut, &format!("Zornov clip {id}"))?;
-            let spatial = grade.basic.clarity != 0.0 || grade.basic.sharpen.amount != 0.0 || grade.basic.vignette.amount != 0.0 || grade.basic.grain.amount != 0.0 || grade.basic.dehaze != 0.0;
-            return text(json!({ "lut": path, "size": size, "input_output": "Rec.709 / BT.1886 video levels in and out", "not_in_lut": { "spatial_tools": spatial, "window_nodes": skipped } }));
+            let bake = services::grade::export_lut(&g, Path::new(path), size, &format!("Zornov clip {id}"))?;
+            return text(json!({ "lut": path, "size": size, "input_output": "Rec.709 / BT.1886 video levels in and out", "not_in_lut": { "spatial_tools": bake.spatial, "window_nodes": bake.windows } }));
         }
         let ids = self.clip_ids(a);
         let path = s(a, "path").or_else(|| s(a, "import")).ok_or("lut takes \"path\" + \"clip(s)\" to apply a .cube / .3dl, or \"export\": path + \"clip\" to bake a grade")?;
@@ -454,24 +221,12 @@ impl Session {
     fn cdl_tool(&mut self, a: &Value) -> Result<Vec<Content>, String> {
         if let Some(path) = s(a, "export") {
             let ids = self.clip_ids(a);
-            let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ColorDecisionList xmlns=\"urn:ASC:CDL:v1.01\">\n");
+            let mut grades = Vec::new();
             for id in &ids {
                 let c = self.model_clip(*id).ok_or_else(|| format!("no clip {id}"))?;
-                let p = c.grade.map(|g| g.params).unwrap_or_default();
-                let n = |k: &str, d: f64| match p.get(k) {
-                    Some(m::Value::Scalar(v)) => *v,
-                    _ => d,
-                };
-                let tri = |k: &str, d: f64| format!("{:.6} {:.6} {:.6}", n(&format!("cdl_{k}_r"), d), n(&format!("cdl_{k}_g"), d), n(&format!("cdl_{k}_b"), d));
-                xml.push_str(&format!(
-                    "  <ColorDecision>\n    <ColorCorrection id=\"clip_{id}\">\n      <SOPNode>\n        <Slope>{}</Slope>\n        <Offset>{}</Offset>\n        <Power>{}</Power>\n      </SOPNode>\n      <SatNode>\n        <Saturation>{:.6}</Saturation>\n      </SatNode>\n    </ColorCorrection>\n  </ColorDecision>\n",
-                    tri("slope", 1.0),
-                    tri("offset", 0.0),
-                    tri("power", 1.0),
-                    n("cdl_sat", 1.0)
-                ));
+                grades.push((*id, c.grade.map(|g| g.params).unwrap_or_default()));
             }
-            xml.push_str("</ColorDecisionList>\n");
+            let xml = services::grade::cdl_xml(&grades);
             std::fs::write(path, xml).map_err(|e| e.to_string())?;
             return text(json!({ "cdl": path, "clips": ids }));
         }
@@ -482,24 +237,7 @@ impl Session {
         let mut p = Map::new();
         if let Some(path) = s(a, "path") {
             let x = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-            let tag = |t: &str| -> Option<Vec<f64>> {
-                let i = x.find(&format!("<{t}>"))? + t.len() + 2;
-                let j = x[i..].find(&format!("</{t}>"))? + i;
-                Some(x[i..j].split_whitespace().filter_map(|v| v.parse().ok()).collect())
-            };
-            for (k, t) in [("slope", "Slope"), ("offset", "Offset"), ("power", "Power")] {
-                if let Some(v) = tag(t).filter(|v| v.len() == 3) {
-                    for (c, x) in ["r", "g", "b"].iter().zip(v) {
-                        p.insert(format!("cdl_{k}_{c}"), json!(x));
-                    }
-                }
-            }
-            if let Some(v) = tag("Saturation").and_then(|v| v.first().copied()) {
-                p.insert("cdl_sat".into(), json!(v));
-            }
-            if p.is_empty() {
-                return Err(format!("{path}: no ASC CDL (Slope / Offset / Power) found"));
-            }
+            p = services::grade::cdl_from_xml(&x, path)?;
         }
         for (k, d) in [("slope", 1.0), ("offset", 0.0), ("power", 1.0)] {
             if let Some(v) = a.get(k) {
@@ -585,14 +323,7 @@ impl Session {
             for id in &ids {
                 let mut c = self.model_clip(*id).ok_or_else(|| format!("no clip {id}"))?;
                 let seq = self.seq_of(*id).ok_or("clip not in a sequence")?;
-                // Keep this clip's own shot match.
-                let mut ng = g.clone();
-                if let Some(old) = &c.grade {
-                    for (k, v) in old.params.iter().filter(|(k, _)| k.starts_with("match_")) {
-                        ng.params.insert(k.clone(), v.clone());
-                    }
-                }
-                c.grade = Some(ng);
+                services::grade::apply_still_grade(&mut c, &g);
                 edits.push(m::Edit::SetClip { seq, clip: Box::new(c) });
             }
             self.apply_edit("Apply still", m::Edit::Batch { edits })?;
@@ -859,5 +590,119 @@ impl Session {
             }
             o => Err(format!("media_manage has no action \"{o}\"; info, set, proxies, use_proxies, forget_proxies, consolidate, multicam, angle")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::Session;
+
+    fn session() -> Session {
+        Session::new(services::project::new_custom("Post", 640, 360, 30.0))
+    }
+
+    fn card(s: &mut Session) -> u32 {
+        s.edit(&[json!({"op": "card", "colour": "#336699", "at": 0.0, "duration": 2.0, "lane": "overlay"})], "card", false).unwrap();
+        s.doc.project.clips.iter().map(|c| c.id).max().unwrap()
+    }
+
+    fn grade_of(s: &Session, id: u32) -> m::Grade {
+        s.doc.model.sequences.iter().find_map(|q| q.clip(m::ClipId(id as u64))).unwrap().grade.clone().unwrap()
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("zornov-post-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The colour arms keep their behaviour after the logic moved into
+    /// `services::grade`: grade, node with qualifier and window, CDL, LUT
+    /// and the project's colour settings, all through the agent's tool.
+    #[test]
+    fn the_colour_tool_still_grades_through_the_services() {
+        let mut s = session();
+        let id = card(&mut s);
+        s.run("colour", &json!({"action": "grade", "clip": id, "params": {"exposure": 0.5, "lift_amount": 0.2, "sat": 0.3}})).unwrap();
+        let g = grade_of(&s, id);
+        assert_eq!(g.params.get("exposure"), Some(&m::Value::Scalar(0.5)));
+        assert!(g.params.contains_key("saturation") && g.params.contains_key("lift_amount"));
+        let e = err(s.run("colour", &json!({"action": "grade", "clip": id, "params": {"exposre": 1}})));
+        assert!(e.contains("did you mean \"exposure\""), "{e}");
+
+        s.run("colour", &json!({"action": "node", "clip": id, "qualifier": "skin", "mix": 50, "window": {"shape": "circle", "x": 0.4, "y": 0.5}, "params": {"saturation": 0.2}})).unwrap();
+        let mc = s.doc.model.sequences.iter().find_map(|q| q.clip(m::ClipId(id as u64))).unwrap();
+        let nodes = mc.grade.as_ref().unwrap().nodes();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].mix, 0.5);
+        assert_eq!(services::grade::qualifier_preset(&nodes[0]).as_deref(), Some("skin"));
+        assert_eq!(mc.masks.len(), 1);
+        assert_eq!(nodes[0].window, Some(mc.masks[0].id));
+        let e = err(s.run("colour", &json!({"action": "node", "clip": id, "node": 5, "enabled": false})));
+        assert!(e.contains("no node 5; the clip has 1"), "{e}");
+        s.run("colour", &json!({"action": "node", "clip": id, "node": 1, "remove": true})).unwrap();
+        let mc = s.doc.model.sequences.iter().find_map(|q| q.clip(m::ClipId(id as u64))).unwrap();
+        assert!(mc.grade.as_ref().unwrap().nodes().is_empty() && mc.masks.is_empty());
+
+        s.run("colour", &json!({"action": "cdl", "clip": id, "slope": [1.1, 1.0, 0.9], "sat": 0.8})).unwrap();
+        let dir = temp("cdl");
+        let file = dir.join("grade.cdl");
+        s.run("colour", &json!({"action": "cdl", "clip": id, "export": file.to_str().unwrap()})).unwrap();
+        let xml = std::fs::read_to_string(&file).unwrap();
+        assert!(xml.contains("<Slope>1.100000 1.000000 0.900000</Slope>") && xml.contains("<Saturation>0.800000</Saturation>"), "{xml}");
+        s.run("colour", &json!({"action": "grade", "clip": id, "reset": true})).unwrap();
+        s.run("colour", &json!({"action": "cdl", "clip": id, "path": file.to_str().unwrap()})).unwrap();
+        assert_eq!(grade_of(&s, id).params.get("cdl_slope_r"), Some(&m::Value::Scalar(1.1)));
+
+        let lut = dir.join("look.cube");
+        let r = s.run("colour", &json!({"action": "lut", "clip": id, "export": lut.to_str().unwrap(), "size": 5})).unwrap();
+        assert!(said(r).contains("\"size\":5"));
+        s.run("colour", &json!({"action": "lut", "clip": id, "path": lut.to_str().unwrap()})).unwrap();
+        assert_eq!(grade_of(&s, id).lut.as_deref(), lut.to_str());
+        let e = err(s.run("colour", &json!({"action": "lut", "clip": id, "path": dir.join("nope.cube").to_str().unwrap()})));
+        assert!(!e.is_empty());
+
+        s.run("colour", &json!({"action": "output", "space": "hdr10", "hdr_peak": 1500})).unwrap();
+        assert_eq!(s.doc.model.settings.colour_space, m::ColourSpace::Rec2020Pq);
+        assert_eq!(s.doc.model.settings.colour.hdr_peak, Some(1500));
+        s.run("colour", &json!({"action": "view", "view": "aces"})).unwrap();
+        assert_eq!(s.doc.model.settings.colour.view, "aces");
+        s.run("colour", &json!({"action": "view", "view": "none"})).unwrap();
+        assert!(s.doc.model.settings.colour.view.is_empty());
+        assert!(err(s.run("colour", &json!({"action": "output", "space": "xyz"}))).contains("no output space"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn err(r: Result<Vec<Content>, String>) -> String {
+        match r {
+            Ok(p) => panic!("expected an error, got {}", said(p)),
+            Err(e) => e,
+        }
+    }
+
+    fn said(r: Vec<Content>) -> String {
+        r.into_iter().filter_map(|c| if let Content::Text(t) = c { Some(t) } else { None }).collect::<Vec<_>>().join("\n")
+    }
+
+    /// A still saved from one shot goes onto another through the tool,
+    /// keeping the other shot's own match parameters.
+    #[test]
+    fn a_still_applies_but_keeps_the_shots_own_match() {
+        let mut s = session();
+        let a = card(&mut s);
+        s.run("colour", &json!({"action": "grade", "clip": a, "params": {"contrast": 0.4}})).unwrap();
+        let g = grade_of(&s, a);
+        let name = format!("post-test-{}", std::process::id());
+        let st = services::grade_stills::save(&s.doc, &name, &g, None, Some(a as u64), None).unwrap();
+        s.edit(&[json!({"op": "card", "colour": "#aa3333", "at": 2.0, "duration": 2.0, "lane": "overlay"})], "card", false).unwrap();
+        let b = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
+        assert!(services::grade::edit_grade(&mut s.doc, b, "Match", None, |_, g| {
+            g.params.insert("match_exposure".into(), m::Value::Scalar(0.3));
+        }));
+        s.run("colour", &json!({"action": "stills", "apply": st.name.clone(), "clips": [b]})).unwrap();
+        assert_eq!(grade_of(&s, b).params.get("contrast"), Some(&m::Value::Scalar(0.4)));
+        assert_eq!(grade_of(&s, b).params.get("match_exposure"), Some(&m::Value::Scalar(0.3)));
+        services::grade_stills::remove(&s.doc, &name).unwrap();
     }
 }
