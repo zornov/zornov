@@ -285,7 +285,8 @@ impl StudioApp {
     /// Open a project folder (ask when `path` is None). Unsaved work in
     /// the open project is settled first (see [`StudioApp::replace`]).
     pub fn open_folder(&mut self, ctx: &egui::Context, path: Option<PathBuf>) {
-        let Some(dir) = path.or_else(|| rfd::FileDialog::new().set_title("Open project").pick_folder()) else { return };
+        // Under tests there is no one to answer a native dialog: with no path, nothing opens.
+        let Some(dir) = path.or_else(|| if cfg!(test) { None } else { rfd::FileDialog::new().set_title("Open project").pick_folder() }) else { return };
         self.replace(ctx, Replace::Open(dir));
     }
 
@@ -427,23 +428,22 @@ impl StudioApp {
         let Some(offer) = ctx.data(|d| d.get_temp::<Option<Offer>>(egui::Id::new(OFFER))).flatten() else { return };
         let when = edited_label(offer.at_ms / 1000).to_lowercase();
         let mut answer = None;
-        let out = kit::modal(ctx, egui::Id::new("files-restore"), egui::vec2(460.0, 190.0), &crate::i18n::tf(format!("Found unsaved changes from {when}")), |ui| {
-            ui.add_space(theme::space::MD);
-            ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                ui.label(crate::i18n::shown("Zornov was closed before they were saved. Restoring adds them as one step you can undo."));
-            });
-            ui.add_space(theme::space::LG);
-            ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                if kit::Button::primary("Restore").show(ui).clicked() {
-                    answer = Some(true);
-                }
-                if kit::Button::secondary("Keep saved version").show(ui).clicked() {
-                    answer = Some(false);
-                }
-            });
+        let id = egui::Id::new("files-restore");
+        let out = kit::modal_sized(ctx, id, kit::DialogSize::Small, &crate::i18n::tf(format!("Found unsaved changes from {when}")), |ui| {
+            let body = kit::above_footer(ui).shrink2(egui::vec2(kit::DIALOG_PAD, theme::space::LG));
+            ui.put(body, egui::Label::new(egui::RichText::new(crate::i18n::shown("Zornov was closed before they were saved. Restoring adds them as one step you can undo.")).font(theme::body()).color(theme::tokens(ctx).text_2)).wrap());
+            match kit::dialog_footer(ui, "Restore changes", Some("Keep saved version"), false) {
+                kit::Choice::Primary => answer = Some(true),
+                kit::Choice::Secondary => answer = Some(false),
+                kit::Choice::None => {}
+            }
         });
+        if out.confirm {
+            answer = Some(true);
+        }
+        if answer.is_some() {
+            kit::return_focus(ctx, id);
+        }
         if out.close {
             answer = Some(false);
         }
@@ -519,26 +519,25 @@ impl StudioApp {
         let id = egui::Id::new("files-unsaved");
         let name = self.doc.project.name.clone();
         let mut answer = None;
-        let out = kit::modal(ctx, id, egui::vec2(440.0, 190.0), &crate::i18n::tf(format!("Save changes to {name}?")), |ui| {
-            ui.add_space(theme::space::MD);
-            ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                ui.label(crate::i18n::shown("It is not saved anywhere yet. Without saving, your changes are lost."));
-            });
-            ui.add_space(theme::space::LG);
-            ui.horizontal(|ui| {
-                ui.add_space(20.0);
-                if kit::Button::primary("Save").show(ui).clicked() {
-                    answer = Some(Unsaved::Save);
-                }
-                if kit::Button::secondary("Don't save").show(ui).clicked() {
-                    answer = Some(Unsaved::Discard);
-                }
-                if kit::Button::ghost("Cancel").show(ui).clicked() {
-                    answer = Some(Unsaved::Cancel);
-                }
-            });
+        let out = kit::modal_sized(ctx, id, kit::DialogSize::Small, &crate::i18n::tf(format!("Save changes to {name}?")), |ui| {
+            let body = kit::above_footer(ui).shrink2(egui::vec2(kit::DIALOG_PAD, theme::space::LG));
+            ui.put(body, egui::Label::new(egui::RichText::new(crate::i18n::shown("It is not saved anywhere yet. Without saving, your changes are lost.")).font(theme::body()).color(theme::tokens(ctx).text_2)).wrap());
+            // "Don't save" sits at the left edge of the footer, away from the
+            // two answers that keep the work.
+            let r = ui.max_rect();
+            let left = egui::Rect::from_min_size(egui::pos2(r.left() + kit::DIALOG_PAD, r.bottom() - kit::DIALOG_FOOT_H + 12.0), egui::vec2(120.0, 32.0));
+            if ui.put(left, |ui: &mut egui::Ui| kit::Button::ghost("Don't save").show(ui)).clicked() {
+                answer = Some(Unsaved::Discard);
+            }
+            match kit::dialog_footer(ui, "Save", Some("Cancel"), false) {
+                kit::Choice::Primary => answer = Some(Unsaved::Save),
+                kit::Choice::Secondary => answer = Some(Unsaved::Cancel),
+                kit::Choice::None => {}
+            }
         });
+        if out.confirm {
+            answer = Some(Unsaved::Save);
+        }
         if out.close {
             answer = Some(Unsaved::Cancel);
         }
@@ -1141,6 +1140,31 @@ mod tests {
         app.open_folder(&ctx, Some(a.clone()));
         app.answer_unsaved(&ctx, Replace::Open(a), Unsaved::Discard);
         assert_eq!(app.doc.project.name, "A", "Don't save lets it go");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// R4-A: the "Save changes?" dialog answers to Esc, shows the kit title,
+    /// and `open_folder` with no path never opens a native picker under tests.
+    #[test]
+    fn the_save_dialog_answers_to_esc_and_open_folder_never_asks_the_system() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx, dir) = app_in("esc");
+        let a = saved_project(&dir, "A");
+        app.doc = crate::services::project::new_custom("Scratch", 640, 360, 30.0);
+        app.doc.edit("Rename", |p| p.name = "Scratch 2".into());
+        app.open_folder(&ctx, None);
+        assert!(pending(&ctx).is_none(), "no path, no picker, nothing asked");
+        app.open_folder(&ctx, Some(a.clone()));
+        assert_eq!(pending(&ctx), Some(Replace::Open(a)));
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)));
+        for f in 0..3 {
+            ctx.run_ui(egui::RawInput { time: Some(f as f64 * 0.1), screen_rect: screen, ..Default::default() }, |_| app.unsaved_dialog(&ctx)).textures_delta.clear();
+        }
+        assert!(pending(&ctx).is_some(), "still asking while nothing is pressed");
+        let esc = egui::Event::Key { key: egui::Key::Escape, physical_key: Some(egui::Key::Escape), pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        ctx.run_ui(egui::RawInput { time: Some(0.5), screen_rect: screen, events: vec![esc], ..Default::default() }, |_| app.unsaved_dialog(&ctx)).textures_delta.clear();
+        assert!(pending(&ctx).is_none(), "Esc cancels");
+        assert_eq!(app.doc.project.name, "Scratch 2", "Cancel keeps the work");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
