@@ -25,6 +25,10 @@ pub struct RenderView {
     previewer: Previewer,
     registry: Arc<SourceRegistry>,
     revision: Option<u64>,
+    /// Which project the renderer was last given.
+    seen: Option<ProjectId>,
+    /// Times the renderer started afresh because another project opened.
+    pub resets: u32,
     /// The stretch of time the renderer's copy of the project covers.
     span: Option<(i64, i64)>,
     sequence: u64,
@@ -52,6 +56,38 @@ pub struct RenderView {
     hit_sources: Sources,
     /// The 3D workspace's view: the scene is seen through it when set.
     view: Option<studio_render::viewport::ViewOptions>,
+}
+
+/// What tells one open project from another: where it is saved and, when
+/// their edit counts agree, the clips' ids, places and lengths and the
+/// picture's size.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ProjectId {
+    folder: Option<std::path::PathBuf>,
+    edits: u64,
+    fingerprint: u64,
+}
+
+impl ProjectId {
+    pub(crate) fn of(doc: &Doc) -> Self {
+        use std::hash::{Hash, Hasher};
+        let proj = &doc.project;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (proj.width, proj.height, proj.clips.len()).hash(&mut h);
+        for c in &proj.clips {
+            (c.id, c.start, c.dur, c.lane).hash(&mut h);
+        }
+        Self { folder: doc.folder.as_ref().map(|f| f.root().to_path_buf()), edits: doc.edits, fingerprint: h.finish() }
+    }
+
+    /// Whether this is not the project `before` described. A project saved
+    /// for the first time gains a folder without being another project.
+    pub(crate) fn replaces(&self, before: Option<&Self>) -> bool {
+        before.is_some_and(|b| {
+            let moved = matches!((&b.folder, &self.folder), (Some(x), Some(y)) if x != y);
+            moved || self.edits < b.edits || (self.edits == b.edits && self.fingerprint != b.fingerprint)
+        })
+    }
 }
 
 /// Draws text generators for `render` with the `text` crate, using the
@@ -351,7 +387,7 @@ impl RenderView {
         let cache = DecodeCache::new(512 << 20);
         let renderer = studio_render::best_renderer(Sources::new(registry.clone(), cache));
         let hit_sources = Sources::new(registry.clone(), DecodeCache::new(32 << 20));
-        Self { previewer: Previewer::new(renderer), registry, revision: None, span: None, sequence: 0, asked: None, texture: None, frames: 0, last_ms: 0.0, shown_time: None, keep_pixels: false, last_pixels: None, ahead: None, dropping: 0, window: (0.0, 0), scene: None, hit_sources, view: None }
+        Self { previewer: Previewer::new(renderer), registry, revision: None, seen: None, resets: 0, span: None, sequence: 0, asked: None, texture: None, frames: 0, last_ms: 0.0, shown_time: None, keep_pixels: false, last_pixels: None, ahead: None, dropping: 0, window: (0.0, 0), scene: None, hit_sources, view: None }
     }
 
     /// Hand the current project to the renderer when it changed. Follows
@@ -359,6 +395,16 @@ impl RenderView {
     /// the revision every frame, and a new scene each frame made the
     /// renderer draw every picture several times over.
     pub fn sync(&mut self, doc: &Doc, time: i64) {
+        // A project opened from Home counts edits from zero like the one it
+        // replaced, so the count alone cannot tell them apart: the renderer
+        // starts afresh when the project's identity changes.
+        let now = ProjectId::of(doc);
+        if now.replaces(self.seen.as_ref()) {
+            let (keep, view, resets) = (self.keep_pixels, self.view.take(), self.resets + 1);
+            *self = Self::new();
+            (self.keep_pixels, self.view, self.resets) = (keep, view, resets);
+        }
+        self.seen = Some(now);
         // The renderer gets the part of the project around `time`: a copy
         // of a whole long project on every edit (every drag step) was most
         // of a frame. A new part is cut when the project changes or the
@@ -498,6 +544,33 @@ mod tests {
     /// refresh, the playhead moved by each frame's real time) and reports
     /// how evenly its frames reach the screen. Headless: no window.
     /// `STUDIO_CADENCE_FILE=clip.mp4 cargo test --release cadence -- --nocapture`
+    #[test]
+    fn another_project_is_told_from_the_same_one() {
+        let id = |folder: Option<&str>, edits, fingerprint| super::ProjectId { folder: folder.map(Into::into), edits, fingerprint };
+        let before = id(None, 3, 7);
+        assert!(!id(None, 0, 7).replaces(None));
+        assert!(!id(None, 3, 7).replaces(Some(&before)), "same project, same count");
+        assert!(!id(None, 4, 9).replaces(Some(&before)), "an edit moves the count on");
+        assert!(id(None, 3, 9).replaces(Some(&before)), "same count, other clips");
+        assert!(id(None, 0, 7).replaces(Some(&before)), "a lower count");
+        assert!(!id(Some("/a"), 4, 9).replaces(Some(&before)), "saving gives it a folder");
+        assert!(id(Some("/b"), 9, 9).replaces(Some(&id(Some("/a"), 3, 7))), "another folder is another project");
+    }
+
+    #[test]
+    fn sync_starts_afresh_for_another_project_once() {
+        let mut v = super::RenderView::new();
+        let mut doc = crate::services::project::new_custom("One", 640, 360, 30.0);
+        v.sync(&doc, 0);
+        v.sync(&doc, 0);
+        assert_eq!(v.resets, 0, "an unchanged project is not reset");
+        doc = crate::services::project::new_custom("Other", 1280, 720, 30.0);
+        v.sync(&doc, 0);
+        assert_eq!(v.resets, 1, "a different project resets the renderer once");
+        v.sync(&doc, 0);
+        assert_eq!(v.resets, 1);
+    }
+
     #[test]
     fn cadence() {
         let Ok(file) = std::env::var("STUDIO_CADENCE_FILE") else { return };
