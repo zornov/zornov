@@ -781,7 +781,7 @@ struct CardOut {
 
 /// A grid of cards: a picture in 16:9, then the name and a line about it.
 #[allow(clippy::too_many_arguments)]
-fn card_grid(ui: &mut egui::Ui, salt: &str, n: usize, sel: Option<usize>, info: &dyn Fn(usize) -> CardInfo, paint: &mut dyn FnMut(&egui::Painter, Rect, usize, f32)) -> CardOut {
+fn card_grid(ui: &mut egui::Ui, grid_key: &str, n: usize, sel: Option<usize>, info: &dyn Fn(usize) -> CardInfo, paint: &mut dyn FnMut(&egui::Painter, Rect, usize, f32)) -> CardOut {
     let t = theme::tokens(ui.ctx());
     let avail = ui.available_width();
     let cols = cols_for(avail, CARD_MIN_W);
@@ -805,7 +805,7 @@ fn card_grid(ui: &mut egui::Ui, salt: &str, n: usize, sel: Option<usize>, info: 
             continue;
         }
         let ti = info(i);
-        let id = ui.scope_id().with(("home-card", salt, i));
+        let id = ui.scope_id().with(("home-card", grid_key, i));
         let resp = ui.interact(rect, id, Sense::click());
         let selected = sel == Some(i);
         resp.widget_info(|| WidgetInfo::selected(Role::Button, true, selected, &ti.label));

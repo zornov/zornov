@@ -1707,7 +1707,7 @@ pub fn compose(spec: &MusicSpec) -> Result<Piece, String> {
         }
     }
     if fx.crackle {
-        let mut cr = rng.fork(4242);
+        let mut cr = stream_rng(&mut rng, CRACKLE_STREAM);
         for i in 0..n {
             if cr.chance(40.0 / crate::dsp::SR) {
                 let a = cr.range(0.004, 0.03);
@@ -1858,11 +1858,31 @@ impl RoleTag for Layer {
     }
 }
 
+/// Which random stream the record crackle draws from. A stream number that
+/// keeps the crackle apart from the other forks of one piece; not a secret.
+const CRACKLE_STREAM: u64 = 4242;
+
+/// A noise source for one numbered stream of a piece, drawn from the piece's
+/// own source. The same as [`Rng::fork`], which the composer uses elsewhere.
+fn stream_rng(rng: &mut Rng, stream: u64) -> Rng {
+    Rng::new(rng.u64() ^ stream.wrapping_mul(0x9E37_79B9))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use studio_sound::beats;
     use studio_sound::loudness::measure;
+
+    #[test]
+    fn the_crackle_stream_is_the_same_noise_as_before() {
+        let (mut a, mut b) = (Rng::new(77), Rng::new(77));
+        let (mut old, mut new) = (a.fork(4242), stream_rng(&mut b, CRACKLE_STREAM));
+        for _ in 0..64 {
+            assert_eq!(old.u64(), new.u64());
+        }
+        assert_eq!(a.u64(), b.u64(), "the parent source moves on the same way");
+    }
 
     fn quick(desc: &str, secs: f32) -> MusicSpec {
         MusicSpec::new(desc, secs)
