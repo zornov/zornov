@@ -84,13 +84,20 @@ pub fn pressed(ctx: &egui::Context, prefs: &Prefs, ids: &[&str]) -> Vec<&'static
     let mut out = Vec::new();
     ctx.input_mut(|i| {
         for (id, k) in table {
-            if i.consume_shortcut(&k) {
+            // A held key repeats; only stepping actions follow the repeats.
+            // A toggle (play, snap, fullscreen…) fires once per press, so
+            // holding Space doesn't flip playback on and off.
+            let fresh = i.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } if *key == k.logical_key && modifiers.matches_logically(k.modifiers)));
+            if i.consume_shortcut(&k) && (fresh || REPEATS.contains(&id)) {
                 out.push(id);
             }
         }
     });
     out
 }
+
+/// Actions a held key repeats: stepping through time, zoom, and undo/redo.
+const REPEATS: &[&str] = &["frame-back", "frame-fwd", "second-back", "second-fwd", "zoom-in", "zoom-out", "zoom-in-plus", "undo", "redo"];
 
 /// Whether one action's shortcut was pressed (consumed if so).
 pub fn hit(ctx: &egui::Context, prefs: &Prefs, id: &str) -> bool {
@@ -228,6 +235,26 @@ pub fn name(id: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frame(ctx: &egui::Context, key: Key, repeat: bool) -> Vec<&'static str> {
+        let ev = egui::Event::Key { key, physical_key: None, pressed: true, repeat, modifiers: Modifiers::NONE };
+        let mut got = Vec::new();
+        let mut out = ctx.run_ui(egui::RawInput { events: vec![ev], ..Default::default() }, |ui| got = pressed(ui.ctx(), &Prefs::default(), &["play", "frame-fwd"]));
+        out.textures_delta.clear();
+        got
+    }
+
+    #[test]
+    fn holding_space_plays_once_but_held_arrows_keep_stepping() {
+        let ctx = egui::Context::default();
+        assert_eq!(frame(&ctx, Key::Space, false), ["play"]);
+        // The key repeats while held: playback is not toggled again.
+        assert!(frame(&ctx, Key::Space, true).is_empty());
+        assert!(frame(&ctx, Key::Space, true).is_empty());
+        // A held arrow keeps stepping frames.
+        assert_eq!(frame(&ctx, Key::ArrowRight, false), ["frame-fwd"]);
+        assert_eq!(frame(&ctx, Key::ArrowRight, true), ["frame-fwd"]);
+    }
 
     #[test]
     fn extra_keys_parse_and_clash_with_nothing() {
