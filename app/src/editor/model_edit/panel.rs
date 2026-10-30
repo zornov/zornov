@@ -224,7 +224,7 @@ fn modifiers_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, asset
                 kit::menu_separator(ui);
                 kit::menu_heading(ui, "Boolean with an object");
                 for (cid, name) in models {
-                    if MenuItem::new(&name).show(ui).on_hover_text(crate::i18n::t("Copies that object in as a hidden cutter part and subtracts it")).clicked() {
+                    if MenuItem::new(&name).show(ui).on_hover_text(crate::i18n::t("Subtracts a hidden copy as a cutter")).clicked() {
                         act = Some(Act::Cutter(cid));
                     }
                 }
@@ -863,25 +863,25 @@ fn object_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, asset: &
         });
         kit::labeled_row(ui, "Auto smooth", |ui| {
             let mut a = p.smooth_angle;
-            if kit::Slider::new("Auto smooth", &mut a, 0.0..=180.0).unit("°").with_value().show(ui).on_hover_text(crate::i18n::t("Edges sharper than this shade hard; marked sharp edges always do")).changed() {
+            if kit::Slider::new("Auto smooth", &mut a, 0.0..=180.0).unit("°").with_value().show(ui).on_hover_text(crate::i18n::t("Sharper edges shade hard; marked ones always do")).changed() {
                 act = Some(Act::Angle(a));
             }
         });
         kit::menu_separator(ui);
         ui.horizontal_wrapped(|ui| {
-            for (label, how, tip) in [("Origin to geometry", "geometry", "Moves the object's origin to the middle of its shape"), ("Origin to bottom", "bottom", "Moves the origin to the middle of the shape's base"), ("Origin to 3D cursor", "cursor", "Moves the origin to the 3D cursor")] {
+            for (label, how, tip) in [("Origin to geometry", "geometry", "Moves the origin to the shape's middle"), ("Origin to bottom", "bottom", "Moves the origin to the base's middle"), ("Origin to 3D cursor", "cursor", "Moves the origin to the 3D cursor")] {
                 if kit::Button::ghost(label).compact().show(ui).on_hover_text(crate::i18n::t(tip)).clicked() {
                     act = Some(Act::Origin(how));
                 }
             }
-            if kit::Button::ghost("Apply rotation and scale").compact().show(ui).on_hover_text(crate::i18n::t("Bakes the object's rotation and scale into its shape")).clicked() {
+            if kit::Button::ghost("Apply rotation and scale").compact().show(ui).on_hover_text(crate::i18n::t("Bakes rotation and scale into shape")).clicked() {
                 act = Some(Act::Apply);
             }
             let others = app.editor.selection.iter().filter(|s| **s as u64 != id).count();
             if others > 0 && kit::Button::ghost("Join selected").compact().show(ui).on_hover_text(crate::i18n::t("Joins the other selected models into this one")).clicked() {
                 act = Some(Act::Join);
             }
-            if kit::Button::secondary("Keep in My Models").icon(Icon::DownloadSimple).compact().show(ui).on_hover_text(crate::i18n::t("Saves this model to your own models, for any project")).clicked() {
+            if kit::Button::secondary("Keep in My Models").icon(Icon::DownloadSimple).compact().show(ui).on_hover_text(crate::i18n::t("Saves to your models, for any project")).clicked() {
                 act = Some(Act::Keep);
             }
         });

@@ -108,7 +108,7 @@ fn build_in() -> Vec<Workspace> {
         // The mixer beside the timeline, so levels can be set while the clips go by.
         docking(with(ws("Audio", "Mix sound: audio tools, a tall timeline and level controls.", (true, 320.0), (true, 300.0), (true, Some(460.0)), "Audio"), false, "Audio"), Panel::Sound, Some(Panel::Timeline), Zone::Right),
         with(ws("Effects", "Effects, masks and tracking on a large viewer.", (true, 320.0), (true, 400.0), (true, Some(220.0)), "Effects"), false, "Adjust"),
-        with(ws("Motion", "Titles, shapes and animation with keyframes close at hand.", (true, 320.0), (true, 340.0), (true, Some(280.0)), "Motions"), false, "Animation"),
+        with(ws("Motion", "Titles, shapes and keyframes close at hand", (true, 320.0), (true, 340.0), (true, Some(280.0)), "Motions"), false, "Animation"),
         // The Assistant a tab with the Library (showing); Review notes,
         // versions and the team a tab with the Inspector.
         showing(showing(docking(docking(ws("Review", "Plan and review: your media and the Assistant, a short timeline.", (true, 380.0), (true, 300.0), (true, Some(200.0)), "AI"), Panel::Review, Some(Panel::Inspector), Zone::Tab), Panel::Ai, Some(Panel::Library), Zone::Tab), Panel::Ai), Panel::Review),

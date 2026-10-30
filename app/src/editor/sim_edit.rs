@@ -92,7 +92,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
     let playhead = (app.editor.playhead - mc.start).max(0) as f64 / 1e6 + mc.start as f64 / 1e6;
     Section::new("sim-settings", "Simulation settings").icon(Icon::ArrowsOutCardinal).start_closed().show(ui, |ui| {
         let tk = theme::tokens(ui.ctx());
-        ui.label(egui::RichText::new("Set up a simulation and bake it into keys. Unset values use the automatic ones for the project's size.").font(theme::caption()).color(tk.text_2));
+        ui.label(egui::RichText::new("Bake a simulation into keys. Unset values use project-size defaults.").font(theme::caption()).color(tk.text_2));
         let names: Vec<&str> = SIMS.iter().map(|s| s.name).collect();
         kit::labeled_row(ui, "Simulation", |ui| {
             if let Some(i) = kit::menu_button(ui, "sim-kind", at, &names, ui.available_width() - 40.0, None) {
