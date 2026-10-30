@@ -394,8 +394,9 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                     if app.cli.shot.is_none() {
                         let kbps = (s.bitrate.unwrap_or(suggested_mbps(w, h, fps)) * 1000.0) as u32;
                         let req = export_run::Request { path: path.clone(), format, size: (w, h), fps: fps as f64, range: (a, b), quality: s.quality, bitrate_kbps: kbps, av1_speed: s.av1_speed };
-                        let task = export_run::start(&app.doc, req);
-                        let id = app.jobs.start_task(crate::i18n::tf(format!("Export {}", s.name)), format.label(), task, Some(path.clone()));
+                        // The request is kept on the job, so a failed export can be retried.
+                        let task = export_run::start(&app.doc, req.clone());
+                        let id = app.jobs.start_export(crate::i18n::tf(format!("Export {}", s.name)), format.label(), task, req);
                         s.job = Some(id);
                     }
                     #[cfg(not(feature = "render"))]
