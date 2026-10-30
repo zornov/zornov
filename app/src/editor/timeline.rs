@@ -1182,6 +1182,11 @@ fn headers(app: &mut StudioApp, ui: &mut egui::Ui, lanes: &[(u32, Rect)], area: 
             if nresp.double_clicked() {
                 ctx.data_mut(|d| d.insert_temp(rename_id(), (lane.id, lane.name.clone())));
             }
+            // The name sits over the header and takes its clicks, so a right-click
+            // on the name opens the track menu from here.
+            if nresp.secondary_clicked() {
+                open_menu(&ctx, TlMenu::Track(lane.id), nresp.interact_pointer_pos().unwrap_or(name_r.center()));
+            }
         }
         let sound_on = lane.kind == LaneKind::Audio || lane.kind == LaneKind::Spine;
         let toggles: [(Icon, &str, bool, LaneToggle, bool); 3] = [
@@ -1646,6 +1651,37 @@ fn t_accent(ui: &egui::Ui) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Centre of the first accessibility node with this label.
+    fn node_centre(h: &crate::ui_tests::Harness, label: &str) -> Option<Pos2> {
+        let update = h.last.as_ref()?.platform_output.accesskit_update.as_ref()?;
+        update.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.bounds()).map(|b| egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32))
+    }
+
+    fn right_click(h: &mut crate::ui_tests::Harness, at: Pos2) {
+        use egui::{Event, Modifiers, PointerButton};
+        h.with_events(vec![Event::PointerMoved(at)]);
+        h.with_events(vec![Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE }]);
+        h.with_events(vec![Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE }]);
+        h.frames(2);
+    }
+
+    #[test]
+    fn right_click_on_a_track_header_opens_the_track_menu() {
+        let mut h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        h.frames(4);
+        let lock = node_centre(&h, "Lock track").or_else(|| node_centre(&h, "Unlock track")).expect("a track header is on screen");
+        // The name sits left of the lock button, on the header.
+        let on_header = egui::pos2(lock.x - 50.0, lock.y);
+        right_click(&mut h, on_header);
+        assert!(kit::is_open(&h.ctx, menu_id()), "the menu opened on the header");
+        let what = h.ctx.data(|d| d.get_temp::<(TlMenu, Pos2)>(menu_id().with("what"))).expect("a menu target");
+        assert!(matches!(what.0, TlMenu::Track(_)), "it is the track menu, not the empty-timeline one: {:?}", what.0);
+        let labels = h.labels();
+        for want in ["Rename", "Add track above", "Delete track"] {
+            assert!(labels.iter().any(|l| l == want), "{want} is in the menu: {labels:?}");
+        }
+    }
 
     fn burst_wave() -> crate::services::library::Wave {
         // 10 s at 2048 samples/s: quiet tone, a loud burst at 6.0–6.5 s.
