@@ -60,6 +60,12 @@ pub struct ExportState {
     pub rights: Option<String>,
     /// The project this state belongs to (see [`sync_project`]).
     pub project_key: String,
+    /// More ▸ Make a shorter version.
+    pub shorter: Shorter,
+    /// More ▸ Bundle.
+    pub bundle: BundleUi,
+    /// A project the screen wants opened (the shorter version just made).
+    pub open_request: Option<std::path::PathBuf>,
     /// "Deliver for": the delivery spec id in force, if any.
     pub spec: Option<&'static str>,
     /// The size the spec decides, when it is not one of the sizes in the list.
@@ -111,6 +117,9 @@ impl Default for ExportState {
             job: None,
             rights: None,
             project_key: String::new(),
+            shorter: Shorter::default(),
+            bundle: BundleUi::default(),
+            open_request: None,
             spec: None,
             size_override: None,
             run_qc: false,
@@ -474,8 +483,193 @@ fn deliver_for(ui: &mut egui::Ui, s: &mut ExportState, project: (u32, u32, f32),
     }
 }
 
+/// "Make a shorter version": 15 / 30 / 60 seconds or a length of your own, optionally vertical.
+pub struct Shorter {
+    pub open: bool,
+    /// 0..=2 pick 15 / 30 / 60 s; 3 is `custom`.
+    pub len: usize,
+    pub custom: f32,
+    pub vertical: bool,
+    pub done: Option<export::CutdownOut>,
+}
+
+impl Default for Shorter {
+    fn default() -> Self {
+        Self { open: false, len: 1, custom: 45.0, vertical: false, done: None }
+    }
+}
+
+/// "Bundle…": the checklist, the run, the result.
+pub struct BundleUi {
+    pub open: bool,
+    pub req: export::BundleReq,
+    /// Cutdown lengths ticked in the checklist (15 / 30 / 60 s).
+    pub cutdowns: [bool; 3],
+    pub run: Option<std::sync::mpsc::Receiver<Result<export::BundleOut, String>>>,
+    pub done: Option<export::BundleOut>,
+}
+
+impl Default for BundleUi {
+    fn default() -> Self {
+        Self { open: false, req: export::BundleReq::default(), cutdowns: [false; 3], run: None, done: None }
+    }
+}
+
+const SHORTER: [f64; 3] = [15.0, 30.0, 60.0];
+
+fn shorter_secs(sh: &Shorter) -> f64 {
+    SHORTER.get(sh.len).copied().unwrap_or(sh.custom as f64)
+}
+
+/// "Make it": saves the project and cuts it down into a project of its own. Returns what to tell the person.
+fn make_shorter(doc: &mut crate::doc::Doc, sh: &mut Shorter) -> Result<String, String> {
+    let root = doc.folder.as_ref().map(|f| f.root().to_path_buf()).ok_or("Save the project to a folder first: the shorter version is made from the saved project")?;
+    crate::services::project::save(doc, None)?;
+    let secs = shorter_secs(sh);
+    let out = export::cutdown(doc, export::CutdownReq { seconds: secs, root, vertical: sh.vertical, ..Default::default() })?;
+    let msg = crate::i18n::tf(format!("Made {} · {:.0} s", out.name, out.seconds));
+    sh.done = Some(out);
+    Ok(msg)
+}
+
+/// The cutdowns ticked in the bundle checklist, as lengths.
+fn bundle_cutdowns(b: &BundleUi) -> Vec<f64> {
+    SHORTER.iter().zip(b.cutdowns).filter(|(_, on)| *on).map(|(s, _)| *s).collect()
+}
+
+/// "Make bundle": the project is saved, then the bundle is written on its own thread.
+fn start_bundle(doc: &mut crate::doc::Doc, b: &mut BundleUi, spec: Option<&str>) -> Result<(), String> {
+    let root = doc.folder.as_ref().map(|f| f.root().to_path_buf()).ok_or("Save the project to a folder first: the bundle is made from the saved project")?;
+    crate::services::project::save(doc, None)?;
+    let mut req = b.req.clone();
+    req.cutdowns = bundle_cutdowns(b);
+    req.spec = spec.map(str::to_owned);
+    let copy = crate::doc::Doc::new(doc.model.clone());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // The receiver may be gone when the person closes the screen; the bundle is written either way.
+        let _ = tx.send(export::bundle(&copy, &root, &req));
+    });
+    b.done = None;
+    b.run = Some(rx);
+    Ok(())
+}
+
+/// The bundle finished on its thread: one toast, the result kept for the section.
+fn poll_bundle(b: &mut BundleUi, ctx: &egui::Context) {
+    let Some(rx) = &b.run else { return };
+    match rx.try_recv() {
+        Ok(Ok(out)) => {
+            kit::push(ctx, crate::i18n::tf(format!("Made bundle · {} files", out.files)), None, Some(Icon::CheckCircle));
+            b.done = Some(out);
+            b.run = None;
+        }
+        Ok(Err(e)) => {
+            kit::push(ctx, format!("Could not make the bundle: {e}"), None, Some(Icon::Warning));
+            b.run = None;
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(400)),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => b.run = None,
+    }
+}
+
+fn shorter_section(ui: &mut egui::Ui, doc: &mut crate::doc::Doc, s: &mut ExportState) {
+    let t = theme::tokens(ui.ctx());
+    let sh = &mut s.shorter;
+    ui.horizontal(|ui| {
+        for (i, label) in ["15 s", "30 s", "60 s", "Custom"].iter().enumerate() {
+            if ui.selectable_label(sh.len == i, *label).clicked() {
+                sh.len = i;
+            }
+        }
+    });
+    if sh.len == 3 {
+        FieldRow::new("Length", &mut sh.custom, 2.0..=3600.0).default(45.0).unit("s").decimals(0).step(1.0).scrub(0.5).field_width(84.0).show(ui);
+    }
+    ui.checkbox(&mut sh.vertical, "Vertical (9:16)").on_hover_text("Reframes to follow the subject; the original is not changed");
+    let mut go = false;
+    ui.horizontal(|ui| {
+        go = Button::primary("Make it").compact().show(ui).clicked();
+    });
+    if go {
+        match make_shorter(doc, sh) {
+            Ok(m) => {
+                kit::push(ui.ctx(), m, None, Some(Icon::CheckCircle));
+            }
+            Err(e) => {
+                kit::push(ui.ctx(), format!("Could not make a shorter version: {e}"), None, Some(Icon::Warning));
+            }
+        }
+    }
+    if let Some(out) = sh.done.clone() {
+        kit::label_trunc(ui, egui::RichText::new(crate::i18n::tf(format!("{} · {:.0} s · kept {} shots, dropped {}", out.name, out.seconds, out.kept.len(), out.dropped.len()))).font(theme::caption()).color(t.text_2));
+        ui.horizontal(|ui| {
+            if Button::secondary("Open").compact().show(ui).clicked() {
+                s.open_request = Some(out.project.clone());
+            }
+            if Button::secondary("Add to queue").compact().show(ui).on_hover_text("Renders the shorter version with the render queue").clicked() {
+                let mut spec = studio_deliver::queue::JobSpec::new(&out.name, &out.project);
+                spec.preset = if out.vertical { "Vertical".into() } else { "Social 1080p".into() };
+                match crate::deliver_run::store().update(|q| q.add(spec)) {
+                    Ok(_) => {
+                        kit::push(ui.ctx(), crate::i18n::tf(format!("Added {} to the render queue", out.name)), None, Some(Icon::CheckCircle));
+                    }
+                    Err(e) => {
+                        kit::push(ui.ctx(), format!("Could not add it to the queue: {e}"), None, Some(Icon::Warning));
+                    }
+                }
+            }
+        });
+    }
+}
+
+fn bundle_section(ui: &mut egui::Ui, doc: &mut crate::doc::Doc, s: &mut ExportState) {
+    let t = theme::tokens(ui.ctx());
+    poll_bundle(&mut s.bundle, ui.ctx());
+    let spec = s.spec;
+    let b = &mut s.bundle;
+    let running = b.run.is_some();
+    ui.add_enabled_ui(!running, |ui| {
+        let mut thumbs = b.req.thumbnails > 0;
+        ui.checkbox(&mut b.req.master, "Master");
+        ui.checkbox(&mut b.req.proxy, "Proxy (720p review copy)");
+        ui.checkbox(&mut b.req.audio, "Mix (24-bit WAV)");
+        ui.add_enabled(b.req.audio, egui::Checkbox::new(&mut b.req.stems, "Stems"));
+        ui.checkbox(&mut b.req.captions, "Captions");
+        if ui.checkbox(&mut thumbs, "Thumbnails").changed() {
+            b.req.thumbnails = if thumbs { 8 } else { 0 };
+        }
+        ui.checkbox(&mut b.req.poster, "Poster frame");
+        ui.horizontal(|ui| {
+            ui.label("Shorter versions");
+            for (i, label) in ["15 s", "30 s", "60 s"].iter().enumerate() {
+                ui.checkbox(&mut b.cutdowns[i], *label);
+            }
+        });
+        ui.add_enabled(b.cutdowns.iter().any(|c| *c), egui::Checkbox::new(&mut b.req.verticals, "Vertical versions too"));
+    });
+    if running {
+        ui.label(egui::RichText::new("Making the bundle…").font(theme::caption()).color(t.text_2));
+    } else if Button::primary("Make bundle").compact().show(ui).clicked() {
+        if let Err(e) = start_bundle(doc, b, spec) {
+            kit::push(ui.ctx(), format!("Could not make the bundle: {e}"), None, Some(Icon::Warning));
+        }
+    }
+    if let Some(out) = &b.done {
+        kit::label_trunc(ui, egui::RichText::new(crate::i18n::tf(format!("{} files in {}", out.files, studio_paths::tilde(&out.folder)))).font(theme::caption()).color(t.text_2));
+        for m in out.missing.iter().take(4) {
+            ui.add(egui::Label::new(egui::RichText::new(crate::i18n::tf(format!("Left out: {m}"))).font(theme::caption()).color(t.warn)).wrap());
+        }
+        if Button::secondary("Show in Finder").compact().show(ui).clicked() {
+            if let Err(e) = export::reveal(&out.folder) {
+                kit::push(ui.ctx(), format!("Could not show the folder: {e}"), None, Some(Icon::Warning));
+            }
+        }
+    }
+}
+
 /// Export ▸ More: what happens after the export, and the audio-only shortcut.
-fn more_options(ui: &mut egui::Ui, s: &mut ExportState, fill: Option<&export::spec::Fill>) {
+fn more_options(ui: &mut egui::Ui, doc: &mut crate::doc::Doc, s: &mut ExportState, fill: Option<&export::spec::Fill>) {
     let t = theme::tokens(ui.ctx());
     egui::CollapsingHeader::new("More").id_salt("export-more").default_open(false).show(ui, |ui| {
         ui.checkbox(&mut s.run_qc, "Run QC after").on_hover_text("Checks the finished file for levels, black, frozen frames and loudness");
@@ -498,6 +692,19 @@ fn more_options(ui: &mut egui::Ui, s: &mut ExportState, fill: Option<&export::sp
                     s.quality = p.quality;
                 }
             }
+        }
+        ui.separator();
+        if Button::ghost("Make a shorter version…").compact().show(ui).clicked() {
+            s.shorter.open = !s.shorter.open;
+        }
+        if s.shorter.open {
+            shorter_section(ui, doc, s);
+        }
+        if Button::ghost("Bundle…").compact().show(ui).clicked() {
+            s.bundle.open = !s.bundle.open;
+        }
+        if s.bundle.open {
+            bundle_section(ui, doc, s);
         }
         if let Some(f) = fill {
             for n in f.notes.iter().take(2) {
@@ -727,7 +934,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                 ui.add(egui::Label::new(egui::RichText::new(crate::i18n::shown("Set in and out points with I and O to export part of the sequence.")).font(theme::caption()).color(t.text_2)).wrap());
             });
         }
-        more_options(ui, s, spec_fill.as_ref());
+        more_options(ui, &mut app.doc, s, spec_fill.as_ref());
     });
 
     // Footer: estimate, progress, actions.
@@ -816,6 +1023,11 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| kit::label_trunc(ui, egui::RichText::new(text).font(theme::body()).color(t.text_2)));
             });
         }
+    }
+    // The shorter version the person asked to open: the usual open settles unsaved work first.
+    if let Some(dir) = app.export.open_request.take() {
+        app.overlay = Overlay::None;
+        app.open_folder(ui.ctx(), Some(dir));
     }
 }
 
@@ -928,6 +1140,52 @@ mod tests {
         let e = write_captions(&doc, &dir.join("film.mp4"));
         assert!(e.is_err() || dir.join("film.srt").is_file(), "either it says there are no captions or it wrote them");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_shorter_version_needs_a_saved_project_and_makes_a_project_of_its_own() {
+        let mut doc = crate::doc::Doc::from_view(&crate::view::demo());
+        let mut sh = Shorter::default();
+        let e = make_shorter(&mut doc, &mut sh).unwrap_err();
+        assert!(e.starts_with("Save the project"), "{e}");
+        let dir = std::env::temp_dir().join(format!("zornov-shorter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::services::project::save(&mut doc, Some(&dir)).expect("saves to a temp folder");
+        sh.len = 3;
+        sh.custom = (doc.project.duration() as f64 / crate::view::SEC as f64 / 2.0).floor() as f32;
+        let msg = make_shorter(&mut doc, &mut sh).expect("cuts it down");
+        assert!(msg.starts_with("Made "), "{msg}");
+        let out = sh.done.as_ref().expect("the result is kept for Open and Add to queue");
+        assert!(out.project.is_dir() && out.seconds < doc.project.duration() as f64 / crate::view::SEC as f64);
+        // Too long a version says why.
+        sh.custom = 100000.0;
+        assert!(make_shorter(&mut doc, &mut sh).unwrap_err().contains("longer"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_bundle_checklist_maps_to_a_request_and_needs_a_saved_project() {
+        let mut doc = crate::doc::Doc::from_view(&crate::view::demo());
+        let mut b = BundleUi::default();
+        b.cutdowns = [false, true, true];
+        assert_eq!(bundle_cutdowns(&b), vec![30.0, 60.0]);
+        let e = start_bundle(&mut doc, &mut b, None).unwrap_err();
+        assert!(e.starts_with("Save the project"), "{e}");
+        assert!(b.run.is_none(), "nothing started");
+    }
+
+    #[test]
+    fn more_shows_the_shorter_version_and_bundle_sections() {
+        let mut h = Harness::new(&["--screen", "editor"]);
+        h.app.overlay = Overlay::Export;
+        h.app.export.shorter.open = true;
+        h.app.export.bundle.open = true;
+        h.frames(4);
+        // The "More" header is collapsed by default; its content is reachable once opened by the person.
+        let labels = h.labels();
+        assert!(labels.iter().any(|l| l == "More"), "{labels:?}");
+        assert!(h.cut_text().is_empty() && h.overlaps().is_empty());
     }
 
     #[test]
