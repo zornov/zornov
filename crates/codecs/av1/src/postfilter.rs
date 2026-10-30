@@ -46,6 +46,64 @@ pub(crate) fn apply(fs: &mut FrameState, stats: &mut DecodeStats, pool: &crate::
 }
 
 // ---------------------------------------------------------------------------------------------
+// Encoder entry point
+
+/// The post-filters on data the caller supplies, for an encoder that must reproduce the
+/// decoder's output exactly. The caller fills the per-block inputs (transform sizes, CDEF
+/// indices, loop restoration units), then runs the stages.
+pub struct PostFilter {
+    fs: FrameState,
+}
+
+impl PostFilter {
+    /// `cur` is the reconstruction before filtering, `mi` the mode info of all blocks.
+    pub fn new(seq: &crate::SequenceHeader, fh: &crate::FrameHeader, cur: crate::frame::FrameBuf, mi: crate::frame::MiInfo) -> PostFilter {
+        let mut fs = FrameState::new(seq, fh);
+        fs.cur = cur;
+        fs.mi = mi;
+        PostFilter { fs }
+    }
+
+    /// `LoopfilterTxSizes` of `plane` at a 4x4 unit of that plane.
+    pub fn set_lf_tx_size(&mut self, plane: usize, row: usize, col: usize, tx_size: u8) {
+        self.fs.set_lf_tx_size(plane, row, col, tx_size);
+    }
+
+    /// `cdef_idx` of the 64x64 block containing mode info position (`row`, `col`).
+    pub fn set_cdef_idx(&mut self, row: usize, col: usize, idx: i8) {
+        self.fs.set_cdef_idx(row, col, idx);
+    }
+
+    /// Parameters of loop restoration unit `unit` of `plane`.
+    pub fn set_lr_unit(&mut self, plane: usize, unit: usize, kind: u8, wiener: [[i8; 3]; 2], sgr_set: u8, sgr_xqd: [i8; 2]) {
+        self.fs.lr.lr_type[plane][unit] = kind;
+        self.fs.lr.lr_wiener[plane][unit] = wiener;
+        self.fs.lr.lr_sgr_set[plane][unit] = sgr_set;
+        self.fs.lr.lr_sgr_xqd[plane][unit] = sgr_xqd;
+    }
+
+    /// Units per row and column of `plane`'s restoration.
+    pub fn lr_units(&self, plane: usize) -> (usize, usize) {
+        (self.fs.lr_unit_cols[plane], self.fs.lr_unit_rows[plane])
+    }
+
+    /// Loop restoration alone: `deblocked` is the frame before CDEF, `cdef` the one after it
+    /// (the same frame when CDEF did nothing).
+    pub fn restore(&self, deblocked: &crate::frame::FrameBuf, cdef: &crate::frame::FrameBuf) -> crate::frame::FrameBuf {
+        let pool = crate::par::Pool::new(1);
+        crate::restoration::loop_restoration(&self.fs, deblocked, cdef, &pool)
+    }
+
+    /// All stages, as the decoder runs them; the filtered frame.
+    pub fn run(mut self) -> crate::frame::FrameBuf {
+        let pool = crate::par::Pool::new(1);
+        let mut stats = DecodeStats::default();
+        apply(&mut self.fs, &mut stats, &pool, false);
+        self.fs.cur
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Loop filter (7.14)
 
 /// Luma rows above a band that its horizontal edges read or write (p6 .. p0 of the widest

@@ -13,8 +13,9 @@
 use std::sync::Arc;
 
 use crate::bits::BitWriter;
+use crate::filters::{self, FilterParams};
 use crate::error::{Error, Result};
-use crate::mode::{FixedDecider, ModeDecider, SearchDecider};
+use crate::mode::{FixedDecider, ModeDecider, PartitionDecider};
 use crate::rc::gop::GopPlanner;
 use crate::rc::{MAX_RETRIES, RateControl};
 use crate::obu::{ObuType, av1c, obu, write_frame_header, write_sequence_header};
@@ -45,6 +46,8 @@ fn level_for(width: u32, height: u32) -> u8 {
 pub struct Encoder {
     cfg: Config,
     seq: SeqParams,
+    dseq: studio_av1::SequenceHeader,
+    filters: filters::FilterSet,
     gop: GopPlanner,
     rc: RateControl,
     frames: u32,
@@ -93,8 +96,8 @@ impl Encoder {
             profile: 0,
             level_idx: level_for(cfg.width, cfg.height),
             use_128x128_superblock: false,
-            enable_cdef: false,
-            enable_restoration: false,
+            enable_cdef: true,
+            enable_restoration: true,
             enable_order_hint: true,
             // BT.709, limited range: what `color::from_rgba8` produces
             color_primaries: 1,
@@ -102,7 +105,22 @@ impl Encoder {
             matrix_coefficients: 1,
             full_range: false,
         };
-        Ok(Encoder { gop: GopPlanner::new(cfg.keyint), rc: RateControl::new(&cfg), cfg, seq, frames: 0, refs: RefStore::default(), recon: None })
+        let dseq = filters::decoder_sequence(&write_sequence_header(&seq));
+        Ok(Encoder { dseq, filters: Default::default(), gop: GopPlanner::new(cfg.keyint), rc: RateControl::new(&cfg), cfg, seq, frames: 0, refs: RefStore::default(), recon: None })
+    }
+
+    /// Chooses which in-loop filters may be used (all of them by default).
+    pub fn with_filters(mut self, filters: filters::FilterSet) -> Encoder {
+        self.filters = filters;
+        self
+    }
+
+    /// Workers for the filter searches: `Config::threads`, 0 meaning all cores.
+    fn threads(&self) -> usize {
+        match self.cfg.threads {
+            0 => std::thread::available_parallelism().map_or(1, |n| n.get()),
+            n => n,
+        }
     }
 
     /// The `av1C` record for the MP4 track.
@@ -124,13 +142,17 @@ impl Encoder {
         buf.enable_intra_edge_filter = false;
         let mut tw = TileWriter::new(&self.seq, q, mi_cols, mi_rows);
         let ref_idx = [0u8; 7];
+        // speeds 7 and 8 stop splitting at 16x16, speed 6 and below go to 8x8
+        let min_n4 = if self.cfg.speed >= 7 { 4 } else { 2 };
+        let (mut intra_sbs, mut inter_sbs) = (Vec::new(), Vec::new());
         if key {
-            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(SearchDecider { base_q_idx: q }) };
+            let mut decider: Box<dyn ModeDecider> = if self.cfg.speed >= FIXED_FROM_SPEED { Box::new(FixedDecider { base_q_idx: q }) } else { Box::new(PartitionDecider { base_q_idx: q, min_n4 }) };
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
                     let pos = SbPos { col, row };
                     let sb = decider.decide_sb(frame, &mut buf, pos);
                     tw.write_sb(pos, &sb);
+                    intra_sbs.push((pos, sb));
                 }
             }
         } else {
@@ -138,16 +160,48 @@ impl Encoder {
             // fast: one block size by quantiser (coarser ones leave less to gain from small blocks,
             // and their mode info costs more); otherwise the size is chosen for every superblock
             let fixed_size = if q >= 160 { 16 } else { 8 };
-            let mut coder = InterFrameCoder::new(frame, &self.refs, ref_idx, if fast { fixed_size } else { 0 }, self.cfg.speed <= 6);
+            let mut coder = InterFrameCoder::new(frame, &self.refs, ref_idx, if fast { fixed_size } else { 0 }, self.cfg.speed <= 6).with_min_block(min_n4);
             for row in 0..mi_rows.div_ceil(16) {
                 for col in 0..mi_cols.div_ceil(16) {
                     let pos = SbPos { col, row };
                     let sb = coder.decide_sb(&mut buf, pos);
                     tw.write_inter_sb(pos, &sb);
+                    inter_sbs.push((pos, sb));
                 }
             }
         }
-        let tile = tw.finish();
+        // in-loop filters: the search sees the finished tile, the references the filtered frame
+        let fast = self.cfg.speed >= FIXED_FROM_SPEED;
+        let lf = if fast || !self.filters.deblock { [0, 0] } else { filters::search_deblock(&self.dseq, &buf, tw.mode_info(), frame) };
+        let deblocked = filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf, cdef: None, lr: None });
+        let cdef = if fast || !self.filters.cdef { None } else { filters::search_cdef(&self.dseq, &deblocked, tw.mode_info(), frame, q) };
+        let lr = if fast || !self.filters.restoration || self.cfg.speed > 6 { None } else { filters::search_lr(&self.dseq, &buf, tw.mode_info(), frame, lf, cdef.as_ref(), q, self.threads()) };
+        let buf = if cdef.is_none() && lr.is_none() {
+            deblocked
+        } else {
+            filters::apply(&self.dseq, &buf, tw.mode_info(), &FilterParams { lf_level: lf, cdef: cdef.clone(), lr: lr.clone() })
+        };
+        // the strength index and the restoration units are coded inside the tile data, so a frame
+        // that uses more than one strength set or any restoration is written again
+        let rewrite = cdef.as_ref().is_some_and(|c| c.params.bits > 0) || lr.is_some();
+        let tile = if rewrite {
+            let mut tw2 = TileWriter::new(&self.seq, q, mi_cols, mi_rows);
+            if let Some(c) = cdef.as_ref().filter(|c| c.params.bits > 0) {
+                tw2 = tw2.with_cdef(c.params.bits as u32, c.idx.clone());
+            }
+            if let Some(l) = &lr {
+                tw2 = tw2.with_lr(l.clone());
+            }
+            for (pos, sb) in &intra_sbs {
+                tw2.write_sb(*pos, sb);
+            }
+            for (pos, sb) in &inter_sbs {
+                tw2.write_inter_sb(*pos, sb);
+            }
+            tw2.finish()
+        } else {
+            tw.finish()
+        };
 
         let fp = FrameParams {
             frame_type: if key { FrameType::Key } else { FrameType::Inter },
@@ -157,8 +211,10 @@ impl Encoder {
             refresh_frame_flags: if key { 0xFF } else { 0x01 },
             order_hint: self.frames & 0x7F,
             ref_frame_idx: ref_idx,
-            loop_filter_level: [0, 0],
+            loop_filter_level: [lf[0] as u8, lf[1] as u8],
             cdef_enabled: false,
+            cdef: cdef.map(|c| c.params).unwrap_or_default(),
+            lr: lr.as_ref().map(|l| l.params).unwrap_or_default(),
             tile_cols_log2: 0,
             tile_rows_log2: 0,
         };

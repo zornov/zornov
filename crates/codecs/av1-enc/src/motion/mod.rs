@@ -33,6 +33,9 @@ use crate::types::{BlockMode, CoefBlock, Frame, InterDecision, InterSbDecision, 
 use mvpred::{find_stack, frame_info, predicted_mv};
 use search::{Matcher, mv_bits};
 
+/// Bits charged for a partition symbol when comparing a block with its split.
+const PARTITION_BITS: f64 = 2.0;
+
 /// A motion vector in 1/8 pel units: `[row, col]`.
 pub type Mv = [i32; 2];
 
@@ -81,6 +84,8 @@ pub struct InterFrameCoder<'a> {
     block4: usize,
     /// Run the wide integer search (slower) rather than only the predicted starts and a local one.
     full_search: bool,
+    /// Smallest block the partition search splits down to, in 4x4 units (2 is 8x8).
+    min_n4: usize,
     /// Mirror of the mode info the tile writer keeps, for the candidate stacks.
     ctx: ContextState,
     mv_frame: MvFrame,
@@ -94,7 +99,7 @@ impl<'a> InterFrameCoder<'a> {
         assert!(matches!(block4, 0 | 2 | 4 | 8 | 16));
         let reference = refs.slots[ref_idx[0] as usize].clone().expect("the LAST reference slot is empty");
         let (mi_cols, mi_rows) = (2 * ((src.width as usize + 7) >> 3), 2 * ((src.height as usize + 7) >> 3));
-        InterFrameCoder { src, refs, ref_idx, reference, mi_rows, mi_cols, block4, full_search, ctx: ContextState::new(mi_cols, mi_rows), mv_frame: frame_info(mi_rows, mi_cols) }
+        InterFrameCoder { src, refs, ref_idx, reference, mi_rows, mi_cols, block4, full_search, min_n4: 2, ctx: ContextState::new(mi_cols, mi_rows), mv_frame: frame_info(mi_rows, mi_cols) }
     }
 
     /// Chooses and reconstructs the blocks of one superblock.
@@ -105,20 +110,73 @@ impl<'a> InterFrameCoder<'a> {
             recon.begin_sb(sb);
             return self.code_sb(recon, r0, c0, self.block4).0;
         }
-        // try the uniform partitions, go back to the saved state after each, keep the cheapest
-        let saved = self.ctx.save_region(r0, c0, SB4, SB4);
-        let mut best: Option<(f64, usize)> = None;
-        for size in [16, 8, 4] {
-            self.ctx.restore_region(&saved);
-            recon.begin_sb(sb);
-            let (_, cost) = self.code_sb(recon, r0, c0, size);
-            if best.is_none_or(|b| cost < b.0) {
-                best = Some((cost, size));
-            }
-        }
-        self.ctx.restore_region(&saved);
+        // search the partition: every node is coded whole and split into four, the cheaper kept
         recon.begin_sb(sb);
-        self.code_sb(recon, r0, c0, best.expect("a size was tried").1).0
+        let mut blocks = Vec::new();
+        self.search_node(recon, r0, c0, SB4, &mut blocks);
+        InterSbDecision { blocks }
+    }
+
+    /// Searches the partition of the `n4` x `n4` node at `(r, c)`: the block whole or split into
+    /// four, recursively down to 8x8, whichever costs less. The winner is left coded in `recon`
+    /// and in the mode info; its blocks are appended to `out` in decode order. Returns the cost.
+    fn search_node(&mut self, recon: &mut FrameBuf, r: usize, c: usize, n4: usize, out: &mut Vec<BlockMode>) -> f64 {
+        if r >= self.mi_rows || c >= self.mi_cols {
+            return 0.0;
+        }
+        let half = n4 / 2;
+        let lam = lambda(recon.quant.base_q_idx, recon.bit_depth);
+        if !(r + half < self.mi_rows && c + half < self.mi_cols) {
+            // past the frame edge the partition is forced; the pieces that are full nodes are searched
+            let mut shapes = Vec::new();
+            uniform_partition(r, c, n4, n4, self.mi_rows, self.mi_cols, &mut shapes);
+            if shapes.iter().all(|s| s.2 != s.3) || shapes.len() == 1 {
+                let mut total = 0.0;
+                for shape in shapes {
+                    let (b, cost) = self.decide_block(recon, shape);
+                    out.push(b);
+                    total += cost;
+                }
+                return total;
+            }
+            let mut total = 0.0;
+            for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
+                total += self.search_node(recon, r + dr, c + dc, half, out);
+            }
+            return total;
+        }
+        let base_ctx = self.ctx.save_region(r, c, n4, n4);
+        let base_rec = recon.save_region(r, c, n4);
+        let (whole, whole_cost) = self.decide_block(recon, (r, c, n4, n4));
+        let whole_cost = whole_cost + lam * PARTITION_BITS;
+        if n4 <= self.min_n4 {
+            out.push(whole);
+            return whole_cost;
+        }
+        let after_ctx = self.ctx.save_region(r, c, n4, n4);
+        let after_rec = recon.save_region(r, c, n4);
+        self.ctx.restore_region(&base_ctx);
+        recon.restore_region(&base_rec);
+        let mut split = Vec::new();
+        let mut split_cost = lam * PARTITION_BITS;
+        for (dr, dc) in [(0, 0), (0, half), (half, 0), (half, half)] {
+            split_cost += self.search_node(recon, r + dr, c + dc, half, &mut split);
+        }
+        if whole_cost <= split_cost {
+            self.ctx.restore_region(&after_ctx);
+            recon.restore_region(&after_rec);
+            out.push(whole);
+            whole_cost
+        } else {
+            out.extend(split);
+            split_cost
+        }
+    }
+
+    /// Limits the partition search to blocks of at least `min_n4` x `min_n4` (4x4 units).
+    pub fn with_min_block(mut self, min_n4: usize) -> Self {
+        self.min_n4 = min_n4.max(2);
+        self
     }
 
     /// Codes the superblock with uniform blocks of `block4`; returns the decisions and their total

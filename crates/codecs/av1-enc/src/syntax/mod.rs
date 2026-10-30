@@ -14,6 +14,7 @@ pub mod coef;
 pub mod ctx;
 pub mod inter_info;
 pub mod intra_info;
+pub mod lr;
 
 use studio_av1::spec_tables::*;
 
@@ -57,6 +58,8 @@ pub struct TileWriter {
     frame: FrameSyntax,
     /// Frame-level inputs of the motion vector processes (inter frames).
     mv_frame: MvFrame,
+    /// Loop restoration units, coded in front of each superblock.
+    lr: Option<lr::LrWriter>,
 }
 
 impl TileWriter {
@@ -73,7 +76,27 @@ impl TileWriter {
             sb_size: if seq.use_128x128_superblock { BLOCK_128X128 } else { BLOCK_64X64 },
             frame: FrameSyntax { tx_mode_select: false, lossless: base_q_idx == 0 },
             mv_frame: frame_info(mi_rows as usize, mi_cols as usize),
+            lr: None,
         }
+    }
+
+    /// Codes the restoration units of `choice` in front of the superblocks.
+    pub fn with_lr(mut self, choice: crate::types::LrChoice) -> TileWriter {
+        self.lr = Some(lr::LrWriter::new(choice));
+        self
+    }
+
+    fn write_lr(&mut self, sb: SbPos) {
+        let sb4 = NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize;
+        if let Some(lr) = &mut self.lr {
+            lr.write_sb(&mut self.enc, &mut self.cdfs.cdfs, sb.row as usize * sb4, sb.col as usize * sb4, sb4);
+        }
+    }
+
+    /// Codes `cdef_idx` (`bits` literal bits, from `idx`, one per 64x64 block) as the decoder reads it.
+    pub fn with_cdef(mut self, bits: u32, idx: Vec<i8>) -> TileWriter {
+        self.ctx.cdef = Some(CdefSyntax::new(bits, self.mi_cols.div_ceil(16), idx));
+        self
     }
 
     /// Mirrors `disable_cdf_update` of the frame header. Call before writing anything.
@@ -285,6 +308,7 @@ impl TileWriter {
         if sb.col == 0 {
             self.ctx.clear_left();
         }
+        self.write_lr(sb);
         let shapes: Vec<Leaf> = dec.blocks.iter().map(BlockMode::shape).collect();
         let sb4 = NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize;
         let mut cur = 0;
@@ -312,6 +336,7 @@ impl TileWriter {
         if sb.col == 0 {
             self.ctx.clear_left();
         }
+        self.write_lr(sb);
         let shapes: Vec<Leaf> = dec.blocks.iter().map(|b| (b.mi_row as usize, b.mi_col as usize, b.w4 as usize, b.h4 as usize)).collect();
         let sb4 = NUM_4X4_BLOCKS_WIDE[self.sb_size] as usize;
         let mut cur = 0;
@@ -414,6 +439,11 @@ impl TileWriter {
     }
 
     /// The finished tile data.
+    /// The mode info of the frame coded so far.
+    pub fn mode_info(&self) -> &studio_av1::frame::MiInfo {
+        &self.ctx.mi
+    }
+
     pub fn finish(self) -> Vec<u8> {
         self.enc.finish()
     }

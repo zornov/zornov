@@ -54,6 +54,7 @@ pub fn write_intra_frame_mode_info(enc: &mut SymbolEncoder, cdfs: &mut Cdfs, ctx
     let (r, c, ms) = (b.mi_row, b.mi_col, b.mi_size);
     let sctx = ctx.skip_ctx(r, c);
     enc.write_symbol(&mut cdfs.skip[sctx], b.skip as usize);
+    ctx.write_cdef(enc, r, c, b.skip);
 
     assert!(b.y_mode <= PAETH_PRED, "y mode {} is not an intra mode", b.y_mode);
     let (actx, lctx) = ctx.y_mode_ctx(r, c);
@@ -85,6 +86,7 @@ pub fn write_intra_block_in_inter_frame(enc: &mut SymbolEncoder, cdfs: &mut Cdfs
     let (r, c, ms) = (b.mi_row, b.mi_col, b.mi_size);
     let sctx = ctx.skip_ctx(r, c);
     enc.write_symbol(&mut cdfs.skip[sctx], b.skip as usize);
+    ctx.write_cdef(enc, r, c, b.skip);
     let ictx = ctx.is_inter_ctx(r, c);
     enc.write_symbol(&mut cdfs.is_inter[ictx], 0);
 

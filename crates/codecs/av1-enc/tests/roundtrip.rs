@@ -428,3 +428,72 @@ fn p_frames_save_bytes_on_moving_content_at_equal_psnr() {
     eprintln!("mean bytes at equal PSNR: {:.1}% of all-intra over {} operating points", 100.0 * mean, ratios.len());
     assert!(mean < 0.6, "mean ratio {mean:.2}");
 }
+
+fn code_sequence_with(frames: &[Frame], q: u8, speed: u8, set: studio_av1_enc::filters::FilterSet) -> (usize, f64) {
+    let (w, h) = (frames[0].width, frames[0].height);
+    let mut enc = Encoder::new(Config { rate: RateMode::Cqp(q), speed, keyint: 240, ..Config::new(w, h) }).unwrap().with_filters(set);
+    let (mut bytes, mut psnr_sum) = (0, 0.0);
+    for (i, f) in frames.iter().enumerate() {
+        bytes += enc.push_frame(f, i as i64).unwrap().remove(0).data.len();
+        psnr_sum += psnr(&enc.reconstruction().unwrap().planes[0], &f.planes[0]);
+    }
+    (bytes, psnr_sum / frames.len() as f64)
+}
+
+/// Bytes a curve of `(psnr, bytes)` points (sorted by PSNR) needs to reach `psnr`, log-linear
+/// between the points; `None` outside the curve.
+fn curve_bytes_at(curve: &[(f64, f64)], psnr: f64) -> Option<f64> {
+    curve.windows(2).find_map(|w| {
+        let ((p0, b0), (p1, b1)) = (w[0], w[1]);
+        (p0..=p1).contains(&psnr).then(|| (b0.ln() + (b1.ln() - b0.ln()) * (psnr - p0) / (p1 - p0)).exp())
+    })
+}
+
+/// A slower speed must not cost bytes at equal PSNR: speed 6 searches more than speed 8 (full-pel
+/// motion search and loop restoration), so on moving content it may only match or beat it.
+#[test]
+fn speed_6_needs_no_more_bytes_than_speed_8_at_equal_psnr() {
+    let set = studio_av1_enc::filters::FilterSet::default();
+    let mut ratios = Vec::new();
+    for (name, motion) in [("pan 3,2", Motion::Pan(3.0, 2.0)), ("pan 1.25,0.5", Motion::Pan(1.25, 0.5)), ("object", Motion::Object)] {
+        let frames = moving_sequence(motion, 320, 192, 6);
+        let curve = |speed: u8| -> Vec<(f64, f64)> {
+            let mut c: Vec<(f64, f64)> = [60u8, 100, 140, 180].iter().map(|&q| {
+                let (b, p) = code_sequence_with(&frames, q, speed, set);
+                (p, b as f64)
+            }).collect();
+            c.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            c
+        };
+        let (fast, slow) = (curve(8), curve(6));
+        for &(p, b) in &fast {
+            if let Some(s) = curve_bytes_at(&slow, p) {
+                eprintln!("{name:13} {p:5.2} dB: speed 8 {b:6.0} B, speed 6 {s:6.0} B, ratio {:.3}", s / b);
+                ratios.push(s / b);
+            }
+        }
+    }
+    assert!(ratios.len() >= 5, "too few comparable operating points ({})", ratios.len());
+    let mean = ratios.iter().sum::<f64>() / ratios.len() as f64;
+    eprintln!("speed 6 needs {:.1}% of speed 8's bytes at equal PSNR over {} points", 100.0 * mean, ratios.len());
+    assert!(mean <= 1.0, "speed 6 costs {:.1}% of speed 8's bytes", 100.0 * mean);
+    assert!(ratios.iter().all(|&r| r <= 1.05), "speed 6 loses more than 5% at some operating point: {ratios:?}");
+}
+
+#[test]
+#[ignore = "exploration: bytes at fixed PSNR targets (AV1LAMBDA sets the RD multiplier scale)"]
+fn explore_lambda() {
+    let set = studio_av1_enc::filters::FilterSet::default();
+    let mut seqs: Vec<(String, Vec<Frame>)> = gate_images().into_iter().map(|(n, f, _)| (n, vec![f])).collect();
+    seqs.push(("pan".into(), moving_sequence(Motion::Pan(3.0, 2.0), 160, 96, 4)));
+    seqs.push(("object".into(), moving_sequence(Motion::Object, 160, 96, 4)));
+    for (name, frames) in &seqs {
+        let mut c: Vec<(f64, f64)> = (20..=240).step_by(20).map(|q| { let (b, p) = code_sequence_with(frames, q as u8, 6, set); (p, b as f64) }).collect();
+        c.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        for target in [30.0, 35.0, 40.0, 45.0] {
+            if let Some(b) = curve_bytes_at(&c, target) {
+                eprintln!("PT {name} {target} {b:.1}");
+            }
+        }
+    }
+}

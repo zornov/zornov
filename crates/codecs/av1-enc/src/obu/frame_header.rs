@@ -157,16 +157,31 @@ pub fn write_frame_header(seq: &SeqParams, fh: &FrameParams, w: &mut BitWriter) 
         w.put(0, 3); // loop_filter_sharpness
         w.flag(false); // loop_filter_delta_enabled
         if seq.enable_cdef {
-            w.put(0, 2); // cdef_damping_minus_3
-            w.put(0, 2); // cdef_bits
-            w.put(0, 4); // cdef_y_pri_strength[0]
-            w.put(0, 2); // cdef_y_sec_strength[0]
-            w.put(0, 4); // cdef_uv_pri_strength[0]
-            w.put(0, 2); // cdef_uv_sec_strength[0]
+            let c = &fh.cdef;
+            w.put(c.damping as u32 - 3, 2); // cdef_damping_minus_3
+            w.put(c.bits as u32, 2); // cdef_bits
+            let sec = |v: u8| if v == 4 { 3 } else { v as u32 };
+            for i in 0..1usize << c.bits {
+                w.put(c.y_pri[i] as u32, 4);
+                w.put(sec(c.y_sec[i]), 2);
+                w.put(c.uv_pri[i] as u32, 4);
+                w.put(sec(c.uv_sec[i]), 2);
+            }
         }
         if seq.enable_restoration {
-            for _ in 0..3 {
-                w.put(0, 2); // lr_type = RESTORE_NONE
+            let lr = &fh.lr;
+            for p in 0..3 {
+                w.put(lr.switchable[p] as u32, 2); // lr_type: 0 NONE, 1 SWITCHABLE
+            }
+            if lr.uses_lr() {
+                // lr_unit_shift (64x64 superblocks): one bit, and one more when it is set
+                w.flag(lr.unit_shift > 0);
+                if lr.unit_shift > 0 {
+                    w.flag(lr.unit_shift > 1); // lr_unit_extra_shift
+                }
+                if lr.switchable[1] || lr.switchable[2] {
+                    w.flag(lr.uv_shift > 0); // lr_uv_shift
+                }
             }
         }
         w.flag(false); // tx_mode_select = 0: TX_MODE_LARGEST

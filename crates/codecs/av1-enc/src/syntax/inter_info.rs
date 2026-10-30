@@ -133,6 +133,7 @@ pub fn write_inter_block_mode_info(enc: &mut SymbolEncoder, cdfs: &mut Cdfs, ctx
     assert!(d.w4 >= 2 && d.h4 >= 2, "inter blocks must be at least 8x8");
     let sctx = ctx.skip_ctx(r, c);
     enc.write_symbol(&mut cdfs.skip[sctx], d.skip as usize);
+    ctx.write_cdef(enc, r, c, d.skip);
     let ictx = ctx.is_inter_ctx(r, c);
     enc.write_symbol(&mut cdfs.is_inter[ictx], 1);
     write_single_ref(enc, cdfs, ctx, r, c, d.ref_frame as usize);
