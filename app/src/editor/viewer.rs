@@ -39,7 +39,6 @@ pub(super) struct Placed {
 pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
     app.editor.viewer_rect = r;
-    forget_replaced_project(app, ui.ctx());
     let p = ui.painter().with_clip_rect(r);
     // Header and bottom bar are separated from the picture by hairlines.
     p.hline(r.x_range(), r.top() + TOOLBAR_H - 0.5, Stroke::new(1.0, t.line));
@@ -203,46 +202,6 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     } else if drop.dnd_hover_payload::<LibDrag>().is_some() {
         ui.painter().rect_stroke(canvas, 0, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
     }
-}
-
-/// What tells one open project from another when their edit counts agree:
-/// the clips' ids, places and lengths, and the picture's size.
-fn project_fingerprint(proj: &Project) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (proj.width, proj.height, proj.clips.len()).hash(&mut h);
-    for c in &proj.clips {
-        (c.id, c.start, c.dur, c.lane).hash(&mut h);
-    }
-    h.finish()
-}
-
-/// Whether the project now open is not the one drawn last frame: a new
-/// project starts counting edits from nothing, so the same count with other
-/// clips, or a lower one, is a different project.
-pub(crate) fn project_replaced(before: Option<(u64, u64)>, edits: u64, fingerprint: u64) -> bool {
-    before.is_some_and(|(e, f)| edits < e || (edits == e && fingerprint != f))
-}
-
-/// The renderer keeps the scene it was given until the project's edit count
-/// moves; a project opened from Home counts from zero too, so the viewer
-/// kept showing the previous project's picture. A different project starts
-/// the renderer afresh.
-fn forget_replaced_project(app: &mut StudioApp, ctx: &egui::Context) {
-    let key = egui::Id::new("viewer-project-seen");
-    let now = (app.doc.edits, project_fingerprint(&app.doc.project));
-    let before = ctx.data(|d| d.get_temp::<(u64, u64)>(key));
-    if project_replaced(before, now.0, now.1) {
-        #[cfg(feature = "render")]
-        {
-            app.render = None;
-        }
-        ctx.data_mut(|d| {
-            let n = d.get_temp::<u32>(key.with("resets")).unwrap_or(0);
-            d.insert_temp(key.with("resets"), n + 1);
-        });
-    }
-    ctx.data_mut(|d| d.insert_temp(key, now));
 }
 
 fn view_menu_id() -> egui::Id {
@@ -544,6 +503,10 @@ pub(crate) fn overlays_id() -> egui::Id {
     egui::Id::unique("viewer-overlays")
 }
 
+pub(crate) fn source_hint_id() -> egui::Id {
+    egui::Id::new("viewer-source-hint")
+}
+
 fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     let t = theme::tokens(ui.ctx());
     let bar = Rect::from_min_size(r.min + Vec2::new(12.0, 4.0), Vec2::new(r.width() - 20.0, TOOLBAR_H - 8.0));
@@ -554,13 +517,27 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         let ctx = bui.ctx().clone();
         let mut which = usize::from(app.editor.cutting.show_source);
         let was = which;
-        kit::segmented(&mut bui, "viewer-source-program", &mut which, &[kit::Segment::text("Program"), kit::Segment::text("Source")], None, None);
+        let seg = kit::segmented(&mut bui, "viewer-source-program", &mut which, &[kit::Segment::text("Program"), kit::Segment::text("Source")], None, None);
         if which != was {
             super::cutting::toggle_source(app);
             if which == 1 && !app.editor.cutting.show_source {
-                kit::push(&ctx, "Pick a clip in the Library to load the Source monitor", None, Some(Icon::Info));
+                kit::set_open(&ctx, source_hint_id(), true);
             }
         }
+        // Nothing to show in the Source monitor yet: say where to pick a clip.
+        kit::popover(&ctx, source_hint_id(), seg.rect, kit::Side::Below, 280.0, |ui| {
+            ui.label(crate::i18n::shown("Pick a clip in the Library to load the Source monitor"));
+            ui.horizontal(|ui| {
+                if kit::Button::primary("Open Library").compact().show(ui).clicked() {
+                    app.editor.open_panel(crate::dock::Panel::Library);
+                    app.editor.rail = super::library::RailItem::Media;
+                    kit::set_open(ui.ctx(), source_hint_id(), false);
+                }
+                if kit::Button::ghost("Not now").compact().show(ui).clicked() {
+                    kit::set_open(ui.ctx(), source_hint_id(), false);
+                }
+            });
+        });
     }
     bui.add_space(8.0);
     // The buttons scroll sideways when the viewer is narrower than they
@@ -832,15 +809,21 @@ mod add_menu_tests {
 }
 
 #[cfg(test)]
-mod replaced_tests {
-    use super::project_replaced;
+mod source_hint_tests {
+    use crate::ui_tests::Harness;
 
     #[test]
-    fn another_project_is_told_from_the_same_one() {
-        assert!(!project_replaced(None, 0, 7));
-        assert!(!project_replaced(Some((3, 7)), 3, 7), "same project, same count");
-        assert!(!project_replaced(Some((3, 7)), 4, 9), "an edit moves the count on");
-        assert!(project_replaced(Some((3, 7)), 3, 9), "same count, other clips");
-        assert!(project_replaced(Some((3, 7)), 0, 7), "a lower count");
+    fn the_source_monitor_hint_has_buttons_that_work() {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(1440.0, 900.0);
+        h.frames(6);
+        crate::kit::set_open(&h.ctx, super::source_hint_id(), true);
+        h.frames(4);
+        assert!(h.labels().iter().any(|l| l.contains("Pick a clip in the Library")), "{:?}", h.labels());
+        assert!(h.find(Some(eframe::egui::accesskit::Role::Button), "Not now").is_some(), "it can be dismissed");
+        let open = h.find(Some(eframe::egui::accesskit::Role::Button), "Open Library").expect("a button that opens the Library");
+        h.click_at(open);
+        h.frames(3);
+        assert!(!crate::kit::is_open(&h.ctx, super::source_hint_id()), "the hint closes");
+        assert!(h.app.editor.panel_open(crate::dock::Panel::Library), "the Library is open");
     }
 }

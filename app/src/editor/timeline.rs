@@ -107,11 +107,11 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         lanes_bg(app, &clip_p, &lane_rects, track_r, &t);
     }
     let range = app.doc.project.range;
-    if let Some((a, b)) = range {
+    if let Some((a, b)) = range.filter(|_| !comp) {
         let band = Rect::from_min_max(egui::pos2(view.x(a), track_r.top()), egui::pos2(view.x(b), track_r.bottom()));
         clip_p.rect_filled(band, 0, theme::alpha(t.accent, 0.05));
     }
-    for m in &app.doc.project.markers {
+    for m in app.doc.project.markers.iter().filter(|_| !comp) {
         clip_p.vline(view.x(m.time), track_r.y_range(), Stroke::new(1.0, theme::alpha(t.warn, 0.28)));
     }
 
@@ -138,12 +138,15 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
         let bar = Rect::from_min_size(egui::pos2(track_r.right() - 7.0, y0), Vec2::new(4.0, thumb_h));
         ui.painter().rect_filled(bar, CornerRadius::same(2), theme::alpha(t.text_2, 0.6));
     }
-    ruler_ui(app, ui, ruler, &view, &t);
+    // The node canvas has no time axis: no ruler or playhead across it.
+    if !comp {
+        ruler_ui(app, ui, ruler, &view, &t);
+    }
     corner(app, ui, Rect::from_min_max(body.min, egui::pos2(ruler.left(), ruler.bottom())), &t);
 
     // Snap line with a short pulse when it appears.
     if let Some((st, born)) = app.editor.snap_line {
-        if app.editor.tl_drag.is_some() {
+        if app.editor.tl_drag.is_some() && !comp {
             let x = view.x(st);
             let age = (ctx.input(|i| i.time) - born) as f32;
             let pulse = (1.0 - age / 0.14).clamp(0.0, 1.0);
@@ -156,7 +159,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect) {
     // Playhead: an ember line with a soft glow and a small rounded tab in
     // the ruler.
     let px = kit::snap(&ctx, view.x(app.editor.playhead)) + 0.5;
-    if px >= ruler.left() - 6.0 && px <= ruler.right() + 6.0 {
+    if !comp && px >= ruler.left() - 6.0 && px <= ruler.right() + 6.0 {
         let p = ui.painter().with_clip_rect(Rect::from_min_max(egui::pos2(ruler.left() - 6.0, ruler.top()), track_r.max));
         // A line with a small handle in the ruler.
         let top = ruler.top() + 2.0;
@@ -524,7 +527,11 @@ fn clips(app: &mut StudioApp, ui: &mut egui::Ui, p: &Painter, view: &View, lanes
         let selected = app.editor.selection.contains(&c.id);
         let hov = resp.hovered() && app.editor.tl_drag.is_none();
         let hover_k = kit::hover_t(&ctx, id, hov);
-        paint_clip(p, &mut app.thumbs, &proj, c, lane, r, selected, hover_k, lifted, &t, &beat_times);
+        let name_cut = paint_clip(p, &mut app.thumbs, &proj, c, lane, r, selected, hover_k, lifted, &t, &beat_times);
+        // A name cut short by the clip's width shows whole on hover.
+        if name_cut && !c.name.is_empty() {
+            resp.clone().on_hover_text(c.name.as_str());
+        }
         super::keys::timeline(app, ui, c, r, track);
 
         // Edge zones for trimming.
@@ -994,7 +1001,7 @@ impl AudioShape {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c: &Clip, lane: &Lane, r: Rect, selected: bool, hover: f32, lifted: bool, t: &theme::Tokens, beats: &[Time]) {
+fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c: &Clip, lane: &Lane, r: Rect, selected: bool, hover: f32, lifted: bool, t: &theme::Tokens, beats: &[Time]) -> bool {
     let cr = CornerRadius::same(theme::radius::CLIP);
     let mut fill = clip_fill(t, c.kind);
     let dim = lane.hidden || lane.muted || (c.kind == ClipKind::Audio && !c.audio.enabled);
@@ -1103,6 +1110,7 @@ fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c
         p.hline((r.left() + 6.0)..=(r.right() - 6.0), r.top() + 1.0, Stroke::new(1.0, Color32::from_white_alpha((70.0 * hover) as u8)));
     }
     // Name and duration on one line in the top 18 px.
+    let mut name_cut = false;
     let top = Rect::from_min_max(r.min, egui::pos2(r.right(), r.top() + CLIP_TOP));
     if r.width() > 36.0 {
         let dur = view::format_short(c.dur);
@@ -1117,7 +1125,7 @@ fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c
                 name_w -= 14.0;
             }
         }
-        kit::paint_text_clipped(&inner, egui::pos2(x, top.center().y + 1.0), Align2::LEFT_CENTER, &c.name, theme::caption(), t.on_clip, name_w);
+        name_cut = kit::paint_text_clipped(&inner, egui::pos2(x, top.center().y + 1.0), Align2::LEFT_CENTER, &c.name, theme::caption(), t.on_clip, name_w);
         if show_dur {
             inner.text(egui::pos2(r.right() - 6.0, top.center().y + 1.0), Align2::RIGHT_CENTER, dur, theme::caption(), t.on_clip);
         }
@@ -1125,9 +1133,8 @@ fn paint_clip(p: &Painter, thumbs: &mut crate::thumbs::Thumbs, proj: &Project, c
     // Keyframe marks are drawn (and handled) by `keys`.
     if selected {
         p.rect_stroke(r, cr, Stroke::new(1.5, PLAYHEAD), egui::StrokeKind::Inside);
-    } else {
-        let _ = t;
     }
+    name_cut
 }
 
 fn headers(app: &mut StudioApp, ui: &mut egui::Ui, lanes: &[(u32, Rect)], area: Rect, t: &theme::Tokens) {
@@ -1889,6 +1896,49 @@ mod tests {
         assert_eq!(ruler_label(12, 24.0), "00:00:12");
         assert_eq!(ruler_label(36, 24.0), "00:01:12");
         assert_eq!(ruler_label(3600 * 24 + 5, 24.0), "01:00:00:05");
+    }
+
+    /// Whether the last frame drew the playhead's handle (a white pentagon).
+    fn playhead_drawn(h: &crate::ui_tests::Harness) -> bool {
+        fn walk(s: &egui::Shape) -> bool {
+            match s {
+                egui::Shape::Path(p) => p.fill == PLAYHEAD && p.points.len() == 5,
+                egui::Shape::Vec(v) => v.iter().any(walk),
+                _ => false,
+            }
+        }
+        h.last.as_ref().is_some_and(|o| o.shapes.iter().any(|c| walk(&c.shape)))
+    }
+
+    #[test]
+    fn the_node_canvas_has_no_ruler_or_playhead_across_it() {
+        let mut h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        h.frames(6);
+        assert!(playhead_drawn(&h), "the clips view draws the playhead");
+        super::super::comp::set_on(&h.ctx, true);
+        h.frames(4);
+        assert!(!playhead_drawn(&h), "the node canvas does not");
+        super::super::comp::set_on(&h.ctx, false);
+        h.frames(4);
+        assert!(playhead_drawn(&h), "back on the clips, it returns");
+    }
+
+    #[test]
+    fn a_clip_name_cut_short_shows_whole_on_hover() {
+        let mut h = crate::ui_tests::Harness::new(&["--screen", "editor"]);
+        h.frames(6);
+        let clip = h.app.doc.project.clips.iter().find(|c| !c.name.is_empty() && c.kind != ClipKind::Audio).cloned().expect("a named clip");
+        // Zoomed out until the clip is a sliver wider than the text threshold.
+        h.app.editor.auto_fit = false;
+        h.app.editor.px_per_sec = (50.0 / (clip.dur as f64 / SEC as f64) as f32).clamp(MIN_PPS, MAX_PPS);
+        h.frames(4);
+        let r = h.ctx.read_response(egui::Id::unique(("clip", clip.id))).map(|r| r.rect).expect("the clip is on screen");
+        assert!(r.width() > 36.0 && r.width() < 120.0, "a narrow clip: {}", r.width());
+        let at = r.center();
+        h.with_events(vec![egui::Event::PointerMoved(at)]);
+        h.frames(50);
+        let tips = h.labels().iter().filter(|l| **l == clip.name).count();
+        assert!(tips >= 1, "the full name {:?} is shown on hover: {:?}", clip.name, h.labels());
     }
 
     /// The Move toast's Undo button is the toast the move pushed, and it
