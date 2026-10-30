@@ -286,34 +286,106 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect) {
     }
 }
 
-const STRIP_W: f32 = 92.0;
+const STRIP_W: f32 = 108.0;
+/// The fader's drawing area: the track, its dB scale and its meter.
+const FADER_W: f32 = 62.0;
+/// Room one channel's meter and its label take on the master.
+const CHANNEL_PITCH: f32 = 20.0;
+/// The dB marks drawn beside a fader and its meter.
+const SCALE_DB: [f32; 8] = [12.0, 6.0, 0.0, -6.0, -12.0, -24.0, -48.0, -60.0];
 
-/// A vertical fader with a meter beside it; returns the new dB when dragged.
+/// Where `v` dB sits on a fader of `rect`: +12 at the top, −60 at the
+/// bottom, 0 dB at 20 %.
+fn db_y(rect: Rect, v: f32) -> f32 {
+    let v = v.clamp(-60.0, 12.0);
+    let k = if v >= 0.0 { 0.2 * (1.0 - v / 12.0) } else { 0.2 + 0.8 * (-v / 60.0).sqrt() };
+    rect.top() + k * rect.height()
+}
+
+fn y_db(rect: Rect, y: f32) -> f32 {
+    let k = ((y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+    if k <= 0.2 { 12.0 * (1.0 - k / 0.2) } else { -60.0 * ((k - 0.2) / 0.8).powi(2) }
+}
+
+fn meter_colour(lvl: f32, t: &theme::Tokens) -> egui::Color32 {
+    if lvl > -1.0 { t.danger } else if lvl > -9.0 { t.warn } else { t.accent }
+}
+
+/// A meter column over the fader scale, filled from the bottom to `peak`.
+fn meter(p: &egui::Painter, col: Rect, scale: Rect, peak: f32, t: &theme::Tokens) {
+    p.rect_filled(col, 1, t.sunken);
+    let lvl = db(peak);
+    if lvl > -60.0 {
+        p.rect_filled(Rect::from_min_max(egui::pos2(col.left(), db_y(scale, lvl)), col.max), 1, meter_colour(lvl, t));
+    }
+}
+
+/// The scale between a fader and its meter: a tick and a number per mark
+/// (the 0 dB line stronger).
+fn scale(p: &egui::Painter, rect: Rect, t: &theme::Tokens) {
+    let mut last = f32::NEG_INFINITY;
+    for v in SCALE_DB {
+        let y = db_y(rect, v);
+        let x = rect.left() + 38.0;
+        p.hline(x..=x + 3.0, y, Stroke::new(1.0, if v == 0.0 { t.text_2 } else { t.line_strong }));
+        // A number only where the one above leaves it room.
+        if y - last >= 10.0 {
+            p.text(egui::pos2(x - 2.0, y), Align2::RIGHT_CENTER, format!("{v:.0}"), egui::FontId::proportional(9.0), if v == 0.0 { t.text } else { t.text_3 });
+            last = y;
+        }
+    }
+}
+
+/// The pan, said in words: "Center", "L 35", "R 20".
+fn pan_text(pan: f32) -> String {
+    let n = (pan.abs() * 100.0).round() as i32;
+    if n == 0 { "Center".into() } else if pan < 0.0 { format!("L {n}") } else { format!("R {n}") }
+}
+
+/// A Mute or Solo button that shows its state: filled while on.
+fn state_toggle(ui: &mut egui::Ui, label: &str, on: bool, width: f32, on_fill: egui::Color32, tip: &str, t: &theme::Tokens) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, theme::space::CONTROL_H_COMPACT), Sense::click());
+    let l = label.to_owned();
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, &l));
+    let fill = if on { on_fill } else { theme::mix(t.raised, t.text, if resp.hovered() { 0.12 } else { 0.06 }) };
+    let ink = if on { ink_on(on_fill) } else { t.text_2 };
+    let p = ui.painter();
+    p.rect_filled(rect, CornerRadius::same(4), fill);
+    if !on {
+        p.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, t.line), egui::StrokeKind::Inside);
+    }
+    p.text(rect.center(), Align2::CENTER_CENTER, crate::i18n::shown(label), theme::caption(), ink);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::shown(tip))
+}
+
+/// Text that reads on `fill`: black on a light fill, white on a dark one.
+fn ink_on(fill: egui::Color32) -> egui::Color32 {
+    let l = 0.299 * fill.r() as f32 + 0.587 * fill.g() as f32 + 0.114 * fill.b() as f32;
+    if l > 140.0 { egui::Color32::BLACK } else { egui::Color32::WHITE }
+}
+
+/// Mute and Solo side by side, filling `width`; returns what was clicked.
+fn mute_solo(ui: &mut egui::Ui, mute: bool, solo: bool, width: f32, t: &theme::Tokens) -> (bool, bool) {
+    let each = ((width - ui.spacing().item_spacing.x) / 2.0).floor();
+    // TODO(kit): a mute and a solo colour in the theme.
+    ui.horizontal(|ui| {
+        let m = state_toggle(ui, "Mute", mute, each, t.warn, "Mute", t).clicked();
+        let s = state_toggle(ui, "Solo", solo, each, t.accent_fill, "Solo", t).clicked();
+        (m, s)
+    })
+    .inner
+}
+
+/// A vertical fader with a dB scale and a meter beside it; returns the new
+/// dB when dragged.
 fn fader(ui: &mut egui::Ui, id: egui::Id, rect: Rect, value_db: f32, peak: f32, t: &theme::Tokens) -> Option<f32> {
-    // Fader travel: +12 dB at the top to −60 at the bottom, 0 dB at 20 %.
-    let to_y = |v: f32| {
-        let v = v.clamp(-60.0, 12.0);
-        let k = if v >= 0.0 { 0.2 * (1.0 - v / 12.0) } else { 0.2 + 0.8 * (-v / 60.0).sqrt() };
-        rect.top() + k * rect.height()
-    };
-    let from_y = |y: f32| {
-        let k = ((y - rect.top()) / rect.height()).clamp(0.0, 1.0);
-        if k <= 0.2 { 12.0 * (1.0 - k / 0.2) } else { -60.0 * ((k - 0.2) / 0.8).powi(2) }
-    };
     let p = ui.painter();
     let track = Rect::from_center_size(egui::pos2(rect.left() + 10.0, rect.center().y), Vec2::new(4.0, rect.height()));
     p.rect_filled(track, 2, t.sunken);
-    p.hline(track.left() - 4.0..=track.right() + 4.0, to_y(0.0), Stroke::new(1.0, t.line));
-    // Meter.
-    let meter = Rect::from_min_max(egui::pos2(rect.left() + 24.0, rect.top()), egui::pos2(rect.left() + 30.0, rect.bottom()));
-    p.rect_filled(meter, 1, t.sunken);
-    let lvl = db(peak);
-    if lvl > -60.0 {
-        let y = to_y(lvl);
-        let col = if lvl > -1.0 { t.danger } else if lvl > -9.0 { t.warn } else { t.accent };
-        p.rect_filled(Rect::from_min_max(egui::pos2(meter.left(), y), meter.max), 1, col);
-    }
-    let knob = Rect::from_center_size(egui::pos2(track.center().x, to_y(value_db)), Vec2::new(18.0, 10.0));
+    p.hline(track.left() - 4.0..=track.right() + 4.0, db_y(rect, 0.0), Stroke::new(1.0, t.line_strong));
+    scale(p, rect, t);
+    meter(p, Rect::from_min_max(egui::pos2(rect.left() + 44.0, rect.top()), egui::pos2(rect.left() + 52.0, rect.bottom())), rect, peak, t);
+    let knob = Rect::from_center_size(egui::pos2(track.center().x, db_y(rect, value_db)), Vec2::new(18.0, 10.0));
     let resp = ui.interact(rect.with_max_x(rect.left() + 22.0), id, Sense::click_and_drag());
     p.rect_filled(knob, 3, if resp.hovered() || resp.dragged() { t.text } else { t.text_2 });
     if resp.double_clicked() {
@@ -322,9 +394,26 @@ fn fader(ui: &mut egui::Ui, id: egui::Id, rect: Rect, value_db: f32, peak: f32, 
     if resp.dragged()
         && let Some(pos) = resp.interact_pointer_pos()
     {
-        return Some((from_y(pos.y) * 10.0).round() / 10.0);
+        return Some((y_db(rect, pos.y) * 10.0).round() / 10.0);
     }
     None
+}
+
+/// The master's loudness, one labelled row each: (name, value, unit).
+fn loudness_rows(m: &studio_sound::Meters) -> [(&'static str, String, &'static str); 4] {
+    [("Momentary", fmt_lufs(m.momentary_lufs), "LUFS"), ("Short-term", fmt_lufs(m.short_term_lufs), "LUFS"), ("Integrated", fmt_lufs(m.integrated_lufs), "LUFS"), ("True peak", fmt_lufs(m.true_peak_dbtp), "dBTP")]
+}
+
+/// The meter columns of the master's channels from `left`, each with the
+/// room its label needs: (label slot, meter).
+fn channel_columns(n: usize, left: f32, top: f32, bottom: f32) -> Vec<(Rect, Rect)> {
+    (0..n)
+        .map(|i| {
+            let x = left + i as f32 * CHANNEL_PITCH;
+            let col = Rect::from_min_max(egui::pos2(x + 6.0, top), egui::pos2(x + 14.0, bottom));
+            (Rect::from_min_max(egui::pos2(x, bottom + 2.0), egui::pos2(x + CHANNEL_PITCH, bottom + 14.0)), col)
+        })
+        .collect()
 }
 
 fn set_lane_gesture(app: &mut StudioApp, key: &str, lane: u64, f: impl FnOnce(&mut LaneMix, &mut m::Lane)) {
@@ -350,8 +439,7 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
     let Some(seq) = app.doc.model.sequence(app.doc.model.active_sequence).cloned() else { return };
     if d.buses.is_empty() {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new(crate::i18n::shown("Lanes play straight into the master. Film mixes group them in buses.")).font(theme::caption()).color(t.text_2));
-            if Button::secondary("Add film buses").icon(Icon::Plus).compact().show(ui).clicked() {
+            if Button::secondary("Add film buses").icon(Icon::Plus).compact().show(ui).on_hover_text(crate::i18n::shown("Group lanes into dialogue, music and effects buses")).clicked() {
                 edit_desk(ui.ctx(), &mut app.doc, "Film buses", |d| {
                     d.add_film_buses();
                     Ok(String::new())
@@ -364,7 +452,18 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
     // Strips keep their size: a narrow panel scrolls them sideways, a short
     // one down.
     let view_h = ui.available_height().max(180.0);
-    let strips = egui::ScrollArea::both().id_salt("mixer-strips").show_h(ui, |ui| {
+    // The master stays pinned at the right; the strips scroll in what is left.
+    let area = ui.available_rect_before_wrap();
+    let mw = master_width(d.layout());
+    let master_rect = Rect::from_min_max(egui::pos2((area.right() - mw).max(area.left()), area.top()), egui::pos2(area.right(), area.top() + view_h));
+    let strips_rect = Rect::from_min_max(area.min, egui::pos2((master_rect.left() - 6.0).max(area.left()), master_rect.bottom()));
+    ui.allocate_rect(Rect::from_min_max(area.min, master_rect.max), Sense::hover());
+    let mut mui = ui.new_child(egui::UiBuilder::new().max_rect(master_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    mui.set_clip_rect(master_rect.intersect(ui.clip_rect()));
+    master_strip(app, &mut mui, d, &meters, t);
+    let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(strips_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    sui.set_clip_rect(strips_rect.intersect(ui.clip_rect()));
+    let strips = egui::ScrollArea::both().id_salt("mixer-strips").show_h(&mut sui, |ui| {
         ui.set_max_height(view_h);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -377,11 +476,14 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
                 let peak = meters.bus_ids.iter().position(|x| *x == b.id).and_then(|k| meters.bus_peaks.get(k)).copied().unwrap_or(0.0);
                 bus_strip(app, ui, b, peak, t);
             }
-            ui.separator();
-            master_strip(app, ui, d, &meters, t);
         });
     });
     kit::note_scroll(ui.ctx(), strips.inner_rect, false);
+}
+
+/// The master strip's width: room for the loudness table, or its meters.
+fn master_width(layout: Layout) -> f32 {
+    (FADER_W + 28.0 + CHANNEL_PITCH * layout.channels() as f32).max(150.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -454,6 +556,10 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
     }
     // Pan or the surround pad.
     if surround {
+        // The room's labels sit outside the pad, so the dot never covers them.
+        c.horizontal(|ui| {
+            ui.label(egui::RichText::new(crate::i18n::shown("Position")).font(theme::caption()).color(t.text_2));
+        });
         let pad = c.allocate_exact_size(Vec2::splat(STRIP_W - 14.0), Sense::click_and_drag());
         let (r, resp) = pad;
         let p = c.painter();
@@ -464,7 +570,6 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
         let pos = spec.surround.at(app.editor.playhead);
         let dot = egui::pos2(r.center().x + pos.x * r.width() * 0.5, r.center().y - pos.y * r.height() * 0.5);
         p.circle_filled(dot, 5.0, t.accent);
-        p.text(r.center_top() + Vec2::new(0.0, 2.0), Align2::CENTER_TOP, crate::i18n::shown("front"), theme::caption(), t.text_2);
         if resp.dragged()
             && let Some(at) = resp.interact_pointer_pos()
         {
@@ -478,13 +583,19 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
                 mix.surround.placed = true;
             });
         }
+        c.horizontal(|ui| {
+            ui.label(egui::RichText::new(crate::i18n::shown("Front is up")).font(theme::caption()).color(t.text_3));
+        });
         resp.on_hover_text(crate::i18n::shown("Where the lane sits in the room: drag (front is up)"));
     } else {
         let mut pan = lane.pan as f32;
-        // The slider and its word fit the strip.
-        let word = kit::text_width(&c, "pan", egui::TextStyle::Body.resolve(c.style())) + c.spacing().item_spacing.x;
-        let _ = word;
-        if kit::Slider::new("pan", &mut pan, -1.0..=1.0).default(0.0).decimals(2).with_label().show(&mut c).changed() {
+        c.horizontal(|ui| {
+            ui.label(egui::RichText::new(crate::i18n::shown("Pan")).font(theme::caption()).color(t.text_2));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(crate::i18n::shown(&pan_text(pan))).font(theme::caption()).color(t.text));
+            });
+        });
+        if kit::Slider::new("Pan", &mut pan, -1.0..=1.0).default(0.0).decimals(2).width(STRIP_W - 14.0).show(&mut c).changed() {
             set_lane_gesture(app, &format!("pan-{}", lane.id.0), lane.id.0, |mix, l| {
                 l.pan = pan as f64;
                 mix.pan_keys.clear();
@@ -492,28 +603,25 @@ fn lane_strip(app: &mut StudioApp, ui: &mut egui::Ui, lane: &m::Lane, d: &Desk, 
         }
     }
     // Mute, solo.
-    c.horizontal(|ui| {
-        let mut mute = lane.muted;
-        let mut solo = lane.solo;
-        if kit::chip(ui, "M", mute, None).on_hover_text(crate::i18n::shown("Mute")).clicked() {
-            mute = !mute;
-            edit_lane(ui.ctx(), &mut app.doc, lane.id.0, "Mute track", |_, l| {
-                l.muted = mute;
-                Ok(String::new())
-            });
-        }
-        if kit::chip(ui, "S", solo, None).on_hover_text(crate::i18n::shown("Solo")).clicked() {
-            solo = !solo;
-            edit_lane(ui.ctx(), &mut app.doc, lane.id.0, "Solo track", |_, l| {
-                l.solo = solo;
-                Ok(String::new())
-            });
-        }
-    });
+    let (mute, solo) = mute_solo(&mut c, lane.muted, lane.solo, STRIP_W - 10.0, t);
+    if mute {
+        let v = !lane.muted;
+        edit_lane(ui.ctx(), &mut app.doc, lane.id.0, "Mute track", |_, l| {
+            l.muted = v;
+            Ok(String::new())
+        });
+    }
+    if solo {
+        let v = !lane.solo;
+        edit_lane(ui.ctx(), &mut app.doc, lane.id.0, "Solo track", |_, l| {
+            l.solo = v;
+            Ok(String::new())
+        });
+    }
     // Fader.
     let auto = !mix.volume_keys.is_empty();
     let shown = if auto { desk::mix::curve(&mix.volume_keys, lane.volume_db as f32).eval(app.editor.playhead) } else { lane.volume_db as f32 };
-    let fr = Rect::from_min_max(egui::pos2(c.cursor().left(), c.cursor().top() + 4.0), egui::pos2(c.cursor().left() + 34.0, rect.bottom() - 22.0));
+    let fr = Rect::from_min_max(egui::pos2(c.cursor().left(), c.cursor().top() + 4.0), egui::pos2(c.cursor().left() + FADER_W, rect.bottom() - 22.0));
     if fr.height() > 30.0 {
         if let Some(v) = fader(&mut c, egui::Id::unique(("lane-fader", lane.id.0)), fr, shown, peak, t) {
             set_lane_gesture(app, &format!("fader-{}", lane.id.0), lane.id.0, |mix, l| {
@@ -533,27 +641,26 @@ fn bus_strip(app: &mut StudioApp, ui: &mut egui::Ui, b: &desk::Bus, peak: f32, t
     kit::label_trunc(&mut c, egui::RichText::new(&b.name).font(theme::caption()).color(t.text).strong());
     c.label(egui::RichText::new(format!("{} bus{}", b.kind().stem(), if b.effects.is_empty() { String::new() } else { format!(" · {}", b.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>().join(", ")) })).font(theme::caption()).color(t.text_2));
     let id = b.id;
-    c.horizontal(|ui| {
-        if kit::chip(ui, "M", b.muted, None).on_hover_text(crate::i18n::shown("Mute")).clicked() {
-            let v = !b.muted;
-            edit_desk(ui.ctx(), &mut app.doc, "Mute bus", |d| {
-                if let Some(x) = d.buses.iter_mut().find(|x| x.id == id) {
-                    x.muted = v;
-                }
-                Ok(String::new())
-            });
-        }
-        if kit::chip(ui, "S", b.solo, None).on_hover_text(crate::i18n::shown("Solo")).clicked() {
-            let v = !b.solo;
-            edit_desk(ui.ctx(), &mut app.doc, "Solo bus", |d| {
-                if let Some(x) = d.buses.iter_mut().find(|x| x.id == id) {
-                    x.solo = v;
-                }
-                Ok(String::new())
-            });
-        }
-    });
-    let fr = Rect::from_min_max(egui::pos2(c.cursor().left(), c.cursor().top() + 4.0), egui::pos2(c.cursor().left() + 34.0, rect.bottom() - 22.0));
+    let (mute, solo) = mute_solo(&mut c, b.muted, b.solo, STRIP_W - 10.0, t);
+    if mute {
+        let v = !b.muted;
+        edit_desk(ui.ctx(), &mut app.doc, "Mute bus", |d| {
+            if let Some(x) = d.buses.iter_mut().find(|x| x.id == id) {
+                x.muted = v;
+            }
+            Ok(String::new())
+        });
+    }
+    if solo {
+        let v = !b.solo;
+        edit_desk(ui.ctx(), &mut app.doc, "Solo bus", |d| {
+            if let Some(x) = d.buses.iter_mut().find(|x| x.id == id) {
+                x.solo = v;
+            }
+            Ok(String::new())
+        });
+    }
+    let fr = Rect::from_min_max(egui::pos2(c.cursor().left(), c.cursor().top() + 4.0), egui::pos2(c.cursor().left() + FADER_W, rect.bottom() - 22.0));
     if fr.height() > 30.0 {
         if let Some(v) = fader(&mut c, egui::Id::unique(("bus-fader", id)), fr, b.volume_db, peak, t) {
             set_desk_gesture(app, &format!("bus-{id}"), |d| {
@@ -569,47 +676,65 @@ fn bus_strip(app: &mut StudioApp, ui: &mut egui::Ui, b: &desk::Bus, peak: f32, t
 
 fn master_strip(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, meters: &studio_sound::Meters, t: &theme::Tokens) {
     let layout = d.layout();
-    let w = 120.0 + 10.0 * layout.channels() as f32;
+    let w = master_width(layout);
     let h = ui.available_height().max(180.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(6), t.raised);
     let mut c = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink(5.0)).layout(egui::Layout::top_down(egui::Align::Min)));
     c.label(egui::RichText::new(crate::i18n::shown("Master")).font(theme::caption()).color(t.text).strong());
     let gain = d.delivery.as_ref().map_or(0.0, |x| x.gain_db);
-    let lufs = |v: f64| fmt_lufs(v);
-    c.label(egui::RichText::new(crate::i18n::tf(format!("M {}  S {}\nI {}  TP {}", lufs(meters.momentary_lufs), lufs(meters.short_term_lufs), lufs(meters.integrated_lufs), lufs(meters.true_peak_dbtp)))).font(theme::caption()).color(t.text_2)).on_hover_text(crate::i18n::shown("Momentary, short-term and integrated loudness (LUFS) and true peak (dBTP) since playback started"));
+    // Loudness since playback started: a name, a value and its unit per row.
+    let rows = loudness_rows(meters);
+    egui::Grid::new("master-loudness").num_columns(3).spacing([6.0, 1.0]).show(&mut c, |g| {
+        for (name, value, unit) in rows {
+            g.label(egui::RichText::new(crate::i18n::shown(name)).font(theme::caption()).color(t.text_2));
+            g.label(egui::RichText::new(value).font(theme::caption()).color(t.text));
+            g.label(egui::RichText::new(unit).font(theme::caption()).color(t.text_3));
+            g.end_row();
+        }
+    })
+    .response
+    .on_hover_text(crate::i18n::shown("Momentary, short-term and integrated loudness (LUFS) and true peak (dBTP) since playback started"));
     if gain != 0.0 {
-        c.label(egui::RichText::new(format!("delivery {gain:+.1} dB")).font(theme::caption()).color(t.text_2));
+        c.label(egui::RichText::new(crate::i18n::tf(format!("Delivery {gain:+.1} dB"))).font(theme::caption()).color(t.text_2));
     }
-    let fr = Rect::from_min_max(egui::pos2(c.cursor().left(), c.cursor().top() + 4.0), egui::pos2(c.cursor().left() + 34.0, rect.bottom() - 22.0));
+    let fr = Rect::from_min_max(egui::pos2(c.cursor().left(), c.cursor().top() + 4.0), egui::pos2(c.cursor().left() + FADER_W, rect.bottom() - 36.0));
     if fr.height() > 30.0 {
         if let Some(v) = fader(&mut c, egui::Id::unique("master-fader"), fr, d.master.volume_db, meters.master_peak, t) {
             set_desk_gesture(app, "master", |d| d.master.volume_db = v);
         }
-        // A meter per channel.
+        // A meter per channel, on the fader's scale, each with its label.
         let p = c.painter();
-        for (i, name) in layout.names().iter().enumerate() {
-            let x = fr.right() + 8.0 + i as f32 * 10.0;
-            let m = Rect::from_min_max(egui::pos2(x, fr.top()), egui::pos2(x + 6.0, fr.bottom()));
-            p.rect_filled(m, 1, t.sunken);
-            let lvl = db(meters.channel_peaks.get(i).copied().unwrap_or(0.0));
-            if lvl > -60.0 {
-                let k = 1.0 - (lvl + 60.0) / 60.0;
-                let col = if lvl > -1.0 { t.danger } else if lvl > -9.0 { t.warn } else { t.accent };
-                p.rect_filled(Rect::from_min_max(egui::pos2(m.left(), m.top() + k.clamp(0.0, 1.0) * m.height()), m.max), 1, col);
-            }
-            p.text(egui::pos2(m.center().x, fr.bottom() + 2.0), Align2::CENTER_TOP, *name, egui::FontId::proportional(8.0), t.text_2);
+        for (i, ((slot, col), name)) in channel_columns(layout.channels(), fr.right() + 8.0, fr.top(), fr.bottom()).into_iter().zip(layout.names()).enumerate() {
+            meter(p, col, fr, meters.channel_peaks.get(i).copied().unwrap_or(0.0), t);
+            p.text(slot.center_top() + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, *name, egui::FontId::proportional(9.0), t.text_2);
         }
-        c.painter().text(egui::pos2(rect.left() + 22.0, rect.bottom() - 6.0), Align2::CENTER_BOTTOM, format!("{:+.1}", d.master.volume_db), theme::caption(), t.text_2);
+        c.painter().text(egui::pos2(fr.left() + 10.0, rect.bottom() - 6.0), Align2::CENTER_BOTTOM, format!("{:+.1} dB", d.master.volume_db), theme::caption(), t.text_2);
+    }
+}
+
+/// A section's title above its controls.
+fn heading(ui: &mut egui::Ui, text: &str, t: &theme::Tokens) {
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(crate::i18n::shown(text)).font(theme::body_medium()).color(t.text));
+}
+
+/// How many clips are chosen, in words.
+fn selected_text(n: usize) -> String {
+    match n {
+        0 => "No clips selected".into(),
+        1 => "1 clip selected".into(),
+        n => format!("{n} clips selected"),
     }
 }
 
 fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelState, t: &theme::Tokens) {
-    if let Some(x) = d.delivery.as_ref().and_then(|x| LoudnessTarget::from_id(&x.target)) {
-        if s.reading.is_none() {
-            s.target = LoudnessTarget::ALL.iter().position(|y| *y == x).unwrap_or(0);
-        }
+    if let Some(x) = d.delivery.as_ref().and_then(|x| LoudnessTarget::from_id(&x.target))
+        && s.reading.is_none()
+    {
+        s.target = LoudnessTarget::ALL.iter().position(|y| *y == x).unwrap_or(0);
     }
+    heading(ui, "Loudness", t);
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(crate::i18n::shown("Spec")).font(theme::caption()).color(t.text_2));
         let target = LoudnessTarget::ALL[s.target.min(LoudnessTarget::ALL.len() - 1)];
@@ -655,26 +780,29 @@ fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
         });
     }
     ui.separator();
+    heading(ui, "Stems", t);
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new(crate::i18n::tf(format!("Stems ({}): DX, MX, FX, M&E, mix{}", d.layout().id(), if d.languages.is_empty() { "" } else { ", and each dub" }))).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("{} · DX, MX, FX, M&E, mix{}", d.layout().id(), if d.languages.is_empty() { "" } else { ", each dub" }))).font(theme::caption()).color(t.text_2));
         ui.checkbox(&mut s.separate_bg, "BG apart");
         ui.checkbox(&mut s.adm, "ADM objects");
-        if Button::secondary("Export stems…").icon(Icon::Export).compact().show(ui).clicked() && busy().is_empty() {
-            if let Some(dir) = rfd::FileDialog::new().set_title("Folder for the stems").pick_folder() {
-                let model = app.doc.model.clone();
-                let (layout, bg, adm) = (d.layout(), s.separate_bg, s.adm);
-                let title = app.doc.project.name.clone();
-                spawn("Writing stems", move || {
-                    let w = desk::render::export_stems(&model, &dir, layout, bg, &title);
-                    let a = adm.then(|| desk::render::export_adm(&model, &dir.join(format!("{} ADM.wav", if title.is_empty() { "Zornov" } else { &title })), layout, &title));
-                    Done::Stems(w, a)
-                });
-            }
+        if Button::secondary("Export stems…").icon(Icon::Export).compact().show(ui).clicked()
+            && busy().is_empty()
+            && let Some(dir) = rfd::FileDialog::new().set_title("Folder for the stems").pick_folder()
+        {
+            let model = app.doc.model.clone();
+            let (layout, bg, adm) = (d.layout(), s.separate_bg, s.adm);
+            let title = app.doc.project.name.clone();
+            spawn("Writing stems", move || {
+                let w = desk::render::export_stems(&model, &dir, layout, bg, &title);
+                let a = adm.then(|| desk::render::export_adm(&model, &dir.join(format!("{} ADM.wav", if title.is_empty() { "Zornov" } else { &title })), layout, &title));
+                Done::Stems(w, a)
+            });
         }
     });
     ui.separator();
+    heading(ui, "Cues and captions", t);
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new(crate::i18n::tf(format!("ADR cue sheet ({} cues)", d.adr.len()))).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("ADR cue sheet: {} cues", d.adr.len()))).font(theme::caption()).color(t.text_2));
         if Button::secondary("Export cue sheet…").icon(Icon::Export).compact().show(ui).clicked()
             && let Some(p) = rfd::FileDialog::new().set_file_name("ADR cue sheet.csv").save_file()
         {
@@ -685,7 +813,7 @@ fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
         let selected = s.selected_track.clone().or_else(|| d.subtitles.first().map(|t| t.lang.clone()));
         let track = selected.as_deref().and_then(|l| d.subtitles_of(l)).cloned();
         let name = track.as_ref().map(|t| t.name.clone()).unwrap_or_else(|| crate::i18n::shown("no subtitles yet").into_owned());
-        ui.label(egui::RichText::new(crate::i18n::tf(format!("Subtitles: {name}"))).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::tf(format!("Captions: {name}"))).font(theme::caption()).color(t.text_2));
         let enabled = track.is_some();
         ui.add_enabled_ui(enabled, |ui| {
             if Button::secondary("Export subtitles…").icon(Icon::Export).compact().show(ui).on_hover_text(crate::i18n::shown("Writes the track chosen in Captions as SRT or VTT")).clicked()
@@ -777,7 +905,7 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
     streamer(app, ui, d, t);
     let sel: Vec<u64> = app.editor.selection.iter().map(|x| *x as u64).collect();
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new(format!("{} selected", sel.len())).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::tf(selected_text(sel.len()))).font(theme::caption()).color(t.text_2));
         kit::Slider::new("Target level", &mut s.level_target, -36.0..=-10.0).default(-23.0).unit("LUFS").with_value().width(160.0).show(ui);
         if Button::secondary("Level dialogue").compact().show(ui).clicked() {
             app.doc.begin_batch("Level dialogue");
@@ -828,6 +956,12 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
     let fps = app.doc.project.fps;
     egui::ScrollArea::vertical().id_salt("adr-cues").show_v(ui, |ui| {
         egui::Grid::new("adr-grid").num_columns(7).spacing([8.0, 4.0]).striped(true).show(ui, |ui| {
+            if !d.adr.is_empty() {
+                for h in ["#", "Character", "Time", "Line", "Status", "Take", ""] {
+                    ui.label(egui::RichText::new(crate::i18n::shown(h)).font(theme::caption()).color(t.text_3));
+                }
+                ui.end_row();
+            }
             for c in &d.adr {
                 ui.label(egui::RichText::new(c.id.to_string()).font(theme::caption()));
                 let mut who = c.character.clone();
@@ -848,10 +982,10 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                 ui.label(egui::RichText::new(&c.status).font(theme::caption()).color(t.text_2));
                 ui.horizontal_wrapped(|ui| {
                     let recording = is_recording();
-                    if ui.add_enabled_ui(!recording, |ui| Button::secondary("Record").icon(Icon::Microphone).compact().show(ui)).inner.on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked() {
-                        if let Err(e) = start_recording(app, c) {
-                            s.message = Some(e);
-                        }
+                    if ui.add_enabled_ui(!recording, |ui| Button::secondary("Record").icon(Icon::Microphone).compact().show(ui)).inner.on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked()
+                        && let Err(e) = start_recording(app, c)
+                    {
+                        s.message = Some(e);
                     }
                     if Button::secondary("Take…").compact().show(ui).on_hover_text(crate::i18n::shown("Bring in a recorded take: synced, matched, on the ADR lane")).clicked()
                         && let Some(p) = rfd::FileDialog::new().add_filter("Sound", &["wav", "aif", "aiff", "m4a", "mp3", "flac"]).pick_file()
@@ -862,7 +996,7 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                             Err(e) => e,
                         });
                     }
-                    if ui.small_button("✓").on_hover_text(crate::i18n::shown("Approve the take")).clicked() {
+                    if IconButton::new(Icon::Check, "Approve the take").show(ui).clicked() {
                         let id = c.id;
                         edit_desk(ui.ctx(), &mut app.doc, "ADR approved", |d| {
                             if let Some(x) = d.adr.iter_mut().find(|x| x.id == id) {
@@ -872,7 +1006,7 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                         });
                     }
                 });
-                if ui.small_button("✕").on_hover_text(crate::i18n::shown("Remove the cue")).clicked() {
+                if IconButton::new(Icon::X, "Remove the cue").show(ui).clicked() {
                     let id = c.id;
                     edit_desk(ui.ctx(), &mut app.doc, "Remove ADR cue", |d| {
                         d.adr.retain(|x| x.id != id);
@@ -921,6 +1055,9 @@ fn subtitles_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut Panel
     ui.separator();
     let selected = s.selected_track.clone().or_else(|| d.subtitles.first().map(|t| t.lang.clone()));
     ui.horizontal_wrapped(|ui| {
+        if !d.subtitles.is_empty() {
+            ui.label(egui::RichText::new(crate::i18n::shown("Tracks")).font(theme::caption()).color(t.text_2));
+        }
         for tr in &d.subtitles {
             let on = selected.as_deref() == Some(tr.lang.as_str());
             if ui.selectable_label(on, format!("{} ({}, {})", tr.name, tr.lang, tr.cues.len())).clicked() {
@@ -930,7 +1067,7 @@ fn subtitles_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut Panel
         }
     });
     let Some(tr) = selected.as_deref().and_then(|l| d.subtitles_of(l)).cloned() else {
-        ui.label(egui::RichText::new(crate::i18n::shown("No subtitles yet: make them from the dialogue or import an SRT / VTT.")).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::shown("No captions yet: make them from the dialogue or import SRT or VTT")).font(theme::caption()).color(t.text_2));
         return;
     };
     let spec = studio_text::subtitles::SubtitleSpec::netflix(&tr.lang, fps);
@@ -1014,5 +1151,146 @@ fn subtitles_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut Panel
     });
     if let Some(m) = &s.message {
         ui.label(egui::RichText::new(m).font(theme::caption()).color(t.text_2));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_tests::Harness;
+
+    #[test]
+    fn pan_reads_in_words() {
+        assert_eq!(pan_text(0.0), "Center");
+        assert_eq!(pan_text(-0.35), "L 35");
+        assert_eq!(pan_text(1.0), "R 100");
+        assert_eq!(pan_text(0.004), "Center");
+    }
+
+    #[test]
+    fn fader_scale_round_trips_and_runs_downward() {
+        let r = Rect::from_min_size(egui::pos2(0.0, 10.0), Vec2::new(60.0, 200.0));
+        let ys: Vec<f32> = SCALE_DB.iter().map(|v| db_y(r, *v)).collect();
+        assert!(ys.windows(2).all(|w| w[1] > w[0]), "marks run top to bottom: {ys:?}");
+        assert!((db_y(r, 0.0) - (r.top() + 0.2 * r.height())).abs() < 0.01);
+        for v in [12.0, 6.0, 0.0, -6.0, -24.0, -60.0] {
+            assert!((y_db(r, db_y(r, v)) - v).abs() < 0.05, "{v}");
+        }
+    }
+
+    #[test]
+    fn channel_labels_fit_their_columns() {
+        let ctx = egui::Context::default();
+        crate::editor::test_frame(&ctx, egui::RawInput::default(), |ui| {
+            let font = egui::FontId::proportional(9.0);
+            for l in Layout::ALL {
+                let cols = channel_columns(l.channels(), 0.0, 0.0, 100.0);
+                assert_eq!(cols.len(), l.names().len());
+                for ((slot, col), name) in cols.iter().zip(l.names()) {
+                    let w = kit::text_width(ui, name, font.clone());
+                    assert!(w <= slot.width() - 2.0, "{name} ({w}) fits a {} wide slot", slot.width());
+                    assert!(slot.contains_rect(Rect::from_center_size(egui::pos2(slot.center().x, slot.center().y), Vec2::new(w, 9.0))) && col.center().x == slot.center().x);
+                }
+                for w in cols.windows(2) {
+                    assert!(!w[0].0.shrink(0.5).intersects(w[1].0.shrink(0.5)) && !w[0].1.intersects(w[1].1), "{} neighbours overlap", l.id());
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn master_loudness_is_labelled() {
+        let m = studio_sound::Meters { momentary_lufs: -23.04, short_term_lufs: -22.5, integrated_lufs: f64::NEG_INFINITY, true_peak_dbtp: -1.25, ..Default::default() };
+        let rows = loudness_rows(&m);
+        let names: Vec<_> = rows.iter().map(|r| r.0).collect();
+        assert_eq!(names, ["Momentary", "Short-term", "Integrated", "True peak"]);
+        assert_eq!(rows[0].1, "-23.0");
+        assert_eq!(rows[2].1, "—");
+        assert_eq!((rows[2].2, rows[3].2), ("LUFS", "dBTP"));
+    }
+
+    #[test]
+    fn selected_clips_in_words() {
+        assert_eq!(selected_text(0), "No clips selected");
+        assert_eq!(selected_text(1), "1 clip selected");
+        assert_eq!(selected_text(3), "3 clips selected");
+    }
+
+    fn panel(tab: usize, w: f32, h: f32) -> Harness {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(w, h);
+        set_on(&h.ctx, true);
+        let mut s = state(&h.ctx);
+        s.tab = tab;
+        save(&h.ctx, s);
+        h.frames(4);
+        h
+    }
+
+    fn shot(h: &Harness, name: &str) {
+        let dir = std::env::temp_dir().join("zornov-sound-shots");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        h.shot(dir.join(format!("{name}.png")));
+    }
+
+    #[test]
+    fn mixer_frame_has_labels_and_no_explainer() {
+        let h = panel(MIXER, 1440.0, 900.0);
+        let labels = h.labels();
+        for want in ["Master", "Momentary", "Short-term", "Integrated", "True peak"] {
+            assert!(labels.iter().any(|l| l == want), "{want} missing in {labels:?}");
+        }
+        assert!(!labels.iter().any(|l| l.contains("play straight")), "the explainer is gone");
+        // M and S are written out as Mute and Solo toggles with a state.
+        assert!(!labels.iter().any(|l| l == "M" || l == "S"));
+        assert!(labels.iter().any(|l| l == "Mute") && labels.iter().any(|l| l == "Solo"), "{labels:?}");
+        assert!(h.overlaps().iter().all(|o| !o.a.contains("Mute") && !o.b.contains("Mute") && !o.a.contains("Solo") && !o.b.contains("Solo")));
+        let cut: Vec<_> = h.cut_text().into_iter().filter(|c| ["Mute", "Solo", "Master", "Momentary", "Short-term", "Integrated", "True peak"].contains(&c.text.as_str())).collect();
+        assert!(cut.is_empty(), "{cut:?}");
+        shot(&h, "mixer");
+    }
+
+    #[test]
+    fn narrow_dock_keeps_master_pinned_and_strips_whole() {
+        for w in [420.0, 520.0, 700.0] {
+            let h = panel(MIXER, w, 900.0);
+            let labels = h.labels();
+            for want in ["Master", "Momentary", "True peak"] {
+                assert!(labels.iter().any(|l| l == want), "{want} at {w}: {labels:?}");
+            }
+            let bad: Vec<_> = h.cut_text().into_iter().filter(|c| ["Master", "Momentary", "Short-term", "Integrated", "True peak"].contains(&c.text.as_str())).collect();
+            assert!(bad.is_empty(), "master text cut at {w}: {bad:?}");
+            assert!(h.overlaps().iter().all(|o| !o.a.contains("Master") && !o.b.contains("Master")), "overlap at {w}");
+            shot(&h, &format!("mixer-{w}"));
+        }
+    }
+
+    #[test]
+    fn mute_toggle_shows_its_state() {
+        let mut h = panel(MIXER, 1440.0, 900.0);
+        let on = |h: &Harness| h.nodes().iter().filter(|(_, l)| l == "Mute").count();
+        assert!(on(&h) >= 1);
+        let ctx = h.ctx.clone();
+        let t = theme::tokens(&ctx);
+        crate::editor::test_frame(&ctx, egui::RawInput::default(), |ui| {
+            let (r_off, r_on) = (state_toggle(ui, "Mute", false, 46.0, t.warn, "Mute", &t).rect, state_toggle(ui, "Mute", true, 46.0, t.warn, "Mute", &t).rect);
+            assert_eq!(r_off.size(), r_on.size());
+        });
+        assert_ne!(ink_on(t.warn), t.warn);
+        h.frames(1);
+    }
+
+    #[test]
+    fn other_tabs_draw_without_cut_text() {
+        for (tab, name) in [(DIALOGUE, "dialogue"), (CAPTIONS, "captions"), (DELIVER, "deliver")] {
+            let h = panel(tab, 1200.0, 800.0);
+            let cut: Vec<_> = h.cut_text().into_iter().collect();
+            assert!(cut.is_empty(), "{name}: {cut:?}");
+            shot(&h, name);
+        }
+        let h = panel(DELIVER, 1200.0, 800.0);
+        let labels = h.labels();
+        for want in ["Loudness", "Stems"] {
+            assert!(labels.iter().any(|l| l == want), "{want} in {labels:?}");
+        }
     }
 }

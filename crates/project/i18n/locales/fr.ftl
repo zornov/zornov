@@ -1364,3 +1364,4 @@ dock-move-heading = Déplacer { $panel } vers…
 editorial-panel = Éditorial
 pop-out = Détacher dans une fenêtre
 dock-back = Réancrer
+feedback = Retours

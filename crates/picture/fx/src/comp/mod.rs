@@ -32,6 +32,7 @@ use crate::image::{Image, lerp_px};
 use crate::params::{ParamDef, ParamKind, ParamSet, ParamValue};
 
 pub mod clean;
+pub mod edit;
 pub mod geo;
 pub mod gpu;
 pub mod key;

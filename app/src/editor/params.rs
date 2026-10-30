@@ -260,8 +260,11 @@ fn choice_row(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], g: &m::Genera
         _ => default,
     };
     let at = options.iter().position(|o| *o == cur).unwrap_or(0);
+    // The stored words are ids (`as_typed`): show them as words.
+    let shown: Vec<String> = options.iter().map(|o| humanise(o)).collect();
+    let shown: Vec<&str> = shown.iter().map(String::as_str).collect();
     kit::labeled_row(ui, label, |ui| {
-        if let Some(i) = kit::menu_button(ui, key, at, options, ui.available_width() - 40.0, None) {
+        if let Some(i) = kit::menu_button(ui, key, at, &shown, ui.available_width() - 40.0, None) {
             let v = m::Value::Choice(options[i].to_owned());
             put(app, ids, key, label, |c| three_d::set_param(c, key, v.clone()));
         }
@@ -697,7 +700,7 @@ fn json_leaf(ui: &mut egui::Ui, salt: &str, label: &str, v: &mut Value) -> bool 
     let mut changed = false;
     kit::labeled_row(ui, label, |ui| match v {
         Value::Null => {
-            ui.label(egui::RichText::new("none").font(theme::body()).color(tk.text_2));
+            ui.label(egui::RichText::new("Not set").font(theme::body()).color(tk.text_2));
             // An optional setting that is not set: give it a value to edit.
             if Button::ghost("Set").compact().show(ui).clicked() {
                 let key = salt.rsplit('/').next().unwrap_or("");
