@@ -16,32 +16,53 @@ use serde_json::{Value, json};
 
 use crate::app::StudioApp;
 use crate::icons::Icon;
-use crate::kit::{self, Button, Segment};
+use crate::kit::{self, Button, FieldRow, Segment};
+use super::super::physics::cloud_feedback as feedback;
 use crate::services::genmedia::{self as g, Task};
 use crate::theme;
 use studio_model as m;
 
 /// The tasks in the menu: the task, its name, what to select.
 const TASKS: [(Task, &str, &str); 10] = [
-    (Task::Animate, "Animate a still", "Select a picture clip (or a video clip: the frame under the playhead)."),
-    (Task::Between, "Between two frames", "Select two clips: the first and the last frame."),
-    (Task::Restyle, "Restyle", "Select a clip; a second selected clip is the look to follow."),
-    (Task::Relight, "Relight", "Select a clip."),
-    (Task::TimeOfDay, "Time of day", "Select a clip."),
-    (Task::Season, "Season", "Select a clip."),
-    (Task::Outpaint, "Extend (wider or taller)", "Select a picture clip, such as a backdrop a pan runs off."),
-    (Task::Inpaint, "Fill a region", "Select a picture clip."),
-    (Task::Upscale, "Upscale", "Select a clip."),
-    (Task::Enhance, "Enhance and restore", "Select a clip."),
+    (Task::Animate, "Animate a still", "Select a picture, or a video at its frame"),
+    (Task::Between, "Between two frames", "Select two clips: the first and last frame"),
+    (Task::Restyle, "Restyle", "Select a clip. A second one sets the look"),
+    (Task::Relight, "Relight", "Select a clip"),
+    (Task::TimeOfDay, "Time of day", "Select a clip"),
+    (Task::Season, "Season", "Select a clip"),
+    (Task::Outpaint, "Extend the picture", "Select a picture clip, such as a backdrop"),
+    (Task::Inpaint, "Fill a region", "Select a picture clip"),
+    (Task::Upscale, "Upscale", "Select a clip"),
+    (Task::Enhance, "Enhance and restore", "Select a clip"),
 ];
-const PROVIDERS: [(&str, Option<g::Provider>); 3] = [("Best here", None), ("Codex", Some(g::Provider::Codex)), ("This Mac", Some(g::Provider::Local))];
+const PROVIDERS: [(&str, Option<g::Provider>); 3] = [("Best available", None), ("Codex", Some(g::Provider::Codex)), ("This Mac", Some(g::Provider::Local))];
+// What the ops take, and (in the `_NAMES` beside them) what the menus show.
 const DIRECTIONS: [&str; 8] = ["left", "right", "top", "top-left", "top-right", "bottom", "front", "back"];
+const DIRECTION_NAMES: [&str; 8] = ["Left", "Right", "Top", "Top left", "Top right", "Bottom", "Front", "Back"];
 const COLOURS: [&str; 8] = ["warm", "golden", "white", "cool", "blue", "moonlight", "red", "neon"];
+const COLOUR_NAMES: [&str; 8] = ["Warm", "Golden", "White", "Cool", "Blue", "Moonlight", "Red", "Neon"];
 const TIMES: [&str; 7] = ["dawn", "morning", "noon", "golden hour", "sunset", "blue hour", "night"];
+const TIME_NAMES: [&str; 7] = ["Dawn", "Morning", "Noon", "Golden hour", "Sunset", "Blue hour", "Night"];
 const SEASONS: [&str; 4] = ["spring", "summer", "autumn", "winter"];
+const SEASON_NAMES: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
 const MOTIONS: [&str; 9] = ["push_in", "pull_out", "pan_left", "pan_right", "rise", "fall", "orbit_left", "orbit_right", "dolly_zoom"];
-const SIDES: [&str; 6] = ["Both sides", "Right", "Left", "Taller", "Top", "Bottom"];
-const FPS: [(&str, Option<f64>); 4] = [("Same", None), ("48", Some(48.0)), ("50", Some(50.0)), ("60", Some(60.0))];
+const MOTION_NAMES: [&str; 9] = ["Push in", "Pull out", "Pan left", "Pan right", "Rise", "Fall", "Orbit left", "Orbit right", "Dolly zoom"];
+const SIDES: [&str; 6] = ["Left and right", "Right", "Left", "Top and bottom", "Top", "Bottom"];
+const FPS: [(&str, Option<f64>); 4] = [("Same as the clip", None), ("48 fps", Some(48.0)), ("50 fps", Some(50.0)), ("60 fps", Some(60.0))];
+
+/// A task's name as the menu shows it, from its op name.
+fn task_name(op: &str) -> String {
+    TASKS.iter().find(|t| t.0.name() == op).map_or_else(|| feedback::shown_name(op), |t| t.1.to_owned())
+}
+
+/// A row for a 0..1 amount shown as a percentage.
+fn percent_row(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInclusive<f32>, default: f32) {
+    let mut pct = *v * 100.0;
+    let (lo, hi) = (*range.start() * 100.0, *range.end() * 100.0);
+    if FieldRow::new(label, &mut pct, lo..=hi).default(default * 100.0).unit("%").decimals(0).show(ui).changed {
+        *v = pct / 100.0;
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Form {
@@ -227,7 +248,7 @@ fn start(app: &mut StudioApp, args: Value) -> Result<(), String> {
     let req = s.request_for(task, &args);
     app.doc = s.doc;
     let req = req?;
-    let state = Arc::new(Mutex::new(Run { status: "Starting".into(), done: None, args, owner: crate::editor::owner_of(app) }));
+    let state = Arc::new(Mutex::new(Run { status: crate::i18n::shown("Starting").into_owned(), done: None, args, owner: crate::editor::owner_of(app) }));
     if let Ok(mut gl) = run().lock() {
         *gl = Some(state.clone());
     }
@@ -264,16 +285,16 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
             app.doc = s.doc;
             match landed {
                 Ok(_) => {
-                    let what = format!("{} done by {}", req.task.name().replace('_', " "), out.by);
-                    kit::push(ctx, out.note.map_or(what.clone(), |n| format!("{what}. {n}")), None, Some(Icon::Sparkle));
+                    let what = crate::i18n::tf(format!("{} done by {}", task_name(req.task.name()), out.by));
+                    kit::push(ctx, out.note.map_or(what.clone(), |n| format!("{what}. {}", feedback::plain(&app.doc, &n))), None, Some(Icon::Sparkle));
                 }
                 Err(e) => {
-                    kit::push(ctx, crate::i18n::tf(format!("Made, but not placed: {e}")), None, Some(Icon::Warning));
+                    kit::push(ctx, crate::i18n::tf(format!("Made, but not placed: {}", feedback::plain(&app.doc, &e))), None, Some(Icon::Warning));
                 }
             }
         }
         Err(e) => {
-            kit::push(ctx, crate::i18n::tf(format!("Could not do it: {e}")), None, Some(Icon::Warning));
+            kit::push(ctx, crate::i18n::tf(format!("{} failed: {}", task_name(args["task"].as_str().unwrap_or("")), feedback::plain(&app.doc, &e))), None, Some(Icon::Warning));
         }
     }
 }
@@ -289,6 +310,17 @@ fn menu(ui: &mut egui::Ui, label: &str, id: &str, cur: &mut usize, names: &[&str
     changed
 }
 
+/// What the line under the task menu says: what to select, until enough
+/// is.
+fn selected_line(task: Task, needs: &str, sel: usize) -> String {
+    let need = if task == Task::Between { 2 } else { 1 };
+    match sel {
+        n if n < need => needs.to_owned(),
+        1 => "1 clip selected".to_owned(),
+        n => crate::i18n::tf(format!("{n} clips selected")),
+    }
+}
+
 /// The Change side of the card.
 pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
     let ctx = ui.ctx().clone();
@@ -301,14 +333,14 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
     let (task, _, needs) = TASKS[f.task.min(TASKS.len() - 1)];
     let here = g::Available::now();
     let sel = app.editor.selection.len();
-    ui.label(egui::RichText::new(if sel == 0 { needs.to_owned() } else { format!("{needs} {} selected.", if sel == 1 { "One clip".to_owned() } else { format!("{sel} clips") }) }).font(theme::caption()).color(t.text_2));
+    ui.label(egui::RichText::new(selected_line(task, needs, sel)).font(theme::caption()).color(t.text_2));
     let hint = match task {
-        Task::Animate => Some("What happens (the camera moves through the picture; motion inside it is not available yet)"),
-        Task::Restyle => Some("The style in words: \"hand-drawn anime\", \"oil painting\""),
-        Task::Relight => Some("Anything more about the light (optional)"),
-        Task::Outpaint => Some("What lies beyond the edges (optional)"),
-        Task::Inpaint => Some("What to paint in the region (\"empty sky\" removes)"),
-        Task::Between => Some("How it moves from one to the other (not available yet: a morph is made)"),
+        Task::Animate => Some("What happens as the camera moves"),
+        Task::Restyle => Some("The style, such as oil painting"),
+        Task::Relight => Some("More about the light (optional)"),
+        Task::Outpaint => Some("What lies past the edges (optional)"),
+        Task::Inpaint => Some("What to paint there. Empty sky removes"),
+        Task::Between => Some("How one becomes the other (a morph for now)"),
         _ => None,
     };
     if let Some(h) = hint {
@@ -316,59 +348,59 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
     }
     match task {
         Task::Animate => {
-            menu(ui, "Camera", "gen-motion", &mut f.motion, &MOTIONS);
-            kit::Slider::new("Seconds", &mut f.seconds, 1.0..=15.0).default(5.0).unit("s").decimals(0).show(ui);
+            menu(ui, "Camera", "gen-motion", &mut f.motion, &MOTION_NAMES);
+            FieldRow::new("Length", &mut f.seconds, 1.0..=15.0).default(5.0).unit("s").decimals(0).step(1.0).show(ui);
         }
         Task::Between => {
-            kit::Slider::new("Seconds", &mut f.seconds, 1.0..=10.0).default(2.0).unit("s").decimals(0).show(ui);
+            FieldRow::new("Length", &mut f.seconds, 1.0..=10.0).default(2.0).unit("s").decimals(0).step(1.0).show(ui);
         }
         Task::Restyle | Task::TimeOfDay | Task::Season => {
             if task == Task::TimeOfDay {
-                menu(ui, "Time", "gen-time", &mut f.time, &TIMES);
+                menu(ui, "Time", "gen-time", &mut f.time, &TIME_NAMES);
             }
             if task == Task::Season {
-                menu(ui, "Season", "gen-season", &mut f.season, &SEASONS);
+                menu(ui, "Season", "gen-season", &mut f.season, &SEASON_NAMES);
             }
             f.strength = f.strength.clamp(0.1, 1.0);
-            kit::Slider::new("Amount", &mut f.strength, 0.1..=1.0).default(1.0).decimals(2).show(ui);
+            percent_row(ui, "Amount", &mut f.strength, 0.1..=1.0, 1.0);
         }
         Task::Relight => {
-            menu(ui, "From", "gen-dir", &mut f.direction, &DIRECTIONS);
-            menu(ui, "Colour", "gen-colour", &mut f.colour, &COLOURS);
-            kit::Slider::new("Strength", &mut f.strength, 0.1..=2.0).default(1.0).decimals(2).show(ui);
+            menu(ui, "From", "gen-dir", &mut f.direction, &DIRECTION_NAMES);
+            menu(ui, "Colour", "gen-colour", &mut f.colour, &COLOUR_NAMES);
+            percent_row(ui, "Amount", &mut f.strength, 0.1..=2.0, 1.0);
         }
         Task::Outpaint => {
-            menu(ui, "Grow", "gen-side", &mut f.side, &SIDES);
-            kit::Slider::new("By", &mut f.grow, 0.1..=2.0).default(0.5).decimals(2).show(ui);
+            menu(ui, "Sides", "gen-side", &mut f.side, &SIDES);
+            percent_row(ui, "Grow by", &mut f.grow, 0.1..=2.0, 0.5);
         }
         Task::Inpaint => {
             let labels = ["Left", "Top", "Width", "Height"];
             for (i, l) in labels.iter().enumerate() {
-                kit::Slider::new(l, &mut f.region[i], 0.0..=1.0).default([0.4, 0.4, 0.2, 0.2][i]).decimals(2).show(ui);
+                percent_row(ui, l, &mut f.region[i], 0.0..=1.0, [0.4, 0.4, 0.2, 0.2][i]);
             }
         }
         Task::Upscale => {
-            kit::Slider::new("Times", &mut f.scale, 1.5..=4.0).default(2.0).unit("×").decimals(1).show(ui);
+            FieldRow::new("Scale", &mut f.scale, 1.5..=4.0).default(2.0).unit("×").decimals(1).show(ui);
         }
         Task::Enhance => {
-            kit::labeled_row(ui, "Old film", |ui| kit::toggle(ui, &mut f.old_film, "old-film", None));
-            kit::labeled_row(ui, "Faces", |ui| kit::toggle(ui, &mut f.faces, "faces", None));
+            kit::labeled_row(ui, "Old film", |ui| kit::toggle(ui, &mut f.old_film, "Restore old film", None));
+            kit::labeled_row(ui, "Faces", |ui| kit::toggle(ui, &mut f.faces, "Restore faces", None));
             f.scale = f.scale.clamp(1.0, 4.0);
-            kit::Slider::new("Upscale", &mut f.scale, 1.0..=4.0).default(1.0).unit("×").decimals(1).show(ui);
+            FieldRow::new("Upscale", &mut f.scale, 1.0..=4.0).default(1.0).unit("×").decimals(1).show(ui);
             let names: Vec<&str> = FPS.iter().map(|x| x.0).collect();
             menu(ui, "Frame rate", "gen-fps", &mut f.fps, &names);
         }
     }
     let pnames: Vec<&str> = PROVIDERS.iter().map(|p| p.0).collect();
-    menu(ui, "By", "gen-provider", &mut f.provider, &pnames);
+    menu(ui, "Engine", "gen-provider", &mut f.provider, &pnames);
     if !task.makes_video() && !matches!(task, Task::Upscale | Task::Enhance) && PROVIDERS[f.provider.min(2)].1 != Some(g::Provider::Local) {
-        kit::Slider::new("Takes", &mut f.takes, 1.0..=4.0).default(1.0).decimals(0).show(ui);
+        FieldRow::new("Tries", &mut f.takes, 1.0..=4.0).default(1.0).decimals(0).step(1.0).show(ui);
     }
     let can = g::providers(task, false);
     let picked = PROVIDERS[f.provider.min(2)].1;
     let missing = match picked {
-        Some(g::Provider::Codex) if !here.codex => Some("Needs the Codex app on this Mac."),
-        Some(p) if !can.contains(&p) => Some("That one cannot do this task; Best here picks one that can."),
+        Some(g::Provider::Codex) if !here.codex => Some("Needs the Codex app on this Mac"),
+        Some(p) if !can.contains(&p) => Some("That engine can't do this. Best available picks one that can"),
         _ => None,
     };
     if let Some(m) = missing {
@@ -378,7 +410,12 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
     let recipe = app.editor.selection.first().and_then(|id| app.doc.project.clips.iter().find(|c| c.id == *id)).and_then(|c| c.media).and_then(|m| app.doc.project.media(m)).and_then(|mi| mi.path.clone()).and_then(|p| g::recipe(&p)).filter(|r| r["task"].as_str().is_some_and(|t| t != "make"));
     let mut again: Option<bool> = None;
     if let Some(r) = &recipe {
-        ui.label(egui::RichText::new(crate::i18n::tf(format!("The selected clip was made by {}: {}", r["task"].as_str().unwrap_or("a task").replace('_', " "), r["prompt"].as_str().filter(|p| !p.is_empty()).unwrap_or("no prompt")))).font(theme::caption()).color(t.text_2));
+        let what = task_name(r["task"].as_str().unwrap_or(""));
+        let said = match r["prompt"].as_str().map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) => crate::i18n::tf(format!("Made with {what}: “{p}”")),
+            None => crate::i18n::tf(format!("Made with {what}")),
+        };
+        ui.label(egui::RichText::new(said).font(theme::caption()).color(t.text_2));
         ui.horizontal_wrapped(|ui| {
             if Button::secondary("Make again").show(ui).clicked() {
                 again = Some(false);
@@ -395,11 +432,9 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
     } else {
         if Button::primary("Run").icon(Icon::Sparkle).show(ui).clicked() {
             match args_of(app, &f).and_then(|a| start(app, a)) {
-                Ok(()) => {}
-                Err(e) => {
-                    kit::push(&ctx, e, None, Some(Icon::Warning));
-                }
-            }
+                Ok(()) => feedback::done(&ctx, crate::i18n::tf(format!("{} started", TASKS[f.task.min(TASKS.len() - 1)].1))),
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
+            };
         }
     }
     if let (Some(vary), Some(r)) = (again, recipe) {
@@ -412,9 +447,10 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
             o.remove("clip");
         }
         a["at"] = json!(app.editor.playhead as f64 / 1e6);
-        if let Err(e) = start(app, a) {
-            kit::push(&ctx, e, None, Some(Icon::Warning));
-        }
+        match start(app, a) {
+            Ok(()) => feedback::done(&ctx, if vary { "Making a variation" } else { "Making it again" }),
+            Err(e) => feedback::failed(&ctx, &app.doc, &e),
+        };
     }
     ctx.data_mut(|d| d.insert_temp(form_id(), f));
 }
@@ -463,6 +499,34 @@ mod tests {
         }
         let c = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap();
         assert!(c.meta.contains_key("generated"), "{:?}", c.meta);
+        // Every task at the Inspector's width: labelled rows (no bare
+        // tracks), menu words for people, notes without trailing periods.
+        for k in 0..TASKS.len() {
+            ctx.data_mut(|d| d.insert_temp(form_id(), Form { task: k, ..Default::default() }));
+            let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| super::super::card(&mut app, ui));
+            drawn.assert_tidy(&format!("generate-change-{k}"), &["Made with"]);
+            assert!(drawn.shows("Engine") && drawn.shows("Run"), "{:?}", drawn.texts);
+        }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_menus_and_notes_read_plainly() {
+        for list in [&DIRECTION_NAMES[..], &COLOUR_NAMES, &TIME_NAMES, &SEASON_NAMES, &MOTION_NAMES, &SIDES] {
+            for n in list {
+                assert_eq!(crate::editor::physics::cloud_ui_check::problem(n), None, "{n}");
+            }
+        }
+        assert_eq!(DIRECTIONS.len(), DIRECTION_NAMES.len());
+        assert_eq!(COLOURS.len(), COLOUR_NAMES.len());
+        assert_eq!(TIMES.len(), TIME_NAMES.len());
+        assert_eq!(SEASONS.len(), SEASON_NAMES.len());
+        assert_eq!(MOTIONS.len(), MOTION_NAMES.len());
+        for t in TASKS {
+            assert_eq!(crate::editor::physics::cloud_ui_check::problem(t.2), None, "{}", t.2);
+        }
+        assert_eq!(task_name("time_of_day"), "Time of day");
+        assert_eq!(selected_line(Task::Between, TASKS[1].2, 1), TASKS[1].2);
+        assert_eq!(selected_line(Task::Relight, TASKS[3].2, 2), "2 clips selected");
     }
 }
