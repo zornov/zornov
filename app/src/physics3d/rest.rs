@@ -183,7 +183,7 @@ pub fn check_within(project: &m::Project, seq: m::SequenceId, t: m::Micros, budg
     let known = memo().lock().unwrap_or_else(|e| e.into_inner()).get(&fp).cloned().unwrap_or_default();
     // Answered before for this very scene: nothing to build or simulate.
     if known.contains_key(&u64::MAX) {
-        let mut out: Vec<Finding> = known.into_iter().filter_map(|(_, f)| f).collect();
+        let mut out: Vec<Finding> = known.into_values().flatten().collect();
         out.sort_by_key(|f| f.clip);
         return (out, 0);
     }
