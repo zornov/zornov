@@ -452,7 +452,18 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
     // Strips keep their size: a narrow panel scrolls them sideways, a short
     // one down.
     let view_h = ui.available_height().max(180.0);
-    let strips = egui::ScrollArea::both().id_salt("mixer-strips").show_h(ui, |ui| {
+    // The master stays pinned at the right; the strips scroll in what is left.
+    let area = ui.available_rect_before_wrap();
+    let mw = master_width(d.layout());
+    let master_rect = Rect::from_min_max(egui::pos2((area.right() - mw).max(area.left()), area.top()), egui::pos2(area.right(), area.top() + view_h));
+    let strips_rect = Rect::from_min_max(area.min, egui::pos2((master_rect.left() - 6.0).max(area.left()), master_rect.bottom()));
+    ui.allocate_rect(Rect::from_min_max(area.min, master_rect.max), Sense::hover());
+    let mut mui = ui.new_child(egui::UiBuilder::new().max_rect(master_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    mui.set_clip_rect(master_rect.intersect(ui.clip_rect()));
+    master_strip(app, &mut mui, d, &meters, t);
+    let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(strips_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+    sui.set_clip_rect(strips_rect.intersect(ui.clip_rect()));
+    let strips = egui::ScrollArea::both().id_salt("mixer-strips").show_h(&mut sui, |ui| {
         ui.set_max_height(view_h);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -465,11 +476,14 @@ fn mixer_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, t: &theme::Tokens
                 let peak = meters.bus_ids.iter().position(|x| *x == b.id).and_then(|k| meters.bus_peaks.get(k)).copied().unwrap_or(0.0);
                 bus_strip(app, ui, b, peak, t);
             }
-            ui.separator();
-            master_strip(app, ui, d, &meters, t);
         });
     });
     kit::note_scroll(ui.ctx(), strips.inner_rect, false);
+}
+
+/// The master strip's width: room for the loudness table, or its meters.
+fn master_width(layout: Layout) -> f32 {
+    (FADER_W + 28.0 + CHANNEL_PITCH * layout.channels() as f32).max(150.0)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -662,7 +676,7 @@ fn bus_strip(app: &mut StudioApp, ui: &mut egui::Ui, b: &desk::Bus, peak: f32, t
 
 fn master_strip(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, meters: &studio_sound::Meters, t: &theme::Tokens) {
     let layout = d.layout();
-    let w = (FADER_W + 28.0 + CHANNEL_PITCH * layout.channels() as f32).max(150.0);
+    let w = master_width(layout);
     let h = ui.available_height().max(180.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(6), t.raised);
@@ -1233,6 +1247,21 @@ mod tests {
         let cut: Vec<_> = h.cut_text().into_iter().filter(|c| ["Mute", "Solo", "Master", "Momentary", "Short-term", "Integrated", "True peak"].contains(&c.text.as_str())).collect();
         assert!(cut.is_empty(), "{cut:?}");
         shot(&h, "mixer");
+    }
+
+    #[test]
+    fn narrow_dock_keeps_master_pinned_and_strips_whole() {
+        for w in [420.0, 520.0, 700.0] {
+            let h = panel(MIXER, w, 900.0);
+            let labels = h.labels();
+            for want in ["Master", "Momentary", "True peak"] {
+                assert!(labels.iter().any(|l| l == want), "{want} at {w}: {labels:?}");
+            }
+            let bad: Vec<_> = h.cut_text().into_iter().filter(|c| ["Master", "Momentary", "Short-term", "Integrated", "True peak"].contains(&c.text.as_str())).collect();
+            assert!(bad.is_empty(), "master text cut at {w}: {bad:?}");
+            assert!(h.overlaps().iter().all(|o| !o.a.contains("Master") && !o.b.contains("Master")), "overlap at {w}");
+            shot(&h, &format!("mixer-{w}"));
+        }
     }
 
     #[test]
