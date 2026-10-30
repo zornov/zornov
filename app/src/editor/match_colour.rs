@@ -10,7 +10,8 @@ use studio_model as m;
 
 use crate::app::StudioApp;
 use crate::icons::Icon;
-use crate::kit::{self, Button, Section};
+use crate::kit::{self, Button, FieldRow, Section};
+use super::physics::cloud_feedback as feedback;
 use crate::services::colour_match as cm;
 use crate::theme;
 use crate::view::ClipKind;
@@ -34,7 +35,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
     Section::new("match-colour", "Match colour").icon(Icon::Palette).show(ui, |ui| {
         let t = theme::tokens(ui.ctx());
         if others.is_empty() {
-            ui.label(egui::RichText::new(crate::i18n::shown("Add another shot to match this one to.")).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(crate::i18n::shown("Add another video shot to match this one to")).font(theme::caption()).color(t.text_2));
             return;
         }
         let pid = egui::Id::unique("match-colour-pick").with(id);
@@ -46,7 +47,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 who = i;
             }
         });
-        let changed = kit::Slider::new("Strength", &mut strength, 0.0..=100.0).default(100.0).unit("%").decimals(0).show(ui).changed();
+        let changed = FieldRow::new("Strength", &mut strength, 0.0..=100.0).default(100.0).unit("%").decimals(0).show(ui).changed;
         ctx.data_mut(|d| d.insert_temp(pid, (who, strength)));
         // A matched clip follows the slider at once.
         if changed && cm::strength(&mc).is_some() {
@@ -74,15 +75,15 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         app.doc.apply("Match colour", m::Edit::SetClip { seq, clip: Box::new(c) });
                         kit::push(&ctx, crate::i18n::tf(format!("Matched to {}: {said}", others[who].1)), None, Some(Icon::Palette));
                     }
-                    Err(e) => {
-                        kit::push(&ctx, e, None, Some(Icon::Warning));
-                    }
+                    Err(e) => feedback::failed(&ctx, &app.doc, &e),
                 }
             }
             if cm::strength(&mc).is_some() && Button::ghost("Remove").icon(Icon::X).compact().show(ui).clicked() {
                 let mut c = mc.clone();
                 cm::clear(&mut c);
-                app.doc.apply("Remove colour match", m::Edit::SetClip { seq, clip: Box::new(c) });
+                if app.doc.apply("Remove colour match", m::Edit::SetClip { seq, clip: Box::new(c) }) {
+                    feedback::done(&ctx, "Colour match removed");
+                }
             }
         });
     });
@@ -115,5 +116,12 @@ mod tests {
         }
         let mc = app.doc.model.active().clip(m::ClipId(ids[0] as u64)).unwrap();
         assert_eq!(cm::strength(mc), Some(0.7));
+        // At the Inspector's width: a labelled strength row (it was a bare
+        // track), nothing cut or on top of anything.
+        let names: Vec<String> = app.doc.project.clips.iter().map(|c| c.name.clone()).filter(|n| !n.is_empty()).collect();
+        let allow: Vec<&str> = names.iter().map(String::as_str).collect();
+        let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| inspector(&mut app, ui, ids[0]));
+        drawn.assert_tidy("match-colour", &allow);
+        assert!(drawn.shows("Strength") && drawn.shows("Match again"));
     }
 }
