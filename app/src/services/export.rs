@@ -50,6 +50,7 @@ pub const PRESETS: &[Preset] = &[
     Preset { name: "Intermediate", sub: "Zornov codec · CLV", format: Format::Clv, size: Size::Project, quality: 95.0, available: true },
     Preset { name: "PNG sequence", sub: "Lossless stills", format: Format::Png, size: Size::Project, quality: 100.0, available: true },
     Preset { name: "HEVC 10-bit", sub: "HEVC Main 10 · smooth gradients", format: Format::Hevc10, size: Size::ShortSide(2160), quality: 90.0, available: true },
+    Preset { name: "Web (AV1)", sub: "AV1 · small file, slower · 1080p", format: Format::Av1, size: Size::ShortSide(1080), quality: 70.0, available: true },
     Preset { name: "Audio only", sub: "AAC · M4A", format: Format::M4a, size: Size::Project, quality: 80.0, available: true },
     Preset { name: "ProRes 422 HQ", sub: "Master · 10-bit 4:2:2 · PCM · timecode", format: Format::ProRes422Hq, size: Size::Project, quality: 100.0, available: true },
     Preset { name: "ProRes 4444", sub: "Master · 12-bit 4:4:4 · PCM · timecode", format: Format::ProRes4444, size: Size::Project, quality: 100.0, available: true },
@@ -104,7 +105,7 @@ pub fn request(doc: &Doc, p: &Preset, path: PathBuf, range: Option<(Time, Time)>
     let fps = proj.fps as f64;
     let size = output_size(p.size, (proj.width, proj.height));
     let range = range.unwrap_or((0, super::transport::duration(doc)));
-    Request { path, format: p.format, size, fps, range, quality: p.quality, bitrate_kbps: suggested_kbps(size.0, size.1, fps) }
+    Request { path, format: p.format, size, fps, range, quality: p.quality, bitrate_kbps: suggested_kbps(size.0, size.1, fps), av1_speed: Default::default() }
 }
 
 /// What happened since the last poll.
