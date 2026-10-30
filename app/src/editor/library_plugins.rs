@@ -25,6 +25,40 @@ struct PanelState {
     error: Option<String>,
 }
 
+/// A failure in words: "Couldn't <what>: <reason>", with the reason cut to its
+/// first line and the developer detail (system error codes, paths into the
+/// build, JSON, backtraces) taken out. Sentence case, no trailing period.
+pub fn plain_error(what: &str, raw: &str) -> String {
+    let first = raw.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let mut reason = first.trim_start_matches("Error:").trim_start_matches("error:").trim().to_owned();
+    // "No such file or directory (os error 2)" -> "No such file or directory".
+    if let Some(i) = reason.find(" (os error") {
+        reason.truncate(i);
+    }
+    let low = reason.to_lowercase();
+    let reason = if reason.is_empty() || reason.starts_with('{') || reason.starts_with('[') || low.contains("panicked") || low.contains("stack backtrace") || low.contains("wasm trap") || low.contains("unreachable") {
+        "the plugin gave an error".to_owned()
+    } else if low.contains("no such file") {
+        "the file is not there".to_owned()
+    } else if low.contains("permission denied") {
+        "access to that folder was refused".to_owned()
+    } else if low.contains("timed out") || low.contains("timeout") {
+        "it took too long".to_owned()
+    } else {
+        reason
+    };
+    let reason = reason.trim_end_matches(['.', ':', ' ']);
+    // "No such file" -> "no such file", but "OpenFX" and "PNG" keep their capitals.
+    let mut chars = reason.chars();
+    let plain_word = reason.split(' ').next().is_some_and(|w| w.chars().skip(1).all(|c| !c.is_uppercase()));
+    let reason: String = match chars.next() {
+        Some(c) if c.is_uppercase() && plain_word => c.to_lowercase().chain(chars).collect(),
+        _ => reason.to_owned(),
+    };
+    let reason: String = if reason.chars().count() > 120 { reason.chars().take(119).chain(std::iter::once('…')).collect() } else { reason };
+    format!("Couldn't {what}: {reason}")
+}
+
 fn panel_id(plugin: &str, panel: &str) -> egui::Id {
     egui::Id::unique(("plugin-panel", plugin.to_owned(), panel.to_owned()))
 }
@@ -64,7 +98,7 @@ pub fn toggle_recording(app: &mut StudioApp, ctx: &egui::Context) {
                     kit::push(ctx, format!("Saved macro \"{}\" ({} steps)", m.name, m.steps.len()), None, Some(Icon::CheckCircle));
                 }
                 Err(e) => {
-                    kit::push(ctx, e, None, Some(Icon::Warning));
+                    kit::push(ctx, plain_error("save the macro", &e), None, Some(Icon::Warning));
                 }
             }
         }
@@ -95,7 +129,7 @@ fn run_macro(app: &mut StudioApp, ctx: &egui::Context, name: &str, every: Option
     match r {
         Ok((n, refused)) if refused.is_empty() => kit::push(ctx, format!("Ran \"{name}\": {n} changes"), None, Some(Icon::CheckCircle)),
         Ok((n, refused)) => kit::push(ctx, format!("Ran \"{name}\": {n} changes, {} skipped ({})", refused.len(), refused[0]), None, Some(Icon::Warning)),
-        Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
+        Err(e) => kit::push(ctx, plain_error(&format!("run \"{name}\""), &e), None, Some(Icon::Warning)),
     };
 }
 
@@ -172,7 +206,7 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
         if let Some(path) = rfd::FileDialog::new().add_filter("Zornov plugin", &["wasm"]).pick_file() {
             match host().install_file(&path) {
                 Ok(p) => kit::push(&ctx, format!("Installed {} ({})", p.manifest.name, p.manifest.summary()), None, Some(Icon::CheckCircle)),
-                Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+                Err(e) => kit::push(&ctx, plain_error("install the plugin", &e), None, Some(Icon::Warning)),
             };
         }
     }
@@ -191,7 +225,7 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
                     app.editor.library_selected = None;
                     match host().uninstall(&m.id) {
                         Ok(()) => kit::push(&ctx, format!("Removed {}", m.name), None, Some(Icon::Trash)),
-                        Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+                        Err(e) => kit::push(&ctx, plain_error(&format!("remove {}", m.name), &e), None, Some(Icon::Warning)),
                     };
                 }
                 if p.error.is_none() {
@@ -199,13 +233,13 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
                     if Button::secondary(label).show(ui).clicked() {
                         app.editor.library_selected = None;
                         if let Err(e) = host().set_enabled(&m.id, !p.enabled) {
-                            kit::push(&ctx, e, None, Some(Icon::Warning));
+                            kit::push(&ctx, plain_error(&format!("turn {} {}", m.name, if p.enabled { "off" } else { "on" }), &e), None, Some(Icon::Warning));
                         }
                     }
                 }
             });
             let what = match &p.error {
-                Some(e) => format!("Cannot run: {e}"),
+                Some(e) => plain_error("run", e).replacen("Couldn't run", "Can't run", 1),
                 None if !p.enabled => format!("Off. {}", m.summary()),
                 None => format!("{} {}", m.description, if m.effects.len() + m.generators.len() + m.transitions.len() > 0 { "Its effects are in Effects ▸ Plugins, its transitions in Cuts ▸ Plugins." } else { "" }),
             };
@@ -244,7 +278,7 @@ fn export(app: &mut StudioApp, ctx: &egui::Context, plugin: &str, exporter: &str
     });
     match r {
         Ok(()) => kit::push(ctx, format!("Exported {}", studio_paths::tilde(&path)), None, Some(Icon::Export)),
-        Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
+        Err(e) => kit::push(ctx, plain_error("export the project", &e), None, Some(Icon::Warning)),
     };
 }
 
@@ -299,7 +333,7 @@ fn panel_ui(app: &mut StudioApp, ui: &mut egui::Ui, plugin: &str, panel: &str, n
                 }
             }
             if let Some(e) = &st.error {
-                ui.label(egui::RichText::new(e).font(theme::caption()).color(t.text_2));
+                ui.label(egui::RichText::new(plain_error("use this panel", e)).font(theme::caption()).color(t.text_2));
             }
             if Button::ghost("Close").show(ui).clicked() {
                 ui.ctx().data_mut(|d| d.remove::<PanelState>(id));
@@ -353,7 +387,7 @@ fn available(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
                     app.editor.library_selected = None;
                     match catalogue::install(host(), &e.id) {
                         Ok(p) => kit::push(&ctx, format!("Installed {} ({})", p.manifest.name, p.manifest.summary()), None, Some(Icon::CheckCircle)),
-                        Err(err) => kit::push(&ctx, err, None, Some(Icon::Warning)),
+                        Err(err) => kit::push(&ctx, plain_error(&format!("{} {}", if have.is_some() { "update" } else { "install" }, e.name), &err), None, Some(Icon::Warning)),
                     };
                 }
             });
@@ -374,7 +408,7 @@ fn available(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
             if Button::secondary(if on { "Stop loading" } else { "Load" }).show(ui).clicked() {
                 match plugins::set_ofx(!on) {
                     Ok(v) => kit::push(&ctx, format!("{} OpenFX plugins loaded", v["plugins"].as_array().map_or(0, Vec::len)), None, None),
-                    Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+                    Err(e) => kit::push(&ctx, plain_error("load OpenFX plugins", &e), None, Some(Icon::Warning)),
                 };
             }
         });
@@ -387,7 +421,31 @@ fn available(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
         };
         ui.label(egui::RichText::new(text).font(theme::body()).color(t.text_2));
         for f in ofx["failed"].as_array().into_iter().flatten() {
-            ui.label(egui::RichText::new(format!("{}: {}", f["bundle"].as_str().unwrap_or(""), f["error"].as_str().unwrap_or(""))).font(theme::caption()).color(t.text_2));
+            ui.label(egui::RichText::new(plain_error(&format!("load {}", f["bundle"].as_str().unwrap_or("a bundle")), f["error"].as_str().unwrap_or(""))).font(theme::caption()).color(t.text_2));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_failures_are_plain_sentences() {
+        let cases = [
+            ("install the plugin", "No such file or directory (os error 2)", "Couldn't install the plugin: the file is not there"),
+            ("export the project", "Permission denied (os error 13)", "Couldn't export the project: access to that folder was refused"),
+            ("run \"Fade\"", "thread 'main' panicked at src/lib.rs:12:5:\nindex out of bounds", "Couldn't run \"Fade\": the plugin gave an error"),
+            ("use this panel", "{\"error\": \"bad\"}", "Couldn't use this panel: the plugin gave an error"),
+            ("load a bundle", "Error: OpenFX bundle is missing its binary.", "Couldn't load a bundle: OpenFX bundle is missing its binary"),
+            ("remove Soft Glow", "", "Couldn't remove Soft Glow: the plugin gave an error"),
+        ];
+        for (what, raw, want) in cases {
+            let got = plain_error(what, raw);
+            assert_eq!(got, want, "for {raw:?}");
+            assert!(!got.contains("os error") && !got.contains("panicked") && !got.ends_with('.'), "{got}");
+        }
+        let long = plain_error("x", &"word ".repeat(100));
+        assert!(long.chars().count() <= "Couldn't x: ".len() + 120, "{}", long.chars().count());
+    }
 }
