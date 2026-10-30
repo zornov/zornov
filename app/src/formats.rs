@@ -147,12 +147,15 @@ pub enum Av1Speed {
     #[default]
     Fast,
     Balanced,
-    /// Full mode and motion search: smallest files, slowest.
+    /// Full mode and motion search. Not offered yet: the encoder's speed-6 path is slowest and
+    /// no smaller than Balanced. Add it to [`Av1Speed::ALL`] to bring it back.
+    #[allow(dead_code)]
     Small,
 }
 
 impl Av1Speed {
-    pub const ALL: [Av1Speed; 3] = [Av1Speed::Fast, Av1Speed::Balanced, Av1Speed::Small];
+    /// The speeds the Export screen offers.
+    pub const ALL: [Av1Speed; 2] = [Av1Speed::Fast, Av1Speed::Balanced];
 
     pub fn label(self) -> &'static str {
         match self {

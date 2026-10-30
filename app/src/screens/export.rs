@@ -57,8 +57,8 @@ pub struct ExportState {
     pub job: Option<u64>,
     /// What stops the export under the licences, if something does.
     pub rights: Option<String>,
-    /// Export although a licence says no (the person chose to).
-    pub ignore_rights: bool,
+    /// The project this state belongs to (see [`sync_project`]).
+    pub project_key: String,
 }
 
 /// Suggested H.264 bitrate in Mb/s for a size and rate (by
@@ -84,7 +84,7 @@ impl Default for ExportState {
             av1_speed: Default::default(),
             job: None,
             rights: None,
-            ignore_rights: false,
+            project_key: String::new(),
         }
     }
 }
@@ -113,7 +113,38 @@ fn bitrate_mbps(s: &ExportState, w: u32, h: u32, fps: f32) -> f32 {
     w as f32 * h as f32 * fps * bpp / 1e6
 }
 
+/// Which project an export state belongs to: its folder and name.
+fn project_key(doc: &crate::doc::Doc) -> String {
+    format!("{}|{}", doc.folder.as_ref().map(|f| f.root().display().to_string()).unwrap_or_default(), doc.project.name)
+}
+
+/// A different project than the one this state was made for starts over: the file name, the
+/// licence problem and the running job of the last project do not carry across.
+fn sync_project(s: &mut ExportState, doc: &crate::doc::Doc) {
+    let key = project_key(doc);
+    if s.project_key.is_empty() {
+        // First look: the state is the one the screen was opened with.
+        s.project_key = key;
+    } else if s.project_key != key {
+        *s = ExportState { project_key: key, ..Default::default() };
+    }
+}
+
+/// "Export": the licences are checked afresh every time; true when the export may start.
+fn press_export(s: &mut ExportState, blocked: impl FnOnce() -> Option<String>) -> bool {
+    s.rights = blocked();
+    s.rights.is_none()
+}
+
+/// "Export anyway": lets this one export start. Nothing is remembered, so the next one is
+/// checked again.
+fn press_export_anyway(s: &mut ExportState) -> bool {
+    s.rights = None;
+    true
+}
+
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
+    sync_project(&mut app.export, &app.doc);
     if app.export.name.is_empty() {
         app.export.name = app.doc.project.name.clone();
     }
@@ -348,13 +379,11 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
                 let mut go = Button::primary("Export").icon(Icon::Export).shortcut("⌘↩").min_width(112.0).show(ui).clicked()
                     || ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter)));
                 // Licences first: something that cannot be used stops the export until the person decides.
-                if go && !s.ignore_rights {
-                    s.rights = crate::screens::library_safety::export_block(&app.doc);
-                    go = s.rights.is_none();
+                if go {
+                    go = press_export(s, || crate::screens::library_safety::export_block(&app.doc));
                 }
                 if s.rights.is_some() && Button::ghost("Export anyway").show(ui).clicked() {
-                    s.ignore_rights = true;
-                    s.rights = None;
+                    go = press_export_anyway(s);
                 }
                 if go {
                     let format = Format::ALL[s.codec.min(Format::ALL.len() - 1)];
@@ -414,7 +443,32 @@ mod tests {
         assert!(labels.iter().any(|l| l.contains("Early encoder: slower than H.264, no rate control yet.")), "the note is shown: {labels:?}");
         assert!(labels.iter().any(|l| l.contains("Quality")), "AV1 has a quality control");
         assert!(labels.iter().any(|l| l.contains("Balanced")), "AV1 has a speed control: {labels:?}");
+        assert!(!labels.iter().any(|l| l == "Small"), "Small is not offered yet: {labels:?}");
         assert!(h.cut_text().is_empty(), "nothing is cut off: {:?}", h.cut_text());
         assert!(h.overlaps().is_empty(), "nothing is drawn over: {:?}", h.overlaps());
+    }
+
+    #[test]
+    fn export_anyway_is_for_one_export_and_a_new_project_starts_over() {
+        let mut s = ExportState::default();
+        let a = crate::doc::Doc::from_view(&crate::view::demo());
+        sync_project(&mut s, &a);
+        s.name = "A cut".into();
+        s.job = Some(7);
+        // Project A has a licence problem: Export is stopped, Export anyway lets that one through.
+        assert!(!press_export(&mut s, || Some("clip.mp4: licence ran out".into())));
+        assert!(s.rights.is_some());
+        assert!(press_export_anyway(&mut s));
+        assert!(s.rights.is_none());
+        // The next export from the same project is checked again.
+        assert!(!press_export(&mut s, || Some("clip.mp4: licence ran out".into())));
+        // Project B: nothing of A is left, and its problem blocks it.
+        let mut doc_b = crate::doc::Doc::from_view(&crate::view::demo());
+        std::sync::Arc::make_mut(&mut doc_b.project).name = "Project B".into();
+        s.rights = None;
+        sync_project(&mut s, &doc_b);
+        assert!(s.name.is_empty() && s.job.is_none() && s.rights.is_none(), "the state of project A is gone");
+        assert!(!press_export(&mut s, || Some("other.mp4: no licence".into())));
+        assert_eq!(s.rights.as_deref(), Some("other.mp4: no licence"));
     }
 }
