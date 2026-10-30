@@ -111,13 +111,24 @@ pub fn shapes() -> Vec<(&'static str, &'static str)> {
 }
 
 /// The bar along the top of the workspace.
+/// Where the bar's first row sits: right of the pane's name, and of the outliner when it is open.
+fn first_row(ctx: &egui::Context, body: Rect) -> Rect {
+    let left = if crate::editor::viewport::ui::outliner_open(ctx) { 250.0 } else { 170.0 };
+    Rect::from_min_size(body.left_top() + Vec2::new(left, 4.0), Vec2::new((body.width() - left - 130.0).max(200.0), BAR_H))
+}
+
+/// Everything the bar covers: one row, two in Edit mode. Pane names and
+/// the view gizmo keep clear of it.
+pub fn bar_rect(ctx: &egui::Context, body: Rect) -> Rect {
+    let r = first_row(ctx, body);
+    if super::stage() == Stage::Edit { Rect::from_min_max(r.min, egui::pos2(r.right(), r.bottom() + 2.0 + BAR_H)) } else { r }
+}
+
 pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
     let ctx = ui.ctx().clone();
     let stage = super::stage();
     let candidate = super::candidate(app).is_some() || super::open_clip().is_some();
-    // Right of the pane's name, and of the outliner when it is open.
-    let left = if crate::editor::viewport::ui::outliner_open(&ctx) { 250.0 } else { 170.0 };
-    let r = Rect::from_min_size(body.left_top() + Vec2::new(left, 4.0), Vec2::new((body.width() - left - 130.0).max(200.0), BAR_H));
+    let r = first_row(&ctx, body);
     let th = theme::tokens(&ctx);
     let mut bui = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Center)));
     bui.spacing_mut().item_spacing.x = 3.0;
