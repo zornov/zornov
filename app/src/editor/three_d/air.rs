@@ -71,7 +71,7 @@ pub(super) fn light_look(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc
             row(app, ui, ids, "generator.beam", "Light shafts", 0.0..=300.0, 0.0, "%", 0, pct, from_pct);
         }
         let carries = param_bool(mc, "atmosphere", false);
-        flag_row(app, ui, ids, "Carries air and look", carries, |c, v| {
+        flag_row(app, ui, ids, "Air and look", carries, |c, v| {
             if v {
                 set_param(c, "atmosphere", m::Value::Bool(true));
             } else if let m::ClipSource::Generator(g) = &mut c.source {
@@ -92,13 +92,13 @@ const TONE_NAMES: [&str; 3] = ["filmic", "soft", "none"];
 fn air_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Clip) {
     let ground = (app.doc.project.height as f32) * 4.0;
     Section::new("air", "Air and look").icon(Icon::Aperture).show(ui, |ui| {
-        row(app, ui, ids, "generator.ground", "Ground (world y)", -ground..=ground, 0.0, "px", 0, same, same);
+        row(app, ui, ids, "generator.ground", "Ground height", -ground..=ground, 0.0, "px", 0, same, same);
         kit::menu_heading(ui, "Fog");
         row(app, ui, ids, "generator.fog_density", "Density", 0.0..=0.3, 0.0, "", 3, same, same);
         if mc.get_property("generator.fog_density").and_then(|v| v.as_f64()).is_some_and(|d| d > 0.0) {
-            row(app, ui, ids, "generator.fog_falloff", "Thins with height", 0.0..=1.5, 0.0, "", 2, same, same);
+            row(app, ui, ids, "generator.fog_falloff", "Height falloff", 0.0..=1.5, 0.0, "", 2, same, same);
             colour_row(app, ui, ids, mc, "fog_colour", "Fog colour", Color32::from_rgb(190, 200, 215));
-            row(app, ui, ids, "generator.fog_anisotropy", "Glow toward lights", -90.0..=90.0, 40.0, "%", 0, pct, from_pct);
+            row(app, ui, ids, "generator.fog_anisotropy", "Glow at lights", -90.0..=90.0, 40.0, "%", 0, pct, from_pct);
             row(app, ui, ids, "generator.fog_patchiness", "Patchiness", 0.0..=100.0, 0.0, "%", 0, pct, from_pct);
             row(app, ui, ids, "generator.fog_range", "Range", 5.0..=500.0, 80.0, "m", 0, same, same);
         }
@@ -122,7 +122,7 @@ fn air_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Clip
             });
             if now > 0 {
                 row(app, ui, ids, &format!("generator.{key}_amount"), "Amount", 0.0..=150.0, 60.0, "%", 0, pct, from_pct);
-                row(app, ui, ids, &format!("generator.{key}_wind_x"), "Wind (right)", -20.0..=20.0, 0.0, "m/s", 1, same, same);
+                row(app, ui, ids, &format!("generator.{key}_wind_x"), "Wind", -20.0..=20.0, 0.0, "m/s", 1, same, same);
                 row(app, ui, ids, &format!("generator.{key}_size"), "Size", 0.1..=5.0, 1.0, "×", 1, same, same);
                 row(app, ui, ids, &format!("generator.{key}_speed"), "Speed", 0.0..=4.0, 1.0, "×", 1, same, same);
                 if now == 1 {
@@ -146,16 +146,48 @@ fn air_section(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32], mc: &m::Clip
         row(app, ui, ids, "generator.temperature", "Temperature", -100.0..=100.0, 0.0, "%", 0, pct, from_pct);
         row(app, ui, ids, "generator.tint", "Tint", -100.0..=100.0, 0.0, "%", 0, pct, from_pct);
         colour_row(app, ui, ids, mc, "shadow_tint", "Shadow tint", Color32::from_rgb(26, 64, 128));
-        row(app, ui, ids, "generator.shadow_tint_amount", "Shadow tint amount", 0.0..=200.0, 50.0, "%", 0, pct, from_pct);
+        row(app, ui, ids, "generator.shadow_tint_amount", "Shadow mix", 0.0..=200.0, 50.0, "%", 0, pct, from_pct);
         colour_row(app, ui, ids, mc, "highlight_tint", "Highlight tint", Color32::from_rgb(255, 192, 128));
-        row(app, ui, ids, "generator.highlight_tint_amount", "Highlight tint amount", 0.0..=200.0, 50.0, "%", 0, pct, from_pct);
+        row(app, ui, ids, "generator.highlight_tint_amount", "Highlight mix", 0.0..=200.0, 50.0, "%", 0, pct, from_pct);
         kit::menu_heading(ui, "Bloom and lens");
         row(app, ui, ids, "generator.bloom_strength", "Bloom", 0.0..=150.0, 0.0, "%", 0, pct, from_pct);
-        row(app, ui, ids, "generator.bloom_threshold", "Bloom threshold", 0.0..=4.0, 0.9, "", 2, same, same);
-        row(app, ui, ids, "generator.bloom_radius", "Bloom reach", 0.0..=100.0, 50.0, "%", 0, pct, from_pct);
+        row(app, ui, ids, "generator.bloom_threshold", "Threshold", 0.0..=4.0, 0.9, "", 2, same, same);
+        row(app, ui, ids, "generator.bloom_radius", "Reach", 0.0..=100.0, 50.0, "%", 0, pct, from_pct);
         row(app, ui, ids, "generator.halation", "Halation", 0.0..=100.0, 0.0, "%", 0, pct, from_pct);
         row(app, ui, ids, "generator.vignette", "Vignette", 0.0..=100.0, 0.0, "%", 0, pct, from_pct);
         row(app, ui, ids, "generator.grain", "Grain", 0.0..=100.0, 0.0, "%", 0, pct, from_pct);
         row(app, ui, ids, "generator.fringe", "Colour fringe", 0.0..=100.0, 0.0, "%", 0, pct, from_pct);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::physics::cloud_ui_check as check;
+
+    /// The look rows of a flame lamp and the scene's air and look, at the
+    /// Inspector's width: short labels in one column, none cut off.
+    #[test]
+    fn the_light_look_and_air_rows_read_cleanly() {
+        let _serial = crate::ui_tests::serial();
+        let (ctx, mut app) = check::editor();
+        let mut s = crate::agent::Session::new(crate::services::project::new_custom("Air", 640, 360, 30.0));
+        s.edit(&[serde_json::json!({"op": "light", "type": "point", "glow": 1, "flame": true, "flame_height": 0.1, "flicker": 0.3}), serde_json::json!({"op": "atmosphere", "preset": "neon_rain"})], "look", false).unwrap();
+        app.doc = s.doc;
+        let lights: Vec<m::Clip> = app.doc.model.active().clips.iter().filter(|c| c.is_camera_or_light()).cloned().collect();
+        assert!(!lights.is_empty());
+        let mut saw_air = false;
+        for mc in lights {
+            let id = mc.id.0 as u32;
+            saw_air |= param_bool(&mc, "atmosphere", false);
+            let drawn = check::draw(&ctx, 3, |ui| light_look(&mut app, ui, &[id], &mc, sp::LightKind::Point));
+            drawn.assert_tidy(&format!("light-look-{id}"), &[]);
+            if param_bool(&mc, "atmosphere", false) {
+                for l in ["Ground height", "Shadow mix", "Highlight mix", "Air and look"] {
+                    assert!(drawn.shows(l), "{l}");
+                }
+            }
+        }
+        assert!(saw_air, "the atmosphere op puts the air on a light");
+    }
 }
