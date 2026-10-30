@@ -1040,7 +1040,7 @@ help-timeline-body = Clips sit on lanes. The Main lane holds the story and close
     Press M to add a marker. Press I and O to set the in and out points of a range to loop or export.
 help-split-trim-title = Cutting, splitting and trimming
 help-split-trim-keys = split cut blade trim slip delete ripple remove two pieces divide shorten
-help-split-trim-body = Put the playhead where you want the cut and press S. The selected clip, or every clip under the playhead, is split in two. Press B for the blade tool and click a clip to cut it there.
+help-split-trim-body = Put the playhead where you want the cut and press S. The selected clip, or every clip under the playhead, is split in two. Press B for the blade tool and click a clip to cut it there. With a trim point set, [ and ] trim the edit back and forward; without one, they select the previous and next clip.
     Drag the edge of a clip to trim it. The Y key switches to slip, which changes which part of the source you see without moving the clip. Select a piece and press Delete to remove it; on the Main lane the gap closes.
 help-titles-title = Titles and text
 help-titles-keys = title text caption lower third font style size colour outline text style
@@ -1096,11 +1096,11 @@ help-workspaces-body = A workspace arranges the editor for one kind of work. Edi
     A workspace only sets which panels are open and what the Library and Inspector show. You can still resize panels and change anything afterwards.
 help-shortcuts-title = Keyboard shortcuts
 help-shortcuts-keys = keyboard shortcuts keys hotkeys commands list customise remap
-help-shortcuts-body = Space plays and pauses, J K L play backwards, stop and forwards. S splits, M adds a marker, I and O set range points, A B Y R choose tools, N toggles snapping, F fills the screen. Command with Z, shift Z, D, A and E undo, redo, duplicate, select all and export.
+help-shortcuts-body = Space plays and pauses, J K L play backwards, stop and forwards. S splits, M adds a marker, I and O set range points, A B Y R choose tools, N toggles snapping, F fills the screen. Command with Z, shift Z, D, A and E undo, redo, duplicate, select all and export. [ and ] select the previous and next clip. With a trim point set (press T), they trim back and forward instead.
     Settings, Shortcuts lists every shortcut and lets you change them.
 help-keyboard-nav-title = Working with the keyboard and a screen reader
 help-keyboard-nav-keys = keyboard screen reader voiceover narrator nvda accessibility navigate blind focus tab landmarks announcements
-help-keyboard-nav-body = Zornov works with VoiceOver, Narrator and other screen readers, and everything can be done without a mouse. Tab moves between controls; F6 and Shift F6 jump between the Library, Viewer, Inspector and Timeline.
+help-keyboard-nav-body = Zornov works with VoiceOver, Narrator and other screen readers, and everything can be done without a mouse. Tab moves between controls; F6 and Shift F6 jump between the panels on screen.
     On the timeline, ] and [ select the next and previous clip, Up and Down arrows jump to the next and previous edit point, Alt with Up and Down moves to the clip on the lane above or below, and Alt with Left and Right nudges the selected clip by a frame (Shift for a second). Alt and the full stop says where the playhead is.
     On the canvas, the full stop and the comma select the layer below and above at the playhead, Alt and the comma lists the layers, and Command with Alt and the arrow keys moves the selected layer by one percent of the picture (add Shift for five percent). Each step is spoken.
     Changes are spoken as they happen. You can turn spoken updates off in Settings, General, Accessibility.
@@ -1146,7 +1146,7 @@ workspace-colour-blurb = Grade and match shots: looks, colour controls and scope
 workspace-audio-blurb = Mix sound: audio tools, a tall timeline and level controls.
 workspace-vfx-blurb = Effects, masks and tracking on a large viewer.
 workspace-motion-blurb = Titles, shapes and animation with keyframes close at hand.
-workspace-production-blurb = Plan and review: your media and the AI editor, a short timeline.
+workspace-production-blurb = Plan and review: your media and the Assistant, a short timeline.
 search-help = Search help
 no-help-article-matches-try-other-words = No help article matches. Try other words.
 welcome-tour = Welcome tour
