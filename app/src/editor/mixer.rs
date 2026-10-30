@@ -715,10 +715,10 @@ fn selected_text(n: usize) -> String {
 }
 
 fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelState, t: &theme::Tokens) {
-    if let Some(x) = d.delivery.as_ref().and_then(|x| LoudnessTarget::from_id(&x.target)) {
-        if s.reading.is_none() {
-            s.target = LoudnessTarget::ALL.iter().position(|y| *y == x).unwrap_or(0);
-        }
+    if let Some(x) = d.delivery.as_ref().and_then(|x| LoudnessTarget::from_id(&x.target))
+        && s.reading.is_none()
+    {
+        s.target = LoudnessTarget::ALL.iter().position(|y| *y == x).unwrap_or(0);
     }
     heading(ui, "Loudness", t);
     ui.horizontal_wrapped(|ui| {
@@ -771,17 +771,18 @@ fn delivery_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
         ui.label(egui::RichText::new(crate::i18n::tf(format!("{} · DX, MX, FX, M&E, mix{}", d.layout().id(), if d.languages.is_empty() { "" } else { ", each dub" }))).font(theme::caption()).color(t.text_2));
         ui.checkbox(&mut s.separate_bg, "BG apart");
         ui.checkbox(&mut s.adm, "ADM objects");
-        if Button::secondary("Export stems…").icon(Icon::Export).compact().show(ui).clicked() && busy().is_empty() {
-            if let Some(dir) = rfd::FileDialog::new().set_title("Folder for the stems").pick_folder() {
-                let model = app.doc.model.clone();
-                let (layout, bg, adm) = (d.layout(), s.separate_bg, s.adm);
-                let title = app.doc.project.name.clone();
-                spawn("Writing stems", move || {
-                    let w = desk::render::export_stems(&model, &dir, layout, bg, &title);
-                    let a = adm.then(|| desk::render::export_adm(&model, &dir.join(format!("{} ADM.wav", if title.is_empty() { "Zornov" } else { &title })), layout, &title));
-                    Done::Stems(w, a)
-                });
-            }
+        if Button::secondary("Export stems…").icon(Icon::Export).compact().show(ui).clicked()
+            && busy().is_empty()
+            && let Some(dir) = rfd::FileDialog::new().set_title("Folder for the stems").pick_folder()
+        {
+            let model = app.doc.model.clone();
+            let (layout, bg, adm) = (d.layout(), s.separate_bg, s.adm);
+            let title = app.doc.project.name.clone();
+            spawn("Writing stems", move || {
+                let w = desk::render::export_stems(&model, &dir, layout, bg, &title);
+                let a = adm.then(|| desk::render::export_adm(&model, &dir.join(format!("{} ADM.wav", if title.is_empty() { "Zornov" } else { &title })), layout, &title));
+                Done::Stems(w, a)
+            });
         }
     });
     ui.separator();
@@ -967,10 +968,10 @@ fn dialogue_tab(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, s: &mut PanelS
                 ui.label(egui::RichText::new(&c.status).font(theme::caption()).color(t.text_2));
                 ui.horizontal_wrapped(|ui| {
                     let recording = is_recording();
-                    if ui.add_enabled_ui(!recording, |ui| Button::secondary("Record").icon(Icon::Microphone).compact().show(ui)).inner.on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked() {
-                        if let Err(e) = start_recording(app, c) {
-                            s.message = Some(e);
-                        }
+                    if ui.add_enabled_ui(!recording, |ui| Button::secondary("Record").icon(Icon::Microphone).compact().show(ui)).inner.on_hover_text(crate::i18n::shown("Plays from 4 s before the line with a 3-2-1 streamer and records the microphone")).clicked()
+                        && let Err(e) = start_recording(app, c)
+                    {
+                        s.message = Some(e);
                     }
                     if Button::secondary("Take…").compact().show(ui).on_hover_text(crate::i18n::shown("Bring in a recorded take: synced, matched, on the ADR lane")).clicked()
                         && let Some(p) = rfd::FileDialog::new().add_filter("Sound", &["wav", "aif", "aiff", "m4a", "mp3", "flac"]).pick_file()
