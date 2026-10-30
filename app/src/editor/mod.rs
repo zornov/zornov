@@ -294,6 +294,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let full = ui.max_rect();
     crate::a11y::begin_frame(&ctx);
+    // Undo puts back the selection an edit was made with.
+    app.doc.track_selection(&app.editor.selection);
     // Esc cancels a panel drag before anything else hears it.
     dock_ui::keys(app, &ctx);
     // The editor's keys are for the timeline and the viewer. A panel or
@@ -674,10 +676,22 @@ fn redo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
 /// After undo or redo: select what changed (clips that are gone drop out)
 /// and bring the playhead to it when it is not already over it.
 pub(crate) fn show_changed(ed: &mut EditorState, doc: &mut Doc) {
+    show_changed_inner(ed, doc);
+    doc.track_selection(&ed.selection);
+}
+
+fn show_changed_inner(ed: &mut EditorState, doc: &mut Doc) {
     let touched: Vec<u32> = doc.take_history_touched().into_iter().filter(|id| doc.project.clip(*id).is_some()).collect();
     ed.selection.retain(|id| doc.project.clip(*id).is_some());
     ed.selected_cut = None;
+    // The selection as it was before the edit (after it, for redo), when
+    // the document knows it; clips that are gone drop out. With nothing to
+    // put back, the changed clips are selected so the change is seen.
+    let restore: Option<Vec<u32>> = doc.take_selection_restore().map(|s| s.into_iter().filter(|id| doc.project.clip(*id).is_some()).collect::<Vec<u32>>()).filter(|s| !s.is_empty());
     if touched.is_empty() {
+        if let Some(r) = restore {
+            ed.selection = r;
+        }
         return;
     }
     let spans: Vec<(Time, Time)> = touched.iter().filter_map(|id| doc.project.clip(*id)).map(|c| (c.start, c.end())).collect();
@@ -685,7 +699,7 @@ pub(crate) fn show_changed(ed: &mut EditorState, doc: &mut Doc) {
     if ed.playhead < lo || ed.playhead > hi {
         ed.playhead = lo;
     }
-    ed.selection = touched;
+    ed.selection = restore.unwrap_or(touched);
 }
 
 /// Editor actions in Settings ▸ Shortcuts, run from the person's keys.
@@ -900,6 +914,42 @@ mod history_focus_tests {
         assert!(doc.redo().is_some());
         show_changed(&mut ed, &mut doc);
         assert_eq!(ed.playhead, mid);
+    }
+
+    /// Undo puts back the selection the edit was made with, redo the one
+    /// it left, through the same path as the key, the menu and the toast.
+    #[test]
+    fn undo_restores_the_selection_the_edit_was_made_with() {
+        let mut doc = Doc::from_view(&view::demo());
+        let mut ed = EditorState::new(&crate::prefs::Prefs::default());
+        let spine = doc.project.spine();
+        let free: Vec<u32> = doc.project.clips.iter().filter(|c| Some(c.lane) != spine).map(|c| c.id).collect();
+        let (a, b) = (free[0], free[1]);
+        let seq = doc.seq();
+        // Frame 1: a is selected; the edit trims b, and leaves b selected.
+        ed.selection = vec![a];
+        doc.track_selection(&ed.selection);
+        assert!(doc.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(b as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        ed.selection = vec![b];
+        // Frame 2 starts: the document learns the edit left b selected.
+        doc.track_selection(&ed.selection);
+        // The person clicks elsewhere meanwhile.
+        ed.selection.clear();
+        doc.track_selection(&ed.selection);
+        assert!(doc.undo().is_some());
+        show_changed(&mut ed, &mut doc);
+        assert_eq!(ed.selection, vec![a], "undo: what was selected before the edit");
+        assert!(doc.redo().is_some());
+        show_changed(&mut ed, &mut doc);
+        assert_eq!(ed.selection, vec![b], "redo: what the edit left selected");
+        // A new edit forgets the redo marks and undo still works.
+        doc.track_selection(&ed.selection);
+        assert!(doc.apply("Trim", m::Edit::Trim { seq, clip: m::ClipId(a as u64), edge: m::Edge::End, delta: -SEC / 4, ripple: false }));
+        ed.selection = vec![a];
+        doc.track_selection(&ed.selection);
+        assert!(doc.undo().is_some());
+        show_changed(&mut ed, &mut doc);
+        assert_eq!(ed.selection, vec![b]);
     }
 }
 
