@@ -108,6 +108,36 @@ pub fn take(mc: &mut m::Clip, paths: &[String], kind: &str) {
     }
 }
 
+/// The label column of a [`FieldRow`] at this width: narrow panels give the label less room.
+// TODO(kit): `labeled_row` should take this from the same place as `FieldRow`.
+fn label_col(ui: &egui::Ui) -> f32 {
+    if ui.available_width() < 260.0 { 80.0 } else { kit::label_width(ui.ctx()) }
+}
+
+/// Width of the reset and keyframe slots every `FieldRow` keeps at its end.
+// TODO(kit): a token for the row's end slots.
+const END_SLOTS: f32 = 40.0;
+
+/// A labelled row on the same grid as a `FieldRow`: the label column, then
+/// content that stops where the value fields stop.
+// TODO(kit): `labeled_row` with the narrow label and end slots.
+fn row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui, f32) -> R) -> R {
+    let lw = label_col(ui);
+    let full = ui.available_width();
+    let w = (full - lw - END_SLOTS).max(40.0);
+    let t = theme::tokens(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.set_min_height(theme::space::CONTROL_H);
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(lw, theme::space::CONTROL_H), Sense::hover());
+        let cut = kit::paint_text_clipped(ui.painter(), Pos2::new(crate::i18n::start_x(r, 0.0), r.center().y), crate::i18n::start_center(), label, theme::body(), t.text_2, lw - 8.0);
+        kit::tip_if_cut(resp, cut, label);
+        let out = ui.scope(|ui| add(ui, w)).inner;
+        out
+    })
+    .inner
+}
+
 pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
     let Some(mc) = app.doc.model.active().clip(m::ClipId(id as u64)).cloned() else { return };
     let has = mc.keyframes.values().any(|t| !t.modifiers.is_empty());
@@ -121,8 +151,8 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         }
         let (label, path, scale, unit, axis) = PROPS[cur];
         let names: Vec<&str> = offered.iter().map(|i| PROPS[*i].0).collect();
-        kit::labeled_row(ui, "Property", |ui| {
-            if let Some(i) = kit::menu_button(ui, "mod-prop", offered.iter().position(|x| *x == cur).unwrap_or(0), &names, ui.available_width(), None) {
+        row(ui, "Property", |ui, w| {
+            if let Some(i) = kit::menu_button(ui, "mod-prop", offered.iter().position(|x| *x == cur).unwrap_or(0), &names, w, None) {
                 cur = offered[i];
                 ui.data_mut(|d| d.insert_temp(pick_id, cur));
             }
@@ -134,7 +164,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         let mut changed: Option<m::Clip> = None;
         let mut gesture = false;
         for (k, md) in mods.iter().enumerate() {
-            ui.add_space(4.0);
+            ui.add_space(theme::space::SM);
             let mut next = md.clone();
             let mut remove = false;
             let title = KINDS.iter().find(|x| x.1 == md.name()).map_or(md.name(), |x| x.0);
@@ -147,59 +177,61 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                     let top = 500.0f32.max(a);
                     let r1 = FieldRow::new("Amount", &mut a, 0.0..=top).default(10.0).unit(unit).decimals(1).scrub(0.2).show(ui);
                     let mut f = *per_second as f32;
-                    let r2 = FieldRow::new("Per second", &mut f, 0.1..=30.0).default(2.0).decimals(1).step(0.1).scrub(0.02).show(ui);
+                    let r2 = FieldRow::new("Rate", &mut f, 0.1..=30.0).default(2.0).unit("/s").decimals(1).step(0.1).scrub(0.02).show(ui);
                     let mut o = *octaves as f32;
                     let r3 = FieldRow::new("Detail", &mut o, 1.0..=6.0).default(1.0).step(1.0).scrub(0.05).show(ui);
                     let mut s = *seed as f32;
-                    let r4 = FieldRow::new("Seed", &mut s, 0.0..=999.0).default(0.0).step(1.0).no_slider().show(ui);
+                    FieldRow::new("Seed", &mut s, 0.0..=999.0).default(0.0).step(1.0).no_slider().show(ui);
                     *amount = (a / scale) as f64;
                     *per_second = f.max(0.1) as f64;
                     *octaves = o.round().clamp(1.0, 8.0) as u32;
                     *seed = s.max(0.0) as u32;
                     gesture |= r1.dragging || r2.dragging || r3.dragging;
-                    let _ = r4;
                 }
                 m::Modifier::Cycles { before, after, count } => {
-                    kit::labeled_row(ui, "Before", |ui| {
-                        if let Some(i) = kit::menu_button(ui, &format!("cyc-b-{k}"), repeat_index(*before), &REPEATS, ui.available_width(), None) {
+                    row(ui, "Before", |ui, w| {
+                        if let Some(i) = kit::menu_button(ui, &format!("cyc-b-{k}"), repeat_index(*before), &REPEATS, w, None) {
                             *before = repeat_of(i);
                         }
                     });
-                    kit::labeled_row(ui, "After", |ui| {
-                        if let Some(i) = kit::menu_button(ui, &format!("cyc-a-{k}"), repeat_index(*after), &REPEATS, ui.available_width(), None) {
+                    row(ui, "After", |ui, w| {
+                        if let Some(i) = kit::menu_button(ui, &format!("cyc-a-{k}"), repeat_index(*after), &REPEATS, w, None) {
                             *after = repeat_of(i);
                         }
                     });
                     let mut c = *count as f32;
-                    FieldRow::new("Times (0 = always)", &mut c, 0.0..=100.0).default(0.0).step(1.0).no_slider().show(ui);
+                    FieldRow::new("Times", &mut c, 0.0..=100.0).default(0.0).step(1.0).no_slider().show(ui);
+                    ui.label(egui::RichText::new(crate::i18n::shown("0 loops for ever.")).font(theme::caption()).color(t.text_2));
                     *count = c.max(0.0) as u32;
                 }
                 m::Modifier::Stepped { per_second, .. } => {
                     let mut f = *per_second as f32;
-                    let r = FieldRow::new("Poses / s", &mut f, 1.0..=60.0).default(12.0).decimals(0).step(1.0).scrub(0.1).show(ui);
+                    let r = FieldRow::new("Poses", &mut f, 1.0..=60.0).unit("/s").default(12.0).decimals(0).step(1.0).scrub(0.1).show(ui);
                     *per_second = f.max(1.0) as f64;
                     gesture |= r.dragging;
                 }
                 m::Modifier::Limits { min, max } => {
                     for (name, slot) in [("Lowest", min), ("Highest", max)] {
-                        kit::labeled_row(ui, name, |ui| {
+                        let cur = mc.get_property(&ps[0]).and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        row(ui, name, |ui, w| {
                             let mut on = slot.is_some();
                             if kit::toggle(ui, &mut on, name, None).changed() {
-                                *slot = on.then(|| mc.get_property(&ps[0]).and_then(|v| v.as_f64()).unwrap_or(0.0));
+                                *slot = on.then_some(cur);
+                            }
+                            if let Some(v) = slot {
+                                let mut x = *v as f32 * scale;
+                                let r = kit::NumberField::new(name, &mut x).range(-10_000.0..=10_000.0).decimals(1).unit(unit).width((w - 44.0).max(56.0)).show(ui);
+                                *v = (x / scale) as f64;
+                                gesture |= r.dragged();
                             }
                         });
-                        if let Some(v) = slot {
-                            let mut x = *v as f32 * scale;
-                            let r = FieldRow::new("", &mut x, -10_000.0..=10_000.0).unit(unit).decimals(1).no_slider().show(ui);
-                            *v = (x / scale) as f64;
-                            gesture |= r.dragging;
-                        }
                     }
                 }
                 m::Modifier::Expression { expr } => {
                     let mut text = expr.clone();
-                    let w = ui.available_width();
-                    kit::text_field(ui, &mut text, "value + sin(t * tau) * 10", None, w, None);
+                    row(ui, "Formula", |ui, w| {
+                        kit::text_field(ui, &mut text, "value + sin(t * tau) * 10", None, w, None);
+                    });
                     let ok = m::modifier::expr::parse(&text);
                     match &ok {
                         Ok(_) => {
@@ -222,14 +254,14 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 changed = Some(c);
             }
         }
-        ui.add_space(4.0);
+        ui.add_space(theme::space::SM);
         let have: Vec<&str> = mods.iter().map(|x| x.name()).collect();
         let addable: Vec<(&str, &str)> = KINDS.iter().copied().filter(|(_, k)| !have.contains(k)).filter(|(_, k)| *k != "cycles" || mc.keyframes.get(&ps[0]).is_some_and(|t| t.keys.len() > 1)).collect();
         if !addable.is_empty() {
             let mut names: Vec<&str> = vec!["Add modifier…"];
             names.extend(addable.iter().map(|x| x.0));
-            kit::labeled_row(ui, "", |ui| {
-                if let Some(i) = kit::menu_button(ui, "mod-add", 0, &names, ui.available_width(), None)
+            row(ui, "Add", |ui, w| {
+                if let Some(i) = kit::menu_button(ui, "mod-add", 0, &names, w, None)
                     && i > 0
                 {
                     let mut c = mc.clone();
