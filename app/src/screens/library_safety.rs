@@ -61,7 +61,8 @@ struct State {
 }
 
 const KINDS: [&str; 4] = ["All", "Video", "Image", "Audio"];
-const TABS: [&str; 3] = ["Media", "Project health", "Rights"];
+const TABS: [&str; 4] = ["Media", "Project health", "Rights", "Manage"];
+const LIBRARY_TAB: usize = 3;
 
 pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
     let id = egui::Id::new("library-safety-state");
@@ -103,6 +104,7 @@ fn body(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
     match st.tab {
         0 => library(app, ui, st),
         1 => safety_tab(app, ui, st),
+        LIBRARY_TAB => super::library_manage::show(ui, app),
         _ => rights_tab(app, ui, st),
     }
 }
@@ -178,6 +180,9 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
             return;
         }
     };
+    if super::library_manage::banner(ui, app) {
+        st.tab = LIBRARY_TAB;
+    }
     ui.horizontal(|ui| {
         kit::text_field(ui, &mut st.query, "Search names, tags, words said, what the picture shows", Some(Icon::MagnifyingGlass), ui.available_width() - 190.0, None);
         if Button::secondary("Look into footage").compact().busy(st.busy).show(ui).on_hover_text("Describes frames, groups faces and fingerprints every picture and sound so search and “More like this” can see inside. Runs in the background.").clicked() {

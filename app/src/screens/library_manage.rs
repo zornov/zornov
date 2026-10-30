@@ -8,11 +8,8 @@
 //! "Relink missing" looks in chosen folders, shows what it found, and then
 //! points the project at it in one undo step.
 //!
-//! Hook: `show(ui, app)` goes in the Media tab of the Library ▸ Safety sheet
-//! (screens/library_safety.rs) and `banner(ui, app)` above the media list; the
-//! banner draws only while media is offline.
-
-#![allow(dead_code)] // hooked into the Library sheet by screens/library_safety.rs (see the report)
+//! In the Library ▸ Safety sheet: `show` is its Library tab, and `banner` sits above
+//! the Media list and draws only while media is offline.
 
 use crate::app::StudioApp;
 use crate::assets::{self, Asset, Store};
@@ -29,7 +26,8 @@ const VIEWS: [&str; 4] = ["Bins", "Duplicates", "Missing", "Licences"];
 pub const BINS: usize = 0;
 pub const DUPLICATES: usize = 1;
 pub const MISSING: usize = 2;
-pub const LICENCES: usize = 3;
+#[cfg(test)]
+const LICENCES: usize = 3;
 
 /// How to take the last change back.
 #[derive(Clone, Debug)]
@@ -75,11 +73,6 @@ fn files(n: usize) -> String {
 
 // ------------------------------------------------------------- the actions
 // Each returns what happened in words for the toast, and how to take it back.
-
-pub fn reload(st: &mut State, doc: &crate::doc::Doc, root: Option<&std::path::Path>) -> Result<(), String> {
-    let store = assets::global()?;
-    reload_with(st, store, doc, root)
-}
 
 fn reload_with(st: &mut State, store: &Store, doc: &crate::doc::Doc, root: Option<&std::path::Path>) -> Result<(), String> {
     if let Some(r) = root {
@@ -200,13 +193,15 @@ fn done(ui: &egui::Ui, st: &mut State, r: Result<(String, Undo), String>) {
     st.loaded = false;
 }
 
-/// A bar that appears only while media is offline and sends the person to Missing.
+/// A bar that appears only while media is offline; true when "Relink missing…" was pressed
+/// (the sheet then shows this view, which looks for the files).
 pub fn banner(ui: &mut egui::Ui, app: &mut StudioApp) -> bool {
     let n = crate::services::library::offline_ids(&app.doc.project.media).len();
     if n == 0 {
         return false;
     }
     let t = theme::tokens(ui.ctx());
+    let mut pressed = false;
     ui.horizontal(|ui| {
         ui.label(RichText::new(format!("{} offline", files(n))).font(theme::body()).color(t.text_2));
         if Button::secondary("Relink missing…").compact().show(ui).clicked() {
@@ -214,9 +209,11 @@ pub fn banner(ui: &mut egui::Ui, app: &mut StudioApp) -> bool {
             st.view = MISSING;
             st.wants_plan = true;
             ui.ctx().data_mut(|d| d.insert_temp(state_id(), st));
+            pressed = true;
         }
     });
-    true
+    ui.add_space(space::SM);
+    pressed
 }
 
 pub fn show(ui: &mut egui::Ui, app: &mut StudioApp) {
@@ -233,30 +230,30 @@ pub fn show(ui: &mut egui::Ui, app: &mut StudioApp) {
 pub fn show_with(ui: &mut egui::Ui, app: &mut StudioApp, store: &Store) {
     let mut st: State = ui.ctx().data_mut(|d| d.get_temp(state_id())).unwrap_or_default();
     let t = theme::tokens(ui.ctx());
-    if !st.loaded {
-        if let Err(e) = reload_with(&mut st, store, &app.doc, root(app).as_deref()) {
-            st.note = e;
-        }
+    if !st.loaded
+        && let Err(e) = reload_with(&mut st, store, &app.doc, root(app).as_deref())
+    {
+        st.note = e;
     }
     ui.horizontal(|ui| {
         let segs: Vec<Segment> = VIEWS.iter().map(|v| Segment::text(v)).collect();
         kit::segmented(ui, "library-manage-views", &mut st.view, &segs, None, None);
-        if let Some((label, undo)) = st.undo.clone() {
-            if Button::ghost("Undo").compact().show(ui).on_hover_text(label).clicked() {
-                let r = take_back(&mut app.doc, store, &undo);
-                st.undo = None;
-                match r {
-                    Ok(text) => {
-                        kit::push(ui.ctx(), text.clone(), None, None);
-                        st.note = text;
-                    }
-                    Err(e) => {
-                        kit::push_error(ui.ctx(), e.clone());
-                        st.note = e;
-                    }
+        if let Some((label, undo)) = st.undo.clone()
+            && Button::ghost("Undo").compact().show(ui).on_hover_text(label).clicked()
+        {
+            let r = take_back(&mut app.doc, store, &undo);
+            st.undo = None;
+            match r {
+                Ok(text) => {
+                    kit::push(ui.ctx(), text.clone(), None, None);
+                    st.note = text;
                 }
-                st.loaded = false;
+                Err(e) => {
+                    kit::push_error(ui.ctx(), e.clone());
+                    st.note = e;
+                }
             }
+            st.loaded = false;
         }
     });
     ui.add_space(space::SM);
@@ -374,12 +371,12 @@ fn missing_view(ui: &mut egui::Ui, app: &mut StudioApp, store: &Store, st: &mut 
         if Button::secondary("Relink missing…").compact().show(ui).clicked() {
             st.wants_plan = true;
         }
-        if Button::ghost("Choose folder…").compact().show(ui).clicked() {
-            if let Some(dir) = rfd::FileDialog::new().set_title("Look for missing media in").pick_folder() {
-                match find_candidates(store, root.as_deref(), &[dir]) {
-                    Ok(p) => st.plan = Some(p),
-                    Err(e) => st.note = e,
-                }
+        if Button::ghost("Choose folder…").compact().show(ui).clicked()
+            && let Some(dir) = rfd::FileDialog::new().set_title("Look for missing media in").pick_folder()
+        {
+            match find_candidates(store, root.as_deref(), &[dir]) {
+                Ok(p) => st.plan = Some(p),
+                Err(e) => st.note = e,
             }
         }
     });
@@ -406,11 +403,11 @@ fn missing_view(ui: &mut egui::Ui, app: &mut StudioApp, store: &Store, st: &mut 
             }
         }
     }
-    if apply {
-        if let Some(mut p) = st.plan.take() {
-            let r = relink_now(&mut app.doc, store, &mut p);
-            done(ui, st, r);
-        }
+    if apply
+        && let Some(mut p) = st.plan.take()
+    {
+        let r = relink_now(&mut app.doc, store, &mut p);
+        done(ui, st, r);
     }
 }
 
@@ -511,7 +508,7 @@ mod tests {
         png(&a, 3);
         std::fs::copy(&a, &b).unwrap();
         let mut doc = crate::services::project::new_custom("t", 640, 360, 30.0);
-        crate::services::project::import_media(&mut doc, &[b.clone()]);
+        crate::services::project::import_media(&mut doc, std::slice::from_ref(&b));
         store.add_file(&a, None).unwrap();
         store.sync_model(&d, &doc.model).unwrap();
         let groups = manage::duplicates(&store, false).unwrap();
@@ -561,14 +558,15 @@ mod tests {
     fn frame(h: &mut crate::ui_tests::Harness, store: &Store, tags: &mut Vec<String>) -> egui::FullOutput {
         let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(760.0, 520.0))), ..Default::default() };
         let (ctx, app) = (h.ctx.clone(), &mut h.app);
-        let out = ctx.run_ui(raw, |ui| {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+        let mut out = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 banner(ui, app);
                 show_with(ui, app, store);
             });
         });
+        out.textures_delta.clear();
         if let Some(u) = out.platform_output.accesskit_update.as_ref() {
-            tags.extend(u.nodes.iter().filter_map(|(_, n)| n.label().map(str::to_owned)));
+            tags.extend(u.nodes.iter().filter_map(|(_, n)| n.label().or(n.value()).map(str::to_owned)));
         }
         out
     }
@@ -601,15 +599,11 @@ mod tests {
             assert!(has(view, label), "the {label} segment is there in view {view}");
         }
         assert!(has(BINS, "In this project") && has(BINS, "Footage/Day 1"));
-        assert!(has(DUPLICATES, "No duplicates"));
+        assert!(has(DUPLICATES, "wasted"));
         assert!(has(MISSING, "Relink missing…") && has(MISSING, "Missing (1)"));
         assert!(has(LICENCES, "keep.png"));
         // Offline media shows the banner.
         assert!(has(MISSING, "offline"), "the banner appears while media is offline");
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/ui-shots");
-        std::fs::create_dir_all(&dir).unwrap();
-        h.with_events(vec![]);
-        h.shot(dir.join("library-manage.png"));
         let _ = std::fs::remove_dir_all(&d);
     }
 }
