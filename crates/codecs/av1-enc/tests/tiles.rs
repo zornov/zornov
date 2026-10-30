@@ -286,3 +286,175 @@ fn merging_tile_buffers_copies_exactly_the_tile() {
         }
     }
 }
+
+// ---- the encoder's own tiled frame loop ----
+
+use studio_av1_enc::{Config, Encoder, RateMode};
+
+/// A textured picture that pans by (3, 2) samples a frame.
+fn pan_frame(w: u32, h: u32, i: u32) -> Frame {
+    let rgba: Vec<u8> = (0..w * h)
+        .flat_map(|j| {
+            let (x, y) = (j % w + 3 * i, j / w + 2 * i);
+            let edge = if (x / 24 + y / 40) % 2 == 0 { 50 } else { 0 };
+            [((x / 3 + y / 5) as i32 % 256 + noise(x, y)).clamp(0, 255) as u8, ((y / 2 % 200 + edge) as i32 + noise(y, x)).clamp(0, 255) as u8, ((x * y / 900 % 256) as i32 + noise(x + 7, y)).clamp(0, 255) as u8, 255]
+        })
+        .collect();
+    from_rgba8(&rgba, w, h, 8, false)
+}
+
+struct Coded {
+    packets: Vec<Vec<u8>>,
+    recon: Vec<Frame>,
+}
+
+fn encode_seq(w: u32, h: u32, frames: u32, tiles: (u8, u8), speed: u8, q: u8, threads: usize) -> Coded {
+    let mut enc = Encoder::new(Config { speed, tiles, threads, rate: RateMode::Cqp(q), keyint: 240, ..Config::new(w, h) }).unwrap();
+    let (mut packets, mut recon) = (Vec::new(), Vec::new());
+    for i in 0..frames {
+        packets.push(enc.push_frame(&pan_frame(w, h, i), i as i64).unwrap().remove(0).data);
+        recon.push(enc.reconstruction().unwrap().clone());
+    }
+    Coded { packets, recon }
+}
+
+fn check_decodes(c: &Coded, what: &str) {
+    let mut dec = Decoder::new();
+    for (i, (p, want)) in c.packets.iter().zip(&c.recon).enumerate() {
+        let mut out = dec.decode_pts(p, i as i64).unwrap_or_else(|e| panic!("{what} frame {i}: {e:?}"));
+        out.extend(dec.flush());
+        assert_eq!(out.len(), 1, "{what} frame {i}");
+        assert_eq!(out[0].planes, want.planes, "{what} frame {i}: decoder output differs from the reconstruction");
+    }
+}
+
+#[test]
+fn encoder_tiles_decode_bit_exactly_key_and_p_frames() {
+    for &(w, h) in &[(330u32, 200u32), (193, 131), (65, 300), (256, 130)] {
+        for speed in [6u8, 8] {
+            for tiles in [(0u8, 0u8), (1, 0), (0, 1), (1, 1), (2, 1)] {
+                let c = encode_seq(w, h, 3, tiles, speed, 110, 3);
+                check_decodes(&c, &format!("{w}x{h} speed {speed} tiles {tiles:?}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn encoder_1080p_tiles_decode_bit_exactly_and_do_not_depend_on_threads() {
+    for tiles in [(1u8, 0u8), (1, 1), (2, 1)] {
+        let one = encode_seq(1920, 1080, 2, tiles, 8, 120, 1);
+        check_decodes(&one, &format!("1080p tiles {tiles:?}"));
+        for threads in [3usize, 8] {
+            let many = encode_seq(1920, 1080, 2, tiles, 8, 120, threads);
+            assert_eq!(one.packets, many.packets, "1080p tiles {tiles:?}: bytes differ between 1 and {threads} threads");
+        }
+    }
+}
+
+#[test]
+fn encoder_tiles_do_not_depend_on_threads_at_speed_6() {
+    for tiles in [(1u8, 1u8), (2, 1)] {
+        let one = encode_seq(330, 200, 3, tiles, 6, 130, 1);
+        for threads in [2usize, 7] {
+            assert_eq!(one.packets, encode_seq(330, 200, 3, tiles, 6, 130, threads).packets, "tiles {tiles:?}, {threads} threads");
+        }
+    }
+}
+
+#[test]
+fn encoder_tiled_streams_decode_on_videotoolbox_bit_exactly() {
+    use studio_encode::mux::{Muxer, Options, av1c_from_sequence_header};
+    if !studio_hw::Av1Decoder::supported() {
+        eprintln!("SKIPPED: this machine's video hardware does not decode AV1");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("studio-av1-enc-tiles-enc-vt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for &(w, h, tiles, speed) in &[(1920u32, 1080u32, (1u8, 0u8), 8u8), (1920, 1080, (1, 1), 8), (1920, 1080, (2, 1), 8), (1920, 1080, (2, 1), 6), (330, 200, (1, 1), 6), (193, 131, (1, 0), 6)] {
+        let c = encode_seq(w, h, 3, tiles, speed, 110, 4);
+        let seq_obu_len = 2 + c.packets[0][1] as usize;
+        let info = av1c_from_sequence_header(&c.packets[0][..seq_obu_len]).unwrap();
+        let path = dir.join(format!("enc-{w}x{h}-{}{}-s{speed}.mp4", tiles.0, tiles.1));
+        let mut mux = Muxer::create(&path, Options::mp4_av1()).unwrap();
+        let track = mux.add_av1_video(info.track_info(30, 1, 1_000_000)).unwrap();
+        for p in &c.packets {
+            mux.write_temporal_unit(track, p).unwrap();
+        }
+        mux.finish().unwrap();
+        let mut demux = studio_mp4::open(&path).unwrap();
+        let movie = demux.movie().clone();
+        let v = &movie.tracks[0];
+        let studio_mp4::Codec::Av1 { config } = &v.codec else { panic!("not AV1: {:?}", v.codec) };
+        let mut hw = studio_hw::Av1Decoder::new(&config.raw, w, h).expect("a hardware AV1 decoder");
+        let mut got = Vec::new();
+        for (i, s) in v.samples.iter().enumerate() {
+            got.extend(hw.decode(&demux.read_sample(s).unwrap(), i as i64).unwrap());
+        }
+        got.extend(hw.flush());
+        got.sort_by_key(|d| d.sample);
+        assert_eq!(got.len(), c.recon.len(), "{w}x{h}");
+        let mut exact = true;
+        for (d, want) in got.iter().zip(&c.recon) {
+            exact &= [(&d.y, &want.planes[0]), (&d.u, &want.planes[1]), (&d.v, &want.planes[2])].iter().all(|(a, b)| a.len() == b.len() && a.iter().zip(b.iter()).all(|(&x, &y)| x as u16 == y));
+        }
+        eprintln!("{w}x{h} tiles {tiles:?} speed {speed}: VideoToolbox matches the reconstruction bit for bit: {exact}");
+        assert!(exact, "{w}x{h} tiles {tiles:?} speed {speed}: VideoToolbox output differs");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Bytes at equal PSNR and speed, for the report: `cargo test --release -p studio-av1-enc --test
+/// tiles -- --ignored --nocapture bench_tiling`. Key + 2 P frames of a 1080p pan, speed 6, all cores.
+#[test]
+#[ignore = "benchmark: run in release mode and read the printed numbers"]
+fn bench_tiling_cost_and_speed_1080p() {
+    let (w, h, n) = (1920u32, 1080u32, 3u32);
+    let src: Vec<Frame> = (0..n).map(|i| pan_frame(w, h, i)).collect();
+    let samples = (w * h + 2 * (w / 2) * (h / 2)) as f64 * n as f64;
+    let sse = |a: &[u16], b: &[u16]| -> u64 { a.iter().zip(b).map(|(&x, &y)| (x as i64 - y as i64).pow(2) as u64).sum() };
+    let speed: u8 = std::env::var("BENCH_SPEED").ok().and_then(|v| v.parse().ok()).unwrap_or(6);
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let layouts = [(0u8, 0u8), (1, 0), (1, 1), (2, 1), (2, 2), (3, 1)];
+    let mut curves: Vec<Vec<(f64, f64)>> = Vec::new();
+    for &tiles in &layouts {
+        let mut curve = Vec::new();
+        for q in [90u8, 120, 150, 180] {
+            let mut enc = Encoder::new(Config { speed, tiles, threads: cores, rate: RateMode::Cqp(q), keyint: 240, ..Config::new(w, h) }).unwrap();
+            let (mut bytes, mut err) = (0usize, 0u64);
+            for (i, f) in src.iter().enumerate() {
+                bytes += enc.push_frame(f, i as i64).unwrap()[0].data.len();
+                err += (0..3).map(|c| sse(&enc.reconstruction().unwrap().planes[c], &f.planes[c])).sum::<u64>();
+            }
+            curve.push((10.0 * (255.0f64 * 255.0 * samples / err as f64).log10(), bytes as f64));
+        }
+        eprintln!("tiles {tiles:?}: (PSNR, bytes) {curve:?}");
+        curve.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        curves.push(curve);
+    }
+    let at = |curve: &[(f64, f64)], psnr: f64| -> Option<f64> {
+        curve.windows(2).find_map(|w| {
+            let ((p0, b0), (p1, b1)) = (w[0], w[1]);
+            (p0.min(p1)..=p0.max(p1)).contains(&psnr).then(|| (b0.ln() + (b1.ln() - b0.ln()) * (psnr - p0) / (p1 - p0)).exp())
+        })
+    };
+    for (k, &tiles) in layouts.iter().enumerate().skip(1) {
+        let r: Vec<f64> = curves[0].iter().filter_map(|&(p, b)| at(&curves[k], p).map(|n| n / b)).collect();
+        eprintln!("tiles {tiles:?} ({} tiles): bytes at equal PSNR = {:.2}% of one tile ({} comparable points)", (1usize << tiles.0).min(30) * (1usize << tiles.1).min(17), 100.0 * r.iter().sum::<f64>() / r.len().max(1) as f64, r.len());
+    }
+    // speed: fps over the key frame and over the P frames, at 1 thread and at all cores
+    for &tiles in &layouts {
+        for threads in [1usize, cores] {
+            let mut enc = Encoder::new(Config { speed, tiles, threads, rate: RateMode::Cqp(120), keyint: 240, ..Config::new(w, h) }).unwrap();
+            let t = std::time::Instant::now();
+            enc.push_frame(&src[0], 0).unwrap();
+            let key = t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            for (i, f) in src.iter().enumerate().skip(1) {
+                enc.push_frame(f, i as i64).unwrap();
+            }
+            let p = t.elapsed().as_secs_f64() / (n - 1) as f64;
+            eprintln!("speed {speed} tiles {tiles:?} threads {threads:2}: key {:.2} fps, P {:.2} fps", 1.0 / key, 1.0 / p);
+        }
+    }
+}
