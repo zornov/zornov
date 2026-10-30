@@ -70,8 +70,34 @@ pub struct Check {
     pub detail: String,
 }
 
+/// The text with anything that looks like a credential masked, so an eval
+/// log or results file never carries a key the agent happened to echo: a
+/// token with a known key prefix, or any long mixed letter-and-digit run.
+pub(crate) fn redact(text: &str) -> String {
+    const PREFIXES: [&str; 8] = ["sk-", "sk_", "pk_", "ghp_", "gho_", "xox", "AKIA", "AIza"];
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut out = String::with_capacity(text.len());
+    let mut run = String::new();
+    let mut flush = |run: &mut String, out: &mut String| {
+        let keyed = PREFIXES.iter().any(|p| run.starts_with(p)) && run.len() >= 16;
+        let long = run.len() >= 32 && run.chars().any(|c| c.is_ascii_digit()) && run.chars().any(|c| c.is_ascii_alphabetic());
+        out.push_str(if keyed || long { "[redacted]" } else { run });
+        run.clear();
+    };
+    for c in text.chars() {
+        if word(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
 fn check(name: &str, pass: bool, weight: f32, detail: impl Into<String>) -> Check {
-    Check { name: name.into(), pass, weight, detail: detail.into() }
+    Check { name: name.into(), pass, weight, detail: redact(&detail.into()) }
 }
 
 pub fn score_of(checks: &[Check]) -> f32 {
@@ -586,15 +612,15 @@ pub fn main(args: &[String]) -> i32 {
             Ok((checks, run)) => {
                 let score = score_of(&checks);
                 for c in &checks {
-                    println!("  {} {:<22} {}", if c.pass { "✓" } else { "✗" }, c.name, c.detail);
+                    println!("  {} {:<22} {}", if c.pass { "✓" } else { "✗" }, c.name, redact(&c.detail));
                 }
-                println!("  = {score:.0}/100 in {:.0}s, {} tokens, {} tool calls", run.seconds, run.tokens, run.tools.len());
+                println!("{}", redact(&format!("  = {score:.0}/100 in {:.0}s, {} tokens, {} tool calls", run.seconds, run.tokens, run.tools.len())));
                 let f = &run.friction;
-                println!("    friction: {} calls to goal, retry {:.0}%, silent drop {:.0}%, undo {:.0}%, {} reply tokens", f["calls_to_goal"], f["retry_rate"].as_f64().unwrap_or(0.0) * 100.0, f["silent_drop_rate"].as_f64().unwrap_or(0.0) * 100.0, f["undo_rate"].as_f64().unwrap_or(0.0) * 100.0, f["reply_tokens"]);
+                println!("{}", redact(&format!("    friction: {} calls to goal, retry {:.0}%, silent drop {:.0}%, undo {:.0}%, {} reply tokens", f["calls_to_goal"], f["retry_rate"].as_f64().unwrap_or(0.0) * 100.0, f["silent_drop_rate"].as_f64().unwrap_or(0.0) * 100.0, f["undo_rate"].as_f64().unwrap_or(0.0) * 100.0, f["reply_tokens"])));
                 results.push(json!({
                     "task": task.name, "score": score, "seconds": run.seconds, "tokens": run.tokens, "tools": run.tools.len(),
                     "checks": checks.iter().map(|c| json!({"name": c.name, "pass": c.pass, "weight": c.weight, "detail": c.detail})).collect::<Vec<_>>(),
-                    "plan": run.plan.as_ref().map(|p| p.text()), "errors": run.errors, "said": run.said, "friction": run.friction,
+                    "plan": run.plan.as_ref().map(|p| p.text()), "errors": run.errors.iter().map(|e| redact(e)).collect::<Vec<_>>(), "said": redact(&run.said), "friction": run.friction,
                 }));
             }
             Err(e) => {
@@ -759,7 +785,7 @@ mod tests {
         let task = Task { name: "steer", brief: "title", steer: Some((3, "Make it DAWN RIDE")), setup: |_, _| Ok(()), score: |s, r| vec![check("dawn", s.doc.project.clips.iter().any(|c| c.text.contains("DAWN")), 1.0, ""), check("steered", r.steered, 1.0, "")] };
         let dir = std::env::temp_dir().join(format!("studio-eval-steer-{}", std::process::id()));
         let (checks, _) = run_task(&task, &dir, |_| Box::new(|_| Ok(Box::new(Slow) as Box<dyn Brain>)), false, Duration::from_secs(60), &mut |_| {}).unwrap();
-        assert!(checks.iter().take(2).all(|c| c.pass), "{checks:?}");
+        assert!(checks.iter().take(2).all(|c| c.pass), "{}", redact(&format!("{checks:?}")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -767,8 +793,25 @@ mod tests {
         Session::new(crate::services::project::new_custom("Eval", 640, 360, 30.0))
     }
 
+    #[test]
+    fn a_key_never_reaches_the_eval_log() {
+        let key = "sk-ant-api03-AbCdEf0123456789xyzXYZ";
+        let hex = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b";
+        let c = check("secret", true, 1.0, format!("agent said {key} and token={hex} done"));
+        assert!(!c.detail.contains(key) && !c.detail.contains(hex), "{}", c.detail);
+        assert_eq!(c.detail, "agent said [redacted] and token=[redacted] done");
+        assert!(!redact(&format!("{c:?}")).contains("AbCdEf"));
+    }
+
+    #[test]
+    fn ordinary_eval_text_is_left_alone() {
+        for t in ["the cat moves 12 px over 3.5 s", "= 87/100 in 42s, 1200 tokens, 9 tool calls", "/tmp/eval/new-title/project.json", "bpm 120.0"] {
+            assert_eq!(redact(t), t);
+        }
+    }
+
     fn named<'a>(checks: &'a [Check], name: &str) -> &'a Check {
-        checks.iter().find(|c| c.name.starts_with(name)).unwrap_or_else(|| panic!("no check {name} in {checks:?}"))
+        checks.iter().find(|c| c.name.starts_with(name)).unwrap_or_else(|| panic!("no check {name} in {}", redact(&format!("{checks:?}"))))
     }
 
     /// A colourist who only grades (the `colour` tool, never `edit`) has
@@ -794,7 +837,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("studio-eval-grade-{}", std::process::id()));
         let (checks, run) = run_task(&task, &dir, |_| Box::new(|_| Ok(Box::new(Colourist) as Box<dyn Brain>)), false, Duration::from_secs(60), &mut |_| {}).unwrap();
         assert!(!run.tools.iter().any(|t| t == "edit"), "the agent never called edit");
-        assert!(named(&checks, "graded").pass, "{checks:?}");
+        assert!(named(&checks, "graded").pass, "{}", redact(&format!("{checks:?}")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -812,7 +855,7 @@ mod tests {
         let task = Task { name: "idle", brief: "do something", steer: None, setup: |_, _| Ok(()), score: |_, _| vec![check("free point", true, 1.0, "")] };
         let dir = std::env::temp_dir().join(format!("studio-eval-idle-{}", std::process::id()));
         let (checks, _) = run_task(&task, &dir, |_| Box::new(|_| Ok(Box::new(Idle) as Box<dyn Brain>)), false, Duration::from_secs(60), &mut |_| {}).unwrap();
-        assert!(checks.iter().all(|c| !c.pass), "{checks:?}");
+        assert!(checks.iter().all(|c| !c.pass), "{}", redact(&format!("{checks:?}")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -828,7 +871,7 @@ mod tests {
         let sky = s.doc.project.clips.iter().map(|c| c.id).max().unwrap();
         s.edit(&[json!({"op": "merge", "clips": [cat, sky], "name": "Cat"})], "merge", false).unwrap();
         let checks = score_cat(&mut s, &Run::default());
-        assert!(named(&checks, "the cat moves").pass, "{checks:?}");
+        assert!(named(&checks, "the cat moves").pass, "{}", redact(&format!("{checks:?}")));
     }
 
     /// A title made as 3D text is the title.
@@ -837,7 +880,7 @@ mod tests {
         let mut s = blank();
         s.edit(&[json!({"op": "text_3d", "text": "DAWN RIDE", "at": 0, "duration": 3})], "title", false).unwrap();
         let checks = score_steer(&mut s, &Run::default());
-        assert!(named(&checks, "new title").pass, "{checks:?}");
+        assert!(named(&checks, "new title").pass, "{}", redact(&format!("{checks:?}")));
     }
 
     /// When the song's beats cannot be heard, cut timing is not scored
@@ -903,7 +946,7 @@ mod tests {
         // A tool answer followed by a note still reads as the answer.
         let id = s.doc.project.clips.iter().find(|c| c.kind == ClipKind::Audio).unwrap().id;
         let v = call_json(&mut s, "listen", json!({"clip": id})).unwrap();
-        assert!(v["bpm"].as_f64().is_some_and(|b| (b - 120.0).abs() < 2.0), "{}", v["bpm"]);
+        assert!(v["bpm"].as_f64().is_some_and(|b| (b - 120.0).abs() < 2.0), "{}", redact(&v["bpm"].to_string()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
