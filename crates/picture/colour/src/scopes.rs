@@ -92,7 +92,48 @@ impl Waveform {
     pub fn get(&self, x: u32, level: u32) -> u32 {
         self.data[(level * self.width + x) as usize]
     }
+
+    /// Samples that went into each column (the image height it was read
+    /// from): what a trace's brightness is measured against.
+    pub fn per_column(&self) -> u32 {
+        (0..self.width.min(1)).map(|x| (0..self.levels).map(|l| self.get(x, l)).sum()).next().unwrap_or(0)
+    }
+
+    /// The signal level (0..1) of the brightest and the darkest sample, or
+    /// `None` for an empty scope.
+    pub fn range(&self) -> Option<(f32, f32)> {
+        let mut lo = None;
+        let mut hi = None;
+        for l in 0..self.levels {
+            if (0..self.width).any(|x| self.get(x, l) > 0) {
+                lo.get_or_insert(l);
+                hi = Some(l);
+            }
+        }
+        let f = |l: u32| l as f32 / (self.levels - 1).max(1) as f32;
+        Some((f(lo?), f(hi?)))
+    }
 }
+
+/// How bright a scope cell with `count` samples shows (0..1), when a
+/// column holds `per_column` samples. A single stray sample is dim but
+/// visible; a tenth of the column at one level is full. The square root
+/// keeps the thin parts of a trace readable next to flat areas.
+pub fn trace_intensity(count: u32, per_column: u32) -> f32 {
+    if count == 0 {
+        return 0.0;
+    }
+    let full = (per_column as f32 * 0.1).max(4.0);
+    (count as f32 / full).sqrt().clamp(0.22, 1.0)
+}
+
+/// Signal value (0..1) as a 10-bit code value (0..1023).
+pub fn code_10bit(v: f32) -> u32 {
+    (v.clamp(0.0, 1.0) * 1023.0).round() as u32
+}
+
+/// The broadcast ("legal") range of the signal: 10-bit codes 64..940.
+pub const LEGAL_RANGE: (f32, f32) = (64.0 / 1023.0, 940.0 / 1023.0);
 
 /// Signal value → bin, clamped to the scope range 0..1.
 #[inline]
@@ -223,6 +264,30 @@ pub fn histogram(img: &Image, s: &ScopeSettings) -> Histogram {
         h.luma[level(lw[0] * p[0] + lw[1] * p[1] + lw[2] * p[2], b) as usize] += 1;
     }
     h
+}
+
+impl Histogram {
+    /// The shares of samples stacked in the first and the last bin of
+    /// the busiest channel: black crushed against the left edge, and a
+    /// channel clipped against the right.
+    pub fn edge_shares(&self) -> (f32, f32) {
+        let total = self.red.iter().sum::<u32>().max(1) as f32;
+        let ends = |v: &Vec<u32>| (v.first().copied().unwrap_or(0) as f32 / total, v.last().copied().unwrap_or(0) as f32 / total);
+        let chans = [ends(&self.red), ends(&self.green), ends(&self.blue)];
+        (chans.iter().map(|c| c.0).fold(0.0, f32::max), chans.iter().map(|c| c.1).fold(0.0, f32::max))
+    }
+}
+
+/// Like [`vectorscope_targets`] with the bars at `level` of full signal
+/// (the vectorscope draws 75 % and 100 % boxes).
+pub fn vectorscope_targets_at(matrix: YCbCrMatrix, level: f32) -> [Target; 6] {
+    let mut t = vectorscope_targets(matrix);
+    let k = level / 0.75;
+    for x in &mut t {
+        x.cb *= k;
+        x.cr *= k;
+    }
+    t
 }
 
 /// What a colourist reads off the scopes, as numbers: where the levels
@@ -384,6 +449,84 @@ mod tests {
         assert_eq!(p[0].get(150, l75), 100);
         let total: u32 = w.data.iter().sum();
         assert_eq!(total, 400 * 100);
+    }
+
+    fn flat(v: f32) -> Image {
+        let c = Transfer::Bt1886.decode_rgb([v; 3]);
+        Image::from_fn(64, 36, move |_, _| [c[0], c[1], c[2], 1.0])
+    }
+
+    #[test]
+    fn known_frames_sit_where_a_scope_puts_them() {
+        let s = ScopeSettings { max_width: 64, ..ScopeSettings::default() };
+        // Black is the bottom row, white the top row, whatever the width.
+        let (lo, hi) = waveform_luma(&flat(0.0), &s).range().unwrap();
+        assert_eq!((lo, hi), (0.0, 0.0));
+        let (lo, hi) = waveform_luma(&flat(1.0), &s).range().unwrap();
+        assert_eq!((lo, hi), (1.0, 1.0));
+        // Mid grey at 50 %: within one bin of the middle.
+        let (m, _) = waveform_luma(&flat(0.5), &s).range().unwrap();
+        assert!((m - 0.5).abs() < 1.0 / 255.0, "{m}");
+        assert_eq!(waveform_luma(&flat(0.5), &s).per_column(), 36);
+        // A ramp left to right climbs from black to white, one level per column.
+        let ramp = Image::from_fn(256, 8, |x, _| {
+            let c = Transfer::Bt1886.decode_rgb([x as f32 / 255.0; 3]);
+            [c[0], c[1], c[2], 1.0]
+        });
+        let w = waveform_luma(&ramp, &ScopeSettings { max_width: 256, ..ScopeSettings::default() });
+        for x in [0u32, 64, 128, 255] {
+            assert_eq!(w.get(x, x), 8, "column {x} holds its own level");
+        }
+    }
+
+    #[test]
+    fn colour_bars_land_on_the_targets_and_grey_on_the_centre() {
+        let s = ScopeSettings::default();
+        let v = vectorscope(&bars(), &s);
+        let n = s.vectorscope_size;
+        // All the 75 % bars (and no more) sit on a 75 % target or the centre.
+        let on_target = |col: u32, row: u32| {
+            vectorscope_targets(YCbCrMatrix::Bt709).iter().any(|t| {
+                let (u, w) = vectorscope_position(t.cb, t.cr);
+                level(u, n).abs_diff(col) <= 1 && level(w, n).abs_diff(row) <= 1
+            }) || (col.abs_diff(n / 2) <= 1 && row.abs_diff(n / 2) <= 1)
+        };
+        let mut off = 0;
+        for row in 0..n {
+            for col in 0..n {
+                if v.data[(row * n + col) as usize] > 0 && !on_target(col, row) {
+                    off += 1;
+                }
+            }
+        }
+        assert_eq!(off, 0);
+        // The 100 % targets lie further out along the same angle.
+        let (a, b) = (vectorscope_targets_at(YCbCrMatrix::Bt709, 0.75), vectorscope_targets_at(YCbCrMatrix::Bt709, 1.0));
+        for (x, y) in a.iter().zip(&b) {
+            assert!(((y.cb.hypot(y.cr)) / x.cb.hypot(x.cr) - 4.0 / 3.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn traces_show_one_sample_and_saturate_on_a_flat_area() {
+        assert_eq!(trace_intensity(0, 100), 0.0);
+        let one = trace_intensity(1, 144);
+        assert!(one >= 0.22 && one < 0.5, "{one}");
+        assert_eq!(trace_intensity(144, 144), 1.0);
+        assert!(trace_intensity(5, 144) > one);
+        assert_eq!((code_10bit(0.0), code_10bit(1.0)), (0, 1023));
+        assert_eq!((LEGAL_RANGE.0 * 1023.0).round(), 64.0);
+    }
+
+    #[test]
+    fn histogram_edges_tell_clipping_from_a_normal_frame() {
+        let s = ScopeSettings::default();
+        let (low, high) = histogram(&flat(1.0), &s).edge_shares();
+        assert_eq!((low, high), (0.0, 1.0));
+        let (low, high) = histogram(&flat(0.0), &s).edge_shares();
+        assert_eq!((low, high), (1.0, 0.0));
+        let (low, high) = histogram(&flat(0.5), &s).edge_shares();
+        assert_eq!((low, high), (0.0, 0.0));
     }
 
     #[test]
