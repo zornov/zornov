@@ -16,6 +16,7 @@ use crate::app::StudioApp;
 use crate::editor::pins::{self, LayerMap};
 use crate::theme;
 use crate::view::Time;
+use super::physics::cloud_feedback as feedback;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use studio_model as m;
 
@@ -208,7 +209,9 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
                 if shift && pts.len() > 2 {
                     pts = vec![pts[0], pts[pts.len() - 1]];
                 }
-                add(app, id, map, &pts.iter().map(|q| from_screen(*q)).collect::<Vec<_>>(), new_fill(&ctx));
+                if !add(app, id, map, &pts.iter().map(|q| from_screen(*q)).collect::<Vec<_>>(), new_fill(&ctx)) {
+                    feedback::hint(&ctx, "Too short to cut. Drag across the layer");
+                }
             }
         }
     }
@@ -267,18 +270,19 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
 }
 
 /// Adds a cut along screen-space `pts` (canvas pixels from the centre) of
-/// layer `id`, thinned to the points that matter.
-fn add(app: &mut StudioApp, id: u32, map: &LayerMap, pts: &[Vec2], fill: usize) {
+/// layer `id`, thinned to the points that matter. False when the drag was
+/// too short to cut anything.
+fn add(app: &mut StudioApp, id: u32, map: &LayerMap, pts: &[Vec2], fill: usize) -> bool {
     let layer: Vec<[f64; 2]> = pts.iter().filter_map(|c| map.layer(*c)).map(|q| [q.x, q.y]).collect();
     // Within a thousandth of the layer is as good as exact.
     let thin = studio_rig::scissor::simplify(&layer, 0.0015);
     if thin.len() < 2 {
-        return;
+        return false;
     }
-    let Some(mut mc) = app.doc.model.active().clip(m::ClipId(id as u64)).cloned() else { return };
+    let Some(mut mc) = app.doc.model.active().clip(m::ClipId(id as u64)).cloned() else { return true };
     let mut cut = m::Cut::new(m::Cut::next_id(&mc.cuts), thin.iter().map(|q| m::Vec2::new(q[0], q[1])).collect());
     if !cut.is_active() {
-        return;
+        return false;
     }
     cut.fill = fill_of(fill);
     if fill == 1 {
@@ -287,6 +291,7 @@ fn add(app: &mut StudioApp, id: u32, map: &LayerMap, pts: &[Vec2], fill: usize) 
     mc.cuts.push(cut);
     let seq = app.doc.seq();
     app.doc.apply("Add cut", m::Edit::SetClip { seq, clip: Box::new(mc) });
+    true
 }
 
 /// Removes a point (the cut with its last two) or a whole cut.
@@ -408,8 +413,9 @@ pub fn rows(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, mc: &m::Clip, tool_
     let ctx = ui.ctx().clone();
     let t = theme::tokens(&ctx);
     let w = ui.available_width();
+    let fill_w = (w - crate::kit::LABEL_W - 6.0).max(120.0);
     if tool_on {
-        ui.label(egui::RichText::new(crate::i18n::shown("Drag across the layer to cut it (shift: straight); drag a dot to move a point, a diamond to move the cut; ⌥-click a dot or diamond removes it. Cut between legs, along lips, under an arm: the sides then move apart.")).font(theme::caption()).color(t.text_2));
+        ui.label(egui::RichText::new(crate::i18n::shown(HOW)).font(theme::caption()).color(t.text_2));
         if CAN_SHOW_MESH {
             let mut on = show_mesh(&ctx);
             crate::kit::labeled_row(ui, "Show mesh", |ui| {
@@ -419,21 +425,22 @@ pub fn rows(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, mc: &m::Clip, tool_
             });
         }
         let mut k = new_fill(&ctx);
-        if crate::kit::segmented(ui, "cut-fill", &mut k, &[Segment::text("No fill"), Segment::text("Mouth"), Segment::text("Auto")], Some(w), None).changed() {
-            set_new_fill(&ctx, k);
-        }
-        ui.label(egui::RichText::new(crate::i18n::shown("A fill shows in the gap where the sides move apart: the dark inside of a mouth, or the picture's own colour darkened.")).font(theme::caption()).color(t.text_2));
-        ui.horizontal(|ui| {
+        crate::kit::labeled_row(ui, "New cuts", |ui| {
+            if crate::kit::segmented(ui, "cut-fill", &mut k, &[Segment::text("No fill"), Segment::text("Mouth"), Segment::text("Auto")], Some(fill_w), None).on_hover_text(crate::i18n::shown(FILL_TIP)).changed() {
+                set_new_fill(&ctx, k);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
             if Button::secondary("Find gaps").icon(Icon::MagicWand).show(ui).clicked() {
-                run(app, &ctx, serde_json::json!({"op": "scissor", "clip": id, "auto": if mc.skeleton.is_some() { vec!["gaps", "parts"] } else { vec!["gaps"] }}), "Find gaps");
+                find(app, &ctx, id, serde_json::json!({"op": "scissor", "clip": id, "auto": if mc.skeleton.is_some() { vec!["gaps", "parts"] } else { vec!["gaps"] }}), "Find gaps");
             }
             if Button::secondary("Find mouth").icon(Icon::MagicWand).show(ui).clicked() {
-                run(app, &ctx, serde_json::json!({"op": "scissor", "clip": id, "auto": "mouth"}), "Find mouth");
+                find(app, &ctx, id, serde_json::json!({"op": "scissor", "clip": id, "auto": "mouth"}), "Find mouth");
             }
         });
     }
-    for c in &mc.cuts {
-        let name = if c.name.is_empty() { crate::i18n::tf(format!("Cut {}", c.id)) } else { c.name.clone() };
+    for (n, c) in mc.cuts.iter().enumerate() {
+        let name = if c.name.is_empty() { crate::i18n::tf(format!("Cut {}", n + 1)) } else { feedback::shown_name(&c.name) };
         crate::kit::name_row(ui, egui::RichText::new(name).font(theme::body_medium()).color(t.text), |ui| {
             if Button::ghost("Remove").icon(Icon::Trash).show(ui).clicked() {
                 let mut next = mc.clone();
@@ -443,8 +450,8 @@ pub fn rows(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, mc: &m::Clip, tool_
             }
         });
         let mut enabled = c.enabled;
-        crate::kit::labeled_row(ui, "Cut on", |ui| {
-            if crate::kit::toggle(ui, &mut enabled, "Cut on", None).changed() {
+        crate::kit::labeled_row(ui, "Splits", |ui| {
+            if crate::kit::toggle(ui, &mut enabled, "Splits the mesh", None).changed() {
                 let mut next = mc.clone();
                 if let Some(o) = next.cuts.iter_mut().find(|o| o.id == c.id) {
                     o.enabled = enabled;
@@ -458,7 +465,8 @@ pub fn rows(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, mc: &m::Clip, tool_
             m::CutFill::Colour(_) => 1,
             m::CutFill::Auto => 2,
         };
-        if crate::kit::segmented(ui, &format!("cut-fill-of-{id}-{}", c.id), &mut k, &[Segment::text("No fill"), Segment::text("Colour"), Segment::text("Auto")], Some(w), None).changed() {
+        let fill = crate::kit::labeled_row(ui, "Fill", |ui| crate::kit::segmented(ui, &format!("cut-fill-of-{id}-{}", c.id), &mut k, &[Segment::text("No fill"), Segment::text("Colour"), Segment::text("Auto")], Some(fill_w), None).on_hover_text(crate::i18n::shown(FILL_TIP)));
+        if fill.changed() {
             let mut next = mc.clone();
             if let Some(o) = next.cuts.iter_mut().find(|o| o.id == c.id) {
                 o.fill = match (k, c.fill) {
@@ -472,12 +480,13 @@ pub fn rows(app: &mut StudioApp, ui: &mut egui::Ui, id: u32, mc: &m::Clip, tool_
             app.doc.apply("Cut fill", m::Edit::SetClip { seq, clip: Box::new(next) });
         }
         if let m::CutFill::Colour(old) = c.fill {
-            let mut rgb = [old.r as f32, old.g as f32, old.b as f32];
+            let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let mut col = Color32::from_rgb(byte(old.r), byte(old.g), byte(old.b));
             crate::kit::labeled_row(ui, "Fill colour", |ui| {
-                if ui.color_edit_button_rgb(&mut rgb).changed() {
+                if crate::kit::colour_well(ui, &format!("cut-colour-{id}-{}", c.id), &mut col, None).changed() {
                     let mut next = mc.clone();
                     if let Some(o) = next.cuts.iter_mut().find(|o| o.id == c.id) {
-                        o.fill = m::CutFill::Colour(m::Rgba::new(rgb[0] as f64, rgb[1] as f64, rgb[2] as f64, old.a));
+                        o.fill = m::CutFill::Colour(m::Rgba::new(col.r() as f64 / 255.0, col.g() as f64 / 255.0, col.b() as f64 / 255.0, old.a));
                     }
                     let seq = app.doc.seq();
                     app.doc.apply_gesture(&format!("cut-colour-{id}-{}", c.id), "Cut fill colour", m::Edit::SetClip { seq, clip: Box::new(next) });
@@ -496,16 +505,43 @@ pub fn after_build(app: &mut StudioApp, ctx: &egui::Context, id: u32, kind: &str
     }
 }
 
-/// Runs an agent op on the open document (one undo step).
-fn run(app: &mut StudioApp, ctx: &egui::Context, op: serde_json::Value, label: &str) {
+/// Runs an agent op on the open document (one undo step); false, with
+/// the reason told, when it could not.
+fn run(app: &mut StudioApp, ctx: &egui::Context, op: serde_json::Value, label: &str) -> bool {
     let doc = std::mem::replace(&mut app.doc, crate::agent::Session::default().doc);
     let mut s = crate::agent::Session::new(doc);
     let r = s.edit(&[op], label, false);
     app.doc = s.doc;
-    if let Err(e) = r {
-        crate::kit::push(ctx, format!("{label}: {e}"), None, Some(Icon::Warning));
+    match r {
+        Ok(_) => true,
+        Err(e) => {
+            feedback::failed(ctx, &app.doc, &e);
+            false
+        }
     }
 }
+
+/// Runs a "find" op and says how many cuts it made.
+fn find(app: &mut StudioApp, ctx: &egui::Context, id: u32, op: serde_json::Value, label: &str) {
+    let count = |app: &StudioApp| app.doc.model.active().clip(m::ClipId(id as u64)).map_or(0, |c| c.cuts.len());
+    let before = count(app);
+    if run(app, ctx, op, label) {
+        feedback::done(ctx, found(count(app).saturating_sub(before)));
+    }
+}
+
+/// What a find tells the person.
+fn found(n: usize) -> String {
+    match n {
+        0 => "No new cuts found".to_owned(),
+        1 => "Found 1 cut".to_owned(),
+        n => crate::i18n::tf(format!("Found {n} cuts")),
+    }
+}
+
+/// The notes in the scissor rows.
+const HOW: &str = "Drag across the layer to cut. Shift draws straight, ⌥-click removes";
+const FILL_TIP: &str = "What shows in the gap when the sides move apart";
 
 use crate::icons::Icon;
 
@@ -618,8 +654,16 @@ mod tests {
             let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 1000.0))), time: Some(i as f64 / 60.0), ..Default::default() };
             crate::editor::test_frame(&ctx, input, |ui| eframe::App::ui(&mut app, ui, &mut frame));
         }
-        let mc = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap();
+        let mc = app.doc.model.active().clip(m::ClipId(id as u64)).unwrap().clone();
         assert_eq!(mc.cuts.len(), 1);
         assert_eq!(mc.cuts[0].fill, m::CutFill::Auto);
+        // The rows alone at the Inspector's width: one label column for the
+        // fills, the cut's name readable, nothing cut off.
+        let drawn = crate::editor::physics::cloud_ui_check::draw(&ctx, 3, |ui| rows(&mut app, ui, id, &mc, true));
+        drawn.assert_tidy("scissor", &[]);
+        assert!(drawn.shows(HOW) && drawn.shows("New cuts") && drawn.shows("Fill") && drawn.shows("Split"), "{:?}", drawn.texts);
+        assert_eq!(drawn.rect_of("New cuts").map(|r| r.left()), drawn.rect_of("Fill").map(|r| r.left()));
+        assert_eq!(found(0), "No new cuts found");
+        assert_eq!(found(3), "Found 3 cuts");
     }
 }
