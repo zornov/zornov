@@ -119,6 +119,19 @@ pub struct Finding {
 /// that moment, and per model what it found (`None`: it stays put).
 type Memo = std::sync::Mutex<std::collections::HashMap<u64, std::collections::HashMap<u64, Option<Finding>>>>;
 
+#[cfg(test)]
+thread_local! {
+    /// Models [`check_one`] simulated on this thread, so a test can tell
+    /// work done from work answered out of the memo.
+    static SIMULATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many models the rest check has simulated on this thread so far.
+#[cfg(test)]
+pub(crate) fn simulated() -> usize {
+    SIMULATED.with(|c| c.get())
+}
+
 fn memo() -> &'static Memo {
     static M: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
     M.get_or_init(Default::default)
@@ -238,6 +251,8 @@ fn check_scene(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::
 fn check_one(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::Micros, it: &Item, ppm: f32, out: &mut Vec<Finding>) -> bool {
     {
         let Some(c) = s.clip(m::ClipId(it.clip)) else { return false };
+        #[cfg(test)]
+        SIMULATED.with(|n| n.set(n.get() + 1));
         let mut b2 = Build::at(seq, t);
         b2.skip = vec![it.clip];
         b2.characters = false;
