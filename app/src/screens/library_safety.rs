@@ -31,6 +31,12 @@ struct Row {
     licence: String,
 }
 
+/// A file reached through two paths (a copy and its original) is one item in the list.
+fn one_per_file(rows: Vec<Row>) -> Vec<Row> {
+    let mut seen = std::collections::HashSet::new();
+    rows.into_iter().filter(|r| seen.insert((r.name.clone(), r.kind.clone(), r.seconds.to_bits()))).collect()
+}
+
 #[derive(Clone, Default)]
 struct State {
     tab: usize,
@@ -42,7 +48,6 @@ struct State {
     rows: Vec<Row>,
     selected: Option<i64>,
     label: String,
-    total: i64,
     health: Option<Value>,
     history: Vec<(String, u64, String)>,
     rights: Option<Value>,
@@ -208,7 +213,7 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
         if let Some(root) = root(app) {
             let _ = store.sync_model(&root, &app.doc.model);
         }
-        st.rows = store
+        let rows: Vec<Row> = store
             .find(&q)
             .unwrap_or_default()
             .into_iter()
@@ -224,10 +229,10 @@ fn library(app: &mut StudioApp, ui: &mut egui::Ui, st: &mut State) {
                 licence: rights::get(store, h.asset.id).ok().flatten().map(|r| r.licence).unwrap_or_else(|| "unknown".into()),
             })
             .collect();
-        st.total = store.counts().ok().and_then(|c| c["assets"].as_i64()).unwrap_or(0);
+        st.rows = one_per_file(rows);
         st.asked = Some(ask);
     }
-    ui.label(egui::RichText::new(format!("{} shown of {} in the library", st.rows.len(), st.total)).font(theme::caption()).color(t.text_2));
+    ui.label(egui::RichText::new(crate::i18n::tf(format!("{} items", st.rows.len()))).font(theme::caption()).color(t.text_2));
     let avail = ui.available_height() - 52.0;
     let mut change = false;
     let mut more_like: Option<i64> = None;
@@ -576,6 +581,13 @@ pub fn export_block(doc: &crate::doc::Doc) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_file_listed_twice_shows_once() {
+        let row = |id: i64, name: &str| super::Row { id, name: name.into(), kind: "video".into(), seconds: 4.0, ..Default::default() };
+        let rows = super::one_per_file(vec![row(1, "a.mp4"), row(2, "a.mp4"), row(3, "b.mp4"), row(4, "b.mp4")]);
+        assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), [1, 3], "first of each, in order");
+    }
+
     use super::*;
 
     #[test]

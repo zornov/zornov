@@ -124,7 +124,7 @@ pub fn tick(app: &mut StudioApp, ctx: &egui::Context) {
 /// The top bar button, with the count of open notes.
 pub fn topbar_button(ui: &mut egui::Ui) {
     let (open, n) = with(|u| (u.open, u.store.open_count()));
-    let label = if n > 0 { format!("Review · {n}") } else { "Review".to_owned() };
+    let label = if n > 0 { format!("Feedback · {n}") } else { "Feedback".to_owned() };
     let resp = Button::secondary(&label).compact().show(ui);
     if resp.clicked() {
         with(|u| u.open = !open);
@@ -202,7 +202,7 @@ pub fn show(app: &mut StudioApp, ctx: &egui::Context) {
 
 fn body(app: &mut StudioApp, ui: &mut egui::Ui) {
     let t = theme::tokens(ui.ctx());
-    ui.label(egui::RichText::new("Review").font(theme::body_medium()).color(t.text));
+    ui.label(egui::RichText::new("Feedback").font(theme::body_medium()).color(t.text));
     ui.add_space(6.0);
     let has_root = with(|u| u.root.is_some());
     if !has_root {
@@ -612,7 +612,7 @@ fn versions_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                         Err(e) => with(|u| u.status = Some(e)),
                     }
                 }
-                if ui.small_button("Branch").on_hover_text("This version's cut joins the project as another sequence").clicked() {
+                if ui.small_button("Branch").on_hover_text("Adds this version's cut as a sequence").clicked() {
                     branch(app, &root, &v.id, &format!("{} (alt)", v.name));
                 }
             });
@@ -819,7 +819,7 @@ fn share_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                 save_store(u);
             });
         }
-        if ui.button("Merge copy").on_hover_text("Takes in the edits made in another copy of this project (one undo step)").clicked() && !path.is_empty() {
+        if ui.button("Merge copy").on_hover_text("Merges edits from another copy (one undo step)").clicked() && !path.is_empty() {
             merge_copy(app, &root, Path::new(&path));
         }
     });

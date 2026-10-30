@@ -112,7 +112,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, scale: f32
         // A hint at the top of the picture.
         let hint = match kind {
             MarkKind::Area => "Drag over the part for the AI · Esc to cancel",
-            MarkKind::Note => "Drag a box or click a spot, then type your note · Esc to cancel",
+            MarkKind::Note => "Drag a box or click; type a note · Esc cancels",
         };
         let g = p.layout_no_wrap(hint.into(), theme::caption(), Color32::WHITE);
         let hr = Rect::from_center_size(egui::pos2(canvas.center().x, canvas.top() + 18.0), g.size() + Vec2::new(20.0, 10.0));

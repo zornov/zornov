@@ -148,7 +148,7 @@ fn pieces(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, id: u32, 
     let t = theme::tokens(ui.ctx());
     let key = egui::Id::unique("in-scene-pieces").with(id);
     let found: Option<(crate::view::Time, Vec<([f32; 4], [f32; 2], [f32; 2], String)>)> = ctx.data(|d| d.get_temp(key));
-    ui.label(egui::RichText::new("Pieces of this backdrop (rocks, trunks, grass) a character can stand behind.").font(theme::caption()).color(t.text_2));
+    ui.label(egui::RichText::new("Backdrop pieces (rocks, trunks, grass) to stand behind").font(theme::caption()).color(t.text_2));
     if Button::secondary("Find pieces").icon(Icon::Eyedropper).show(ui).clicked() {
         let res = (|| -> Result<Vec<([f32; 4], [f32; 2], [f32; 2], String)>, String> {
             let store = studio_ai::store::ModelStore::default();

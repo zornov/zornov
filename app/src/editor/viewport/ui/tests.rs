@@ -563,3 +563,18 @@ fn the_terrain_brush_sculpts_a_world_and_saves_the_strokes() {
     let undone = super::super::world::find(&app.doc, 0).unwrap();
     assert_eq!(undone.file, found.file);
 }
+
+#[test]
+fn the_edit_bar_keeps_clear_of_pane_names_and_gizmos() {
+    let bar = Rect::from_min_size(egui::pos2(170.0, 4.0), Vec2::new(700.0, 60.0));
+    let top_left = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(499.0, 299.0));
+    let top_right = Rect::from_min_max(egui::pos2(501.0, 0.0), egui::pos2(1000.0, 299.0));
+    assert_eq!(clear_of(bar, label_rect(top_left)), 0.0, "the first name sits left of the bar");
+    let dy = clear_of(bar, label_rect(top_right));
+    assert!(dy > 0.0 && !label_rect(top_right).translate(Vec2::new(0.0, dy)).intersects(bar), "the second name moves under the bar");
+    let dy = clear_of(bar, gizmo_rect(top_left));
+    assert!(dy > 0.0 && !gizmo_rect(top_left).translate(Vec2::new(0.0, dy)).intersects(bar), "the gizmo moves under the bar");
+    assert_eq!(clear_of(bar, gizmo_rect(top_right)), 0.0, "a gizmo right of the bar stays");
+    let bottom = Rect::from_min_max(egui::pos2(0.0, 301.0), egui::pos2(499.0, 600.0));
+    assert_eq!(clear_of(bar, label_rect(bottom)) + clear_of(bar, gizmo_rect(bottom)), 0.0, "lower panes are not touched");
+}
