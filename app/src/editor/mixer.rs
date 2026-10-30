@@ -709,7 +709,8 @@ fn master_strip(app: &mut StudioApp, ui: &mut egui::Ui, d: &Desk, meters: &studi
             meter(p, col, fr, meters.channel_peaks.get(i).copied().unwrap_or(0.0), t);
             p.text(slot.center_top() + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, *name, egui::FontId::proportional(9.0), t.text_2);
         }
-        c.painter().text(egui::pos2(fr.left() + 10.0, rect.bottom() - 6.0), Align2::CENTER_BOTTOM, format!("{:+.1} dB", d.master.volume_db), theme::caption(), t.text_2);
+        // Left-aligned to the fader, so the reading starts inside the card.
+        c.painter().text(egui::pos2(fr.left(), rect.bottom() - 6.0), Align2::LEFT_BOTTOM, format!("{:+.1} dB", d.master.volume_db), theme::caption(), t.text_2);
     }
 }
 
