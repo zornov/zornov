@@ -318,3 +318,51 @@ fn filter_searches_do_not_depend_on_the_thread_count() {
         println!("q {q}: lf {lf1:?} cdef {} lr {}", cdef1.is_some(), lr1.is_some());
     }
 }
+
+/// Bytes at equal PSNR with the restoration probe on every unit, one in two and one in four, and
+/// the time of the restoration search: `cargo test --release -p studio-av1-enc --test filters --
+/// --ignored --nocapture probe_sampling`. Content: 640x360 pan with texture, threads 1.
+#[test]
+#[ignore = "benchmark: run in release mode and read the printed numbers"]
+fn probe_sampling_cost_at_equal_psnr() {
+    use studio_av1_enc::filters::{profile, set_probe_sampling, set_probe_small};
+    let (w, h) = (640u32, 360u32);
+    let frames: Vec<Frame> = (0..6u32)
+        .map(|i| {
+            let rgba: Vec<u8> = (0..w * h)
+                .flat_map(|j| {
+                    let (x, y) = (j % w + 3 * i, j / w + 2 * i);
+                    let edge = if (x / 24 + y / 40) % 2 == 0 { 50 } else { 0 };
+                    [((x / 3 + y / 5) as i32 % 256 + noise(x, y, 0)).clamp(0, 255) as u8, ((y / 2 % 200 + edge) as i32 + noise(y, x, 1)).clamp(0, 255) as u8, ((x * y / 900 % 256) as i32 + noise(x + 7, y, 2)).clamp(0, 255) as u8, 255]
+                })
+                .collect();
+            from_rgba8(&rgba, w, h, 8, false)
+        })
+        .collect();
+    let samples = (w * h + 2 * (w / 2) * (h / 2)) as f64 * frames.len() as f64;
+    let mut curves = Vec::new();
+    let settings = [(1usize, false), (4, false), (8, false), (1, true), (4, true), (8, true)];
+    for (every, small) in settings {
+        set_probe_sampling(every);
+        set_probe_small(small);
+        let _ = profile::take();
+        let mut curve = Vec::new();
+        for q in [100u8, 130, 160, 190, 220] {
+            let mut e = Encoder::new(Config { speed: 6, keyint: 240, rate: RateMode::Cqp(q), threads: 1, ..Config::new(w, h) }).unwrap();
+            let (mut bytes, mut err) = (0usize, 0u64);
+            for (i, f) in frames.iter().enumerate() {
+                bytes += e.push_frame(f, i as i64).unwrap()[0].data.len();
+                err += (0..3).map(|c| sse(&e.reconstruction().unwrap().planes[c], &f.planes[c])).sum::<u64>();
+            }
+            curve.push((10.0 * (255.0f64 * 255.0 * samples / err as f64).log10(), bytes as f64));
+        }
+        let lr_ms = profile::take().lr_search_ns as f64 / 1e6;
+        eprintln!("probe 1/{every} small={small}: restoration search {lr_ms:.0} ms total; curve {curve:?}");
+        curve.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        curves.push(curve);
+    }
+    for (k, &(every, small)) in settings.iter().enumerate().skip(1) {
+        let r: Vec<f64> = curves[0].iter().filter_map(|&(p, b)| bytes_at(&curves[k], p).map(|n| n / b)).collect();
+        eprintln!("probe 1/{every} small={small}: bytes at equal PSNR = {:.2}% of probing every unit ({} points)", 100.0 * r.iter().sum::<f64>() / r.len() as f64, r.len());
+    }
+}
