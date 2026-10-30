@@ -91,7 +91,7 @@ pub fn rest_on_support(project: &m::Project, seq: m::SequenceId, clip: u64, t: m
 
 /// Drops clips for real at `t` until they stop (up to `seconds`): where
 /// each ends up (position, rotation X Y Z), for those that moved.
-pub fn settle(project: &m::Project, seq: m::SequenceId, clips: &[u64], t: m::Micros, seconds: f32) -> Result<Vec<(u64, [f64; 3], [f64; 3])>, String> {
+pub fn settle(project: &m::Project, seq: m::SequenceId, clips: &[u64], t: m::Micros, seconds: f32) -> Result<Settled, String> {
     let mut b = Build::at(seq, t);
     b.dynamic = clips.to_vec();
     b.characters = true;
@@ -131,6 +131,13 @@ thread_local! {
 pub(crate) fn simulated() -> usize {
     SIMULATED.with(|c| c.get())
 }
+
+/// What the rest check found per model (`None`: it stays put).
+type Known = std::collections::HashMap<u64, Option<Finding>>;
+/// Answers worked out in one pass, by clip.
+type Answers = Vec<(u64, Option<Finding>)>;
+/// Where a settled clip ended: its id, position and rotation.
+type Settled = Vec<(u64, [f64; 3], [f64; 3])>;
 
 fn memo() -> &'static Memo {
     static M: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
@@ -198,7 +205,7 @@ pub fn check_within(project: &m::Project, seq: m::SequenceId, t: m::Micros, budg
 /// The rest check proper, reusing `known` answers: findings in clip order,
 /// the answers it worked out, and how many models were left when
 /// `deadline` passed.
-fn check_fresh(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::Micros, known: &std::collections::HashMap<u64, Option<Finding>>, deadline: std::time::Instant) -> (Vec<Finding>, Vec<(u64, Option<Finding>)>, usize) {
+fn check_fresh(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::Micros, known: &Known, deadline: std::time::Instant) -> (Vec<Finding>, Answers, usize) {
     let mut answers = Vec::new();
     let mut left = 0;
     let mut out = check_scene(project, s, seq, t, known, &mut answers, &mut left, deadline);
@@ -207,7 +214,7 @@ fn check_fresh(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::
 }
 
 #[allow(clippy::too_many_arguments)]
-fn check_scene(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::Micros, known: &std::collections::HashMap<u64, Option<Finding>>, answers: &mut Vec<(u64, Option<Finding>)>, left: &mut usize, deadline: std::time::Instant) -> Vec<Finding> {
+fn check_scene(project: &m::Project, s: &m::Sequence, seq: m::SequenceId, t: m::Micros, known: &Known, answers: &mut Answers, left: &mut usize, deadline: std::time::Instant) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut b = Build::at(seq, t);
     b.characters = false;
