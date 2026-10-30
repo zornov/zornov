@@ -54,7 +54,7 @@ impl Panel {
             Panel::Timeline => "Timeline",
             Panel::Sound => "Sound",
             Panel::Scopes => "Scopes",
-            Panel::Review => "Feedback",
+            Panel::Review => "Review",
             Panel::Record => "Record",
             Panel::Editorial => "Editorial",
             Panel::Ai => "Assistant",
@@ -1539,12 +1539,16 @@ mod tests {
     }
 
     #[test]
-    fn no_panel_shares_its_name_with_a_workspace() {
+    fn the_review_workspace_and_its_panel_share_one_name() {
         let spaces: Vec<String> = crate::workspaces::builtin().into_iter().map(|w| w.name.to_ascii_lowercase()).collect();
+        // The Review workspace opens the Review panel: one name for both,
+        // and no other panel is named like a workspace.
         for p in Panel::ALL {
-            assert!(!spaces.contains(&p.name().to_ascii_lowercase()), "{} is both a panel and a workspace", p.name());
+            let shared = spaces.contains(&p.name().to_ascii_lowercase());
+            assert_eq!(shared, p == Panel::Review, "{} is both a panel and a workspace", p.name());
         }
-        assert_eq!(Panel::Review.name(), "Feedback");
+        assert_eq!(Panel::Review.name(), "Review");
+        assert!(spaces.contains(&"review".to_owned()));
         assert_eq!(Panel::parse("review"), Some(Panel::Review), "the old name still reaches it");
     }
 }

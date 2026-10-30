@@ -26,6 +26,9 @@ use std::sync::{Arc, Mutex};
 use studio_content::item::Kind;
 use studio_model as m;
 
+pub mod manage;
+pub mod relink;
+
 /// The nine Library panels, in rail order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Panel {

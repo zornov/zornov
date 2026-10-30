@@ -46,7 +46,7 @@ resvg = "0.48"
 png = "0.18"
 studio-model = { path = "../crates/project/model" }
 # Script import: a .docx is a zip of XML.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 roxmltree = "0.20"
 studio-rig = { path = "../crates/3d/rig" }
 studio-fx = { path = "../crates/picture/fx" }

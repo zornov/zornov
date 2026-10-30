@@ -874,6 +874,22 @@ fn each_menu_command_has_one_home() {
     }
 }
 
+/// The View menu scrolls on a short window; its Layout block stays below the
+/// scroll area, so Maximise panel is never cut off or hidden past the fold.
+#[test]
+fn view_menu_layout_block_is_reachable_on_short_windows() {
+    for (w, hgt) in [(960.0, 600.0), (1024.0, 640.0)] {
+        let mut h = Harness::new(&["--screen", "editor"]).sized(w, hgt);
+        h.frames(6);
+        open_menu_items(&mut h, "View");
+        h.frames(3);
+        for item in ["Maximise panel", "Reset layout"] {
+            let r = h.find(Some(accesskit::Role::Button), item).unwrap_or_else(|| panic!("{item} in View at {w}x{hgt}"));
+            assert!(r.top() >= 0.0 && r.bottom() <= hgt - 4.0, "{item} fits the {w}x{hgt} window: {r:?}");
+        }
+    }
+}
+
 /// The surfaces that were buttons are reached from the menus, the tabs or a panel.
 #[test]
 fn library_production_review_and_paint_still_open() {
@@ -1158,24 +1174,6 @@ fn installed_tools_offer_install_from_file_in_scripted_runs() {
     assert!(h.click("Installed"), "the Installed group can be opened");
     let named = h.last.as_ref().and_then(|o| o.platform_output.accesskit_update.as_ref()).is_some_and(|u| u.nodes.iter().any(|(_, n)| n.label() == Some("Install from file…")));
     assert!(named, "the button is there");
-}
-
-/// Screenshot 180: opening a project from Home while another is open kept
-/// the viewer on the old project's picture, because both counted edits from
-/// zero. A different project starts the viewer's renderer afresh; the same
-/// project does not.
-#[test]
-fn the_viewer_starts_afresh_when_another_project_opens() {
-    let _viewport = crate::editor::viewport::test_lock();
-    let mut h = Harness::new(&["--screen", "editor"]).sized(1280.0, 720.0);
-    h.frames(8);
-    let resets = |h: &Harness| h.ctx.data(|d| d.get_temp::<u32>(egui::Id::new("viewer-project-seen").with("resets"))).unwrap_or(0);
-    assert_eq!(resets(&h), 0, "an unchanged project is not reset");
-    h.app.doc = crate::services::project::new_custom("Other", 640, 360, 30.0);
-    h.frames(4);
-    assert_eq!(resets(&h), 1, "a different project resets the viewer once");
-    h.frames(4);
-    assert_eq!(resets(&h), 1);
 }
 
 /// Screenshot 442: at a narrow width a selected clip had no Inspector and

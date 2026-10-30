@@ -104,7 +104,7 @@ fn build_in() -> Vec<Workspace> {
         ws("Edit", "Cut and arrange: a big timeline with your media beside it.", (true, 340.0), (true, 300.0), (true, Some(300.0)), "Media"),
         // The scopes docked under the colour controls, and a timeline tall
         // enough for a few tracks.
-        docking(with(ws("Colour", "Grade and match shots: looks, colour controls and scopes.", (true, 280.0), (true, 380.0), (true, Some(240.0)), "Looks"), true, "Adjust"), Panel::Scopes, Some(Panel::Inspector), Zone::Bottom),
+        docking(with(ws("Colour", "Grade and match shots: looks, colour controls and scopes.", (true, 280.0), (true, 380.0), (true, Some(320.0)), "Looks"), true, "Adjust"), Panel::Scopes, Some(Panel::Inspector), Zone::Bottom),
         // The mixer beside the timeline, so levels can be set while the clips go by.
         docking(with(ws("Audio", "Mix sound: audio tools, a tall timeline and level controls.", (true, 320.0), (true, 300.0), (true, Some(460.0)), "Audio"), false, "Audio"), Panel::Sound, Some(Panel::Timeline), Zone::Right),
         with(ws("Effects", "Effects, masks and tracking on a large viewer.", (true, 320.0), (true, 400.0), (true, Some(220.0)), "Effects"), false, "Adjust"),
@@ -396,6 +396,12 @@ mod tests {
                 assert_ne!((a.library_w, a.inspector_open, a.inspector_w, a.timeline_h, &a.rail), (b.library_w, b.inspector_open, b.inspector_w, b.timeline_h, &b.rail), "{} and {}", a.name, b.name);
             }
         }
+    }
+
+    #[test]
+    fn colour_keeps_a_timeline_as_tall_as_edits() {
+        let h = |name: &str| builtin().into_iter().find(|w| w.name == name).unwrap().timeline_h.expect("a set height");
+        assert!(h("Colour") >= h("Edit"), "Colour {} against Edit {}", h("Colour"), h("Edit"));
     }
 
     #[test]
