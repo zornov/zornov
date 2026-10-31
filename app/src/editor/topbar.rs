@@ -105,7 +105,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
         let w = crate::workspaces::current(app, &name);
         match crate::workspaces::save(w) {
             Ok(()) => kit::push(&ctx, format!("Saved the layout as \"{}\"", name.trim()), None, Some(Icon::SquaresFour)),
-            Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+            Err(e) => kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info),
         };
     }
     if let Some(d) = out.pick {
@@ -585,7 +585,7 @@ fn retry_job(app: &mut StudioApp, ctx: &egui::Context, id: u64) {
     let doc = &app.doc;
     match app.jobs.retry_with(id, |req| crate::export_run::start(doc, req.clone())) {
         Some(_) => {
-            kit::push(ctx, "Export started again", None, Some(Icon::ArrowCounterClockwise));
+            kit::note(ctx, "Export started again", Some(Icon::ArrowCounterClockwise));
         }
         None => {
             kit::push(ctx, "That export can't be run again; start it from Export", None, Some(Icon::Info));

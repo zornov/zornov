@@ -476,14 +476,14 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
                 kit::push(ctx, msg, None, Some(Icon::Check));
             }
             Err(e) => {
-                kit::push(ctx, e.0, None, Some(Icon::Warning));
+                kit::push_as(ctx, e.0, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }
     if proxy_it {
         kit::set_open(ctx, id, false);
         crate::services::proxies::start(&app.doc, vec![m::MediaId(media as u64)], 2);
-        kit::push(ctx, crate::i18n::tf(format!("Making a proxy of {}", app.doc.project.media[index].name)), None, Some(Icon::Info));
+        kit::note(ctx, crate::i18n::tf(format!("Making a proxy of {}", app.doc.project.media[index].name)), Some(Icon::Info));
     }
     if cancel_it {
         kit::set_open(ctx, id, false);
@@ -502,7 +502,7 @@ fn media_menu(app: &mut StudioApp, ctx: &egui::Context, offline: &std::collectio
                     kit::push(ctx, msg, None, Some(Icon::Check));
                 }
                 Err(e) => {
-                    kit::push(ctx, e.0, None, Some(Icon::Warning));
+                    kit::push_as(ctx, e.0, None, Some(Icon::Warning), kit::Level::Info);
                 }
             }
         }
@@ -1119,7 +1119,7 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
                         kit::push(&ctx, msg, None, Some(Icon::Sparkle));
                     }
                     Err(e) => {
-                        kit::push(&ctx, e, None, Some(Icon::Warning));
+                        kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }
@@ -1132,7 +1132,7 @@ fn ai_list(app: &mut StudioApp, ui: &mut egui::Ui, items: &[usize]) {
                             kit::push(bui.ctx(), msg, None, Some(Icon::Sparkle));
                         }
                         Err(e) => {
-                            kit::push(bui.ctx(), e.0, None, Some(Icon::Warning));
+                            kit::push_as(bui.ctx(), e.0, None, Some(Icon::Warning), kit::Level::Info);
                         }
                     }
                 }
@@ -1159,7 +1159,7 @@ pub fn poll_ai(app: &mut StudioApp, ctx: &egui::Context) {
                 kit::push(ctx, o.message, None, Some(Icon::Sparkle));
             }
             Err(e) => {
-                kit::push(ctx, e.0, None, Some(Icon::Warning));
+                kit::push_as(ctx, e.0, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }
@@ -1190,7 +1190,7 @@ pub fn import_sample_media(app: &mut StudioApp, ctx: &egui::Context) {
         mi.id = app.doc.alloc_id() as u32;
     }
     if new.is_empty() {
-        kit::push(ctx, "All sample media is already in this project", None, Some(Icon::Info));
+        kit::note(ctx, "All sample media is already in this project", Some(Icon::Info));
         return;
     }
     let n = new.len();
@@ -1213,7 +1213,9 @@ fn apply(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, tar
     };
     let panel = crate::services::library::Panel::ALL[rail.index()];
     match crate::services::library::apply(&mut app.doc, panel, i, &targets) {
-        Ok(out) => super::toast_undo(&mut app.editor, ctx, out.message, Icon::Check),
+        Ok(out) => {
+            kit::note(ctx, out.message, Some(Icon::Check));
+        }
         Err(r) => {
             kit::push(ctx, r.0, None, Some(Icon::Info));
         }
@@ -1247,7 +1249,7 @@ pub fn add(app: &mut StudioApp, ctx: &egui::Context, rail: RailItem, i: usize, a
     match crate::services::library::add(&mut app.doc, panel, i, t, lane) {
         Ok(out) => {
             app.editor.selection = out.select;
-            super::toast_undo(&mut app.editor, ctx, out.message, Icon::Plus);
+            kit::note(ctx, out.message, Some(Icon::Plus));
         }
         Err(r) => {
             kit::push(ctx, r.0, None, Some(Icon::Info));
@@ -1347,7 +1349,7 @@ pub fn add_adjustment(app: &mut StudioApp, ctx: &egui::Context, d: LibDrag, star
         p.resolve_overlap(id);
     }) {
         app.editor.selection = vec![id];
-        super::toast_undo(&mut app.editor, ctx, format!("{} added as an adjustment clip", item.name), Icon::MagicWand);
+        kit::note(ctx, format!("{} added as an adjustment clip", item.name), Some(Icon::MagicWand));
     }
 }
 
