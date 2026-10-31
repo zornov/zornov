@@ -972,7 +972,6 @@ pub fn module_of(tool: &str, ops: &[&str]) -> String {
         "guide" => "guides",
         "skill" => "skills",
         "listen" => "listen",
-        "capture" => "capture",
         "graph" => "graph",
         "editorial" => "editorial",
         "plugins" => "plugins",
