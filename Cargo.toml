@@ -41,8 +41,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.studio-mp4]
 opt-level = 3
-[profile.dev.package.studio-live]
-opt-level = 3
 # Sound synthesis renders seconds of audio per test.
 [profile.dev.package.studio-synth]
 opt-level = 3

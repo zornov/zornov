@@ -11,7 +11,7 @@
 //! works from the keyboard and a screen reader. Double-click a header, or
 //! ⌘\, to maximise a panel; again to restore.
 //!
-//! Review, Record, Editorial, Scopes and Sound keep their own open flag; the
+//! Review, Editorial, Scopes and Sound keep their own open flag; the
 //! flag follows the tree, and turning it on or off (its button or shortcut)
 //! opens or closes the docked panel. A panel never opens over the editor:
 //! it docks as a tab or beside its zone (Sound beside the Timeline, Scopes
@@ -72,7 +72,6 @@ pub fn region(p: Panel) -> Region {
         Panel::Sound => Region::Sound,
         Panel::Scopes => Region::Scopes,
         Panel::Review => Region::Review,
-        Panel::Record => Region::Record,
         Panel::Editorial => Region::Editorial,
         Panel::Ai => Region::Ai,
     }
@@ -88,7 +87,7 @@ fn header_h(p: Panel) -> f32 {
         Panel::Timeline => super::timeline::TOOLBAR_H,
         Panel::Sound => 38.0,
         Panel::Scopes => 40.0,
-        Panel::Review | Panel::Record | Panel::Editorial => 36.0,
+        Panel::Review | Panel::Editorial => 36.0,
         Panel::Ai => 44.0,
     }
 }
@@ -110,7 +109,6 @@ fn flag(app: &StudioApp, ctx: &egui::Context, p: Panel) -> Option<bool> {
         Panel::Sound => Some(super::mixer::is_on(ctx)),
         Panel::Scopes => Some(super::scopes::is_on(ctx)),
         Panel::Review => Some(super::review::is_open()),
-        Panel::Record => Some(super::capture::is_open()),
         Panel::Editorial => Some(app.editor.cutting.panel.open),
         _ => None,
     }
@@ -121,13 +119,12 @@ fn set_flag(app: &mut StudioApp, ctx: &egui::Context, p: Panel, on: bool) {
         Panel::Sound => super::mixer::set_on(ctx, on),
         Panel::Scopes => super::scopes::set_on(ctx, on),
         Panel::Review => super::review::set_open(on),
-        Panel::Record => super::capture::set_open(on),
         Panel::Editorial => app.editor.cutting.panel.open = on,
         _ => {}
     }
 }
 
-const FLAGGED: [Panel; 5] = [Panel::Sound, Panel::Scopes, Panel::Review, Panel::Record, Panel::Editorial];
+const FLAGGED: [Panel; 4] = [Panel::Sound, Panel::Scopes, Panel::Review, Panel::Editorial];
 
 fn flag_slot(p: Panel) -> usize {
     FLAGGED.iter().position(|q| *q == p).unwrap_or(0)
@@ -568,7 +565,6 @@ fn draw_panel(app: &mut StudioApp, ui: &mut egui::Ui, p: Panel, r: Rect) {
         Panel::Sound => super::mixer::show(app, ui, r),
         Panel::Scopes => super::scopes::docked(app, ui, r),
         Panel::Review => super::review::docked(app, ui, r),
-        Panel::Record => super::capture::docked(app, ui, r),
         Panel::Editorial => super::cutting::panel::docked(app, ui, r),
         Panel::Ai => super::agent_panel::show(app, ui, r),
     }
