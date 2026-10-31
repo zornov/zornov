@@ -159,22 +159,6 @@ fn open_review(h: &mut Harness) {
     crate::editor::dock_ui::open_panel(&mut h.app, &ctx, crate::dock::Panel::Review, false);
 }
 
-/// Paint with a picture open and every side section unfolded.
-pub fn paint_picture(h: &mut Harness) {
-    let _ = crate::paint::apply(&[serde_json::json!({"op": "new", "name": "Overflow", "width": 683, "height": 1024, "background": "white"})]);
-    for _ in 0..200 {
-        h.frames(1);
-        if crate::screens::paint::idle() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    h.frames(4);
-    for section in ["Adjustments", "Animation", "History"] {
-        h.click(section);
-    }
-}
-
 /// Every surface the survey visits: screens, overlays, panels.
 pub fn surfaces() -> Vec<Surface> {
     use crate::view::ClipKind;
@@ -223,9 +207,6 @@ pub fn surfaces() -> Vec<Surface> {
         s("production-script", ED, production_script, &[]),
         s("help", ED, |h| h.app.overlay = Overlay::Help, &[]),
         s("gallery", &["--screen", "gallery"], nothing, &[]),
-        s("paint", &["--screen", "paint"], nothing, &[]),
-        s("paint-picture", &["--screen", "paint"], paint_picture, &[]),
-        s("paint-commands", &["--screen", "paint"], paint_picture, &["Commands…"]),
     ]
 }
 
@@ -282,7 +263,6 @@ pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> 
             if only.is_some_and(|o| !s.name.starts_with(o)) {
                 continue;
             }
-            let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
             let _viewport = crate::editor::viewport::test_lock();
             let mut h = Harness::new(s.args).sized(w, hh);
             (s.setup)(&mut h);
@@ -310,9 +290,6 @@ pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> 
                         h.click(m);
                     }
                 }
-            }
-            if s.name.starts_with("paint") {
-                let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
             }
             // Panels that keep their open state between windows (Record,
             // Vector art) close again with the button that opened them.
@@ -349,7 +326,7 @@ fn ui_overflow_survey() {
 /// Surfaces held to "nothing cut off, nothing drawn over" in the fast
 /// tests. (Library ▸ Rights reads the shared asset database, which one
 /// other test in this binary owns; the survey checks it on a scratch copy.)
-const CHECKED: &[&str] = &["start", "editor", "editor-clip", "insp-video-animation", "insp-title-animation", "insp-audio", "export", "settings", "sound", "review-saved", "production-script", "help", "paint-picture", "editorial"];
+const CHECKED: &[&str] = &["start", "editor", "editor-clip", "insp-video-animation", "insp-title-animation", "insp-audio", "export", "settings", "sound", "review-saved", "production-script", "help", "editorial"];
 
 #[test]
 fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
@@ -363,7 +340,6 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
             std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
-                        let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
                         let _viewport = crate::editor::viewport::test_lock();
                         let mut h = Harness::new(s.args).sized(w, hh);
                         (s.setup)(&mut h);
@@ -372,9 +348,6 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
                             assert!(h.click(c), "{}: {c} can be clicked", s.name);
                         }
                         let (cuts, over) = (h.cut_text(), h.overlaps());
-                        if s.name.starts_with("paint") {
-                            let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
-                        }
                         for c in s.clicks.iter().rev() {
                             h.click(c);
                         }

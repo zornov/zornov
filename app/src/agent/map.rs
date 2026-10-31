@@ -108,7 +108,6 @@ const DEPTS: &[Dept] = &[
             ("grading, colour spaces, HDR, LUTs", "tool:colour"),
             ("match shots", "match_colour tool:scopes"),
             ("timelines in and out, relinking, proxies", "tool:conform tool:media_manage"),
-            ("paint, retouch, composite stills", "tool:picture"),
             ("restore, denoise, upscale", "tool:enhance"),
         ],
     },
