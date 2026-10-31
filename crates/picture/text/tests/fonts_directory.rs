@@ -10,7 +10,7 @@ use studio_text::*;
 fn library() -> FontLibrary {
     let mut lib = FontLibrary::new();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    for p in ["crates/paint/pixel-text/assets/fonts/Inter-Regular.ttf", "crates/paint/pixel-text/assets/fonts/Inter-SemiBold.ttf", "crates/paint/pixel-text/assets/fonts/JetBrainsMono-Regular.ttf", "app/assets/fonts/Manrope-Medium.ttf", "app/assets/fonts/Manrope-Bold.ttf"] {
+    for p in ["crates/picture/text/assets/fonts/Inter-Regular.ttf", "crates/picture/text/assets/fonts/Inter-SemiBold.ttf", "crates/picture/text/assets/fonts/JetBrainsMono-Regular.ttf", "app/assets/fonts/Manrope-Medium.ttf", "app/assets/fonts/Manrope-Bold.ttf"] {
         lib.load_file(&root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
     }
     lib

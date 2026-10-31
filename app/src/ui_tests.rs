@@ -891,7 +891,7 @@ fn view_menu_layout_block_is_reachable_on_short_windows() {
 
 /// The surfaces that were buttons are reached from the menus, the tabs or a panel.
 #[test]
-fn library_production_review_and_paint_still_open() {
+fn library_review_and_settings_still_open() {
     use crate::app::Overlay;
     let open = |menu: &str, item: &str| {
         let mut h = top_bar(1440.0);

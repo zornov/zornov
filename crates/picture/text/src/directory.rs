@@ -469,7 +469,7 @@ mod tests {
     fn similar_names_for_a_misspelling() {
         let mut lib = FontLibrary::new();
         for p in ["Inter-Regular.ttf", "JetBrainsMono-Regular.ttf"] {
-            let _ = lib.load_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../paint/pixel-text/assets/fonts").join(p));
+            let _ = lib.load_file(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts").join(p));
         }
         assert_eq!(lib.similar_families("Intr", 3).first().map(String::as_str), Some("Inter"));
         assert!(lib.similar_families("zzzzzzzzz", 3).is_empty());
