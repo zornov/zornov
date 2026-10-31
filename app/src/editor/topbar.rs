@@ -8,7 +8,6 @@
 
 use super::{Action, run};
 use crate::app::{Jobs, StudioApp};
-use crate::cli::Screen;
 use crate::files::SaveState;
 use crate::dock::Panel;
 use crate::icons::{self, Icon};
@@ -22,8 +21,6 @@ use eframe::egui::{self, Align2, CornerRadius, Rect, Sense, Vec2};
 const WINDOW_BUTTONS_W: f32 = 76.0;
 /// The project's name keeps at least this much room beside the workspace tabs.
 const NAME_MIN_W: f32 = 96.0;
-/// The Paint tab: a mode of its own (a screen), after the workspaces.
-const PAINT: &str = "Paint";
 
 pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     let ctx = ui.ctx().clone();
@@ -98,9 +95,6 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
     if let Some(w) = out.workspace {
         crate::workspaces::switch(app, &ctx, &w);
     }
-    if out.paint {
-        app.screen = Screen::Paint;
-    }
     if let Some(name) = out.save_as {
         let w = crate::workspaces::current(app, &name);
         match crate::workspaces::save(w) {
@@ -118,7 +112,6 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui, r: Rect, narrow: bool) {
 struct Picked {
     pick: Option<Do>,
     workspace: Option<Workspace>,
-    paint: bool,
     save_as: Option<String>,
 }
 
@@ -127,10 +120,10 @@ fn tab_label(name: &str) -> &str {
     if name == "Motion graphics" { "Motion" } else { name }
 }
 
-/// The tabs' labels: the built-in workspaces, then Paint.
+/// The tabs' labels: the built-in workspaces.
 fn tab_names(spaces: &[Workspace]) -> Vec<&str> {
     let builtin = crate::workspaces::builtin().len();
-    spaces.iter().take(builtin).map(|w| tab_label(&w.name)).chain(std::iter::once(PAINT)).collect()
+    spaces.iter().take(builtin).map(|w| tab_label(&w.name)).collect()
 }
 
 /// How wide the tab strip is (as the kit lays out a segmented control).
@@ -141,18 +134,14 @@ fn tabs_width(ui: &egui::Ui, spaces: &[Workspace]) -> f32 {
 /// The workspace tabs, with their names. Your own workspaces are in the dropdown and the View menu.
 fn workspace_tabs(ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
     let names = tab_names(spaces);
-    let builtin = names.len() - 1;
+    let builtin = names.len();
     let opts: Vec<kit::Segment> = names.iter().map(|n| kit::Segment::text(n)).collect();
     // A workspace of your own is none of the tabs.
     let mut i = current.filter(|c| *c < builtin).unwrap_or(usize::MAX);
     let tabs = kit::segmented(ui, "workspace-tabs", &mut i, &opts, None, None);
     crate::onboarding::note_target(ui.ctx(), "workspace-tabs", tabs.rect);
     if tabs.changed() {
-        if i == builtin {
-            out.paint = true;
-        } else {
-            out.workspace = spaces.get(i).cloned();
-        }
+        out.workspace = spaces.get(i).cloned();
     }
 }
 
@@ -161,18 +150,13 @@ const DROPDOWN_W: f32 = 132.0;
 
 /// The same list as a dropdown, for a window too narrow for the tabs.
 fn workspace_menu(ui: &mut egui::Ui, spaces: &[Workspace], current: Option<usize>, out: &mut Picked) {
-    let mut names: Vec<&str> = spaces.iter().map(|w| tab_label(&w.name)).collect();
-    names.push(PAINT);
+    let names: Vec<&str> = spaces.iter().map(|w| tab_label(&w.name)).collect();
     let cur = current.unwrap_or(0);
     let before = ui.cursor().left();
     let picked = kit::menu_button(ui, "workspace-menu", cur, &names, DROPDOWN_W, None);
     crate::onboarding::note_target(ui.ctx(), "workspace-tabs", Rect::from_min_size(egui::pos2(before, ui.max_rect().top()), Vec2::new(DROPDOWN_W, 28.0)));
     if let Some(i) = picked {
-        if i == spaces.len() {
-            out.paint = true;
-        } else {
-            out.workspace = spaces.get(i).cloned();
-        }
+        out.workspace = spaces.get(i).cloned();
     }
 }
 

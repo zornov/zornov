@@ -198,7 +198,7 @@ fn editor_controls_are_named() {
     let bad = h.unlabelled();
     assert!(bad.is_empty(), "controls without a name in the editor: {bad:?}");
     let labels = h.labels();
-    for want in ["Export", "Jobs", "Edit", "Colour", "Audio", "Effects", "Motion", "Review", "Paint"] {
+    for want in ["Export", "Jobs", "Edit", "Colour", "Audio", "Effects", "Motion", "Review"] {
         assert!(labels.iter().any(|l| l == want), "{want} is in the accessibility tree: {labels:?}");
     }
 }
@@ -592,7 +592,7 @@ fn missing_glyphs(h: &Harness) -> Vec<String> {
 #[test]
 fn drawn_text_has_glyphs_and_no_private_use_characters() {
     let mut bad = vec![];
-    for screen in ["start", "editor", "settings", "export", "gallery", "paint"] {
+    for screen in ["start", "editor", "settings", "export", "gallery"] {
         let mut h = Harness::new(&["--screen", screen]);
         h.frames(4);
         bad.extend(missing_glyphs(&h).into_iter().map(|m| format!("{screen}: {m}")));
@@ -748,7 +748,7 @@ fn a_claim_keeps_typing_away_from_the_timeline() {
 // --- the top bar -------------------------------------------------------------------
 
 const MENUS: [&str; 6] = ["File", "Edit", "Clip", "Project", "View", "Help"];
-const TABS: [&str; 7] = ["Edit", "Colour", "Audio", "Effects", "Motion", "Review", "Paint"];
+const TABS: [&str; 6] = ["Edit", "Colour", "Audio", "Effects", "Motion", "Review"];
 
 /// Where `text` was painted in the top bar, the leftmost of them (a menu's
 /// name can also be a workspace tab's).
@@ -789,12 +789,12 @@ fn top_bar(w: f32) -> Harness {
 }
 
 /// Menus | workspace tabs with names | Jobs | Export, left to right; Settings,
-/// Layout, Library, Production, Review and Paint are no buttons of the bar.
+/// Layout, Library, Production and Review are no buttons of the bar.
 #[test]
 fn the_top_bar_is_menus_then_workspace_tabs_then_jobs_and_export() {
     let h = top_bar(1440.0);
     let buttons: Vec<String> = h.nodes().into_iter().filter(|(r, _)| *r == accesskit::Role::Button).map(|(_, l)| l).collect();
-    for gone in ["Layout", "Settings", "Library", "Production", "Review", "Paint"] {
+    for gone in ["Layout", "Settings", "Library", "Production", "Review"] {
         assert!(!buttons.iter().any(|b| b == gone), "{gone} is not a top bar button: {buttons:?}");
     }
     let tab = |n: &str| h.find(Some(accesskit::Role::RadioButton), n).unwrap_or_else(|| panic!("a workspace tab named {n}"));
@@ -829,7 +829,7 @@ fn the_workspace_tabs_reach_1100_px_and_become_a_dropdown_below() {
     let mut h = top_bar(900.0);
     assert!(h.find(Some(accesskit::Role::RadioButton), "Colour").is_none(), "no tabs at 900 px");
     assert!(h.find(None, "Export").is_some(), "Export stays");
-    // The dropdown lists them all, and Paint.
+    // The dropdown lists them all.
     let dd = h.find_text("Edit").expect("the dropdown shows the workspace");
     // (At this width the menus and the dropdown both read Edit: the dropdown is the right one.)
     h.click_at(dd);
@@ -911,11 +911,6 @@ fn library_production_review_and_paint_still_open() {
     assert!(h.app.editor.selection.is_empty() && h.app.editor.dock.is_open(crate::dock::Panel::Inspector));
     let buttons: Vec<String> = h.nodes().into_iter().filter(|(r, _)| *r == accesskit::Role::Button).map(|(_, l)| l).collect();
     assert!(buttons.iter().any(|b| b == "Done") && !buttons.iter().any(|b| b == "Modify"), "the canvas editor is open: {buttons:?}");
-    // Paint is the last workspace tab.
-    let mut h = top_bar(1440.0);
-    let paint = h.find(Some(accesskit::Role::RadioButton), "Paint").unwrap();
-    h.click_at(paint);
-    assert_eq!(h.app.screen, crate::cli::Screen::Paint);
 }
 
 // --- scripted headless runs (`zornov app --ui-script`) --------------------

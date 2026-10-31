@@ -179,7 +179,6 @@ pub(crate) mod generative;
 #[cfg(feature = "render")]
 mod lottie;
 mod psd;
-mod picture;
 mod vector;
 mod reframe;
 mod render;
@@ -2705,7 +2704,6 @@ impl Session {
                 text(json!({"made_playable": done, "failed": failed, "note": if done.is_empty() && failed.is_empty() { "every media file already plays" } else { "" }}))
             }
             "generate" => text(self.generate(a)?),
-            "picture" => self.picture(a),
             "vector" | "illustrate" => self.vector_tool(a),
             #[cfg(feature = "render")]
             "enhance" => text(self.enhance(a)?),
