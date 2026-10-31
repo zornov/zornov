@@ -3,8 +3,8 @@
 
 //! The project's rules for the agent, enforced by the server rather than
 //! asked of the model: `generation: off` refuses every AI-made picture,
-//! video or model (the `generate` tool, generative fill in `picture`, a
-//! `character` the AI generates) whatever the prompt says.
+//! video or model (the `generate` tool, a `character` the AI
+//! generates) whatever the prompt says.
 //!
 //! * The rules live beside the project in `agent-policy.json`
 //!   (`{"generation": "off"}`); `ZORNOV_GENERATION=off` sets the same for
@@ -53,7 +53,6 @@ pub fn generative(tool: &str, a: &Value) -> Option<String> {
             let reads = ["list", "estimate", "looks"].iter().any(|k| yes(k)) || a.get("forget_look").is_some() || (a.get("job").is_some() && a.get("items").is_none() && a.get("prompt").is_none());
             (!reads).then(|| "generate".to_owned())
         }
-        "picture" => a.get("ops").and_then(Value::as_array).and_then(|ops| ops.iter().find_map(|o| o.get("op").and_then(Value::as_str).filter(|n| n.starts_with("generative")).map(|n| format!("picture op {n}")))),
         "edit" => a.get("ops").and_then(Value::as_array).and_then(|ops| {
             ops.iter().map(super::args::unwrap_op).find_map(|o| {
                 let name = o.get("op").and_then(Value::as_str).unwrap_or("");

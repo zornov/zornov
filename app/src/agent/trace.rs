@@ -992,7 +992,6 @@ pub fn module_of(tool: &str, ops: &[&str]) -> String {
         "pick" => "select",
         "canvas_layout" => "layout",
         "generate" => "generate",
-        "picture" => "picture",
         "vector" | "illustrate" => "vector",
         "enhance" => "generative",
         "read" => "web",

@@ -72,8 +72,6 @@ studio-net = { path = "../crates/project/net" }
 studio-webmedia = { path = "../crates/media/webmedia" }
 studio-update = { path = "../crates/project/update" }
 studio-crash = { path = "../crates/project/crash" }
-studio-canvas = { path = "../crates/picture/canvas" }
-studio-pixel-tablet = { path = "../crates/paint/pixel-tablet" }
 studio-craft-media = { path = "../crates/media/craft-media" }
 studio-vp9 = { path = "../crates/codecs/vp9" }
 studio-av1 = { path = "../crates/codecs/av1" }
