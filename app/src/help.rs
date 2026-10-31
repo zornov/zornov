@@ -176,7 +176,7 @@ pub fn topic_for_region(r: crate::a11y::Region) -> &'static str {
         crate::a11y::Region::Viewer => "start",
         crate::a11y::Region::Inspector => "effects",
         crate::a11y::Region::Timeline => "timeline",
-        crate::a11y::Region::Sound | crate::a11y::Region::Record => "audio",
+        crate::a11y::Region::Sound => "audio",
         crate::a11y::Region::Editorial => "timeline",
         crate::a11y::Region::Ai => "ai-editor",
         crate::a11y::Region::Scopes => "colour",

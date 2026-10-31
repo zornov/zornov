@@ -17,7 +17,7 @@ and NVDA (Windows) and Orca (Linux). What Zornov adds:
   "*name*, *kind* clip on *lane*, starts at *time*, lasts *n* seconds, selected".
   A clip that receives keyboard focus is selected and the playhead moves to it.
 * **Regions.** The Library, Viewer, Inspector and Timeline (and the Sound,
-  Scopes, Review and Record panels when docked) are landmarks. `F6` and
+  Scopes and Review panels when docked) are landmarks. `F6` and
   `⇧F6` move between them; the region is announced and outlined. `⇧F10` on a
   region opens its "Move panel to…" menu: every place it can be docked is a
   named button ("Dock left · Viewer"), so panels move without a pointer.

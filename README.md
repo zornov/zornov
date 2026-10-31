@@ -255,14 +255,13 @@ The app is in [`app/`](app): the interface, the editor, the 3D workspace and the
 | Folder | What it holds |
 |---|---|
 | `crates/codecs/` | Video and audio codecs: H.264, HEVC, AV1, VP9, ProRes, DNxHR, AAC, Opus (Vorbis, FLAC and MP3 are read in `crates/media/`) |
-| `crates/media/` | Containers, decoding, encoding, delivery, capture and web media |
+| `crates/media/` | Containers, decoding, encoding, delivery and web media |
 | `crates/picture/` | The GPU renderer, colour, effects, text, motion graphics, Lottie |
-| `crates/paint/` | The paint and photo engine (layers, brushes, PSD, RAW, HEIF) |
 | `crates/vector/` | Vector illustration, path operations, tracing |
 | `crates/3d/` | Meshes, modelling, rigs, physics, worlds, 3D quality checks |
 | `crates/sound/` | Audio engine, mixing, synthesis, speech and lip sync |
 | `crates/ai/` | AI models and the inference engine |
-| `crates/project/` | The project model, content library, production, languages, updates |
+| `crates/project/` | The project model, content library, languages, updates |
 | `crates/plugins/` | The plugin host and its API |
 | `crates/business/` | Accounts, plans and the cloud server (off by default) |
 | `crates/dev/` | Build tasks (`cargo xtask`), the shared test kit, the text checks, and the agent tools a dev build can hot-swap |

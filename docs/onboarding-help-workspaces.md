@@ -82,8 +82,8 @@ along the window's edge), Esc cancels, and the toast offers Undo. The same
 moves are in each panel's Move menu (right-click the header or tab, `⇧F10`
 on a region reached with `F6`, or Layout ▸ Move panel). Layout ▸ Panels
 opens and closes panels (`⌥⌘L` `⌥⌘I` `⌥⌘T` for the Library, Inspector and
-Timeline); Reset layout goes back to the default. Review, Record and
-Editorial also float in a window inside the editor (a handle in it docks
+Timeline); Reset layout goes back to the default. Review and Editorial
+also float in a window inside the editor (a handle in it docks
 them); the Sound panel takes the Timeline's place and the scopes sit over the
 picture when they are not docked. Any panel but the Viewer can **pop out**
 into a window of the system's own (Move menu ▸ Pop out): egui's immediate
