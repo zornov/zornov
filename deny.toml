@@ -76,7 +76,6 @@ exceptions = [
     { allow = ["AGPL-3.0-or-later"], crate = "studio-paths" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-plugin-api" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-plugins" },
-    { allow = ["AGPL-3.0-or-later"], crate = "studio-production" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-quality" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-render" },
     { allow = ["AGPL-3.0-or-later"], crate = "studio-rig" },

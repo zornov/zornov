@@ -85,7 +85,6 @@ studio-mov = { path = "../crates/media/mov" }
 studio-psd = { path = "../crates/vector/psd" }
 studio-lottie = { path = "../crates/picture/lottie" }
 studio-vector-art = { path = "../crates/vector/vector-art", default-features = false }
-studio-production = { path = "../crates/project/production" }
 rfd = "0.17"
 studio-render = { path = "../crates/picture/render", optional = true }
 studio-text = { path = "../crates/picture/text" }

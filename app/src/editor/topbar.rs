@@ -348,7 +348,6 @@ fn model(app: &StudioApp, ctx: &egui::Context, narrow: bool) -> Vec<Menu> {
         ] },
         // What used to be the Production and Library buttons.
         Menu { title: "Project", rows: vec![
-            item("Production…", "", Some(Icon::FilmSlate), true, || Some(Action::Production)),
             item("Project health…", "", Some(Icon::LockSimple), true, || Some(Action::ProjectHealth)),
         ] },
         Menu { title: "View", rows: vec![
@@ -660,7 +659,6 @@ mod tests {
             ("Clip", "Set in point", d(Action::RangeIn)),
             ("Clip", "Set out point", d(Action::RangeOut)),
             ("Clip", "Clear range", d(Action::ClearRange)),
-            ("Project", "Production…", d(Action::Production)),
             ("Project", "Project health…", d(Action::ProjectHealth)),
             ("View", "Zoom in", d(Action::ZoomIn)),
             ("View", "Zoom out", d(Action::ZoomOut)),
