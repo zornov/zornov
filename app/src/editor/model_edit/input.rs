@@ -609,7 +609,7 @@ pub fn confirm(app: &mut StudioApp, ctx: &egui::Context) {
         _ => {
             let label = modal.label.clone();
             if let Err(e) = super::commit(app, &label) {
-                kit::push(ctx, e, None, Some(Icon::Warning));
+                kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
             with(|s| {
                 if let Some(s) = s {
@@ -1340,7 +1340,7 @@ fn finish_knife(app: &mut StudioApp, ctx: &egui::Context) {
     s.last = Some(super::Last { id: "knife", args: Map::new(), ctx: super::local_ctx(app, Some(&pane.view)), before, step: Some("Knife".into()), said: format!("{} new edges", made.len()) });
     with(|cur| *cur = Some(s));
     if let Err(e) = super::commit(app, "Knife") {
-        kit::push(ctx, e, None, Some(Icon::Warning));
+        kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 

@@ -68,7 +68,9 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, ids: &[u32]) {
             // One undo step; nothing changes when it can't run.
             match crate::agent::physics::run(&mut app.doc, &op(ids, at, s)) {
                 Ok(_) => cloud_feedback::done(ui.ctx(), dropped(ids.len())),
-                Err(e) => cloud_feedback::failed(ui.ctx(), &app.doc, &e),
+                Err(e) => {
+                    kit::push_as(ui.ctx(), cloud_feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
+                }
             }
         }
         ui.label(egui::RichText::new(crate::i18n::shown("Start them above the frame; they land as keys")).font(theme::caption()).color(t.text_2));

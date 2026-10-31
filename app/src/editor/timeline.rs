@@ -892,7 +892,7 @@ fn note_refused(ctx: &egui::Context, why: Option<String>) {
 /// On release: say why a trim or slip during the drag was refused, once.
 fn say_refused(ctx: &egui::Context) {
     if let Some(why) = ctx.data_mut(|d| d.remove_temp::<String>(refused_id())) {
-        kit::push(ctx, why, None, Some(Icon::Warning));
+        kit::push_as(ctx, why, None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 
@@ -948,7 +948,7 @@ fn commit_move(app: &mut StudioApp, ctx: &egui::Context, proj: &Project, ids: &[
         ok
     };
     if ok {
-        super::toast_undo(&mut app.editor, ctx, crate::i18n::tf(format!("Moved {}", if ids.len() == 1 { "clip".to_owned() } else { format!("{} clips", ids.len()) })), Icon::ArrowsOutCardinal);
+        kit::note(ctx, crate::i18n::tf(format!("Moved {}", if ids.len() == 1 { "clip".to_owned() } else { format!("{} clips", ids.len()) })), Some(Icon::ArrowsOutCardinal));
     }
 }
 
@@ -1941,10 +1941,9 @@ mod tests {
         assert!(tips >= 1, "the full name {:?} is shown on hover: {:?}", clip.name, h.labels());
     }
 
-    /// The Move toast's Undo button is the toast the move pushed, and it
-    /// takes the move back.
+    /// A move is only noted (no pop-up, no Undo button); ⌘Z takes it back.
     #[test]
-    fn the_move_toast_undoes_the_move() {
+    fn the_move_is_noted_and_undoes() {
         let ctx = egui::Context::default();
         let cc = eframe::CreationContext::_new_kittest(ctx.clone());
         let _serial = crate::ui_tests::serial();
@@ -1958,9 +1957,9 @@ mod tests {
         let lane_ids: Vec<u32> = proj.lanes.iter().map(|l| l.id).collect();
         commit_move(&mut app, &ctx, &proj, &[id], &[(id, start, lane)], SEC, 0, &lane_ids);
         assert_eq!(app.doc.project.clip(id).unwrap().start, start + SEC);
-        let toast = kit::recent(&ctx).into_iter().next().unwrap();
-        assert_eq!((toast.text.as_str(), toast.action.as_deref()), ("Moved clip", Some("Undo")));
-        assert_eq!(app.editor.undo_toast, Some(toast.id));
+        let note = kit::recent(&ctx).into_iter().next().unwrap();
+        assert_eq!((note.text.as_str(), note.action.as_deref()), ("Moved clip", None));
+        assert_eq!(app.editor.undo_toast, None);
         assert!(app.doc.undo().is_some());
         assert_eq!(app.doc.project.clip(id).unwrap().start, start);
     }

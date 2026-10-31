@@ -218,7 +218,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         if app.doc.dirty() {
             app.save(&ctx, false);
         } else {
-            kit::push(&ctx, "Nothing to save", None, Some(Icon::Info));
+            kit::note(&ctx, "Nothing to save", Some(Icon::Info));
         }
         return;
     }
@@ -351,7 +351,7 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         Some(Act::Open(path)) => app.open_folder(&ctx, Some(path)),
         Some(Act::Reveal(path)) => {
             if crate::services::export::reveal(&path).is_err() {
-                kit::push_error(&ctx, "Could not show the project in Finder");
+                kit::push_as(&ctx, "Could not show the project in Finder", None, Some(Icon::Warning), kit::Level::Info);
             }
         }
         Some(Act::Forget(path)) => forget(app, &ctx, &path),

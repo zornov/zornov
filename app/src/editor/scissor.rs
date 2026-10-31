@@ -515,7 +515,7 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, op: serde_json::Value, label: &
     match r {
         Ok(_) => true,
         Err(e) => {
-            feedback::failed(ctx, &app.doc, &e);
+            crate::kit::push_as(ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), crate::kit::Level::Info);
             false
         }
     }

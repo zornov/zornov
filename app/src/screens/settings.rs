@@ -708,7 +708,7 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                                 Ok(()) => changed = true,
                                 Err(e) => {
                                     st.lesson_edit = Some((l.id, text));
-                                    kit::push(ui.ctx(), e, None, Some(Icon::Warning));
+                                    kit::push_as(ui.ctx(), e, None, Some(Icon::Warning), kit::Level::Info);
                                 }
                             }
                         }
@@ -730,7 +730,7 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                                     kit::push(ui.ctx(), "Lesson deleted", None, Some(Icon::Trash));
                                 }
                                 Err(e) => {
-                                    kit::push(ui.ctx(), e, None, Some(Icon::Warning));
+                                    kit::push_as(ui.ctx(), e, None, Some(Icon::Warning), kit::Level::Info);
                                 }
                             }
                         }
@@ -750,7 +750,7 @@ fn lessons_section(st: &mut SettingsState, ui: &mut egui::Ui) {
                             kit::push(ui.ctx(), crate::i18n::tf(format!("{n} lessons deleted")), None, Some(Icon::Trash));
                         }
                         Err(e) => {
-                            kit::push(ui.ctx(), e, None, Some(Icon::Warning));
+                            kit::push_as(ui.ctx(), e, None, Some(Icon::Warning), kit::Level::Info);
                         }
                     }
                     st.lesson_clear = false;

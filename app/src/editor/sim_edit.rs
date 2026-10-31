@@ -175,7 +175,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         let r = s.edit(&[Value::Object(op)], "Simulation", false);
         app.doc = s.doc;
         if let Err(e) = r {
-            kit::push(&ctx, e, None, Some(Icon::Warning));
+            kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }

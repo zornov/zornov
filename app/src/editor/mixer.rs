@@ -32,13 +32,13 @@ use std::sync::Mutex;
 /// A sound-desk edit: it is one undo step, and one that is refused says why.
 fn edit_desk(ctx: &egui::Context, doc: &mut crate::doc::Doc, label: &str, f: impl FnOnce(&mut Desk) -> Result<String, String>) {
     if let Err(e) = desk::edit_desk(doc, label, f) {
-        kit::push(ctx, e, None, Some(Icon::Warning));
+        kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 
 fn edit_lane(ctx: &egui::Context, doc: &mut crate::doc::Doc, lane: u64, label: &str, f: impl FnOnce(&mut LaneMix, &mut m::Lane) -> Result<String, String>) {
     if let Err(e) = desk::edit_lane(doc, lane, label, f) {
-        kit::push(ctx, e, None, Some(Icon::Warning));
+        kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 

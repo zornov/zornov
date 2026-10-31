@@ -186,7 +186,7 @@ fn done(ui: &egui::Ui, st: &mut State, r: Result<(String, Undo), String>) {
             st.undo = Some((text, undo));
         }
         Err(e) => {
-            kit::push_error(ui.ctx(), e.clone());
+            kit::push_as(ui.ctx(), e.clone(), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
             st.note = e;
         }
     }
@@ -249,7 +249,7 @@ pub fn show_with(ui: &mut egui::Ui, app: &mut StudioApp, store: &Store) {
                     st.note = text;
                 }
                 Err(e) => {
-                    kit::push_error(ui.ctx(), e.clone());
+                    kit::push_as(ui.ctx(), e.clone(), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
                     st.note = e;
                 }
             }

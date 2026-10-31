@@ -172,7 +172,6 @@ pub struct EditorState {
     /// Last on-canvas click, for "click again cycles to the layer below".
     pub last_pick: Option<(egui::Pos2, Vec<u32>, usize)>,
     pub undo_toast: Option<u64>,
-    pub redo_toast: Option<u64>,
     /// Trim modes, the source monitor and the selected edit point.
     pub cutting: cutting::Cutting,
 }
@@ -222,7 +221,6 @@ impl EditorState {
             hover_time: None,
             last_pick: None,
             undo_toast: None,
-            redo_toast: None,
             cutting: Default::default(),
         };
         // The saved layout is the workspace as it was left; the Library section
@@ -329,7 +327,8 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     let t = app.editor.hover_time.unwrap_or(app.editor.playhead);
     app.doc.set_time(t);
     if let Some(msg) = app.doc.error.take() {
-        kit::push(&ctx, msg, None, Some(Icon::Warning));
+        let level = if error_lasts(&msg) { kit::Level::Warning } else { kit::Level::Info };
+        kit::push_as(&ctx, msg, None, Some(Icon::Warning), level);
     }
     if !ctx.input(|i| i.pointer.any_down()) && !ctx.egui_wants_keyboard_input() {
         app.doc.end_gesture();
@@ -371,6 +370,13 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
     toasts(app, &ctx);
 }
 
+/// Whether a message in `doc.error` stays until dismissed. Most are an edit
+/// the model refused (a locked lane, a bad value): those fade. A save that
+/// kept the project but lost part of its safety net must not.
+fn error_lasts(msg: &str) -> bool {
+    msg.starts_with("Saved, but ") || msg.starts_with("The project was also saved elsewhere")
+}
+
 fn toasts(app: &mut StudioApp, ctx: &egui::Context) {
     // Above the floating transport.
     if let Some(id) = kit::show(ctx, app.editor.viewer_rect, 72.0) {
@@ -378,8 +384,6 @@ fn toasts(app: &mut StudioApp, ctx: &egui::Context) {
             app.editor.set_tree(before);
         } else if Some(id) == app.editor.undo_toast {
             undo_step(&mut app.editor, &mut app.doc, ctx);
-        } else if Some(id) == app.editor.redo_toast {
-            redo_step(&mut app.editor, &mut app.doc, ctx);
         } else {
             toast_action(app, ctx, id);
         }
@@ -393,7 +397,7 @@ fn toasts(app: &mut StudioApp, ctx: &egui::Context) {
 pub fn toast_action(app: &mut StudioApp, ctx: &egui::Context, id: u64) -> bool {
     if let Some(r) = reveal_action(&mut app.reveal, id) {
         if let Err(e) = r {
-            kit::push_error(ctx, crate::i18n::tf(format!("Could not show it in Finder: {e}")));
+            kit::push_as(ctx, crate::i18n::tf(format!("Could not show it in Finder: {e}")), None, Some(Icon::Warning), kit::Level::Info);
         }
         return true;
     }
@@ -554,7 +558,7 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
                 doc.error = Some(if ed.selection.is_empty() { "No clip under the playhead to split" } else { "The playhead is not inside the selected clip" }.to_owned());
             }
             if doc.project.clips.len() > before {
-                toast_undo(ed, ctx, crate::i18n::tf(format!("Split at {}", view::timecode(t, doc.project.fps))), Icon::Scissors);
+                kit::note(ctx, crate::i18n::tf(format!("Split at {}", view::timecode(t, doc.project.fps))), Some(Icon::Scissors));
             }
         }
         Action::Delete => {
@@ -578,7 +582,7 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             if doc.apply("Duplicate", m::Edit::Duplicate { seq, clips }) {
                 ed.selection = doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
                 let n = ed.selection.len();
-                toast_undo(ed, ctx, if n == 1 { "Duplicated clip".to_owned() } else { format!("Duplicated {n} clips") }, Icon::Copy);
+                kit::note(ctx, if n == 1 { "Duplicated clip".to_owned() } else { format!("Duplicated {n} clips") }, Some(Icon::Copy));
             }
         }
         Action::SelectAll => ed.selection = doc.project.clips.iter().map(|c| c.id).collect(),
@@ -647,8 +651,9 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
     }
 }
 
-/// A toast with an Undo button that undoes the person's last step: the one
-/// way every edit announces itself.
+/// A toast with an Undo button that undoes the person's last step: how an
+/// edit that removes things (delete, cut) announces itself. Other edits only
+/// leave a [`kit::note`]; ⌘Z undoes them.
 pub(crate) fn toast_undo(ed: &mut EditorState, ctx: &egui::Context, text: impl Into<String>, icon: Icon) {
     ed.undo_toast = Some(kit::push(ctx, text, Some("Undo"), Some(icon)));
 }
@@ -687,21 +692,21 @@ fn range_toast(ctx: &egui::Context, doc: &Doc, ok: bool, done: String) {
     if ok {
         kit::push(ctx, done, None, Some(Icon::Flag));
     } else if doc.error.is_none() {
-        kit::push(ctx, "Nothing changed: it is already set there", None, Some(Icon::Info));
+        kit::note(ctx, "Nothing changed: it is already set there", Some(Icon::Info));
     }
 }
 
 /// Undo the person's last step and put the editor where it happened: the
 /// changed clips are selected and the playhead moves to them when it is
-/// elsewhere. With nothing to undo, say so.
+/// elsewhere. That is the feedback; the step is only noted in the recent list.
 fn undo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
     match doc.undo() {
         Some(l) => {
-            ed.redo_toast = Some(kit::push(ctx, crate::i18n::tf(format!("Undid {}", l.to_lowercase())), Some("Redo"), Some(Icon::ArrowUUpLeft)));
+            kit::note(ctx, crate::i18n::tf(format!("Undid {}", l.to_lowercase())), Some(Icon::ArrowUUpLeft));
             show_changed(ed, doc);
         }
         None if doc.error.is_none() => {
-            kit::push(ctx, "Nothing to undo", None, Some(Icon::ArrowUUpLeft));
+            kit::note(ctx, "Nothing to undo", Some(Icon::ArrowUUpLeft));
         }
         None => {}
     }
@@ -710,11 +715,11 @@ fn undo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
 fn redo_step(ed: &mut EditorState, doc: &mut Doc, ctx: &egui::Context) {
     match doc.redo() {
         Some(l) => {
-            toast_undo(ed, ctx, crate::i18n::tf(format!("Redid {}", l.to_lowercase())), Icon::ArrowUUpRight);
+            kit::note(ctx, crate::i18n::tf(format!("Redid {}", l.to_lowercase())), Some(Icon::ArrowUUpRight));
             show_changed(ed, doc);
         }
         None if doc.error.is_none() => {
-            kit::push(ctx, "Nothing to redo", None, Some(Icon::ArrowUUpRight));
+            kit::note(ctx, "Nothing to redo", Some(Icon::ArrowUUpRight));
         }
         None => {}
     }
@@ -1055,6 +1060,14 @@ mod edit_flow_tests {
     }
 
     #[test]
+    fn only_a_lost_safety_net_keeps_its_warning() {
+        assert!(!error_lasts("That lane is locked"));
+        assert!(!error_lasts("Not enough media: no handles"));
+        assert!(error_lasts("Saved, but the undo history could not be kept: disk full"));
+        assert!(error_lasts("The project was also saved elsewhere; both changed clip 3 and this one's change was kept"));
+    }
+
+    #[test]
     fn split_away_from_the_clip_says_why() {
         let _serial = crate::ui_tests::serial();
         let (mut app, ctx) = editor_app();
@@ -1131,16 +1144,40 @@ mod edit_flow_tests {
     }
 
     #[test]
-    fn one_helper_gives_every_edit_toast_a_working_undo() {
+    fn removing_edits_get_an_undo_toast_and_the_rest_only_a_note() {
         let _serial = crate::ui_tests::serial();
         let (mut app, ctx) = editor_app();
         let ids = two_cards(&mut app);
         app.editor.selection = vec![ids[0]];
         run(&mut app, &ctx, Action::Duplicate);
         let t = &kit::recent(&ctx)[0];
+        assert_eq!((t.text.as_str(), t.action.as_deref(), app.editor.undo_toast), ("Duplicated clip", None, None));
+        assert!(app.doc.undo().is_some());
+        assert_eq!(app.doc.project.clips.len(), ids.len());
+        // A delete takes things away: it keeps its pop-up with the Undo button.
+        app.editor.selection = vec![ids[0]];
+        run(&mut app, &ctx, Action::Delete);
+        let t = &kit::recent(&ctx)[0];
         assert_eq!((t.action.as_deref(), Some(t.id)), (Some("Undo"), app.editor.undo_toast));
         assert!(app.doc.undo().is_some());
         assert_eq!(app.doc.project.clips.len(), ids.len());
+    }
+
+    #[test]
+    fn undo_and_redo_are_noted_not_shown() {
+        let _serial = crate::ui_tests::serial();
+        let (mut app, ctx) = editor_app();
+        let ids = two_cards(&mut app);
+        app.editor.selection = vec![ids[0]];
+        run(&mut app, &ctx, Action::Duplicate);
+        let before = kit::recent(&ctx).len();
+        run(&mut app, &ctx, Action::Undo);
+        run(&mut app, &ctx, Action::Redo);
+        let said = said(&ctx);
+        assert!(said[0].starts_with("Redid ") && said[1].starts_with("Undid "), "{said:?}");
+        assert_eq!(said.len(), before + 2);
+        assert!(kit::recent(&ctx).iter().take(2).all(|t| t.action.is_none()));
+        assert_eq!(app.editor.undo_toast, None);
     }
 
     #[test]

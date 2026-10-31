@@ -180,7 +180,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
                 }
             }
             Some(Err(studio_ai::Error::Cancelled)) => {
-                kit::push(ctx, "Tracking stopped", None, Some(Icon::Info));
+                kit::note(ctx, "Tracking stopped", Some(Icon::Info));
             }
             Some(Err(e)) => {
                 kit::push(ctx, crate::i18n::tf(format!("Tracking failed: {e}")), None, Some(Icon::Warning));
@@ -205,7 +205,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
                 }
             }
             Some(Err(studio_ai::Error::Cancelled)) => {
-                kit::push(ctx, "Stabilizing stopped", None, Some(Icon::Info));
+                kit::note(ctx, "Stabilizing stopped", Some(Icon::Info));
             }
             Some(Err(e)) => {
                 kit::push(ctx, crate::i18n::tf(format!("Stabilizing failed: {e}")), None, Some(Icon::Warning));
@@ -303,7 +303,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
                 match tracking::plan_new(&app.doc.project, &app.doc.model, id, Kind::Point, now, &[from_screen(h)], radius(&ctx), None, "") {
                     Ok(job) => start_track(&ctx, job, false),
                     Err(e) => {
-                        kit::push(&ctx, e, None, Some(Icon::Warning));
+                        kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }
@@ -328,7 +328,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
                         match tracking::plan_new(&app.doc.project, &app.doc.model, id, Kind::Plane, now, &corners, 0.0, None, "") {
                             Ok(job) => start_track(&ctx, job, false),
                             Err(e) => {
-                                kit::push(&ctx, e, None, Some(Icon::Warning));
+                                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                             }
                         }
                     }
@@ -368,7 +368,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, canvas: Rect, area: Rect
                         match tracking::plan_fix(&app.doc.project, &app.doc.model, id, tr.id, now, Some(&points), false) {
                             Ok(job) => start_track(&ctx, job, true),
                             Err(e) => {
-                                kit::push(&ctx, e, None, Some(Icon::Warning));
+                                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                             }
                         }
                     }
@@ -480,7 +480,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         match tracking::plan_fix(&app.doc.project, &app.doc.model, id, tr.id, app.editor.playhead, None, false) {
                             Ok(job) => start_track(&ctx, job, false),
                             Err(e) => {
-                                kit::push(&ctx, e, None, Some(Icon::Warning));
+                                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                             }
                         }
                     }
@@ -533,7 +533,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                                 kit::push(&ctx, format!("{} follows {}", others[who].1, tr.name), None, Some(Icon::LinkSimple));
                             }
                             Err(e) => {
-                                kit::push(&ctx, e, None, Some(Icon::Warning));
+                                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                             }
                         }
                     }
@@ -565,7 +565,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                 match tracking::plan_stabilize(&app.doc.project, &app.doc.model, id, s, None) {
                     Ok(job) => start_stabilize(&ctx, job),
                     Err(e) => {
-                        kit::push(&ctx, e, None, Some(Icon::Warning));
+                        kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }

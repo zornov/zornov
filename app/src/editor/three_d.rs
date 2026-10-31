@@ -266,7 +266,7 @@ pub fn add_items(app: &mut StudioApp, ui: &mut egui::Ui, q: &str, close: egui::I
                 s => format!("{}{}", s[..1].to_uppercase(), &s[1..]),
             };
             if let Err(e) = crate::mesh_store::add_model(app, &mesh, &name) {
-                kit::push(&ctx, e, None, Some(Icon::Warning));
+                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }

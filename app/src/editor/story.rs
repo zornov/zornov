@@ -129,7 +129,7 @@ fn toolbar(app: &mut StudioApp, ui: &mut egui::Ui, has: bool) {
                 let mut s = now(app);
                 let done = s.plan(false);
                 if done.is_empty() {
-                    kit::push(&ctx, "Every scene already has shots", None, None);
+                    kit::note(&ctx, "Every scene already has shots", None);
                 } else {
                     set_story(app, s, "Plan shots");
                 }
@@ -309,7 +309,7 @@ fn take_dropped_script(app: &mut StudioApp, ctx: &egui::Context, body: Rect) {
     match script {
         Some(p) => import_file(app, ctx, p),
         None => {
-            kit::push(ctx, "That is not a script file: drop text, Markdown, Fountain, SRT, VTT or Word", None, Some(Icon::Warning));
+            kit::push_as(ctx, "That is not a script file: drop text, Markdown, Fountain, SRT, VTT or Word", None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }
@@ -370,7 +370,7 @@ fn time_box(ui: &mut egui::Ui, ctx: &egui::Context, id: egui::Id, shown: &str, s
     match parse(&text) {
         Some(v) => Some(Some(v)),
         None => {
-            kit::push(ctx, "That is not a time: try 0:12, 1:02:03 or 12", None, Some(Icon::Warning));
+            kit::push_as(ctx, "That is not a time: try 0:12, 1:02:03 or 12", None, Some(Icon::Warning), kit::Level::Info);
             None
         }
     }
@@ -476,7 +476,7 @@ fn script_text(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &th
         } else {
             let new = import::read_script(&b.text, None);
             if new.scenes.is_empty() {
-                kit::push(ctx, "No scenes found in that text", None, Some(Icon::Warning));
+                kit::push_as(ctx, "No scenes found in that text", None, Some(Icon::Warning), kit::Level::Info);
             } else {
                 let old = now(app);
                 let was_empty = old.scenes.is_empty();
@@ -676,7 +676,7 @@ fn script_lines(app: &mut StudioApp, ui: &mut egui::Ui, story: &st::Story, t: &t
                                 line.duration = Some(e - a);
                             }),
                             Some(_) => {
-                                kit::push(ctx, "The end must be after the start", None, Some(Icon::Warning));
+                                kit::push_as(ctx, "The end must be after the start", None, Some(Icon::Warning), kit::Level::Info);
                             }
                             None => reshape(app, "Line end", |s| s.scenes[si].lines[li].duration = None),
                         }

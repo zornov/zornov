@@ -56,7 +56,7 @@ fn done(app: &mut StudioApp, ctx: &egui::Context, r: Result<Vec<String>, String>
             }
         }
         Err(e) => {
-            kit::push(ctx, e, None, Some(Icon::Warning));
+            kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }
@@ -186,7 +186,7 @@ fn template_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip) {
     if let Some((k, v)) = changed {
         let r = run(app, "Template control", vec![json!({"op": "template", "clip": id, "controls": {k: v}})]);
         if let Err(e) = r {
-            kit::push(&ctx, e, None, Some(Icon::Warning));
+            kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }
@@ -383,7 +383,7 @@ fn shape_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, g: &m::Ge
             op["add"] = json!([a]);
         }
         if let Err(e) = run(app, "Shape layer", vec![op]) {
-            kit::push(&ctx, e, None, Some(Icon::Warning));
+            kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }
@@ -431,7 +431,7 @@ fn text_section(app: &mut StudioApp, ui: &mut egui::Ui, mc: &m::Clip, g: &m::Gen
     if let Some(o) = op
         && let Err(e) = run(app, "Text animation", vec![o])
     {
-        kit::push(&ctx, e, None, Some(Icon::Warning));
+        kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 

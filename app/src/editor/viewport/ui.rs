@@ -1357,7 +1357,7 @@ fn finish_brush(app: &mut StudioApp, ctx: &egui::Context) {
         Ok(_) => super::world::discard(),
         Err(e) => {
             super::world::discard();
-            kit::push(ctx, e, None, Some(Icon::Warning));
+            kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
     super::world::clear_hover();
@@ -1393,7 +1393,7 @@ fn finish_stroke(app: &mut StudioApp, ctx: &egui::Context) {
     match super::world::commit(&mut app.doc) {
         Ok(_) => {}
         Err(e) => {
-            kit::push(ctx, e, None, Some(Icon::Warning));
+            kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }
@@ -1423,7 +1423,7 @@ fn finish_walk(app: &mut StudioApp, ctx: &egui::Context, rec: &super::world::Wal
     let Some(id) = id else { return };
     match super::world::finish_recording(&mut app.doc, id, rec, k) {
         Ok(msg) => kit::push(ctx, msg, None, Some(Icon::Aperture)),
-        Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
+        Err(e) => kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info),
     };
 }
 
@@ -1551,7 +1551,7 @@ fn finish_recording(app: &mut StudioApp, ctx: &egui::Context, rec: super::Record
     let Some(id) = id else { return };
     match super::record_path(&mut app.doc, id, &rec.samples) {
         Ok(n) => kit::push(ctx, format!("Recorded the camera path: {n} keys"), None, Some(Icon::Aperture)),
-        Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
+        Err(e) => kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info),
     };
 }
 
@@ -1832,7 +1832,7 @@ fn header(app: &mut StudioApp, ui: &mut egui::Ui, bar: Rect, panes: &[Pane]) {
             if let Some(id) = id {
                 match super::set_camera_to_view(&mut app.doc, id, &nav, time, None) {
                     Ok(()) => kit::push(&ctx, "The camera now sees this view", None, Some(Icon::Aperture)),
-                    Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+                    Err(e) => kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info),
                 };
             }
         }

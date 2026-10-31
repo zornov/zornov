@@ -130,7 +130,7 @@ pub fn bar(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
     if kit::Button::ghost("Remesh").compact().show(ui).on_hover_text(crate::i18n::t("Rebuilds the surface as even quads (closes holes, joins pieces)")).clicked() {
         if let Err(e) = remesh(app, b.voxel) {
-            kit::push(&ctx, e, None, Some(Icon::Warning));
+            kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
     if b != before {
@@ -292,7 +292,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, pane: &Pane, resp: &egui
         if dabs > 0
             && let Err(e) = super::commit(app, "Sculpt")
         {
-            kit::push(&ctx, e, None, Some(Icon::Warning));
+            kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
         if app.doc.in_batch() {
             app.doc.commit_batch();
