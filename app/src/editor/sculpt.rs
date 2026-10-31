@@ -255,7 +255,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, scale: f32) 
                     }
                 }
                 Err(e) => {
-                    kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
+                    kit::push(&ctx, e, None, Some(Icon::Warning));
                 }
             }
             app.doc.end_gesture();
