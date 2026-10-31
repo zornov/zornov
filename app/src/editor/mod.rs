@@ -502,8 +502,6 @@ pub enum Action {
     ProjectSettings,
     /// File ▸ Settings….
     Settings,
-    /// Project ▸ Production….
-    Production,
     /// Project ▸ Project health….
     ProjectHealth,
     /// View ▸ Maximise panel.
@@ -631,7 +629,6 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             ctx.data_mut(|d| d.insert_temp(egui::Id::unique("details-modify"), true));
         }
         Action::Settings => app.overlay = Overlay::Settings,
-        Action::Production => app.overlay = Overlay::Production,
         Action::ProjectHealth => app.overlay = Overlay::Library,
         Action::Maximise => dock_ui::toggle_maximised(app, ctx),
         Action::Help => crate::help::open(app, ctx, None),

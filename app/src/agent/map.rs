@@ -85,7 +85,7 @@ const DEPTS: &[Dept] = &[
             ("3D characters: walk, run, sneak, limp or trot along a route with planted feet; turns; steps on uneven ground", "act tool:inspect"),
             ("3D hand poses, sit, crouch, lean, looks that lead with the eyes, reaches that never stretch, nod, shrug, sigh, startle", "pose"),
             ("where a 3D character's bones, soles, hands and gaze are; which feet slide; what is broken and the fix", "tool:inspect tool:review"),
-            ("plan a film: script, scenes, cast, shots", "tool:story tool:production tool:plan"),
+            ("plan a film: script, scenes, cast, shots", "tool:story tool:plan"),
         ],
     },
     Dept {

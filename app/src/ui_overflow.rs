@@ -130,29 +130,6 @@ pub fn saved_project(h: &mut Harness) {
     h.app.doc.folder = Some(f);
 }
 
-/// A short screenplay with long scene headings and names, broken down,
-/// scheduled and with tasks, so every Production tab has rows to show.
-pub fn production_script(h: &mut Harness) {
-    saved_project(h);
-    let script = "INT. THE VERY LONG CORRIDOR OUTSIDE THE ORBITAL STATION'S HYDROPONICS DECK - NIGHT\n\nMARGUERITE DELACROIX-WHITFIELD walks with a lantern, a battered suitcase and a stack of letters.\n\nMARGUERITE DELACROIX-WHITFIELD\nWe should have left before the storm.\n\nEXT. RAILWAY PLATFORM ON THE EDGE OF THE SALT FLATS AT THE END OF THE WORLD - DAY\n\nBARTHOLOMEW OKONKWO-HARRINGTON waits beside a vintage motorcycle with a sidecar and two dogs.\n\nBARTHOLOMEW OKONKWO-HARRINGTON\nYou came back.\n";
-    let placeholder = crate::doc::Doc::new(h.app.doc.model.clone());
-    let mut session = crate::agent::Session::new(std::mem::replace(&mut h.app.doc, placeholder));
-    session.home = session.doc.folder.as_ref().map(|f| f.root().to_path_buf());
-    let calls = [
-        ("story", serde_json::json!({"do": "import", "text": script, "format": "fountain"})),
-        ("production", serde_json::json!({"do": "breakdown"})),
-        ("production", serde_json::json!({"do": "schedule", "start": "2026-11-02"})),
-        ("production", serde_json::json!({"do": "asset_tasks"})),
-    ];
-    for (tool, args) in calls {
-        if let Err(e) = session.call(tool, &args) {
-            eprintln!("survey setup: {tool} {args}: {e}");
-        }
-    }
-    h.app.doc = session.doc;
-    h.app.overlay = Overlay::Production;
-}
-
 /// Review, opened as a panel (View > Panels, or the Review workspace).
 fn open_review(h: &mut Harness) {
     let ctx = h.ctx.clone();
@@ -199,12 +176,6 @@ pub fn surfaces() -> Vec<Surface> {
         }, &[]),
         s("export", ED, |h| h.app.overlay = Overlay::Export, &[]),
         s("settings", ED, |h| h.app.overlay = Overlay::Settings, &[]),
-        s("production", ED, |h| h.app.overlay = Overlay::Production, &[]),
-        s("production-saved", ED, |h| {
-            saved_project(h);
-            h.app.overlay = Overlay::Production;
-        }, &[]),
-        s("production-script", ED, production_script, &[]),
         s("help", ED, |h| h.app.overlay = Overlay::Help, &[]),
         s("gallery", &["--screen", "gallery"], nothing, &[]),
     ]
@@ -326,7 +297,7 @@ fn ui_overflow_survey() {
 /// Surfaces held to "nothing cut off, nothing drawn over" in the fast
 /// tests. (Library ▸ Rights reads the shared asset database, which one
 /// other test in this binary owns; the survey checks it on a scratch copy.)
-const CHECKED: &[&str] = &["start", "editor", "editor-clip", "insp-video-animation", "insp-title-animation", "insp-audio", "export", "settings", "sound", "review-saved", "production-script", "help", "editorial"];
+const CHECKED: &[&str] = &["start", "editor", "editor-clip", "insp-video-animation", "insp-title-animation", "insp-audio", "export", "settings", "sound", "review-saved", "help", "editorial"];
 
 #[test]
 fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
