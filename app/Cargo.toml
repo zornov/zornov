@@ -64,7 +64,6 @@ studio-sim = { path = "../crates/3d/sim" }
 studio-audio = { path = "../crates/sound/audio" }
 studio-sound = { path = "../crates/sound/sound" }
 studio-synth = { path = "../crates/sound/synth" }
-studio-live = { path = "../crates/media/live" }
 studio-aac = { path = "../crates/codecs/aac" }
 studio-content = { path = "../crates/project/content" }
 studio-ai = { path = "../crates/ai/ai" }

@@ -110,8 +110,6 @@ mod model3d;
 pub(crate) mod craft_book;
 mod scene;
 mod voice;
-mod capture;
-pub(crate) use capture::{ui_live_frame, ui_prompter_frame, ui_start_follow, ui_stop_follow};
 mod stage;
 mod layout;
 pub(crate) mod shell;
@@ -2273,7 +2271,6 @@ impl Session {
             "skill" => Ok(vec![Content::Text(skills::tool(a)?)]),
             "assets" | "project_care" => self.care_call(tool, a),
             "listen" => text(self.listen(a)?),
-            "capture" => self.capture(a),
             "graph" => text(self.graph_tool(a)?),
             "editorial" => text(self.editorial_tool(a)?),
             "search" => {

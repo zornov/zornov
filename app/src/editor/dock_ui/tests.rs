@@ -320,7 +320,7 @@ fn a_secondary_panel_opens_docked_and_floats_only_by_choice() {
 /// tabs or beside their zone, never over the picture or in the timeline's place.
 #[test]
 fn secondary_panels_never_cover_the_viewer_or_replace_the_timeline() {
-    for p in [Panel::Review, Panel::Record, Panel::Editorial, Panel::Scopes, Panel::Sound, Panel::Ai] {
+    for p in [Panel::Review, Panel::Editorial, Panel::Scopes, Panel::Sound, Panel::Ai] {
         let mut d = Drive::new(big());
         let ctx = d.h.ctx.clone();
         open_panel(&mut d.h.app, &ctx, p, false);
