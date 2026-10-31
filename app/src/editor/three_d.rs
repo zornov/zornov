@@ -132,7 +132,7 @@ fn mesh_change(app: &mut StudioApp, ctx: &egui::Context, id: u32, label: &str, f
     match r {
         Ok(file) => change(app, &[id], label, |c| crate::mesh_store::set_file(c, file.clone())),
         Err(e) => {
-            kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
+            kit::push(ctx, e, None, Some(Icon::Warning));
         }
     }
 }
