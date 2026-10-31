@@ -21,7 +21,6 @@ pub enum Overlay {
     Library,
     Export,
     Settings,
-    Production,
     /// Searchable help (F1).
     Help,
 }
@@ -561,7 +560,6 @@ impl eframe::App for StudioApp {
             Overlay::Export => screens::export::show(self, &ctx),
             Overlay::Settings => screens::settings::show(self, &ctx),
             Overlay::Library => screens::library_safety::show(self, &ctx),
-            Overlay::Production => screens::production::show(self, &ctx),
             Overlay::Help => crate::help::show(self, &ctx),
             Overlay::None => {}
         }

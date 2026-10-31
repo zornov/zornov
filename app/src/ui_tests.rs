@@ -862,7 +862,6 @@ fn each_menu_command_has_one_home() {
         ("Project settings…", "File"),
         ("Settings…", "File"),
         ("Export…", "File"),
-        ("Production…", "Project"),
         ("Project health…", "Project"),
         ("Reset layout", "View"),
         ("Maximise panel", "View"),
@@ -901,7 +900,6 @@ fn library_production_review_and_paint_still_open() {
         h.click_at(r);
         h
     };
-    assert_eq!(open("Project", "Production…").app.overlay, Overlay::Production);
     assert_eq!(open("Project", "Project health…").app.overlay, Overlay::Library);
     assert_eq!(open("File", "Settings…").app.overlay, Overlay::Settings);
     assert!(open("View", "Review").app.editor.dock.is_showing(crate::dock::Panel::Review), "View ▸ Review shows the panel");
