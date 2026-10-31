@@ -180,15 +180,15 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, scale: f32) 
                         stroke = Some(Stroke3 { id, mesh: Arc::new(mesh), world, inverse, camera, last: None, dabs: 0, unit });
                     }
                     None => {
-                        kit::push(&ctx, "The model is scaled flat at the playhead, so it can't be sculpted", None, Some(Icon::Warning));
+                        kit::push_as(&ctx, "The model is scaled flat at the playhead, so it can't be sculpted", None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }
             (Err(e), _) => {
-                kit::push(&ctx, e, None, Some(Icon::Warning));
+                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
             (_, None) => {
-                kit::push(&ctx, "The model is not on screen at the playhead", None, Some(Icon::Warning));
+                kit::push_as(&ctx, "The model is not on screen at the playhead", None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }
@@ -255,7 +255,7 @@ pub fn interact(app: &mut StudioApp, ui: &mut egui::Ui, area: Rect, scale: f32) 
                     }
                 }
                 Err(e) => {
-                    kit::push(&ctx, e, None, Some(Icon::Warning));
+                    kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                 }
             }
             app.doc.end_gesture();

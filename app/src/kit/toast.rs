@@ -66,6 +66,17 @@ impl Queue {
         id
     }
 
+    /// A quiet notification: kept in the history, never shown.
+    fn note(&mut self, now: f64, text: String, icon: Option<Icon>) -> u64 {
+        self.next += 1;
+        let id = self.next;
+        self.history.push(Toast { text, action: None, icon, born: now, id, level: Level::Info, count: 1 });
+        if self.history.len() > HISTORY {
+            self.history.remove(0);
+        }
+        id
+    }
+
     fn remember(&mut self, id: u64) {
         if let Some(t) = self.items.iter().find(|t| t.id == id) {
             self.history.push(t.clone());
@@ -111,6 +122,17 @@ pub fn push_as(ctx: &egui::Context, text: impl Into<String>, action: Option<&str
     let text: String = text.into();
     crate::a11y::announce(ctx, crate::i18n::t(&text).into_owned());
     ctx.data_mut(|d| d.get_temp_mut_or_default::<Queue>(qid()).push(now, text, action, icon, level))
+}
+
+/// A quiet notification, for what the screen already shows (an edit just
+/// made, a job just started). It does not pop up and does not disturb a
+/// toast that is showing, but it is announced to screen readers and kept in
+/// [`recent`], so it still shows under Recent notifications.
+pub fn note(ctx: &egui::Context, text: impl Into<String>, icon: Option<Icon>) -> u64 {
+    let now = ctx.input(|i| i.time);
+    let text: String = text.into();
+    crate::a11y::announce(ctx, crate::i18n::t(&text).into_owned());
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Queue>(qid()).note(now, text, icon))
 }
 
 /// The last notifications, newest first (including ones already gone).
@@ -335,6 +357,43 @@ mod tests {
         assert_eq!(r[0].level, Level::Info);
     }
 
+    #[test]
+    fn a_note_is_kept_but_never_shown() {
+        let mut q = q();
+        q.note(0.0, "Moved clip".into(), Some(Icon::Check));
+        assert!(q.items.is_empty());
+        assert_eq!(q.history.len(), 1);
+        assert_eq!(q.history[0].text, "Moved clip");
+        // Past the history size the oldest notes drop out.
+        for i in 0..30 {
+            q.note(i as f64, format!("Note {i}"), None);
+        }
+        assert_eq!(q.history.len(), HISTORY);
+        assert_eq!(q.history.last().unwrap().text, "Note 29");
+    }
+
+    #[test]
+    fn a_note_reaches_recent_without_a_toast_on_screen() {
+        let ctx = egui::Context::default();
+        let id = note(&ctx, "Undid split", Some(Icon::ArrowUUpLeft));
+        let r = recent(&ctx);
+        assert_eq!((r.len(), r[0].id, r[0].text.as_str()), (1, id, "Undid split"));
+        let shown = ctx.data(|d| d.get_temp::<Queue>(qid()).map_or(0, |q| q.items.len()));
+        assert_eq!(shown, 0);
+    }
+
+    #[test]
+    fn a_note_leaves_a_showing_toast_alone() {
+        let ctx = egui::Context::default();
+        let warn = push_error(&ctx, "Could not save");
+        let info = push(&ctx, "Clip deleted", Some("Undo"), Some(Icon::Trash));
+        note(&ctx, "Moved clip", None);
+        let ids: Vec<u64> = ctx.data(|d| d.get_temp::<Queue>(qid()).unwrap().items.iter().map(|t| t.id).collect());
+        assert_eq!(ids, vec![warn, info]);
+        let r = recent(&ctx);
+        assert_eq!((r.len(), r[0].text.as_str()), (3, "Moved clip"));
+    }
+
     /// Toast grammar (D41, D47): sentence case, no trailing period, no
     /// developer text (`{:?}`). Checks the toast calls in the files this
     /// package owns; other packages can add their files to the list.
@@ -351,7 +410,7 @@ mod tests {
             let src = src.split("#[cfg(test)]").next().unwrap_or("");
             for (n, line) in src.lines().enumerate() {
                 let l = line.trim();
-                if !(l.contains("kit::push(") || l.contains("push_error(")) || l.starts_with("//") {
+                if !(l.contains("kit::push(") || l.contains("push_error(") || l.contains("kit::push_as(") || l.contains("kit::note(")) || l.starts_with("//") {
                     continue;
                 }
                 assert!(!l.contains(":?}"), "{name}:{}: developer text in a toast: {l}", n + 1);

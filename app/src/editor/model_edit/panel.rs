@@ -85,7 +85,7 @@ fn asset_of(_app: &StudioApp, mc: &m::Clip) -> Option<(Asset, usize)> {
 
 fn note(ctx: &egui::Context, r: Result<(), String>) {
     if let Err(e) = r {
-        kit::push(ctx, e, None, Some(Icon::Warning));
+        kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 

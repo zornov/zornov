@@ -126,7 +126,7 @@ pub fn section(ui: &mut egui::Ui) {
             }
             Ok(None) => {}
             Err(e) => {
-                kit::push(ui.ctx(), format!("Could not {} the job: {e}", verb(what)), None, Some(Icon::Warning));
+                kit::push_as(ui.ctx(), format!("Could not {} the job: {e}", verb(what)), None, Some(Icon::Warning), kit::Level::Info);
             }
         }
         SNAP.with(|s| *s.borrow_mut() = None);

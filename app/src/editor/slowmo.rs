@@ -73,7 +73,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
             }
         },
         Some(Err(studio_ai::Error::Cancelled)) => {
-            kit::push(ctx, "Smooth slow motion stopped", None, Some(Icon::Info));
+            kit::note(ctx, "Smooth slow motion stopped", Some(Icon::Info));
         }
         Some(Err(e)) => {
             kit::push(ctx, crate::i18n::tf(format!("Smooth slow motion failed: {e}")), None, Some(Icon::Warning));
@@ -114,7 +114,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                     && let Some((_, h, _)) = r.as_ref()
                 {
                     h.cancel();
-                    kit::push(&ctx, "Stopping…", None, Some(Icon::Info));
+                    kit::note(&ctx, "Stopping…", Some(Icon::Info));
                 }
             });
             return;
@@ -128,7 +128,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                             kit::push(&ctx, msg, None, Some(Icon::Sparkle));
                         }
                         Err(e) => {
-                            kit::push(&ctx, e, None, Some(Icon::Warning));
+                            kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                         }
                     }
                 }

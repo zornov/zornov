@@ -75,7 +75,9 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         app.doc.apply("Match colour", m::Edit::SetClip { seq, clip: Box::new(c) });
                         kit::push(&ctx, crate::i18n::tf(format!("Matched to {}: {said}", others[who].1)), None, Some(Icon::Palette));
                     }
-                    Err(e) => feedback::failed(&ctx, &app.doc, &e),
+                    Err(e) => {
+                        kit::push_as(&ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
+                    }
                 }
             }
             if cm::strength(&mc).is_some() && Button::ghost("Remove").icon(Icon::X).compact().show(ui).clicked() {

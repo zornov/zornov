@@ -105,7 +105,7 @@ pub fn toggle_recording(app: &mut StudioApp, ctx: &egui::Context) {
     } else {
         crate::macros::start(&app.doc, &app.editor.selection);
         let on = if app.editor.selection.is_empty() { "no clip selected: edits are kept as they are".to_owned() } else { format!("on {} selected clip{}; replay puts the same changes on other clips", app.editor.selection.len(), if app.editor.selection.len() == 1 { "" } else { "s" }) };
-        kit::push(ctx, format!("Recording a macro, {on}"), None, Some(Icon::Circle));
+        kit::note(ctx, format!("Recording a macro, {on}"), Some(Icon::Circle));
     }
 }
 
@@ -128,8 +128,8 @@ fn run_macro(app: &mut StudioApp, ctx: &egui::Context, name: &str, every: Option
     *LAST_MACRO.lock().unwrap_or_else(|e| e.into_inner()) = Some(name.to_owned());
     match r {
         Ok((n, refused)) if refused.is_empty() => kit::push(ctx, format!("Ran \"{name}\": {n} changes"), None, Some(Icon::CheckCircle)),
-        Ok((n, refused)) => kit::push(ctx, format!("Ran \"{name}\": {n} changes, {} skipped ({})", refused.len(), refused[0]), None, Some(Icon::Warning)),
-        Err(e) => kit::push(ctx, plain_error(&format!("run \"{name}\""), &e), None, Some(Icon::Warning)),
+        Ok((n, refused)) => kit::push_as(ctx, format!("Ran \"{name}\": {n} changes, {} skipped ({})", refused.len(), refused[0]), None, Some(Icon::Warning), kit::Level::Info),
+        Err(e) => kit::push_as(ctx, plain_error(&format!("run \"{name}\""), &e), None, Some(Icon::Warning), kit::Level::Info),
     };
 }
 
@@ -225,7 +225,7 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
                     app.editor.library_selected = None;
                     match host().uninstall(&m.id) {
                         Ok(()) => kit::push(&ctx, format!("Removed {}", m.name), None, Some(Icon::Trash)),
-                        Err(e) => kit::push(&ctx, plain_error(&format!("remove {}", m.name), &e), None, Some(Icon::Warning)),
+                        Err(e) => kit::push_as(&ctx, plain_error(&format!("remove {}", m.name), &e), None, Some(Icon::Warning), kit::Level::Info),
                     };
                 }
                 if p.error.is_none() {
@@ -233,7 +233,7 @@ fn installed(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
                     if Button::secondary(label).show(ui).clicked() {
                         app.editor.library_selected = None;
                         if let Err(e) = host().set_enabled(&m.id, !p.enabled) {
-                            kit::push(&ctx, plain_error(&format!("turn {} {}", m.name, if p.enabled { "off" } else { "on" }), &e), None, Some(Icon::Warning));
+                            kit::push_as(&ctx, plain_error(&format!("turn {} {}", m.name, if p.enabled { "off" } else { "on" }), &e), None, Some(Icon::Warning), kit::Level::Info);
                         }
                     }
                 }
@@ -408,7 +408,7 @@ fn available(app: &mut StudioApp, ui: &mut egui::Ui, q: &str) {
             if Button::secondary(if on { "Stop loading" } else { "Load" }).show(ui).clicked() {
                 match plugins::set_ofx(!on) {
                     Ok(v) => kit::push(&ctx, format!("{} OpenFX plugins loaded", v["plugins"].as_array().map_or(0, Vec::len)), None, None),
-                    Err(e) => kit::push(&ctx, plain_error("load OpenFX plugins", &e), None, Some(Icon::Warning)),
+                    Err(e) => kit::push_as(&ctx, plain_error("load OpenFX plugins", &e), None, Some(Icon::Warning), kit::Level::Info),
                 };
             }
         });

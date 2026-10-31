@@ -527,7 +527,7 @@ fn stills(app: &mut StudioApp, ui: &mut Ui, st: &mut Ui_, id: u32, c: &mut m::Cl
                         kit::push(ui.ctx(), format!("Removed still {}", s.name), None, None);
                     }
                     Err(e) => {
-                        kit::push_error(ui.ctx(), format!("Could not remove the still: {e}"));
+                        kit::push_as(ui.ctx(), format!("Could not remove the still: {e}"), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
                     }
                 }
             }
@@ -606,7 +606,7 @@ fn project_colour(app: &mut StudioApp, ui: &mut Ui, selected: Option<u32>) {
                             }
                         }
                         Err(e) => {
-                            kit::push_error(ui.ctx(), format!("Could not set the input colour space: {e}"));
+                            kit::push_as(ui.ctx(), format!("Could not set the input colour space: {e}"), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
                         }
                     }
                     ui.data_mut(|d| d.remove::<String>(id));
@@ -628,7 +628,7 @@ fn apply_settings(app: &mut StudioApp, ctx: &egui::Context, label: &str, f: impl
         }
         Ok(()) => {}
         Err(e) => {
-            kit::push_error(ctx, format!("Could not change {}: {e}", label.to_lowercase()));
+            kit::push_as(ctx, format!("Could not change {}: {e}", label.to_lowercase()), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
         }
     }
 }

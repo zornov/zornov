@@ -28,7 +28,7 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ops: Vec<Value>, label: &str) {
     let r = s.edit(&ops, label, false);
     app.doc = s.doc;
     if let Err(e) = r {
-        kit::push(ctx, format!("{label}: {e}"), None, Some(Icon::Warning));
+        kit::push_as(ctx, format!("{label}: {e}"), None, Some(Icon::Warning), kit::Level::Info);
     }
 }
 

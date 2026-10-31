@@ -540,7 +540,7 @@ pub fn run_at(app: &mut StudioApp, ctx: &egui::Context, id: &'static str, args: 
                 // Put the last result back as it was.
                 app.doc.redo();
             }
-            kit::push(ctx, e.clone(), None, Some(Icon::Warning));
+            kit::push_as(ctx, e.clone(), None, Some(Icon::Warning), kit::Level::Info);
             return Err(e);
         }
     };
@@ -560,7 +560,7 @@ pub fn run_at(app: &mut StudioApp, ctx: &egui::Context, id: &'static str, args: 
                     cur.changed();
                 }
             });
-            kit::push(ctx, e.clone(), None, Some(Icon::Warning));
+            kit::push_as(ctx, e.clone(), None, Some(Icon::Warning), kit::Level::Info);
             return Err(e);
         }
         step = Some(label.clone());

@@ -239,13 +239,13 @@ fn commit(app: &mut StudioApp, ctx: &egui::Context, ed: &Editing) {
         Target::Template(control) => {
             let r = super::mograph::run(app, "Edit text", vec![json!({"op": "template", "clip": ed.clip, "controls": {control: ed.text}})]);
             if let Err(e) = r {
-                feedback::failed(ctx, &app.doc, &e);
+                kit::push_as(ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
             }
         }
         Target::Solid3d => {
             let r = super::mograph::run(app, "Edit text", vec![json!({"op": "text_3d", "clip": ed.clip, "text": ed.text})]);
             if let Err(e) = r {
-                feedback::failed(ctx, &app.doc, &e);
+                kit::push_as(ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
             }
         }
     }

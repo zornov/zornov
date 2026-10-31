@@ -100,7 +100,7 @@ pub fn add_shape(app: &mut StudioApp, ctx: &egui::Context, id: &'static str) {
     match super::add_object(app, ctx, id, &args) {
         Ok(clip) => OBJECT_LAST.with(|o| *o.borrow_mut() = Some((clip, id, args))),
         Err(e) => {
-            kit::push(ctx, e, None, Some(Icon::Warning));
+            kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
         }
     }
 }
@@ -681,7 +681,7 @@ fn object_panel(app: &mut StudioApp, ui: &mut egui::Ui, body: Rect) {
         match super::add_object(app, &ctx, id, &a) {
             Ok(clip) => OBJECT_LAST.with(|o| *o.borrow_mut() = Some((clip, id, a))),
             Err(e) => {
-                kit::push(&ctx, e, None, Some(Icon::Warning));
+                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }

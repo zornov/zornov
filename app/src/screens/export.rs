@@ -662,7 +662,7 @@ fn bundle_section(ui: &mut egui::Ui, doc: &mut crate::doc::Doc, s: &mut ExportSt
         }
         if Button::secondary("Show in Finder").compact().show(ui).clicked() {
             if let Err(e) = export::reveal(&out.folder) {
-                kit::push(ui.ctx(), format!("Could not show the folder: {e}"), None, Some(Icon::Warning));
+                kit::push_as(ui.ctx(), format!("Could not show the folder: {e}"), None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }

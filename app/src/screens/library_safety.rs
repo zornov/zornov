@@ -569,7 +569,7 @@ pub fn clean_for(app: &mut StudioApp, ctx: &egui::Context) {
     }
     match safety::clean_apply(&root, &o, &plan) {
         Ok(freed) => kit::push(ctx, crate::i18n::tf(format!("Cleaned up {}", safety::human(freed))), None, Some(Icon::CheckCircle)),
-        Err(e) => kit::push(ctx, e, None, Some(Icon::Warning)),
+        Err(e) => kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info),
     };
 }
 

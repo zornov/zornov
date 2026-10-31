@@ -279,7 +279,7 @@ impl AgentUi {
             let (tx, rx) = mpsc::channel();
             self.live.push(ToolCall { tool: "import".into(), args: serde_json::json!({ "paths": [p.display().to_string()] }), reply: tx, epoch: 0 });
             self.downloads.push((format!("converted {name} and imported it"), rx));
-            kit::push(ctx, crate::i18n::tf(format!("Converting {name} to a format Zornov plays…")), None, Some(Icon::FilmStrip));
+            kit::note(ctx, crate::i18n::tf(format!("Converting {name} to a format Zornov plays…")), Some(Icon::FilmStrip));
         }
     }
 
@@ -501,7 +501,7 @@ impl AgentUi {
                     a.live.push(ToolCall { tool: "make_playable".into(), args: serde_json::json!({ "media": need }), reply: tx, epoch: 0 });
                     let what = if need.len() == 1 { "a video".to_owned() } else { format!("{} videos", need.len()) };
                     a.downloads.push((format!("converted {what} so it plays"), rx));
-                    kit::push(ctx, crate::i18n::tf(format!("Converting {what} to a format Zornov plays…")), None, Some(Icon::FilmStrip));
+                    kit::note(ctx, crate::i18n::tf(format!("Converting {what} to a format Zornov plays…")), Some(Icon::FilmStrip));
                 }
             }
         }
@@ -960,7 +960,7 @@ fn link_dialog(app: &mut StudioApp, ctx: &egui::Context) {
                 kit::push(ctx, crate::i18n::tf(format!("Downloading {}…", one_line(url.rsplit('/').next().unwrap_or(&url), 40))), None, Some(Icon::DownloadSimple));
             }
             Err(e) => {
-                kit::push(ctx, e, None, Some(Icon::Warning));
+                kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     } else if out.close || cancel {
@@ -1125,7 +1125,7 @@ fn tools_tab(app: &mut StudioApp, ui: &mut egui::Ui) {
                             };
                             match res {
                                 Ok(m) => kit::push(&ctx, m, None, Some(Icon::Sparkle)),
-                                Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+                                Err(e) => kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info),
                             };
                         }
                     });
@@ -1503,7 +1503,7 @@ fn conversation(app: &mut StudioApp, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         match app.doc.undo_request(request) {
             Ok(_) => kit::push(&ctx, crate::i18n::shown("Took back the AI's request"), None, Some(Icon::ArrowUUpLeft)),
-            Err(e) => kit::push(&ctx, e, None, Some(Icon::Warning)),
+            Err(e) => kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info),
         };
     }
     if stop_clicked {
