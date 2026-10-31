@@ -409,9 +409,6 @@ impl StudioApp {
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd_shift, Key::G))) {
             self.screen = if self.screen == Screen::Gallery { Screen::Start } else { Screen::Gallery };
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(cmd_shift, Key::P))) {
-            self.screen = if self.screen == Screen::Paint { Screen::Editor } else { Screen::Paint };
-        }
         let dialogs = self.cli.shot.is_none();
         if dialogs && ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::O))) {
             self.open_folder(ctx, None);
@@ -548,7 +545,6 @@ impl eframe::App for StudioApp {
             Screen::Start => screens::start::show(self, ui),
             Screen::Editor | Screen::Export | Screen::Settings => editor::show(self, ui),
             Screen::Gallery => gallery::show(self, ui),
-            Screen::Paint => screens::paint::show(self, ui),
         }
         if self.screen == Screen::Editor && self.overlay == Overlay::None {
             editor::drop_hint(&ctx);
