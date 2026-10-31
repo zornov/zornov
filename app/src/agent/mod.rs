@@ -34,8 +34,6 @@ mod plugins;
 pub use plugins::run_on;
 mod matcher;
 mod more;
-mod production;
-pub use production::story_of;
 pub use story::script_context;
 mod props;
 mod policy;
@@ -112,8 +110,6 @@ mod model3d;
 pub(crate) mod craft_book;
 mod scene;
 mod voice;
-mod capture;
-pub(crate) use capture::{ui_live_frame, ui_prompter_frame, ui_start_follow, ui_stop_follow};
 mod stage;
 mod layout;
 pub(crate) mod shell;
@@ -179,7 +175,6 @@ pub(crate) mod generative;
 #[cfg(feature = "render")]
 mod lottie;
 mod psd;
-mod picture;
 mod vector;
 mod reframe;
 mod render;
@@ -457,8 +452,6 @@ pub struct Session {
     accepted: Vec<Value>,
     /// Notes when there is no project folder yet.
     notes: Option<String>,
-    /// The production office when there is no project folder yet.
-    production: Option<studio_production::Production>,
     /// Picture measurements by scene fingerprint (kept with the project),
     /// so check only re-renders what changed.
     look_memo: Option<std::collections::HashMap<String, Value>>,
@@ -750,7 +743,6 @@ impl Session {
             home: None,
             accepted: Vec::new(),
             notes: None,
-            production: None,
             look_memo: None,
             brief: None,
             batches: Vec::new(),
@@ -2279,7 +2271,6 @@ impl Session {
             "skill" => Ok(vec![Content::Text(skills::tool(a)?)]),
             "assets" | "project_care" => self.care_call(tool, a),
             "listen" => text(self.listen(a)?),
-            "capture" => self.capture(a),
             "graph" => text(self.graph_tool(a)?),
             "editorial" => text(self.editorial_tool(a)?),
             "search" => {
@@ -2316,7 +2307,6 @@ impl Session {
             "notes" => text(self.notes(a)?),
             "story" => text(self.story_tool(a)?),
             "comments" | "versions" | "share" | "team" => text(self.collab_tool(tool, a)?),
-            "production" => text(self.production_tool(a)?),
             #[cfg(feature = "commerce")]
             "account" => text(self.account_tool(a)?),
             "check" => {
@@ -2705,7 +2695,6 @@ impl Session {
                 text(json!({"made_playable": done, "failed": failed, "note": if done.is_empty() && failed.is_empty() { "every media file already plays" } else { "" }}))
             }
             "generate" => text(self.generate(a)?),
-            "picture" => self.picture(a),
             "vector" | "illustrate" => self.vector_tool(a),
             #[cfg(feature = "render")]
             "enhance" => text(self.enhance(a)?),

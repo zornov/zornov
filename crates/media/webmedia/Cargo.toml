@@ -12,5 +12,4 @@ studio-h264 = { path = "../../codecs/h264" }
 serde_json = "1"
 
 [dev-dependencies]
-studio-live = { path = "../live" }
 studio-encode = { path = "../encode" }

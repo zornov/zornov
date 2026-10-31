@@ -64,7 +64,6 @@ studio-sim = { path = "../crates/3d/sim" }
 studio-audio = { path = "../crates/sound/audio" }
 studio-sound = { path = "../crates/sound/sound" }
 studio-synth = { path = "../crates/sound/synth" }
-studio-live = { path = "../crates/media/live" }
 studio-aac = { path = "../crates/codecs/aac" }
 studio-content = { path = "../crates/project/content" }
 studio-ai = { path = "../crates/ai/ai" }
@@ -72,8 +71,6 @@ studio-net = { path = "../crates/project/net" }
 studio-webmedia = { path = "../crates/media/webmedia" }
 studio-update = { path = "../crates/project/update" }
 studio-crash = { path = "../crates/project/crash" }
-studio-canvas = { path = "../crates/picture/canvas" }
-studio-pixel-tablet = { path = "../crates/paint/pixel-tablet" }
 studio-craft-media = { path = "../crates/media/craft-media" }
 studio-vp9 = { path = "../crates/codecs/vp9" }
 studio-av1 = { path = "../crates/codecs/av1" }
@@ -85,7 +82,6 @@ studio-mov = { path = "../crates/media/mov" }
 studio-psd = { path = "../crates/vector/psd" }
 studio-lottie = { path = "../crates/picture/lottie" }
 studio-vector-art = { path = "../crates/vector/vector-art", default-features = false }
-studio-production = { path = "../crates/project/production" }
 rfd = "0.17"
 studio-render = { path = "../crates/picture/render", optional = true }
 studio-text = { path = "../crates/picture/text" }

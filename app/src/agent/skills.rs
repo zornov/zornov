@@ -24,7 +24,6 @@ use std::sync::OnceLock;
 const FILES: &[&str] = &[
     include_str!("skills/footage-edit.md"),
     include_str!("skills/story-film.md"),
-    include_str!("skills/production-office.md"),
     include_str!("skills/puppetry-rigging.md"),
     include_str!("skills/motion-animation.md"),
     include_str!("skills/3d-assets-scenes.md"),
@@ -40,10 +39,8 @@ const FILES: &[&str] = &[
     include_str!("skills/vector-drawing.md"),
     include_str!("skills/green-screen-mattes.md"),
     include_str!("skills/vfx-compositing.md"),
-    include_str!("skills/pictures-retouch.md"),
     include_str!("skills/picture-batches.md"),
     include_str!("skills/generated-media.md"),
-    include_str!("skills/capture-live.md"),
     include_str!("skills/review-before-export.md"),
     include_str!("skills/export-delivery.md"),
     include_str!("skills/library-project-care.md"),
@@ -438,7 +435,7 @@ mod tests {
     #[test]
     fn the_old_guide_topics_still_open_something() {
         let words = [
-            "library", "assets", "safety", "backup", "rights", "capture", "record", "live", "stream", "teleprompter", "editing", "editorial", "cutting", "trim", "takes", "footage", "sounds", "catalogue", "analyse", "mix", "mixing", "loudness", "stems", "adr", "subtitles", "dub", "delivery", "qc", "queue", "bundle", "cutdown", "recipes", "moves", "creative", "team", "comments", "versions", "share", "production", "breakdown", "schedule", "budget", "plugins", "macros", "automation", "mograph", "shapes", "templates", "charts", "expressions", "morph", "vector", "svg", "logo", "icons", "models", "mesh", "post", "colour", "grading", "aces", "hdr", "conform", "proxies", "story", "script", "shots", "foley", "vfx", "compositing", "pictures", "paint", "retouch", "living", "weather", "particles",
+            "library", "assets", "safety", "backup", "rights", "editing", "editorial", "cutting", "trim", "takes", "footage", "sounds", "catalogue", "analyse", "mix", "mixing", "loudness", "stems", "adr", "subtitles", "dub", "delivery", "qc", "queue", "bundle", "cutdown", "recipes", "moves", "creative", "team", "comments", "versions", "share", "plugins", "macros", "automation", "mograph", "shapes", "templates", "charts", "expressions", "morph", "vector", "svg", "logo", "icons", "models", "mesh", "post", "colour", "grading", "aces", "hdr", "conform", "proxies", "story", "script", "shots", "foley", "vfx", "compositing", "paint", "living", "weather", "particles",
             "sound", "typography", "puppetry", "sculpting", "walkable", "overdoing", "mistakes", "review", "planning", "staging", "keying", "tracking", "cinematography", "rigging", "3d", "worlds", "generated", "generative", "restyle", "time", "speed",
         ];
         let mut lost = Vec::new();
@@ -468,6 +465,6 @@ mod tests {
         for word in ["story", "mograph", "vector", "enterable", "puppetry"] {
             assert!(for_topic(word, None, false).is_some_and(|r| r.is_ok()), "guide topic {word}");
         }
-        assert!(tool_long_form("story").is_some() || tool_long_form("picture").is_some());
+        assert!(tool_long_form("story").is_some());
     }
 }

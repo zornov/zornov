@@ -11,7 +11,6 @@ pub enum Screen {
     Export,
     Settings,
     Gallery,
-    Paint,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -54,7 +53,6 @@ impl Cli {
                         "export" => Screen::Export,
                         "settings" => Screen::Settings,
                         "gallery" => Screen::Gallery,
-                        "paint" => Screen::Paint,
                         _ => Screen::Start,
                     })
                 }

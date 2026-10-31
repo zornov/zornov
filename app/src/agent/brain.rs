@@ -488,7 +488,6 @@ fn asks(tool: &str, args: &Value, ask_first: bool) -> Option<String> {
         "edit" | "undo" | "redo" | "import" => Some(format!("{tool}: {}", brief_args(tool, args))),
         "search_media" if args.get("fetch").is_some_and(|f| !f.is_null()) => Some("Bring in the chosen search result".to_owned()),
         "download" => Some(format!("Download {}", args.get("url").and_then(Value::as_str).unwrap_or("media from the internet"))),
-        "picture" if args.get("ops").and_then(Value::as_array).is_some_and(|o| o.iter().any(|op| op.get("op").and_then(Value::as_str) == Some("generative_fill"))) => Some("Paint the selection with Codex image generation (your ChatGPT plan)".into()),
         "ai" => Some(format!("Run {}", args.get("action").and_then(Value::as_str).unwrap_or("an AI job"))),
         "check" if args.get("fix").and_then(Value::as_bool) == Some(true) => Some("Fix what check finds".into()),
         _ => None,

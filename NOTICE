@@ -41,25 +41,6 @@ copyright and licence, stated at the top of their files:
   (https://github.com/storytold/effectcraft), Copyright (c) 2026 ArtCraft Team and
   the EffectCraft contributors, MIT OR Apache-2.0. The Lottie player itself is
   written for Zornov, with EffectCraft's Lottie importer as its reference.
-- crates/pixel-* (studio-pixel-geom, -color, -cms, -raster, -doc, -ops,
-  -psd, -codecs, -heif, -raw, -affinity, -compose, -paint, -algo, -io, -text,
-  -vector, -format, -plugins, -engine, -gpu, -tablet, -testkit): the pixel
-  engine of PhotoCraft (https://github.com/storytold/photocraft, rev 486afd8),
-  Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors,
-  MIT OR Apache-2.0; vendored with the crates renamed and the print spooler
-  left out. crates/pixel-docpath is craft-docpath from craft-libs
-  (https://github.com/storytold/craft-libs, rev 82a24b0), same copyright
-  holders and licence. Bundled with them: the Inter and JetBrains Mono fonts
-  (crates/pixel-text/assets/fonts, SIL Open Font License 1.1, licences beside
-  them), the SCOWL English word list (crates/pixel-text/assets/dict, SCOWL
-  licence beside it), and the libfacedetection weights
-  (crates/pixel-algo/data, BSD-3-Clause, Copyright (c) 2015-2019 Shiqi Yu,
-  licence beside them). crates/canvas/src/files.rs is adapted from
-  PhotoCraft's automation crate (same licence).
-- crates/app/assets/paint-icons: Lucide icons (ISC, Copyright (c) 2026
-  Lucide Icons and Contributors) and glyphs drawn by the PhotoCraft
-  contributors on Lucide's grid (MIT OR Apache-2.0), from PhotoCraft's icon
-  set; see the README and LICENSE-lucide.txt there.
 - crates/colour/src/aces.rs: the ACES 1.3 output transforms (RRT, ODT and
   SSTS tone scales and their constants) are transcribed from the Academy's
   reference CTL (https://github.com/ampas/aces-dev, v1.3), Copyright (c) 2015

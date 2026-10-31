@@ -48,7 +48,6 @@ fn positional(cmd: &str) -> &'static [&'static str] {
         "download" => &["url"],
         "search_media" => &["query"],
         "generate" => &["prompt"],
-        "picture" => &["ops"],
         "enhance" => &["clip"],
         "catalogue" => &["panel", "query"],
         "pick" => &["x", "y", "at"],

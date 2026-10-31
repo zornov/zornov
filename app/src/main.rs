@@ -77,7 +77,6 @@ mod rights;
 mod safety;
 mod recover;
 mod media_io;
-mod paint;
 mod mesh_store;
 mod my_models;
 mod view;

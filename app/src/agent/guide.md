@@ -189,7 +189,6 @@ mistake: the value is accepted and lands somewhere else.
 | `act` `route` / `to` / `by` | the ground under a 3D character | canvas px, [x, z] |
 | 3D `rig` bone heads and tails, `mesh` points, `pose` `reach` | the model's own space before its clip's transform | the model's px |
 | 2D `puppet` / `rig` pins | the layer's own picture | 0..1 across and down, so pins follow a moved, scaled or flipped layer |
-| `picture` ops | the picture | px from the top left |
 | `frame` `region`, `see` / `objects` boxes, `inpaint` `region` | the frame or picture | fractions 0..1 from the top left |
 | `viewport` `pick` / `dolly` `x`, `y` | the view | 0..1 across and down |
 
@@ -588,12 +587,11 @@ The editor window is panels docked in a tree, the way the person arranged
 them: splits side by side or stacked, and tab stacks (several panels in
 one place, one showing). Panels: `library`, `viewer`, `inspector`,
 `timeline`, `sound` (mixer, loudness, dialogue, subtitles), `scopes`,
-`review` (notes, versions, team), `record` (camera, voice-over,
-prompter, live), `editorial` (timeline index, takes, script lines) and
-`ai` (you, the AI editor). Review, Record and Editorial can also float in
-a window inside the editor, and any panel but the Viewer can pop out into
-a window of the system's own (another screen). Only in the Zornov window,
-not from a shell.
+`review` (notes, versions, team), `editorial` (timeline index, takes,
+script lines) and `ai` (you, the AI editor). Review and Editorial can
+also float in a window inside the editor, and any panel but the Viewer
+can pop out into a window of the system's own (another screen). Only in
+the Zornov window, not from a shell.
 
 - `layout {}` tells you every panel (`open`, `showing` when it is the tab
   in front, `docked`, `floating`), the whole `tree`, the workspace and the
@@ -606,7 +604,7 @@ not from a shell.
   `top`, `bottom`, or `tab` to stack it with the target. `"target":
   "window"` docks along a whole edge of the window. The panel takes about
   half the target (less when it wants less); the others keep their place.
-- `"float"` takes Review, Record or Editorial out into a window inside the
+- `"float"` takes Review or Editorial out into a window inside the
   editor. `"pop_out"` puts any panel but the Viewer in a window of its
   own; `"dock_back"` (or closing that window) puts it back where it was.
   Your work goes on wherever your own panel is, even while it is closed.

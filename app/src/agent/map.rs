@@ -85,7 +85,7 @@ const DEPTS: &[Dept] = &[
             ("3D characters: walk, run, sneak, limp or trot along a route with planted feet; turns; steps on uneven ground", "act tool:inspect"),
             ("3D hand poses, sit, crouch, lean, looks that lead with the eyes, reaches that never stretch, nod, shrug, sigh, startle", "pose"),
             ("where a 3D character's bones, soles, hands and gaze are; which feet slide; what is broken and the fix", "tool:inspect tool:review"),
-            ("plan a film: script, scenes, cast, shots", "tool:story tool:production tool:plan"),
+            ("plan a film: script, scenes, cast, shots", "tool:story tool:plan"),
         ],
     },
     Dept {
@@ -108,7 +108,6 @@ const DEPTS: &[Dept] = &[
             ("grading, colour spaces, HDR, LUTs", "tool:colour"),
             ("match shots", "match_colour tool:scopes"),
             ("timelines in and out, relinking, proxies", "tool:conform tool:media_manage"),
-            ("paint, retouch, composite stills", "tool:picture"),
             ("restore, denoise, upscale", "tool:enhance"),
         ],
     },
@@ -161,9 +160,9 @@ const DEPTS: &[Dept] = &[
             ("undo, redo, open, save, new", "tool:undo tool:redo tool:open tool:save tool:new_project"),
             ("review notes, versions, sharing, roles", "tool:comments tool:versions tool:share tool:team"),
             #[cfg(not(feature = "commerce"))]
-            ("taste, policy, window, capture", "tool:taste tool:policy tool:layout tool:capture tool:made"),
+            ("taste, policy, window", "tool:taste tool:policy tool:layout tool:made"),
             #[cfg(feature = "commerce")]
-            ("taste, policy, window, account, capture", "tool:taste tool:policy tool:layout tool:account tool:capture tool:made"),
+            ("taste, policy, window, account", "tool:taste tool:policy tool:layout tool:account tool:made"),
         ],
     },
 ];
