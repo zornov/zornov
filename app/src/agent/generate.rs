@@ -666,19 +666,6 @@ impl Session {
         let to_timeline = a.get("to_timeline").and_then(Value::as_bool).unwrap_or(false);
         let parts = self.call("import", &json!({"paths": files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "to_timeline": to_timeline}))?;
         let mut v: Value = parts.iter().find_map(|p| if let super::Content::Text(t) = p { serde_json::from_str(t).ok() } else { None }).unwrap_or(json!({}));
-        // The production office keeps the books: which shot this was for.
-        let made: Vec<String> = files.iter().map(|p| p.display().to_string()).collect();
-        let spend = studio_production::Spend {
-            provider: "codex".into(),
-            model: "image-generation".into(),
-            kind: "picture".into(),
-            prompt: ask.prompt.chars().take(160).collect(),
-            scene: a.get("scene").and_then(Value::as_str).map(str::to_owned),
-            shot: a.get("shot").and_then(Value::as_str).map(str::to_owned),
-            files: made.clone(),
-            ..Default::default()
-        };
-        self.production_record_generation(a, spend, &made);
         v["generated"] = json!({"by": "Codex image generation", "count": files.len(), "transparent": transparent});
         v["files"] = json!(files.iter().map(|p| p.display().to_string()).collect::<Vec<_>>());
         v["prompt"] = json!(ask.prompt);

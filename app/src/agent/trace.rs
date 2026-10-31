@@ -985,7 +985,6 @@ pub fn module_of(tool: &str, ops: &[&str]) -> String {
         "objects" => "objects",
         "story" => "story",
         "comments" | "versions" | "share" | "team" => "collab_tools",
-        "production" => "production",
         "account" => "account_tools",
         "check" => "quality",
         "review" => "review",

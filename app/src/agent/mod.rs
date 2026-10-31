@@ -34,8 +34,6 @@ mod plugins;
 pub use plugins::run_on;
 mod matcher;
 mod more;
-mod production;
-pub use production::story_of;
 pub use story::script_context;
 mod props;
 mod policy;
@@ -456,8 +454,6 @@ pub struct Session {
     accepted: Vec<Value>,
     /// Notes when there is no project folder yet.
     notes: Option<String>,
-    /// The production office when there is no project folder yet.
-    production: Option<studio_production::Production>,
     /// Picture measurements by scene fingerprint (kept with the project),
     /// so check only re-renders what changed.
     look_memo: Option<std::collections::HashMap<String, Value>>,
@@ -749,7 +745,6 @@ impl Session {
             home: None,
             accepted: Vec::new(),
             notes: None,
-            production: None,
             look_memo: None,
             brief: None,
             batches: Vec::new(),
@@ -2315,7 +2310,6 @@ impl Session {
             "notes" => text(self.notes(a)?),
             "story" => text(self.story_tool(a)?),
             "comments" | "versions" | "share" | "team" => text(self.collab_tool(tool, a)?),
-            "production" => text(self.production_tool(a)?),
             #[cfg(feature = "commerce")]
             "account" => text(self.account_tool(a)?),
             "check" => {
