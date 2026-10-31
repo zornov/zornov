@@ -160,9 +160,9 @@ const DEPTS: &[Dept] = &[
             ("undo, redo, open, save, new", "tool:undo tool:redo tool:open tool:save tool:new_project"),
             ("review notes, versions, sharing, roles", "tool:comments tool:versions tool:share tool:team"),
             #[cfg(not(feature = "commerce"))]
-            ("taste, policy, window, capture", "tool:taste tool:policy tool:layout tool:capture tool:made"),
+            ("taste, policy, window", "tool:taste tool:policy tool:layout tool:made"),
             #[cfg(feature = "commerce")]
-            ("taste, policy, window, account, capture", "tool:taste tool:policy tool:layout tool:account tool:capture tool:made"),
+            ("taste, policy, window, account", "tool:taste tool:policy tool:layout tool:account tool:made"),
         ],
     },
 ];

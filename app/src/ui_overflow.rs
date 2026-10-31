@@ -163,7 +163,6 @@ pub fn surfaces() -> Vec<Surface> {
         s("compositor", ED, select_first_clip, &["Nodes"]),
         s("graph", ED, select_first_clip, &["Curves"]),
         s("vector", ED, nothing, &["Vector art: draw logos, icons, illustrations and infographics"]),
-        s("capture", ED, nothing, &["Record, voice-over, prompter and live"]),
         s("viewport-3d", ED, nothing, &["3D workspace"]),
         s("scopes", ED, nothing, &["Scopes"]),
         s("mograph", ED, nothing, &["Motion graphics: templates, shapes, charts, 3D text"]),
@@ -262,8 +261,8 @@ pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> 
                     }
                 }
             }
-            // Panels that keep their open state between windows (Record,
-            // Vector art) close again with the button that opened them.
+            // Panels that keep their open state between windows (Vector art)
+            // close again with the button that opened them.
             for c in s.clicks.iter().rev() {
                 h.click(c);
             }

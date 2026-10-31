@@ -35,7 +35,6 @@ pub enum Panel {
     Sound,
     Scopes,
     Review,
-    Record,
     /// The cutting room's lists: timeline index, checks, takes, sequences, script.
     Editorial,
     /// The Assistant: its conversations, steps and composer.
@@ -43,7 +42,7 @@ pub enum Panel {
 }
 
 impl Panel {
-    pub const ALL: [Panel; 10] = [Panel::Library, Panel::Viewer, Panel::Inspector, Panel::Timeline, Panel::Sound, Panel::Scopes, Panel::Review, Panel::Record, Panel::Editorial, Panel::Ai];
+    pub const ALL: [Panel; 9] = [Panel::Library, Panel::Viewer, Panel::Inspector, Panel::Timeline, Panel::Sound, Panel::Scopes, Panel::Review, Panel::Editorial, Panel::Ai];
 
     /// The name people see (English; translated where it is shown).
     pub fn name(self) -> &'static str {
@@ -55,7 +54,6 @@ impl Panel {
             Panel::Sound => "Sound",
             Panel::Scopes => "Scopes",
             Panel::Review => "Review",
-            Panel::Record => "Record",
             Panel::Editorial => "Editorial",
             Panel::Ai => "Assistant",
         }
@@ -71,7 +69,6 @@ impl Panel {
             Panel::Sound => "sound",
             Panel::Scopes => "scopes",
             Panel::Review => "review",
-            Panel::Record => "record",
             Panel::Editorial => "editorial",
             Panel::Ai => "ai",
         }
@@ -100,7 +97,6 @@ impl Panel {
             Panel::Sound => Vec2::new(360.0, TIMELINE_MIN),
             Panel::Scopes => Vec2::new(240.0, 180.0),
             Panel::Review => Vec2::new(300.0, 200.0),
-            Panel::Record => Vec2::new(320.0, 220.0),
             Panel::Editorial => Vec2::new(320.0, 220.0),
             Panel::Ai => Vec2::new(300.0, 320.0),
         }
@@ -117,7 +113,6 @@ impl Panel {
             Panel::Timeline | Panel::Sound => Vec2::new(800.0, 320.0),
             Panel::Scopes => Vec2::new(320.0, 260.0),
             Panel::Review => Vec2::new(380.0, 320.0),
-            Panel::Record => Vec2::new(420.0, 360.0),
             Panel::Editorial => Vec2::new(460.0, 520.0),
             Panel::Ai => Vec2::new(420.0, 640.0),
         }
@@ -131,7 +126,7 @@ impl Panel {
     /// Panels that can also be floated in a window of their own, by choice
     /// ("Float in a window"): they open docked, never over the editor.
     pub fn floats(self) -> bool {
-        matches!(self, Panel::Review | Panel::Record | Panel::Editorial)
+        matches!(self, Panel::Review | Panel::Editorial)
     }
 
     /// Panels that can pop out into a window of the system's own (another
@@ -722,10 +717,10 @@ impl Tree {
             Panel::Sound if self.is_open(Panel::Timeline) => (Some(Panel::Timeline), Zone::Right),
             Panel::Sound => (None, Zone::Bottom),
             // The browser zone holds the tools that bring things in: the AI
-            // editor, the cutting room's lists and Record (the AI editor used
-            // to be a Library section).
-            Panel::Ai | Panel::Editorial | Panel::Record if self.is_open(Panel::Library) => (Some(Panel::Library), Zone::Tab),
-            Panel::Ai | Panel::Editorial | Panel::Record => (Some(Panel::Viewer), Zone::Left),
+            // editor and the cutting room's lists (the AI editor used to be a
+            // Library section).
+            Panel::Ai | Panel::Editorial if self.is_open(Panel::Library) => (Some(Panel::Library), Zone::Tab),
+            Panel::Ai | Panel::Editorial => (Some(Panel::Viewer), Zone::Left),
             // Review notes, versions and the team join the Inspector's zone.
             Panel::Review if self.is_open(Panel::Inspector) => (Some(Panel::Inspector), Zone::Tab),
             // Scopes beside the picture (the Viewer keeps its minimum width).
