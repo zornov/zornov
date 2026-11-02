@@ -8,7 +8,7 @@
 #   docker run --rm -it -v "$PWD:/work" zornov-linux cargo test --workspace
 #
 # The base is pinned by digest; update the tag and digest together.
-FROM rust:1.99.1-trixie@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc
+FROM rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137
 
 # Package versions follow the pinned base image (exact apt versions break
 # the build as soon as Debian ships a security fix).
