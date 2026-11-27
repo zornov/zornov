@@ -171,10 +171,15 @@ fn main() {
             }
             use std::io::Write;
             let dir = locales_dir();
-            let mut en = std::fs::OpenOptions::new().append(true).open(format!("{dir}/en.ftl")).expect("en.ftl");
-            write!(en, "{text}").expect("write en.ftl");
-            let mut pe = std::fs::OpenOptions::new().append(true).create(true).open(format!("{dir}/pending.txt")).expect("pending.txt");
-            write!(pe, "{pending}").expect("write pending.txt");
+            // A file that does not end in a newline would swallow the first new line.
+            let append = |name: &str, add: &str| {
+                let path = format!("{dir}/{name}");
+                let sep = if std::fs::read_to_string(&path).is_ok_and(|have| !have.is_empty() && !have.ends_with('\n')) { "\n" } else { "" };
+                let mut f = std::fs::OpenOptions::new().append(true).create(true).open(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+                write!(f, "{sep}{add}").unwrap_or_else(|e| panic!("write {name}: {e}"));
+            };
+            append("en.ftl", &text);
+            append("pending.txt", &pending);
             eprintln!("{count} message(s) added to en.ftl and pending.txt");
         }
         Some("--todo") => {
