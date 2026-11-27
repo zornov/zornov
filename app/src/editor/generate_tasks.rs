@@ -433,9 +433,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
         if Button::primary("Run").icon(Icon::Sparkle).show(ui).clicked() {
             match args_of(app, &f).and_then(|a| start(app, a)) {
                 Ok(()) => feedback::done(&ctx, crate::i18n::tf(format!("{} started", TASKS[f.task.min(TASKS.len() - 1)].1))),
-                Err(e) => {
-                    kit::push_as(&ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
-                }
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
             };
         }
     }
@@ -451,9 +449,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, w: f32) {
         a["at"] = json!(app.editor.playhead as f64 / 1e6);
         match start(app, a) {
             Ok(()) => feedback::done(&ctx, if vary { "Making a variation" } else { "Making it again" }),
-            Err(e) => {
-                kit::push_as(&ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
-            }
+            Err(e) => feedback::failed(&ctx, &app.doc, &e),
         };
     }
     ctx.data_mut(|d| d.insert_temp(form_id(), f));

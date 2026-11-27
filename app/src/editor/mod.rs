@@ -372,9 +372,10 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
 
 /// Whether a message in `doc.error` stays until dismissed. Most are an edit
 /// the model refused (a locked lane, a bad value): those fade. A save that
-/// kept the project but lost part of its safety net must not.
+/// kept the project but lost part of its safety net must not, nor a new
+/// project that could not be saved at all.
 fn error_lasts(msg: &str) -> bool {
-    msg.starts_with("Saved, but ") || msg.starts_with("The project was also saved elsewhere")
+    msg.starts_with("Saved, but ") || msg.starts_with("The project was also saved elsewhere") || msg.ends_with(crate::files::NOT_SAVED)
 }
 
 fn toasts(app: &mut StudioApp, ctx: &egui::Context) {
@@ -1065,6 +1066,7 @@ mod edit_flow_tests {
         assert!(!error_lasts("Not enough media: no handles"));
         assert!(error_lasts("Saved, but the undo history could not be kept: disk full"));
         assert!(error_lasts("The project was also saved elsewhere; both changed clip 3 and this one's change was kept"));
+        assert!(error_lasts(&format!("Could not create the folder: access denied{}", crate::files::NOT_SAVED)));
     }
 
     #[test]

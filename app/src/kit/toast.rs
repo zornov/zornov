@@ -66,8 +66,14 @@ impl Queue {
         id
     }
 
-    /// A quiet notification: kept in the history, never shown.
+    /// A quiet notification: kept in the history, never shown. A repeat of
+    /// the newest one collapses into it.
     fn note(&mut self, now: f64, text: String, icon: Option<Icon>) -> u64 {
+        if let Some(t) = self.history.last_mut().filter(|t| t.text == text && t.action.is_none() && t.level == Level::Info) {
+            t.count += 1;
+            t.born = now;
+            return t.id;
+        }
         self.next += 1;
         let id = self.next;
         self.history.push(Toast { text, action: None, icon, born: now, id, level: Level::Info, count: 1 });
@@ -364,7 +370,9 @@ mod tests {
         assert!(q.items.is_empty());
         assert_eq!(q.history.len(), 1);
         assert_eq!(q.history[0].text, "Moved clip");
-        // Past the history size the oldest notes drop out.
+        // A repeat collapses; past the history size the oldest notes drop out.
+        let id = q.note(1.0, "Moved clip".into(), Some(Icon::Check));
+        assert_eq!((q.history.len(), q.history[0].id, q.history[0].count), (1, id, 2));
         for i in 0..30 {
             q.note(i as f64, format!("Note {i}"), None);
         }

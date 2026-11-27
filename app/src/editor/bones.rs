@@ -303,9 +303,7 @@ const NO_BONES: &str = "No bones yet. Build them from the silhouette or draw the
 fn report(ctx: &egui::Context, doc: &crate::doc::Doc, r: Result<(), String>, said: &str) {
     match r {
         Ok(()) => feedback::done(ctx, said),
-        Err(e) => {
-            crate::kit::push_as(ctx, feedback::plain(doc, &e), None, Some(crate::icons::Icon::Warning), crate::kit::Level::Info);
-        }
+        Err(e) => feedback::failed(ctx, doc, &e),
     }
 }
 
@@ -463,9 +461,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                     let n = app.doc.model.active().clip(m::ClipId(id as u64)).and_then(|c| c.skeleton.as_ref()).map_or(0, |s| s.bones.len());
                     feedback::done(&ctx, crate::i18n::tf(format!("{} skeleton built: {n} bones", KIND_NAMES[kind])));
                 }
-                Err(e) => {
-                    crate::kit::push_as(&ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), crate::kit::Level::Info);
-                }
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
             }
         }
         // The canvas tool.
@@ -523,9 +519,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             let dur = mc.duration as f64 / SEC as f64 - from;
             match ch::act(&mut app.doc, id, &[MOTIONS[act].to_owned()], from, dur, 1.0) {
                 Ok(_) => feedback::done(&ctx, crate::i18n::tf(format!("{} keyed from the playhead", MOTION_NAMES[act]))),
-                Err(e) => {
-                    crate::kit::push_as(&ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), crate::kit::Level::Info);
-                }
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
             }
         }
         ui.data_mut(|d| d.insert_temp(act_id, act));
@@ -608,9 +602,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
         if !split && Button::secondary("Split into parts").icon(Icon::Intersect).show(ui).on_hover_text(crate::i18n::shown("Head, torso, arms, legs, tail, eyes and mouth onto their own layers, each following its bone")).clicked() {
             match ch::split_layers(&mut app.doc, id, at, true) {
                 Ok(parts) => feedback::done(&ctx, crate::i18n::tf(format!("Split into {} part layers", parts.len()))),
-                Err(e) => {
-                    crate::kit::push_as(&ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), crate::kit::Level::Info);
-                }
+                Err(e) => feedback::failed(&ctx, &app.doc, &e),
             }
         }
         for (set, options) in ch::swap_sets(&app.doc, id) {

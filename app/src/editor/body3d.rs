@@ -30,7 +30,7 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ops: Vec<Value>, label: &str) -
     match r {
         Ok(v) => Some(v.to_string()),
         Err(e) => {
-            kit::push_as(ctx, feedback::plain(&app.doc, &e), None, Some(crate::icons::Icon::Warning), kit::Level::Info);
+            feedback::failed(ctx, &app.doc, &e);
             None
         }
     }
