@@ -5,8 +5,6 @@
 //! unpadded exactly (also for widths that are not 256-byte aligned), the
 //! exact path returns the frame asked for, and buffers are pooled.
 
-use std::time::Duration;
-
 use studio_render::GpuContext;
 use studio_render::realtime::readback::{RING, Readback, padded_row};
 use studio_render::realtime::{Options, Renderer, frame::View};
@@ -97,8 +95,8 @@ fn the_ring_returns_the_frame_before_with_exact_pixels() {
             // Spot checks with literal values: the last pixel of the last row.
             let last = &out[out.len() - 4..];
             assert_eq!(last, &[(expect * 40 % 256) as u8, ((w - 1) * 3) as u8, ((h - 1) * 50) as u8, 255]);
-            // A frame's worth of pacing, so the previous frame has finished.
-            std::thread::sleep(Duration::from_millis(20));
+            // A GPU that keeps up with the frame rate: the previous frame has finished.
+            let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
         }
     }
 }
@@ -141,7 +139,8 @@ fn the_ring_never_waits_once_warm_and_pools_its_buffers() {
         upload(&ctx, &tex, n, w, h);
         copy_ring(&ctx, &mut rb, &tex, w, h);
         rb.ring_latest(&ctx.device, &mut out).unwrap();
-        std::thread::sleep(Duration::from_millis(5));
+        // A GPU that keeps up with the frame rate.
+        let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
     }
     let s = rb.stats();
     assert_eq!(s.blocking_waits, warm.blocking_waits, "no blocking wait in the steady state");
