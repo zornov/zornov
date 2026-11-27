@@ -368,6 +368,8 @@ fn list(ui: &mut egui::Ui, all: &[Entry], shown: &[usize], st: &mut State, pick:
         return;
     }
     egui::ScrollArea::vertical().id_salt("palette-list").max_height(ROWS_SHOWN as f32 * ROW_H).auto_shrink([false, true]).show(ui, |ui| {
+        // Rows touch: the window's height counts ROW_H per row.
+        ui.spacing_mut().item_spacing.y = 0.0;
         for (n, &i) in shown.iter().enumerate() {
             let e = &all[i];
             let (r, resp) = ui.allocate_exact_size(Vec2::new(width, ROW_H), Sense::click());
@@ -574,6 +576,6 @@ mod tests {
         type_text(&mut h, "delete");
         h.frames(2);
         let cut: Vec<_> = h.cut_text().into_iter().collect();
-        assert!(cut.is_empty(), "{} clipped", cut.len());
+        assert!(cut.is_empty(), "{} clipped: {cut:#?}", cut.len());
     }
 }
