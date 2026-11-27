@@ -62,6 +62,14 @@ impl Driver {
         assert!(!err, "{name} {tag}: {said} {r}");
         (said, took)
     }
+
+    /// Saves the project as a new folder at `dir`. The `save` tool asks first
+    /// when given a path, and headless MCP has no window to ask in, so the
+    /// test saves through the service the tool calls.
+    fn save_to(&mut self, dir: &std::path::Path) {
+        let saved = services::project::save(&mut self.s.doc, Some(dir)).expect("save the project");
+        println!("save: {}", saved.display());
+    }
 }
 
 #[test]
@@ -130,8 +138,7 @@ fn math_showcase() {
     let stats = studio_render::direct::last_stats();
     d.call("see", json!({}), "see");
     d.call("check", json!({}), "check");
-    let project = out.join("Math showcase");
-    d.call("save", json!({"path": project.display().to_string()}), "save");
+    d.save_to(&out.join("Math showcase"));
 
     let mut table = String::from("shape | mesh build (s) | triangles | direct build (s)\n");
     for (name, tris, a, b) in &cost {
@@ -245,8 +252,7 @@ fn math_film() {
         d.call("frame", json!({"t": t, "detail": "full"}), &format!("key{k}"));
     }
     d.call("contact_sheet", json!({"start": 0.2, "end": end - 0.2, "count": 12, "detail": "full"}), "sheet");
-    let project = out.join("Math shapes");
-    d.call("save", json!({"path": project.display().to_string()}), "save");
+    d.save_to(&out.join("Math shapes"));
     std::fs::write(out.join("log.txt"), &d.log).unwrap();
     if std::env::var_os("MATH_FILM_EXPORT").is_some() {
         d.call("check", json!({}), "check");
