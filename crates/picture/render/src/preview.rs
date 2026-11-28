@@ -49,6 +49,9 @@ pub struct PreviewFrame {
     pub rgba: Vec<u8>,
     /// Wall time the render took.
     pub render_time: Duration,
+    /// A picture in it was not decoded in time (a stand-in or nothing was
+    /// drawn): the request is rendered again unless a newer one is waiting.
+    pub provisional: bool,
 }
 
 struct Shared {
@@ -114,8 +117,8 @@ impl Previewer {
                         EncodedPixels::Rgba8(v) => v,
                         EncodedPixels::Rgba16(v) => v.iter().map(|x| (x >> 8) as u8).collect(),
                     };
-                    let out = PreviewFrame { sequence: req.sequence, time: req.time, width: e.width, height: e.height, rgba, render_time: start.elapsed() };
                     let provisional = crate::source::take_provisional() && !req.fast;
+                    let out = PreviewFrame { sequence: req.sequence, time: req.time, width: e.width, height: e.height, rgba, render_time: start.elapsed(), provisional };
                     let mut g = worker.pending.lock().unwrap_or_else(|e| e.into_inner());
                     g.rendered += 1;
                     g.latest = Some(out);
