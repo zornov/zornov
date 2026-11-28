@@ -14,9 +14,10 @@ use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use studio_live::av::{AvConfig, AvEncoder, Packet};
-use studio_live::source::{AudioSource, TestAudio, TestVideo, VideoSource};
-use studio_live::ts::TsMuxer;
+use studio_encode::{aac, h264};
+use ts_mux::{Packet, TsMuxer};
+
+mod ts_mux;
 
 // ---- a local web server ----
 
@@ -180,30 +181,67 @@ struct Clip {
 
 const FPS: u32 = 30;
 
-fn make_clip(w: u32, h: u32, secs: u32, seed: &str) -> Clip {
-    let mut cfg = AvConfig::new(w, h, FPS as f64);
-    cfg.gop_secs = 1.0;
-    let mut enc = AvEncoder::new(cfg).unwrap();
-    let mut v = TestVideo::from_spec(seed, w, h, FPS as f64).unwrap();
-    let mut a = TestAudio::from_spec("tone:440", 48000).unwrap();
-    let mut video = Vec::new();
-    let mut audio = Vec::new();
-    for n in 0..secs * FPS {
-        if let Packet::Video { data, keyframe, pts_us } = enc.push_frame(&v.frame_at((n as f64 * 1e6 / FPS as f64) as i64).unwrap()) {
-            video.push((pts_us, data, keyframe));
-        }
-        for p in enc.push_audio(&a.read(1600)) {
-            if let Packet::Audio { data, pts_us } = p {
-                audio.push((pts_us, data));
+/// The test picture for frame `n`: colour bars, or a counter (the frame
+/// number in blocks along the top and a box that moves).
+fn picture(pattern: &str, w: u32, h: u32, n: u32) -> Vec<u8> {
+    const BARS: [[u8; 3]; 7] = [[191, 191, 191], [191, 191, 0], [0, 191, 191], [0, 191, 0], [191, 0, 191], [191, 0, 0], [0, 0, 191]];
+    const BITS: u32 = 16;
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let mut fill = |x0: u32, y0: u32, x1: u32, y1: u32, c: [u8; 3]| {
+        for y in y0..y1.min(h) {
+            for x in x0..x1.min(w) {
+                let i = ((y * w + x) * 4) as usize;
+                rgba[i..i + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
             }
         }
-    }
-    for p in enc.flush() {
-        if let Packet::Audio { data, pts_us } = p {
-            audio.push((pts_us, data));
+    };
+    if pattern == "bars" {
+        for x in 0..w {
+            fill(x, 0, x + 1, h, BARS[(x * 7 / w) as usize]);
         }
+    } else {
+        fill(0, 0, w, h, [40, 40, 40]);
+        let cell = (w / BITS).max(1);
+        for b in 0..BITS {
+            let c = if n >> b & 1 == 1 { [255, 255, 255] } else { [0, 0, 0] };
+            fill(b * cell, 0, (b + 1) * cell, (h / 8).max(4), c);
+        }
+        let bw = (w / 8).max(4);
+        let x = n * 7 % (w - bw);
+        fill(x, h / 2, x + bw, h / 2 + (h / 6).max(2), [250, 220, 40]);
     }
-    Clip { w: enc.cfg.width, h: enc.cfg.height, sps: enc.sps().to_vec(), pps: enc.pps().to_vec(), asc: enc.audio_info().asc, video, audio }
+    rgba
+}
+
+/// `secs` of `pattern` with a 440 Hz tone, coded as H.264 (a keyframe each
+/// second) and 48 kHz stereo AAC.
+fn make_clip(w: u32, h: u32, secs: u32, pattern: &str) -> Clip {
+    const RATE: u32 = 48_000;
+    let (w, h) = (w & !1, h & !1);
+    let mut vc = h264::Config::new(w, h, FPS, 1);
+    vc.bitrate_kbps = h264::recommended_kbps(w, h, FPS as f64).min(12_000);
+    vc.gop = FPS;
+    vc.rate_mode = h264::RateMode::Vbr;
+    let mut venc = h264::Encoder::new(vc).unwrap();
+    let mut aenc = aac::Encoder::new(aac::Config { sample_rate: RATE, channels: 2, bitrate: 160_000 }).unwrap();
+    let per_frame = (RATE / FPS) as usize;
+    let mut video = Vec::new();
+    let mut units = Vec::new();
+    for n in 0..secs * FPS {
+        let f = venc.encode_rgba(&picture(pattern, w, h, n), w, h);
+        video.push(((n as f64 * 1e6 / FPS as f64).round() as i64, f.data, f.keyframe));
+        let tone: Vec<f32> = (0..per_frame)
+            .flat_map(|i| {
+                let t = (n as usize * per_frame + i) as f32 / RATE as f32;
+                let s = 0.5 * (t * 440.0 * std::f32::consts::TAU).sin();
+                [s, s]
+            })
+            .collect();
+        units.extend(aenc.push(&tone));
+    }
+    units.extend(aenc.flush());
+    let audio = units.into_iter().enumerate().map(|(i, data)| ((i as f64 * aac::FRAME as f64 * 1e6 / RATE as f64).round() as i64, data)).collect();
+    Clip { w, h, sps: venc.sps().to_vec(), pps: venc.pps().to_vec(), asc: aenc.track_info().asc, video, audio }
 }
 
 /// MPEG transport stream segments of `seg_secs` each (video and sound).

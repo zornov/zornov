@@ -125,7 +125,7 @@ pub fn show(ctx: &egui::Context, area: Rect, bottom_offset: f32) -> Option<u64> 
 }
 
 /// Draw the toasts over the whole window, for screens that have no viewer
-/// (Start, Paint, ...). Call once per frame from the app; returns a clicked action's id.
+/// (Start, Gallery, ...). Call once per frame from the app; returns a clicked action's id.
 pub fn show_overlay(ctx: &egui::Context) -> Option<u64> {
     show_in(ctx, ctx.content_rect(), 24.0)
 }

@@ -162,13 +162,12 @@ pub enum Region {
     Sound,
     Scopes,
     Review,
-    Record,
     Editorial,
     Ai,
 }
 
 impl Region {
-    pub const ALL: [Region; 10] = [Region::Library, Region::Viewer, Region::Inspector, Region::Timeline, Region::Sound, Region::Scopes, Region::Review, Region::Record, Region::Editorial, Region::Ai];
+    pub const ALL: [Region; 9] = [Region::Library, Region::Viewer, Region::Inspector, Region::Timeline, Region::Sound, Region::Scopes, Region::Review, Region::Editorial, Region::Ai];
     pub fn name(self) -> &'static str {
         match self {
             Region::Library => "Library",
@@ -178,7 +177,6 @@ impl Region {
             Region::Sound => "Sound",
             Region::Scopes => "Scopes",
             Region::Review => "Feedback",
-            Region::Record => "Record",
             Region::Editorial => "Editorial",
             Region::Ai => "Assistant",
         }

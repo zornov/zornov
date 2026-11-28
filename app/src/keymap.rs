@@ -60,8 +60,8 @@ pub fn parse(s: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, key))
 }
 
-/// Every action with keys: the Settings table. (⇧⌘P stays Paint's, in
-/// `FIXED`, so the command palette is ⌥⌘P; ⌘K stays the Assistant.)
+/// Every action with keys: the Settings table. (The command palette is
+/// ⌥⌘P; ⌘K stays the Assistant.)
 fn table() -> impl Iterator<Item = &'static (&'static str, &'static str, &'static str)> {
     SHORTCUTS.iter()
 }
@@ -190,7 +190,6 @@ pub const FIXED: &[(&str, &str, &str)] = &[
     ("⌘S", "Save", "app.rs"),
     ("⇧⌘S", "Save as", "app.rs"),
     ("⌘I", "Import media", "app.rs"),
-    ("⇧⌘P", "Paint", "app.rs"),
     ("⌘\\", "Maximise panel", "editor/dock_ui.rs"),
     ("F1", "Search help", "app.rs"),
     ("⌘L", "Loop playback", "editor/viewer.rs"),

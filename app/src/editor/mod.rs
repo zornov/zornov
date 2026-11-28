@@ -41,7 +41,6 @@ pub mod match_colour;
 pub mod in_scene;
 #[cfg(feature = "render")]
 pub mod slowmo;
-pub(crate) mod capture;
 pub(crate) mod xform;
 mod keys;
 pub(crate) mod graph;
@@ -149,7 +148,7 @@ pub struct EditorState {
     pub maximised: Option<crate::dock::Panel>,
     /// The open flags of the panels that also show undocked, as the dock
     /// last left them (see `dock_ui::sync_flags`).
-    pub dock_flags: [Option<bool>; 5],
+    pub dock_flags: [Option<bool>; 4],
     /// A popped-out panel whose window should come forward (⌘K on the AI
     /// editor in its own window).
     pub focus_window: Option<crate::dock::Panel>,
@@ -205,7 +204,7 @@ impl EditorState {
             dock: prefs.dock.clone().map_or_else(|| crate::dock::Tree::from_layout(l), crate::dock::Tree::sanitized),
             dock_layout: None,
             dock_drag: None,
-            dock_flags: [None; 5],
+            dock_flags: [None; 4],
             maximised: None,
             dock_undo: None,
             focus_window: None,
@@ -339,7 +338,6 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         let r = full.shrink(GAP);
         panel(ui, r);
         viewer::show(app, ui, r);
-        capture::show(app, &ctx);
         vector::show(app, &ctx);
         cutting::panel::show(app, &ctx);
         toasts(app, &ctx);
@@ -358,7 +356,6 @@ pub fn show(app: &mut StudioApp, ui: &mut egui::Ui) {
         inspector::sheet(app, ui, body);
     }
     // Windows of their own (they stay when the Viewer is a tab behind another).
-    capture::show(app, &ctx);
     vector::show(app, &ctx);
     cutting::panel::show(app, &ctx);
     // The layout persists as it is now (and in the old fields for an older Studio).
@@ -502,8 +499,6 @@ pub enum Action {
     ProjectSettings,
     /// File ▸ Settings….
     Settings,
-    /// Project ▸ Production….
-    Production,
     /// Project ▸ Project health….
     ProjectHealth,
     /// View ▸ Maximise panel.
@@ -631,7 +626,6 @@ pub fn run(app: &mut StudioApp, ctx: &egui::Context, action: Action) {
             ctx.data_mut(|d| d.insert_temp(egui::Id::unique("details-modify"), true));
         }
         Action::Settings => app.overlay = Overlay::Settings,
-        Action::Production => app.overlay = Overlay::Production,
         Action::ProjectHealth => app.overlay = Overlay::Library,
         Action::Maximise => dock_ui::toggle_maximised(app, ctx),
         Action::Help => crate::help::open(app, ctx, None),

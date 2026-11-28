@@ -130,49 +130,10 @@ pub fn saved_project(h: &mut Harness) {
     h.app.doc.folder = Some(f);
 }
 
-/// A short screenplay with long scene headings and names, broken down,
-/// scheduled and with tasks, so every Production tab has rows to show.
-pub fn production_script(h: &mut Harness) {
-    saved_project(h);
-    let script = "INT. THE VERY LONG CORRIDOR OUTSIDE THE ORBITAL STATION'S HYDROPONICS DECK - NIGHT\n\nMARGUERITE DELACROIX-WHITFIELD walks with a lantern, a battered suitcase and a stack of letters.\n\nMARGUERITE DELACROIX-WHITFIELD\nWe should have left before the storm.\n\nEXT. RAILWAY PLATFORM ON THE EDGE OF THE SALT FLATS AT THE END OF THE WORLD - DAY\n\nBARTHOLOMEW OKONKWO-HARRINGTON waits beside a vintage motorcycle with a sidecar and two dogs.\n\nBARTHOLOMEW OKONKWO-HARRINGTON\nYou came back.\n";
-    let placeholder = crate::doc::Doc::new(h.app.doc.model.clone());
-    let mut session = crate::agent::Session::new(std::mem::replace(&mut h.app.doc, placeholder));
-    session.home = session.doc.folder.as_ref().map(|f| f.root().to_path_buf());
-    let calls = [
-        ("story", serde_json::json!({"do": "import", "text": script, "format": "fountain"})),
-        ("production", serde_json::json!({"do": "breakdown"})),
-        ("production", serde_json::json!({"do": "schedule", "start": "2026-11-02"})),
-        ("production", serde_json::json!({"do": "asset_tasks"})),
-    ];
-    for (tool, args) in calls {
-        if let Err(e) = session.call(tool, &args) {
-            eprintln!("survey setup: {tool} {args}: {e}");
-        }
-    }
-    h.app.doc = session.doc;
-    h.app.overlay = Overlay::Production;
-}
-
 /// Review, opened as a panel (View > Panels, or the Review workspace).
 fn open_review(h: &mut Harness) {
     let ctx = h.ctx.clone();
     crate::editor::dock_ui::open_panel(&mut h.app, &ctx, crate::dock::Panel::Review, false);
-}
-
-/// Paint with a picture open and every side section unfolded.
-pub fn paint_picture(h: &mut Harness) {
-    let _ = crate::paint::apply(&[serde_json::json!({"op": "new", "name": "Overflow", "width": 683, "height": 1024, "background": "white"})]);
-    for _ in 0..200 {
-        h.frames(1);
-        if crate::screens::paint::idle() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    h.frames(4);
-    for section in ["Adjustments", "Animation", "History"] {
-        h.click(section);
-    }
 }
 
 /// Every surface the survey visits: screens, overlays, panels.
@@ -202,7 +163,6 @@ pub fn surfaces() -> Vec<Surface> {
         s("compositor", ED, select_first_clip, &["Nodes"]),
         s("graph", ED, select_first_clip, &["Curves"]),
         s("vector", ED, nothing, &["Vector art: draw logos, icons, illustrations and infographics"]),
-        s("capture", ED, nothing, &["Record, voice-over, prompter and live"]),
         s("viewport-3d", ED, nothing, &["3D workspace"]),
         s("scopes", ED, nothing, &["Scopes"]),
         s("mograph", ED, nothing, &["Motion graphics: templates, shapes, charts, 3D text"]),
@@ -215,17 +175,8 @@ pub fn surfaces() -> Vec<Surface> {
         }, &[]),
         s("export", ED, |h| h.app.overlay = Overlay::Export, &[]),
         s("settings", ED, |h| h.app.overlay = Overlay::Settings, &[]),
-        s("production", ED, |h| h.app.overlay = Overlay::Production, &[]),
-        s("production-saved", ED, |h| {
-            saved_project(h);
-            h.app.overlay = Overlay::Production;
-        }, &[]),
-        s("production-script", ED, production_script, &[]),
         s("help", ED, |h| h.app.overlay = Overlay::Help, &[]),
         s("gallery", &["--screen", "gallery"], nothing, &[]),
-        s("paint", &["--screen", "paint"], nothing, &[]),
-        s("paint-picture", &["--screen", "paint"], paint_picture, &[]),
-        s("paint-commands", &["--screen", "paint"], paint_picture, &["Commands…"]),
     ]
 }
 
@@ -282,7 +233,6 @@ pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> 
             if only.is_some_and(|o| !s.name.starts_with(o)) {
                 continue;
             }
-            let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
             let _viewport = crate::editor::viewport::test_lock();
             let mut h = Harness::new(s.args).sized(w, hh);
             (s.setup)(&mut h);
@@ -311,11 +261,8 @@ pub fn survey(dir: Option<&std::path::Path>, only: Option<&str>) -> Vec<String> 
                     }
                 }
             }
-            if s.name.starts_with("paint") {
-                let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
-            }
-            // Panels that keep their open state between windows (Record,
-            // Vector art) close again with the button that opened them.
+            // Panels that keep their open state between windows (Vector art)
+            // close again with the button that opened them.
             for c in s.clicks.iter().rev() {
                 h.click(c);
             }
@@ -349,7 +296,7 @@ fn ui_overflow_survey() {
 /// Surfaces held to "nothing cut off, nothing drawn over" in the fast
 /// tests. (Library ▸ Rights reads the shared asset database, which one
 /// other test in this binary owns; the survey checks it on a scratch copy.)
-const CHECKED: &[&str] = &["start", "editor", "editor-clip", "insp-video-animation", "insp-title-animation", "insp-audio", "export", "settings", "sound", "review-saved", "production-script", "help", "paint-picture", "editorial"];
+const CHECKED: &[&str] = &["start", "editor", "editor-clip", "insp-video-animation", "insp-title-animation", "insp-audio", "export", "settings", "sound", "review-saved", "help", "editorial"];
 
 #[test]
 fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
@@ -363,7 +310,6 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
             std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
-                        let _paint = s.name.starts_with("paint").then(crate::paint::test_lock);
                         let _viewport = crate::editor::viewport::test_lock();
                         let mut h = Harness::new(s.args).sized(w, hh);
                         (s.setup)(&mut h);
@@ -372,9 +318,6 @@ fn nothing_is_cut_off_or_drawn_over_at_small_and_large_sizes() {
                             assert!(h.click(c), "{}: {c} can be clicked", s.name);
                         }
                         let (cuts, over) = (h.cut_text(), h.overlaps());
-                        if s.name.starts_with("paint") {
-                            let _ = crate::paint::apply(&[serde_json::json!({"op": "close"})]);
-                        }
                         for c in s.clicks.iter().rev() {
                             h.click(c);
                         }

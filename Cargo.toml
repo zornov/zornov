@@ -41,8 +41,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.studio-mp4]
 opt-level = 3
-[profile.dev.package.studio-live]
-opt-level = 3
 # Sound synthesis renders seconds of audio per test.
 [profile.dev.package.studio-synth]
 opt-level = 3
@@ -61,56 +59,6 @@ opt-level = 3
 opt-level = 3
 
 
-# The pixel engine (crates/pixel-*) and the canvas run optimised in dev and
-# test builds too: painting, filters and compositing are pixel loops.
-[profile.dev.package.studio-pixel-geom]
-opt-level = 3
-[profile.dev.package.studio-pixel-color]
-opt-level = 3
-[profile.dev.package.studio-pixel-cms]
-opt-level = 3
-[profile.dev.package.studio-pixel-raster]
-opt-level = 3
-[profile.dev.package.studio-pixel-doc]
-opt-level = 3
-[profile.dev.package.studio-pixel-ops]
-opt-level = 3
-[profile.dev.package.studio-pixel-psd]
-opt-level = 3
-[profile.dev.package.studio-pixel-codecs]
-opt-level = 3
-[profile.dev.package.studio-pixel-heif]
-opt-level = 3
-[profile.dev.package.studio-pixel-raw]
-opt-level = 3
-[profile.dev.package.studio-pixel-affinity]
-opt-level = 3
-[profile.dev.package.studio-pixel-compose]
-opt-level = 3
-[profile.dev.package.studio-pixel-paint]
-opt-level = 3
-[profile.dev.package.studio-pixel-algo]
-opt-level = 3
-[profile.dev.package.studio-pixel-io]
-opt-level = 3
-[profile.dev.package.studio-pixel-text]
-opt-level = 3
-[profile.dev.package.studio-pixel-vector]
-opt-level = 3
-[profile.dev.package.studio-pixel-format]
-opt-level = 3
-[profile.dev.package.studio-pixel-plugins]
-opt-level = 3
-[profile.dev.package.studio-pixel-engine]
-opt-level = 3
-[profile.dev.package.studio-pixel-gpu]
-opt-level = 3
-[profile.dev.package.studio-pixel-docpath]
-opt-level = 3
-[profile.dev.package.studio-pixel-tablet]
-opt-level = 3
-[profile.dev.package.studio-canvas]
-opt-level = 3
 # Neural networks (SAM, matting, speech), the AI features around them and
 # the sound mixer: model loading, inference and a long mix take minutes
 # unoptimised, and the cut-out, caption and export tests run them on real
