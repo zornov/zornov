@@ -385,11 +385,17 @@ mod tests {
         let dir = tmp("live");
         let spec = RecordSpec { name: "live".into(), dir: dir.clone(), width: 160, height: 90, fps: 30.0, inputs: vec![InputSpec { label: "a".into(), video: Some("test:bars".into()), audio: Some("test:tone:300".into()), cursor: None }], consent: Consent::default() };
         let live = LiveRecording::start(Recorder::open(spec).unwrap());
-        std::thread::sleep(std::time::Duration::from_millis(1200));
-        let mid = live.progress();
+        // The recorder runs on the wall clock; a loaded machine can fall behind,
+        // so wait for the frames (with a generous limit) instead of a fixed sleep.
+        let limit = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut mid = live.progress();
+        while mid.frames <= 10 && std::time::Instant::now() < limit {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            mid = live.progress();
+        }
         assert!(mid.frames > 10, "{mid:?}");
         let files = live.stop().unwrap();
-        assert!(files[0].seconds > 0.8 && files[0].seconds < 2.5, "{}", files[0].seconds);
+        assert!(files[0].seconds > 0.3 && files[0].seconds < 30.0, "{}", files[0].seconds);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

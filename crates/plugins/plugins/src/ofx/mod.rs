@@ -159,10 +159,26 @@ fn worker_program(env: Option<OsString>, exe: &Path, allow_env: bool) -> Result<
     Ok(verified_sibling(&dir.join("studio-ofx-worker"), dir).unwrap_or(exe))
 }
 
+static WORKER_PROGRAM: OnceLock<PathBuf> = OnceLock::new();
+
+/// Runs every worker of this process from `program`. For tests of this
+/// crate: they are built without debug assertions in release-like profiles,
+/// where `STUDIO_OFX_WORKER` is ignored, and the test program itself is
+/// not a worker.
+#[doc(hidden)]
+pub fn use_worker_program(program: PathBuf) {
+    let _ = WORKER_PROGRAM.set(program);
+}
+
 /// How to start a worker (see `worker_program`).
 fn worker_command(bundle: &Path) -> Result<Command, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("could not locate the OFX worker: {e}"))?;
-    let program = worker_program(std::env::var_os("STUDIO_OFX_WORKER"), &exe, cfg!(debug_assertions) || cfg!(test))?;
+    let program = match WORKER_PROGRAM.get() {
+        Some(p) => p.clone(),
+        None => {
+            let exe = std::env::current_exe().map_err(|e| format!("could not locate the OFX worker: {e}"))?;
+            worker_program(std::env::var_os("STUDIO_OFX_WORKER"), &exe, cfg!(debug_assertions) || cfg!(test))?
+        }
+    };
     let mut c = Command::new(program);
     c.arg("ofx-worker").arg(bundle);
     // `studio-ofx-worker` is a console program; the window must not get one.
