@@ -40,6 +40,9 @@ pub struct RenderView {
     pub last_ms: f32,
     /// The time of the picture on screen.
     pub shown_time: Option<i64>,
+    /// The picture on screen is waiting on decoding; the renderer sends it
+    /// again once the decoded pictures are in.
+    pub provisional: bool,
     /// Keep the shown frame's pixels (the scopes read them).
     pub keep_pixels: bool,
     /// The shown frame as RGBA8 (width, height, pixels, frame count),
@@ -387,7 +390,7 @@ impl RenderView {
         let cache = DecodeCache::new(512 << 20);
         let renderer = studio_render::best_renderer(Sources::new(registry.clone(), cache));
         let hit_sources = Sources::new(registry.clone(), DecodeCache::new(32 << 20));
-        Self { previewer: Previewer::new(renderer), registry, revision: None, seen: None, resets: 0, span: None, sequence: 0, asked: None, texture: None, frames: 0, last_ms: 0.0, shown_time: None, keep_pixels: false, last_pixels: None, ahead: None, dropping: 0, window: (0.0, 0), scene: None, hit_sources, view: None }
+        Self { previewer: Previewer::new(renderer), registry, revision: None, seen: None, resets: 0, span: None, sequence: 0, asked: None, texture: None, frames: 0, last_ms: 0.0, shown_time: None, provisional: false, keep_pixels: false, last_pixels: None, ahead: None, dropping: 0, window: (0.0, 0), scene: None, hit_sources, view: None }
     }
 
     /// Hand the current project to the renderer when it changed. Follows
@@ -517,8 +520,9 @@ impl RenderView {
                 self.show(ctx, f);
             }
         }
-        if !self.shown_time.is_some_and(|t| same(t, time)) || self.ahead.is_some() {
-            // Keep polling while a frame is on its way or waiting its turn.
+        if !self.shown_time.is_some_and(|t| same(t, time)) || self.ahead.is_some() || self.provisional {
+            // Keep polling while a frame is on its way, waiting its turn or
+            // being drawn again with its decoded pictures.
             ctx.request_repaint();
         }
         self.texture.as_ref().map(|t| t.id())
@@ -533,6 +537,7 @@ impl RenderView {
         }
         self.frames += 1;
         self.shown_time = Some(f.time);
+        self.provisional = f.provisional;
         self.last_ms = f.render_time.as_secs_f32() * 1000.0;
         self.last_pixels = self.keep_pixels.then(|| (f.width, f.height, Arc::new(f.rgba), self.frames));
     }

@@ -929,6 +929,11 @@ mod scripted {
         dir
     }
 
+    /// A path as the inside of a quoted script word (`\\` and `\"` are escapes there).
+    fn word(p: &std::path::Path) -> String {
+        p.display().to_string().replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
     fn session(out: &std::path::Path, extra: &[&str]) -> Session {
         let mut argv: Vec<String> = vec!["--ui-script".into(), "x".into(), "--ui-out".into(), out.display().to_string()];
         argv.extend(extra.iter().map(|s| s.to_string()));
@@ -984,7 +989,7 @@ mod scripted {
         let mut h = top_bar(1440.0);
         let at = bar_text(&mut h, "File").expect("the File menu");
         let mut s = session(&out, &["--size", "1440x900"]);
-        let script = format!("open \"{}\"\nframes 6\nshot before\nclick {} {}\nframes 4\nshot after\nhome\nshot home\n", dir.display(), at.center().x, at.center().y);
+        let script = format!("open \"{}\"\nframes 6\nshot before\nclick {} {}\nframes 4\nshot after\nhome\nshot home\n", word(&dir), at.center().x, at.center().y);
         let report = ui_script::run_text(&mut s, &script, &out, "test");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
         assert_eq!(report.shots.len(), 3);
@@ -1053,7 +1058,7 @@ mod scripted {
             eprintln!("no GPU here: {:?}", s.gpu_note);
             return;
         }
-        let report = ui_script::run_text(&mut s, &format!("open \"{}\"\nshot clip\n", dir.display()), &out, "test");
+        let report = ui_script::run_text(&mut s, &format!("open \"{}\"\nshot clip\n", word(&dir)), &out, "test");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
         assert!(!s.app.doc.project.clips.is_empty(), "a clip is on the timeline");
         assert!(s.viewer_frames() > 0, "the preview renderer sent the viewer a frame");

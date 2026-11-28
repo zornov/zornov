@@ -78,6 +78,12 @@ pub trait MediaSource: Send {
     fn nearest_sync(&self, index: u64) -> u64 {
         index
     }
+
+    /// Whether the last `decode_to(index)` stopped waiting while the frame
+    /// is still being decoded on another thread, so asking again gets it.
+    fn decoding(&self, _index: u64) -> bool {
+        false
+    }
 }
 
 thread_local! {
@@ -427,6 +433,10 @@ impl MediaSource for ProxySource {
     fn nearest_sync(&self, index: u64) -> u64 {
         self.inner.nearest_sync(index)
     }
+
+    fn decoding(&self, index: u64) -> bool {
+        self.inner.decoding(index)
+    }
 }
 
 /// Opens a file as a source by sniffing its contents.
@@ -648,10 +658,13 @@ impl Sources {
         if ok && wanted.is_some() {
             return wanted;
         }
+        let late = src.decoding(index);
         // Not decoded in time (or superseded): the nearest decoded picture
-        // stands in, and the caller is told to draw again.
+        // stands in, and the caller is told to draw again. Before the first
+        // picture of a slow decoder is out nothing stands in, and the frame
+        // must still be drawn again once it is.
         let standin = self.cache.nearest(key, index);
-        if standin.is_some() {
+        if standin.is_some() || late {
             PROVISIONAL.with(|p| p.set(true));
         }
         standin
@@ -1660,6 +1673,23 @@ mod tests {
         assert!(s.failure(MediaKey(1)).is_some());
         assert!(s.picture(MediaKey(2), 0).is_none());
     }
+
+    #[test]
+    fn a_first_frame_not_decoded_in_time_is_drawn_again() {
+        let reg = SourceRegistry::new();
+        reg.register_path(MediaKey(1), std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../testdata/media/h264_baseline_cavlc.mp4"));
+        let mut s = Sources::new(reg, DecodeCache::new(64 << 20));
+        // No time to wait: nothing of the file is decoded yet, so nothing
+        // can stand in, and the caller must still be told to draw again.
+        set_wait_budget(Some(Duration::ZERO));
+        let _ = take_provisional();
+        let first = s.picture(MediaKey(1), 0);
+        assert!(first.is_some() || take_provisional(), "a missing first frame is provisional");
+        set_wait_budget(None);
+        let _ = take_provisional();
+        assert!(s.picture(MediaKey(1), 0).is_some(), "the frame once decoded");
+        assert!(!take_provisional());
+    }
 }
 
 // ---------------------------------------------------------------- decode ahead
@@ -1700,6 +1730,9 @@ pub struct AheadSource {
     key: MediaKey,
     cache: Arc<DecodeCache>,
     shared: Arc<AheadShared>,
+    /// The frame the last request stopped waiting for while it was being
+    /// decoded (the wait budget ran out first).
+    late: Option<u64>,
 }
 
 impl AheadSource {
@@ -1755,6 +1788,11 @@ impl AheadSource {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| src.decode_to(k, emit))).unwrap_or(false)
                 };
                 if !worker_cache.contains(key, target) && !decode(&mut src, target, &mut emit) && !worker_cache.contains(key, target) {
+                    // Stopped for a newer request: not a failure, and the
+                    // newer request (often for this same frame) goes on.
+                    if sh.generation.load(Ordering::Relaxed) != generation {
+                        continue;
+                    }
                     sh.state.lock().unwrap_or_else(|e| e.into_inner()).failed = Some(target);
                     sh.decoded.notify_all();
                     continue;
@@ -1772,7 +1810,7 @@ impl AheadSource {
         if spawned.is_err() {
             shared.dead.store(true, Ordering::Relaxed);
         }
-        AheadSource { info, pres_times, sync_of: Arc::new(sync_of), key, cache, shared }
+        AheadSource { info, pres_times, sync_of: Arc::new(sync_of), key, cache, shared, late: None }
     }
 }
 
@@ -1801,7 +1839,12 @@ impl MediaSource for AheadSource {
         self.sync_of.get(index as usize).copied().unwrap_or(index)
     }
 
+    fn decoding(&self, index: u64) -> bool {
+        self.late == Some(index) && !self.shared.dead.load(Ordering::Relaxed)
+    }
+
     fn decode_to(&mut self, index: u64, emit: &mut dyn FnMut(u64, PictureRef)) -> bool {
+        self.late = None;
         if index as usize >= self.pres_times.len() || self.shared.dead.load(Ordering::Relaxed) {
             return false;
         }
@@ -1832,7 +1875,10 @@ impl MediaSource for AheadSource {
             let wait = match deadline {
                 Some(d) => match d.checked_duration_since(Instant::now()) {
                     Some(w) if !w.is_zero() => w,
-                    _ => return false,
+                    _ => {
+                        self.late = Some(index);
+                        return false;
+                    }
                 },
                 // Exact frames (export): wait in short slices so a decode
                 // that cannot produce the frame does not hang forever.

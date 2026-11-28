@@ -710,12 +710,14 @@ impl Session {
             if want_viewer && !self.nudged && self.viewer_frames() > 0 {
                 self.nudge_viewer();
             }
-            let in_viewer = !want_viewer || self.viewer_frames() > 0;
+            // A frame drawn before its clip was decoded is not the picture:
+            // the renderer sends it again, and the shot waits for that.
+            let in_viewer = !want_viewer || (self.viewer_frames() > 0 && !self.viewer_provisional());
             if i >= 6 && self.app.thumbs.pending() == 0 && in_viewer && self.quiet >= 8 {
                 break;
             }
             // Spinners and the caret never hold still: the clock ends it.
-            if started.elapsed() > std::time::Duration::from_secs(if self.viewer_frames() > 0 { 5 } else { 12 }) {
+            if started.elapsed() > std::time::Duration::from_secs(if in_viewer && self.viewer_frames() > 0 { 5 } else { 12 }) {
                 break;
             }
         }
@@ -743,6 +745,12 @@ impl Session {
     /// reach egui as a texture, so they are in the picture).
     pub fn viewer_frames(&self) -> u64 {
         self.app.render.as_ref().map_or(0, |r| r.frames)
+    }
+
+    /// The viewer's frame on screen was drawn while its pictures were still
+    /// decoding (a new one follows).
+    pub fn viewer_provisional(&self) -> bool {
+        self.app.render.as_ref().is_some_and(|r| r.provisional)
     }
 
     /// The window as it is now.
