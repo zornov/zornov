@@ -488,7 +488,7 @@ mod tests {
         let (text, undo) = relink_now(&mut doc, &store, &mut plan).unwrap();
         assert_eq!(text, "Relinked 1 file");
         assert_eq!(doc.undo_label(), Some("Relink media"));
-        assert!(doc.model.media.iter().any(|m| m.path == moved.display().to_string()));
+        assert!(doc.model.media.iter().any(|m| std::path::Path::new(&m.path) == moved));
         assert!(manage::missing(&store, Some(&d), false).unwrap().is_empty());
         // Undo puts both back.
         let back = take_back(&mut doc, &store, &undo).unwrap();
