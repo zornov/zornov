@@ -128,10 +128,15 @@ pub fn note_project(dir: &Path) {
 
 /// A folder under the system's temporary places.
 pub fn is_temporary(dir: &Path) -> bool {
-    // The temp dir does not move while Studio runs; resolve it once.
-    static TMP: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    let tmp = TMP.get_or_init(|| std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir()));
-    dir.starts_with(tmp) || ["/tmp", "/private/tmp", "/private/var/folders", "/var/folders"].iter().any(|t| dir.starts_with(t))
+    // The temp dir does not move while Studio runs; resolve it once. Both
+    // spellings count: on Windows the canonical one is a `\\?\` path (and
+    // may expand 8.3 short names) that never prefixes the plain one.
+    static TMP: std::sync::OnceLock<[PathBuf; 2]> = std::sync::OnceLock::new();
+    let tmp = TMP.get_or_init(|| {
+        let plain = std::env::temp_dir();
+        [std::fs::canonicalize(&plain).unwrap_or_else(|_| plain.clone()), plain]
+    });
+    tmp.iter().any(|t| dir.starts_with(t)) || ["/tmp", "/private/tmp", "/private/var/folders", "/var/folders"].iter().any(|t| dir.starts_with(t))
 }
 
 /// Adds the projects in the shared list that `recents` does not have yet
