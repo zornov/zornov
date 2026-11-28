@@ -1,7 +1,8 @@
 name: build
 
-# Pull requests into main and pushes to main; nothing on other branches, so a
-# Dependabot branch runs once (as its pull request), not twice. macOS is not
+# Pull requests into main, merge queue groups and pushes to main; nothing on
+# other branches, so a Dependabot branch runs once (as its pull request), not
+# twice. macOS is not
 # built here at all: it is built, tested and signed by hand on a Mac
 # (cargo xtask release-mac), and its disk image is attached to releases by hand.
 on:
@@ -9,6 +10,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -54,8 +56,11 @@ jobs:
           AFTER: ${{ github.sha }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          MG_BASE: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
           if [ "$EVENT" = pull_request ]; then range="$PR_BASE...$PR_HEAD"
+          elif [ "$EVENT" = merge_group ] && [ -n "$MG_BASE" ] && git cat-file -e "$MG_BASE^{commit}" 2>/dev/null; then range="$MG_BASE..$MG_HEAD"
           elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && ! [[ "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE..$AFTER"
           else echo "code=true" >> "$GITHUB_OUTPUT"; echo "no range: building everything"; exit 0; fi
           files=$(git diff --name-only "$range")
@@ -173,9 +178,10 @@ jobs:
 
   windows-package:
     # The Windows package, from a full release build. Beside the tests rather
-    # than after them, and on main only: pull requests don't need the zip.
+    # than after them, and on main only: pull requests and merge queue groups
+    # don't need the zip.
     needs: changes
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
@@ -237,10 +243,11 @@ jobs:
   linux-arm64:
     # The same build, tests and package on an arm64 runner, from the same
     # image. On main only, beside the x86_64 job: the code is the same on both
-    # except the NEON kernels, which the Mac tests, so pull requests skip the
-    # wait and a break still shows up before a release tag.
+    # except the NEON kernels, which the Mac tests, so pull requests and merge
+    # queue groups skip the wait and a break still shows up before a release
+    # tag.
     needs: changes
-    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
