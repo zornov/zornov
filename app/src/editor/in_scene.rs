@@ -63,7 +63,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         let _ = kit::push(&ctx, said, None, Some(Icon::Sun));
                     }
                     Err(e) => {
-                        let _ = kit::push(&ctx, e, None, Some(Icon::Warning));
+                        let _ = kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 },
                 (None, false) => {}
@@ -98,7 +98,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         let _ = kit::push(&ctx, said, None, Some(Icon::Sun));
                     }
                     Err(e) => {
-                        let _ = kit::push(&ctx, e, None, Some(Icon::Warning));
+                        let _ = kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }
@@ -120,7 +120,7 @@ pub fn inspector(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
                         let _ = kit::push(&ctx, format!("Lit like its place: {said}"), None, Some(Icon::Sun));
                     }
                     Err(e) => {
-                        let _ = kit::push(&ctx, e, None, Some(Icon::Warning));
+                        let _ = kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }
@@ -166,7 +166,7 @@ fn pieces(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, id: u32, 
                 ctx.data_mut(|d| d.insert_temp(key, (at, v)));
             }
             Err(e) => {
-                let _ = kit::push(ctx, e, None, Some(Icon::Warning));
+                let _ = kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }
@@ -194,7 +194,7 @@ fn pieces(app: &mut StudioApp, ui: &mut egui::Ui, ctx: &egui::Context, id: u32, 
                         let _ = kit::push(ctx, said, None, Some(Icon::Sun));
                     }
                     Err(e) => {
-                        let _ = kit::push(ctx, e, None, Some(Icon::Warning));
+                        let _ = kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                     }
                 }
             }

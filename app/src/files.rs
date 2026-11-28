@@ -194,6 +194,10 @@ pub(crate) fn importable(path: &Path) -> bool {
     import_filters()[0].1.contains(&ext.as_str())
 }
 
+/// Ends the message of a new project's first save that failed: the
+/// project is only in memory until it is saved.
+pub(crate) const NOT_SAVED: &str = "; the project is open but not saved yet";
+
 impl StudioApp {
     fn remember(&mut self, path: &Path) {
         let p = &self.doc.project;
@@ -211,14 +215,14 @@ impl StudioApp {
     /// window's own paths use [`StudioApp::give_folder_or_say`].
     pub fn give_folder(&mut self) {
         if let Err(e) = self.try_give_folder() {
-            self.doc.error = Some(e);
+            self.doc.error = Some(format!("{e}{NOT_SAVED}"));
         }
     }
 
     /// [`StudioApp::give_folder`] that tells the person when it fails.
     pub fn give_folder_or_say(&mut self, ctx: &egui::Context) {
         if let Err(e) = self.try_give_folder() {
-            say_error(ctx, crate::i18n::tf(format!("{e}; the project is open but not saved yet")));
+            say_error(ctx, crate::i18n::tf(format!("{e}{NOT_SAVED}")));
         }
     }
 

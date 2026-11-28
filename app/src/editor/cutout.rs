@@ -199,7 +199,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
                     kit::push(ctx, capital(&said), None, Some(Icon::MagicWand));
                 }
                 Some(Err(studio_ai::Error::Cancelled)) => {
-                    kit::push(ctx, "Cut-out stopped", None, Some(Icon::Info));
+                    kit::note(ctx, "Cut-out stopped", Some(Icon::Info));
                 }
                 Some(Err(e)) => {
                     kit::push(ctx, crate::i18n::tf(format!("Cut-out failed: {e}")), None, Some(Icon::Warning));
@@ -223,7 +223,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) {
                     }
                 }
                 Some(Err(studio_ai::Error::Cancelled)) => {
-                    kit::push(ctx, "Roto stopped", None, Some(Icon::Info));
+                    kit::note(ctx, "Roto stopped", Some(Icon::Info));
                 }
                 Some(Err(e)) => {
                     kit::push(ctx, crate::i18n::tf(format!("Roto failed: {e}")), None, Some(Icon::Warning));

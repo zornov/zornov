@@ -299,7 +299,7 @@ pub fn paste_at(app: &mut StudioApp, ctx: &egui::Context, at: Time) {
         if app.doc.apply("Paste", m::Edit::Paste { seq, at, clipboard: Box::new(cb), mode: m::PasteMode::Insert }) {
             app.editor.selection = app.doc.project.clips.iter().map(|c| c.id).filter(|id| !old.contains(id)).collect();
             let n = app.editor.selection.len();
-            super::toast_undo(&mut app.editor, ctx, if n == 1 { "Pasted clip".to_owned() } else { format!("Pasted {n} clips") }, Icon::DownloadSimple);
+            kit::note(ctx, if n == 1 { "Pasted clip".to_owned() } else { format!("Pasted {n} clips") }, Some(Icon::DownloadSimple));
         }
     }
 }
@@ -377,14 +377,14 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
                         app.editor.selection = ids.to_vec();
                         // "Cut" is said only once the clips are really gone.
                         if !super::delete_selected(&mut app.editor, &mut app.doc, ctx, true) {
-                            kit::push(ctx, "Copied, but could not remove the clips", None, Some(Icon::Warning));
+                            kit::push_as(ctx, "Copied, but could not remove the clips", None, Some(Icon::Warning), kit::Level::Info);
                         }
                     } else {
                         kit::push(ctx, if ids.len() == 1 { "Copied clip".to_owned() } else { format!("Copied {} clips", ids.len()) }, None, Some(Icon::Copy));
                     }
                 }
                 Err(e) => {
-                    kit::push(ctx, format!("Could not copy: {e}"), None, Some(Icon::Warning));
+                    kit::push_as(ctx, format!("Could not copy: {e}"), None, Some(Icon::Warning), kit::Level::Info);
                 }
             }
         }
@@ -453,15 +453,15 @@ fn run(app: &mut StudioApp, ctx: &egui::Context, ids: &[u32], playhead: Time, ac
         Act::Inspector => app.editor.open_panel(crate::dock::Panel::Inspector),
         Act::Restack(how) => {
             let Some(op) = ids.first().and_then(|id| restack_op(&app.doc.project, *id, how)) else {
-                kit::push(ctx, "Nothing to restack against here", None, Some(Icon::Warning));
+                kit::push_as(ctx, "Nothing to restack against here", None, Some(Icon::Warning), kit::Level::Info);
                 return;
             };
             match restack(app, ids[0], &op) {
                 Ok(done) => {
-                    super::toast_undo(&mut app.editor, ctx, done, Icon::Stack);
+                    kit::note(ctx, done, Some(Icon::Stack));
                 }
                 Err(e) => {
-                    kit::push(ctx, e, None, Some(Icon::Warning));
+                    kit::push_as(ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                 }
             }
         }

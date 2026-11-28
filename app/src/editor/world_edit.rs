@@ -199,7 +199,7 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             Ok(true) => p.file = done.job.path,
             Ok(false) => {}
             Err(e) => {
-                kit::push(&ctx, e, None, Some(Icon::Warning));
+                kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
             }
         }
     }
@@ -268,11 +268,11 @@ pub fn section(app: &mut StudioApp, ui: &mut egui::Ui, id: u32) {
             Ok(spec) => match Session::stage_world(&app.doc, id, &spec) {
                 Ok(job) => builder.submit(&ctx, job),
                 Err(e) => {
-                    kit::push(&ctx, e, None, Some(Icon::Warning));
+                    kit::push_as(&ctx, e, None, Some(Icon::Warning), kit::Level::Info);
                 }
             },
             Err(e) => {
-                kit::push(&ctx, format!("World: {e}"), None, Some(Icon::Warning));
+                kit::push_as(&ctx, format!("World: {e}"), None, Some(Icon::Warning), kit::Level::Info);
             }
         }
         p.dirty = false;

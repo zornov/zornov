@@ -243,7 +243,7 @@ pub fn add_content(app: &mut StudioApp, ctx: &egui::Context, index: usize, at: O
     let Some(c) = content::get() else { return };
     let Some(e) = c.entries.get(index).cloned() else { return };
     let Some((kind, path, (w, h))) = materialise(&e) else {
-        kit::push(ctx, crate::i18n::tf(format!("Could not add {}", e.name)), None, Some(Icon::Warning));
+        kit::push_as(ctx, crate::i18n::tf(format!("Could not add {}", e.name)), None, Some(Icon::Warning), kit::Level::Info);
         return;
     };
     let t = at.unwrap_or(app.editor.playhead);
@@ -276,7 +276,7 @@ pub fn add_content(app: &mut StudioApp, ctx: &egui::Context, index: usize, at: O
         p.resolve_overlap(clip_id);
     }) {
         app.editor.selection = vec![clip_id];
-        super::toast_undo(&mut app.editor, ctx, crate::i18n::tf(format!("Added {name}")), Icon::Plus);
+        kit::note(ctx, crate::i18n::tf(format!("Added {name}")), Some(Icon::Plus));
     }
 }
 

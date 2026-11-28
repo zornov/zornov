@@ -106,9 +106,10 @@ pub(crate) fn done(ctx: &egui::Context, text: impl Into<String>) {
     kit::push(ctx, text, None, Some(Icon::Check));
 }
 
-/// Tells the person why an action could not run (`e` made [`plain`]).
+/// Tells the person why an action could not run (`e` made [`plain`]). It
+/// fades like an info toast: nothing was changed, so nothing is lost.
 pub(crate) fn failed(ctx: &egui::Context, doc: &Doc, e: &str) {
-    kit::push(ctx, plain(doc, e), None, Some(Icon::Warning));
+    kit::push_as(ctx, plain(doc, e), None, Some(Icon::Warning), kit::Level::Info);
 }
 
 /// Tells the person what to do first.
