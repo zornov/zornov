@@ -90,7 +90,7 @@ fn tree(dir: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
     fn go(dir: &Path, root: &Path, out: &mut BTreeMap<String, Option<Vec<u8>>>) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
-            let rel = p.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+            let rel = p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
             if e.file_type().unwrap().is_dir() {
                 out.insert(format!("{rel}/"), None);
                 go(&p, root, out);
@@ -153,7 +153,8 @@ fn flight_recorder_moves_models_state_and_relinks_by_name() {
     assert_eq!(media[0].0, pkg.join("Generated/Music/music-dark-0-df58.wav").display().to_string());
     // A model path in another part of the document moves too.
     let text = std::fs::read_to_string(pkg.join("project.json")).unwrap();
-    assert!(text.contains(&pkg.join("Media/3D/ba8912fc457eb160.smesh").display().to_string()), "{text}");
+    let model = serde_json::to_string(&pkg.join("Media/3D/ba8912fc457eb160.smesh").display().to_string()).unwrap();
+    assert!(text.contains(model.trim_matches('"')), "{text}");
     assert!(!text.contains("/Models/"));
 }
 

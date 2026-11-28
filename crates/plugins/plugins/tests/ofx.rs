@@ -44,8 +44,7 @@ fn fixture_bundle(root: &Path) -> PathBuf {
 
 #[test]
 fn ofx_bundle_describes_renders_and_registers() {
-    // SAFETY (test): no other thread reads the environment here.
-    unsafe { std::env::set_var("STUDIO_OFX_WORKER", env!("CARGO_BIN_EXE_studio-ofx-worker")) };
+    ofx::use_worker_program(env!("CARGO_BIN_EXE_studio-ofx-worker").into());
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("ofx-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let bundles = root.join("bundles");
@@ -98,7 +97,7 @@ fn ofx_bundle_describes_renders_and_registers() {
 fn installed_commercial_bundles_load_in_a_worker() {
     // FxFactory (and any other bundle installed on this Mac): loading and
     // describing must not crash Studio, whatever the bundle does.
-    unsafe { std::env::set_var("STUDIO_OFX_WORKER", env!("CARGO_BIN_EXE_studio-ofx-worker")) };
+    ofx::use_worker_program(env!("CARGO_BIN_EXE_studio-ofx-worker").into());
     let found = ofx::find_bundles(&[], false);
     if found.is_empty() {
         eprintln!("no OFX bundles installed; skipped");
