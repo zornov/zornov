@@ -25,6 +25,9 @@ ignore = [
     # rustybuzz (studio-text's shaper) is unmaintained with no release to move
     # to; the HarfBuzz project's successor is harfrust. Not a vulnerability.
     { id = "RUSTSEC-2026-0206", reason = "no replacement released yet; move studio-text to harfrust" },
+    # chrono is flagged unmaintained; the advisory lists every version as affected and
+    # there is no fixed release. Not a vulnerability. Remove once pixel-engine moves off chrono.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no fixed version" },
 ]
 
 [licenses]
